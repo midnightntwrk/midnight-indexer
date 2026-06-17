@@ -90,6 +90,7 @@ impl BridgeStorage for NoopStorage {
         Ok(BridgeBalance {
             deposited: 0,
             claimed: 0,
+            balance: 0,
         })
     }
 

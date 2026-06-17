@@ -238,11 +238,27 @@ where
             .map_err_into_client_error(|| "invalid recipient address")?;
 
         let stream = try_stream! {
-            // Emit initial balance.
-            let initial = storage
+            // Emit initial balance. `balance` is overridden with the authoritative claimable from
+            // the ledger's `bridge_receiving` map (see the `bridge_balance` query for rationale).
+            let mut initial = storage
                 .get_bridge_balance(address)
                 .await
                 .map_err_into_server_error(|| "get bridge balance")?;
+            initial.balance = match storage
+                .get_highest_ledger_state()
+                .await
+                .map_err_into_server_error(|| "get highest ledger state")?
+            {
+                Some((protocol_version, ledger_state_key)) => {
+                    indexer_common::domain::ledger::LedgerState::load(
+                        &ledger_state_key,
+                        protocol_version.ledger_version(),
+                    )
+                    .map_err_into_server_error(|| "load ledger state")?
+                    .bridge_receiving(address)
+                }
+                None => 0,
+            };
             yield BridgeBalance::from(initial);
 
             // Re-emit on each relevant pub-sub event.
@@ -260,10 +276,25 @@ where
             while let Some(_msg) = live.try_next().await
                 .map_err_into_server_error(|| "subscribe BridgeEventIndexed")?
             {
-                let updated = storage
+                let mut updated = storage
                     .get_bridge_balance(address)
                     .await
                     .map_err_into_server_error(|| "get bridge balance (live)")?;
+                updated.balance = match storage
+                    .get_highest_ledger_state()
+                    .await
+                    .map_err_into_server_error(|| "get highest ledger state (live)")?
+                {
+                    Some((protocol_version, ledger_state_key)) => {
+                        indexer_common::domain::ledger::LedgerState::load(
+                            &ledger_state_key,
+                            protocol_version.ledger_version(),
+                        )
+                        .map_err_into_server_error(|| "load ledger state (live)")?
+                        .bridge_receiving(address)
+                    }
+                    None => 0,
+                };
                 yield BridgeBalance::from(updated);
             }
         };

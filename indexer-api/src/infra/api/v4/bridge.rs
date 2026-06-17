@@ -226,21 +226,21 @@ impl From<domain_bridge::BridgeEvent> for BridgeEvent {
 #[derive(Debug, Clone, SimpleObject)]
 #[graphql(directive = beta::apply())]
 pub struct BridgeBalance {
-    /// Sum of UserTransfer amounts for this address (16-byte big-endian u128).
+    /// Sum of UserTransfer amounts for this address, gross/pre-fee (16-byte big-endian u128).
     pub deposited: HexEncoded,
-    /// Sum of bridge claim amounts for this address (16-byte big-endian u128).
+    /// Sum of bridge claim amounts for this address, net/post-fee (16-byte big-endian u128).
     pub claimed: HexEncoded,
-    /// `deposited - claimed`, saturated at zero.
+    /// Remaining claimable, read from the ledger's `bridge_receiving` map (net, zero once fully
+    /// claimed). 16-byte big-endian u128.
     pub balance: HexEncoded,
 }
 
 impl From<domain_bridge::BridgeBalance> for BridgeBalance {
     fn from(b: domain_bridge::BridgeBalance) -> Self {
-        let balance = b.balance();
         Self {
             deposited: b.deposited.to_be_bytes().hex_encode(),
             claimed: b.claimed.to_be_bytes().hex_encode(),
-            balance: balance.to_be_bytes().hex_encode(),
+            balance: b.balance.to_be_bytes().hex_encode(),
         }
     }
 }
