@@ -21,9 +21,8 @@ documentation = "https://github.com/midnightntwrk/midnight-indexer"
 publish       = false
 
 [workspace.dependencies]
-# v8 crates come from crates.io. base-crypto and serialize are patched to the
-# v9 rc tags below, which cargo accepts for the v8 version requirements too
-# (within-major), keeping those types SHARED across v8 and v9.
+# Ledger v8 from crates.io. base-crypto and serialize are patched to the rc
+# tags below and shared with v9 (within-major).
 midnight-base-crypto_v1      = { package = "midnight-base-crypto", version = "1" }
 midnight-coin-structure_v2   = { package = "midnight-coin-structure", version = "2" }
 midnight-ledger_v8           = { package = "midnight-ledger", version = "8" }
@@ -32,10 +31,7 @@ midnight-serialize_v1        = { package = "midnight-serialize", version = "1" }
 midnight-storage-core_v1     = { package = "midnight-storage-core", version = "1.2" }
 midnight-transient-crypto_v2 = { package = "midnight-transient-crypto", version = "2" }
 midnight-zswap_v8            = { package = "midnight-zswap", version = "8" }
-# v9 rc aliases, resolved via the [patch.crates-io] tags below (Thomas's
-# published patch set for 9.1.0.0-rc.2). Everything v9 is cross-major against
-# the v8 entries above since coin-structure went 2 -> 3 at this rc, so the
-# package + version recipe disambiguates all of them.
+# Ledger v9, resolved via the [patch.crates-io] tags below.
 midnight-coin-structure_v3   = { package = "midnight-coin-structure", version = "3" }
 midnight-ledger_v9           = { package = "midnight-ledger-v9", version = "1.0" }
 midnight-onchain-runtime_v4  = { package = "midnight-onchain-runtime", version = "4" }
@@ -108,22 +104,12 @@ trait-variant               = { version = "0.1" }
 uuid                        = { version = "1.23", features = [ "serde" ] }
 walkdir                     = { version = "2.5" }
 
-# The v9 rc stack needs no patches: it comes in as direct git deps on the full
-# workspace tag (see [workspace.dependencies]). The patches below redirect the
-# crates SHARED between v8 and v9 to that same tag, so the v8 registry stack
-# and the v9 git tree resolve them to ONE source: storage-core (tree 1.2.0 ==
-# registry 1.2.0, keeps the indexer's LedgerDb implementing the single DB
-# trait both ledgers use), storage (tree 2.0.1 == registry 2.0.1), serialize
-# (tree 1.1.0 == registry 1.1.0) and base-crypto (tree 1.1.0, within-major of
-# v8's requirement — the shared cost model and timestamp types).
-# coin-structure and transient-crypto are deliberately NOT patched: v8 keeps
-# their registry versions (2.0.x / 2.x), v9 uses the git-tree ones (2.1.0 /
-# 3.0.0) as a distinct source.
-# Thomas's published patch set for ledger 9.1.0.0-rc.2 (#topic-ledger, 11 Jun;
-# resolves midnight-ledger#580 by bumping coin-structure to major 3 and fixing
-# zkir's old-pipeline pins). v8 + shared crates resolve from crates.io;
-# base-crypto and serialize unify v8 and v9 onto the rc tags (within-major);
-# the cross-major v9 crates use the package + version recipe.
+# Ledger 9.1.0.0-rc.2, the ledger team's published patch set (resolves
+# midnight-ledger#580). The rc crates aren't on crates.io yet, hence git tags.
+# Entries without package/version replace their registry crate outright
+# (base-crypto and serialize, shared with v8 within-major; zkir, v9-only); the
+# cross-major v9 crates carry package + version to patch only their major,
+# leaving v8's registry versions intact.
 [patch.crates-io]
 midnight-base-crypto         = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "base-crypto-1.1.0-rc.1" }
 midnight-serialize           = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "serialize-1.2.0-rc.1" }
