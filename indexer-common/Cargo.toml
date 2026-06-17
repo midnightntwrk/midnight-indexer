@@ -24,10 +24,13 @@ midnight-serialize_v1        = { workspace = true }
 midnight-storage-core_v1     = { workspace = true, features = [ "layout-v2" ] }
 midnight-transient-crypto_v2 = { workspace = true }
 midnight-zswap_v8            = { workspace = true }
-# ledger v9 alpha (base-crypto, coin-structure, transient-crypto, serialize and
-# storage-core are unified across v8 and v9, so no separate v9 alias is needed)
+# ledger v9 rc (base-crypto, serialize and storage-core stay unified across v8
+# and v9; coin-structure and transient-crypto are cross-major at this rc, hence
+# their own v9 aliases)
+midnight-coin-structure_v3   = { workspace = true }
 midnight-ledger_v9           = { workspace = true }
 midnight-onchain-runtime_v4  = { workspace = true }
+midnight-transient-crypto_v3 = { workspace = true }
 midnight-zswap_v9            = { workspace = true }
 async-nats                   = { workspace = true, optional = true }
 byte-unit-serde              = { workspace = true }

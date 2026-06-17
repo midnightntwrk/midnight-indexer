@@ -220,10 +220,11 @@ export const ContractActionSchema = z.discriminatedUnion('type', [
   ContractUpdateSchema,
 ]);
 
-// Contract balance schema
+// Contract balance schema. tokenType is a 32-byte hex string and amount a decimal
+// u128 string; enforcing the shape here makes every parse a format assertion.
 export const ContractBalanceSchema = z.object({
-  tokenType: z.string(),
-  amount: z.string(),
+  tokenType: z.string().regex(/^[0-9a-fA-F]{64}$/),
+  amount: z.string().regex(/^[0-9]+$/),
 });
 
 // Updated contract action schemas to match current API

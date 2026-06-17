@@ -38,6 +38,13 @@ use midnight_coin_structure_v2::{
     coin::{NIGHT, TokenType as LedgerTokenType, UnshieldedTokenType, UserAddress},
     contract::ContractAddress as ContractAddressV8,
 };
+use midnight_coin_structure_v3::{
+    coin::{
+        NIGHT as NIGHT_V9, UnshieldedTokenType as UnshieldedTokenTypeV9,
+        UserAddress as UserAddressV9,
+    },
+    contract::ContractAddress as ContractAddressV9,
+};
 use midnight_ledger_v8::{
     dust::{
         DustGenerationInfo as DustGenerationInfoV8, InitialNonce as InitialNonceV8,
@@ -59,6 +66,7 @@ use midnight_ledger_v9::{
         DustGenerationInfo as DustGenerationInfoV9, InitialNonce as InitialNonceV9,
         QualifiedDustOutput as QualifiedDustOutputV9,
     },
+    error::FeeCalculationError as FeeCalculationErrorV9,
     events::{Event as EventV9, EventDetails as EventDetailsV9},
     semantics::{
         TransactionContext as TransactionContextV9, TransactionResult as TransactionResultV9,
@@ -66,7 +74,8 @@ use midnight_ledger_v9::{
     structure::{
         LedgerParameters as LedgerParametersV9, LedgerState as LedgerStateV9,
         OutputInstructionUnshielded as OutputInstructionUnshieldedV9,
-        SystemTransaction as SystemTransactionV9, Utxo as UtxoV9,
+        SPECKS_PER_DUST as SPECKS_PER_DUST_V9, SystemTransaction as SystemTransactionV9,
+        Utxo as UtxoV9,
     },
     verify::WellFormedStrictness as WellFormedStrictnessV9,
 };
@@ -84,6 +93,10 @@ use midnight_storage_core_v1::{
 };
 use midnight_transient_crypto_v2::merkle_tree::{
     MerkleTreeCollapsedUpdate, MerkleTreeDigest, TreeInsertionPath,
+};
+use midnight_transient_crypto_v3::merkle_tree::{
+    MerkleTreeCollapsedUpdate as MerkleTreeCollapsedUpdateV9,
+    MerkleTreeDigest as MerkleTreeDigestV9, TreeInsertionPath as TreeInsertionPathV9,
 };
 use midnight_zswap_v8::ledger::State as ZswapStateV8;
 use midnight_zswap_v9::ledger::State as ZswapStateV9;
@@ -442,12 +455,24 @@ impl LedgerState {
                     whitelist: None,
                 };
 
+                // The stateless `cost` estimates verifier-key sizes, under-costing
+                // contract calls; `cost_with_state` reads them from the ledger state.
+                // The ledger has no state-aware `fees`, so the fee is computed from
+                // the cost the same way `Transaction::fees` does.
                 let cost = transaction
-                    .cost(&ledger_state.parameters, true)
+                    .cost_with_state(&ledger_state.parameters, ledger_state, true)
                     .map_err(|error| Error::TransactionCost(error.into()))?;
-                let fees = transaction
-                    .fees(&ledger_state.parameters, true)
-                    .map_err(|error| Error::TransactionCost(error.into()))?;
+                let fees = {
+                    let normalized = cost
+                        .normalize(ledger_state.parameters.limits.block_limits)
+                        .ok_or(FeeCalculationErrorV9::BlockLimitExceeded)
+                        .map_err(|error| Error::TransactionCost(error.into()))?;
+                    ledger_state
+                        .parameters
+                        .fee_prices
+                        .overall_cost(&normalized)
+                        .into_atomic_units(SPECKS_PER_DUST_V9)
+                };
                 let verified_ledger_transaction = transaction
                     .well_formed(&cx.ref_state, *STRICTNESS_V9, cx.block_context.tblock)
                     .map_err(|error| Error::MalformedTransaction(error.into()))?;
@@ -692,9 +717,7 @@ impl LedgerState {
             }
 
             Self::V9 { ledger_state, .. } => {
-                // coin-structure (hence ContractAddress) is unified at 2.1.0
-                // across v8 and v9, so the V8 address type is reused here.
-                let address = ContractAddressV8::deserialize(&mut address.as_ref(), 0)
+                let address = ContractAddressV9::deserialize(&mut address.as_ref(), 0)
                     .map_err(|error| Error::Deserialize("ContractAddressV9", error))?;
 
                 let mut contract_zswap_state = ZswapStateV9::new();
@@ -722,7 +745,7 @@ impl LedgerState {
             .map_err(|error| Error::InvalidUpdate(error.into()))?
             .tagged_serialize()
             .map_err(|error| Error::Serialize("MerkleTreeCollapsedUpdate", error)),
-            Self::V9 { ledger_state, .. } => MerkleTreeCollapsedUpdate::new(
+            Self::V9 { ledger_state, .. } => MerkleTreeCollapsedUpdateV9::new(
                 &ledger_state.zswap.coin_coms,
                 start_index,
                 end_index,
@@ -748,7 +771,7 @@ impl LedgerState {
             .map_err(|error| Error::InvalidUpdate(error.into()))?
             .tagged_serialize()
             .map_err(|error| Error::Serialize("DustGenerationsMerkleTreeCollapsedUpdate", error)),
-            Self::V9 { ledger_state, .. } => MerkleTreeCollapsedUpdate::new(
+            Self::V9 { ledger_state, .. } => MerkleTreeCollapsedUpdateV9::new(
                 &ledger_state.dust.generation.generating_tree,
                 start_index,
                 end_index,
@@ -774,7 +797,7 @@ impl LedgerState {
             .map_err(|error| Error::InvalidUpdate(error.into()))?
             .tagged_serialize()
             .map_err(|error| Error::Serialize("DustCommitmentsMerkleTreeCollapsedUpdate", error)),
-            Self::V9 { ledger_state, .. } => MerkleTreeCollapsedUpdate::new(
+            Self::V9 { ledger_state, .. } => MerkleTreeCollapsedUpdateV9::new(
                 &ledger_state.dust.utxo.commitments,
                 start_index,
                 end_index,
@@ -892,7 +915,7 @@ impl LedgerParameters {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ZswapMerkleTreeRoot {
     V8(MerkleTreeDigest),
-    V9(MerkleTreeDigest),
+    V9(MerkleTreeDigestV9),
 }
 
 impl ZswapMerkleTreeRoot {
@@ -909,7 +932,7 @@ impl ZswapMerkleTreeRoot {
                 Self::V8(digest)
             }
             LedgerVersion::V9 => {
-                let digest = MerkleTreeDigest::deserialize(&mut zswap_state_root.as_ref(), 0)
+                let digest = MerkleTreeDigestV9::deserialize(&mut zswap_state_root.as_ref(), 0)
                     .map_err(|error| Error::Deserialize("MerkleTreeDigestV9", error))?;
                 Self::V9(digest)
             }
@@ -1833,7 +1856,7 @@ fn make_dust_initial_utxo_v9(
 }
 
 fn make_dust_generation_dtime_update_v9(
-    update: TreeInsertionPath<DustGenerationInfoV9>,
+    update: TreeInsertionPathV9<DustGenerationInfoV9>,
     raw: ByteVec,
 ) -> Result<LedgerEvent, Error> {
     let generation = &update.leaf.1;
@@ -1942,7 +1965,7 @@ where
 
         // ClaimRewards creates a single unshielded UTXO for the claimed amount.
         TransactionV9::ClaimRewards(claim) => {
-            let owner = UserAddress::from(claim.owner);
+            let owner = UserAddressV9::from(claim.owner);
             let ledger_intent_hash = {
                 // ClaimRewards don't have intents, but UTXOs need an intent hash. We compute this
                 // hash the same way that the ledger does internally.
@@ -1951,7 +1974,7 @@ where
                     target_address: owner,
                     nonce: claim.nonce,
                 };
-                output.mk_intent_hash(NIGHT)
+                output.mk_intent_hash(NIGHT_V9)
             };
             let intent_hash = ledger_intent_hash.0.0.into();
             let initial_nonce = make_initial_nonce_v9(OUTPUT_INDEX_ZERO, intent_hash);
@@ -1960,7 +1983,7 @@ where
             let utxo = UtxoV9 {
                 value: claim.value,
                 owner,
-                type_: UnshieldedTokenType::default(),
+                type_: UnshieldedTokenTypeV9::default(),
                 intent_hash: ledger_intent_hash,
                 output_no: OUTPUT_INDEX_ZERO,
             };
@@ -2088,14 +2111,14 @@ fn extend_unshielded_utxos_v9<D>(
             registered_for_dust_generation_v9(spend.output_no, intent_hash, ledger_state);
         let utxo = UtxoV9 {
             value: spend.value,
-            owner: UserAddress::from(spend.owner.clone()),
+            owner: UserAddressV9::from(spend.owner.clone()),
             type_: spend.type_,
             intent_hash: spend.intent_hash,
             output_no: spend.output_no,
         };
 
         UnshieldedUtxo {
-            owner: UserAddress::from(spend.owner).0.0.into(),
+            owner: UserAddressV9::from(spend.owner).0.0.into(),
             token_type: spend.type_.0.0.into(),
             value: spend.value,
             intent_hash,
