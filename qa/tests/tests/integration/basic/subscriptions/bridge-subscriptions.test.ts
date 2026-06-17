@@ -15,7 +15,7 @@
 
 // Integration tests for c2m-bridge GraphQL subscriptions.
 //
-// Covers: bridgeEvents, bridgeClaims, bridgeBalance subscriptions (#942).
+// Covers: bridgeEvents, bridgeBalance subscriptions (#942).
 //
 // ── Status of tests ──────────────────────────────────────────────────────────
 //
@@ -31,13 +31,16 @@
 //
 // All bridge subscriptions follow the existing indexer pattern:
 //   1. Connect via WebSocket (graphql-ws protocol).
-//   2. Optionally provide a `from` cursor (event id or block height) for
-//      reconnection / historical backfill.
-//   3. Optionally provide `toBlock` to bound the stream (replay mode).
-//   4. Receive typed events until the subscription ends or the client disconnects.
+//   2. Optionally provide a `from` cursor (event id) for reconnection /
+//      historical backfill.
+//   3. Receive typed events until the subscription ends or the client disconnects.
+//
+// Subscriptions backfill-then-live-tail: they replay matching historical events
+// and then continue streaming new ones. There is no progress sentinel object.
 //
 // The `bridgeBalance(address)` subscription differs: it computes and emits the
-// current BridgeBalance immediately, then re-emits on every event for that address.
+// current BridgeBalance immediately, then re-emits on every relevant event for
+// that address.
 //
 // Reconnection and backfill tests require known event ids from a stable fixture
 // chain, so they are also blocked on Q1 (data availability).
@@ -54,15 +57,10 @@ import type { GraphQLResponse } from '@utils/indexer/indexer-types';
 
 // ── Stub types (move to indexer-types.ts / websocket-client.ts once #942 lands) ──
 
-interface BlockReference {
-  blockHeight: number;
-  blockHash: string;
-}
-
 interface BridgeEventBase {
   id: number;
+  blockHeight: number;
   midnightTxHash: string;
-  indexedAt: BlockReference;
 }
 
 interface BridgeUserTransfer extends BridgeEventBase {
@@ -104,26 +102,7 @@ type BridgeEvent =
   | BridgeUnapprovedTransfer
   | BridgeSubminimalFlushTransfer;
 
-interface BridgeProgress {
-  __typename: 'BridgeProgress';
-  highestBlockHeight: number;
-  finished: boolean;
-}
-
-type BridgeEventOrProgress = BridgeEvent | BridgeProgress;
-
-interface BridgeClaim {
-  id: number;
-  transactionHash: string;
-  recipient: string;
-  amount: string;
-  indexedAt: BlockReference;
-}
-
-type BridgeClaimOrProgress = BridgeClaim | BridgeProgress;
-
 interface BridgeBalance {
-  address: string;
   deposited: string;
   claimed: string;
   balance: string;
@@ -134,47 +113,24 @@ interface BridgeBalance {
 const BRIDGE_EVENTS_SUBSCRIPTION = `
   subscription BridgeEvents(
     $from: Int
-    $toBlock: Int
     $recipient: HexEncoded
-    $variant: BridgePalletEventVariant
+    $variant: BridgeEventVariant
   ) {
-    bridgeEvents(from: $from, toBlock: $toBlock, recipient: $recipient, variant: $variant) {
+    bridgeEvents(from: $from, recipient: $recipient, variant: $variant) {
       ... on BridgeUserTransfer {
-        __typename id midnightTxHash cardanoTxHash amount recipient
-        indexedAt { blockHeight blockHash }
+        __typename id blockHeight midnightTxHash cardanoTxHash amount recipient
       }
       ... on BridgeReserveTransfer {
-        __typename id midnightTxHash cardanoTxHash amount
-        indexedAt { blockHeight blockHash }
+        __typename id blockHeight midnightTxHash cardanoTxHash amount
       }
       ... on BridgeInvalidTransfer {
-        __typename id midnightTxHash cardanoTxHash amount
-        indexedAt { blockHeight blockHash }
+        __typename id blockHeight midnightTxHash cardanoTxHash amount
       }
       ... on BridgeUnapprovedTransfer {
-        __typename id midnightTxHash cardanoTxHash amount recipient
-        indexedAt { blockHeight blockHash }
+        __typename id blockHeight midnightTxHash cardanoTxHash amount recipient
       }
       ... on BridgeSubminimalFlushTransfer {
-        __typename id midnightTxHash amount count
-        indexedAt { blockHeight blockHash }
-      }
-      ... on BridgeProgress {
-        __typename highestBlockHeight finished
-      }
-    }
-  }
-`;
-
-const BRIDGE_CLAIMS_SUBSCRIPTION = `
-  subscription BridgeClaims($from: Int, $toBlock: Int, $recipient: HexEncoded) {
-    bridgeClaims(from: $from, toBlock: $toBlock, recipient: $recipient) {
-      ... on BridgeClaim {
-        __typename id transactionHash recipient amount
-        indexedAt { blockHeight blockHash }
-      }
-      ... on BridgeProgress {
-        __typename highestBlockHeight finished
+        __typename id blockHeight midnightTxHash amount count
       }
     }
   }
@@ -183,7 +139,6 @@ const BRIDGE_CLAIMS_SUBSCRIPTION = `
 const BRIDGE_BALANCE_SUBSCRIPTION = `
   subscription BridgeBalance($address: HexEncoded!) {
     bridgeBalance(address: $address) {
-      address
       deposited
       claimed
       balance
@@ -209,19 +164,6 @@ describe('bridge subscriptions — bridgeEvents', () => {
   });
 
   /**
-   * bridgeEvents subscription with no cursor and no data emits a BridgeProgress
-   * immediately indicating the current state (finished=false, live mode).
-   *
-   * This test does not require pre-existing bridge events — it only verifies
-   * that the subscription endpoint is live and emits a progress frame.
-   *
-   * @given no from cursor (subscribe from current head)
-   * @when we subscribe to bridgeEvents
-   * @then we receive at least one BridgeProgress frame with highestBlockHeight >= 0
-   */
-  it.todo('should emit a BridgeProgress frame immediately when no from cursor is given');
-
-  /**
    * bridgeEvents subscription replays historical events when a from cursor is given.
    *
    * @given the with-data chain has bridge events with known ids
@@ -229,16 +171,6 @@ describe('bridge subscriptions — bridgeEvents', () => {
    * @then we receive the known events in id-ascending order before switching to live mode
    */
   it.todo('should replay historical events from the given cursor id');
-
-  /**
-   * bridgeEvents subscription with toBlock emits a final BridgeProgress(finished=true)
-   * when the bounded replay reaches the target block.
-   *
-   * @given the with-data chain has bridge events up to a known block height H
-   * @when we subscribe with from=0 and toBlock=H
-   * @then we receive all events up to block H and then a BridgeProgress with finished=true
-   */
-  it.todo('should finish replay at toBlock and emit BridgeProgress(finished=true)');
 
   /**
    * bridgeEvents subscription with a recipient filter only streams events for that address.
@@ -280,44 +212,13 @@ describe('bridge subscriptions — bridgeEvents', () => {
   });
 });
 
-describe('bridge subscriptions — bridgeClaims', () => {
-  let wsClient: IndexerWsClient;
-
-  beforeEach(async () => {
-    wsClient = new IndexerWsClient();
-    await wsClient.connectionInit();
-  }, 30_000);
-
-  afterEach(async () => {
-    await wsClient.connectionClose();
-  });
-
-  /**
-   * bridgeClaims subscription replays historical claims from the given cursor.
-   *
-   * @given the with-data chain has at least one CardanoBridge claim with a known id
-   * @when we subscribe with from=<claimId - 1>
-   * @then we receive the known claim as a BridgeClaim frame
-   */
-  it.todo('should replay a historical claim from the given cursor');
-
-  /**
-   * bridgeClaims subscription with a recipient filter delivers only claims for that address.
-   *
-   * @given the with-data chain has claims for multiple addresses
-   * @when we subscribe with recipient=<knownAddress>
-   * @then only claims where recipient matches are delivered
-   */
-  it.todo('should filter bridgeClaims by recipient');
-
-  /**
-   * bridgeClaims subscription with toBlock finishes and emits BridgeProgress(finished=true).
-   *
-   * @given the with-data chain has claims up to a known block
-   * @when we subscribe with from=0 and toBlock=<knownBlock>
-   * @then all claims up to that block are delivered and a Progress(finished=true) frame follows
-   */
-  it.todo('should finish replay at toBlock for bridgeClaims');
+describe('bridge subscriptions — claims', () => {
+  // There is no bridgeClaims subscription. A bridge claim is a
+  // BridgeClaimTransaction (a ClaimRewards transaction with ClaimKind
+  // CardanoBridge) and is surfaced via the unshieldedTransactions query, not a
+  // subscription. Claim coverage therefore belongs with the unshielded
+  // transaction query tests rather than here.
+  it.todo('claims are observed as BridgeClaimTransaction via the unshieldedTransactions query');
 });
 
 describe('bridge subscriptions — bridgeBalance', () => {
@@ -359,21 +260,17 @@ describe('bridge subscriptions — bridgeBalance', () => {
    * @given the address has a prior UserTransfer balance
    * @and a CardanoBridge claim for that address is indexed
    * @when the subscription receives the claim event
-   * @then balance = deposited - claimedAmount
+   * @then balance reflects the ledger's net remaining-claimable (read from the
+   *       bridge_receiving map), reaching the zero-value hex string once fully claimed
    */
-  it.todo('should push an updated BridgeBalance when a BridgeClaim reduces the balance');
+  it.todo('should push an updated BridgeBalance when a claim reduces the balance');
 });
 
 // Suppress unused import warnings until test bodies are implemented.
 void BRIDGE_EVENTS_SUBSCRIPTION;
-void BRIDGE_CLAIMS_SUBSCRIPTION;
 void BRIDGE_BALANCE_SUBSCRIPTION;
 void UNKNOWN_ADDRESS;
 void log;
 
-type _SuppressUnused =
-  | BridgeEventOrProgress
-  | BridgeClaimOrProgress
-  | BridgeBalance
-  | GraphQLResponse<unknown>;
+type _SuppressUnused = BridgeEvent | BridgeBalance | GraphQLResponse<unknown>;
 void (undefined as unknown as _SuppressUnused);
