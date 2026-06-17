@@ -17,7 +17,7 @@ use crate::{
         IntentHash, LedgerEvent, LedgerVersion, NetworkId, Nonce, SerializedContractAddress,
         SerializedLedgerParameters, SerializedLedgerStateKey, SerializedTransaction,
         SerializedZswapMerkleTreeRoot, SerializedZswapState, TokenType, TransactionResult,
-        UnshieldedUtxo,
+        UnshieldedAddress, UnshieldedUtxo,
         bridge::BridgeClaim,
         dust::{self},
         ledger::{
@@ -181,6 +181,23 @@ impl LedgerState {
             }
             Self::V9 { ledger_state, .. } => {
                 LedgerParameters::V9(ledger_state.parameters.deref().to_owned())
+            }
+        }
+    }
+
+    /// Net remaining-claimable for the recipient, from the ledger's `bridge_receiving` map
+    /// (credited net on deposit, removed on claim). Authoritative, unlike event-derived
+    /// `deposited - claimed`, which carries the bridge fee. `0` for V8 (ledger 9 only).
+    pub fn bridge_receiving(&self, address: UnshieldedAddress) -> u128 {
+        match self {
+            Self::V8 { .. } => 0,
+            Self::V9 { ledger_state, .. } => {
+                let address = UserAddress(HashOutput(address.0));
+                ledger_state
+                    .bridge_receiving
+                    .get(&address)
+                    .copied()
+                    .unwrap_or(0)
             }
         }
     }

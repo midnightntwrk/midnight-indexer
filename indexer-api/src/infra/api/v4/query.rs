@@ -842,10 +842,26 @@ where
             .hex_decode::<UnshieldedAddress>()
             .map_err_into_client_error(|| "invalid recipient address")?;
 
-        let balance = storage
+        let mut balance = storage
             .get_bridge_balance(address)
             .await
             .map_err_into_server_error(|| "get bridge balance")?;
+
+        // Override `balance` with the authoritative remaining-claimable from the ledger's
+        // `bridge_receiving` map (net of fees, zero once fully claimed). `deposited - claimed` over
+        // events would instead carry the bridge fee as a residual.
+        balance.balance = match storage
+            .get_highest_ledger_state()
+            .await
+            .map_err_into_server_error(|| "get highest ledger state")?
+        {
+            Some((protocol_version, ledger_state_key)) => {
+                ledger::LedgerState::load(&ledger_state_key, protocol_version.ledger_version())
+                    .map_err_into_server_error(|| "load ledger state")?
+                    .bridge_receiving(address)
+            }
+            None => 0,
+        };
 
         Ok(balance.into())
     }

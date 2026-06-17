@@ -174,7 +174,16 @@ impl BridgeStorage for Storage {
             .await?;
         let claimed: u128 = claimed_rows.iter().map(|(b,)| u128::from(*b)).sum();
 
-        Ok(BridgeBalance { deposited, claimed })
+        // `balance` is the authoritative remaining-claimable read from the ledger's
+        // `bridge_receiving` map by the API layer; this event-derived value is only a
+        // fallback for direct callers.
+        let balance = deposited.saturating_sub(claimed);
+
+        Ok(BridgeBalance {
+            deposited,
+            claimed,
+            balance,
+        })
     }
 
     #[trace]

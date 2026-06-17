@@ -51,14 +51,14 @@ pub struct BridgeClaim {
 /// Aggregated balance snapshot for a single recipient address.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BridgeBalance {
+    /// Sum of `UserTransfer` amounts (gross, pre-fee) over events.
     pub deposited: u128,
+    /// Sum of bridge claim amounts (net, post-fee) over events.
     pub claimed: u128,
-}
-
-impl BridgeBalance {
-    pub fn balance(&self) -> u128 {
-        self.deposited.saturating_sub(self.claimed)
-    }
+    /// Authoritative remaining-claimable, read from the ledger's `bridge_receiving` map (net,
+    /// zero once fully claimed). Not `deposited - claimed`, which would carry the fee as a
+    /// residual.
+    pub balance: u128,
 }
 
 /// A row of treasury inflow aggregated by reason.

@@ -83,15 +83,16 @@ Per-address bridge balance.
 """
 type BridgeBalance @beta {
 	"""
-	Sum of UserTransfer amounts for this address (16-byte big-endian u128).
+	Sum of UserTransfer amounts for this address, gross/pre-fee (16-byte big-endian u128).
 	"""
 	deposited: HexEncoded!
 	"""
-	Sum of bridge claim amounts for this address (16-byte big-endian u128).
+	Sum of bridge claim amounts for this address, net/post-fee (16-byte big-endian u128).
 	"""
 	claimed: HexEncoded!
 	"""
-	`deposited - claimed`, saturated at zero.
+	Remaining claimable, read from the ledger's `bridge_receiving` map (net, zero once fully
+	claimed). 16-byte big-endian u128.
 	"""
 	balance: HexEncoded!
 }
