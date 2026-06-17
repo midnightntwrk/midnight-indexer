@@ -394,7 +394,6 @@ mod tests {
     /// Notice: The raw test data is created with `generate_txs.sh`.
     #[cfg(any(feature = "cloud", feature = "standalone"))]
     #[tokio::test(flavor = "multi_thread")]
-    #[ignore = "fixtures are ledger-9 alpha.1 era; regenerate once a node 2.0.0-rc image ships"]
     async fn test_deserialize_relevant() -> Result<(), BoxError> {
         #[cfg(feature = "cloud")]
         let _postgres_container = {
