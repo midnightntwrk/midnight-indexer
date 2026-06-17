@@ -111,8 +111,9 @@ pub enum LedgerVersion {
 
 impl LedgerVersion {
     pub const OLDEST: Self = Self::V8;
-    // Dust-query decode version; v8 and v9 dust wire formats are decode-compatible
-    // at ledger-9 alpha.1. Revisit at the rc bump, which changes the v9 tags.
+    // Dust-query decode version. This build serves ledger-9 chains (devnet and
+    // stagenet under the node 2.0 rollout). Deriving the version per chain
+    // rather than from this constant is the tracked follow-up.
     pub const LATEST: Self = Self::V9;
 }
 

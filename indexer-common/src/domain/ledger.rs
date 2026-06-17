@@ -40,6 +40,7 @@ use midnight_ledger_v9::{
 };
 use midnight_serialize_v1::{Serializable, Tagged, tagged_serialize};
 use midnight_transient_crypto_v2::commitment::PureGeneratorPedersen;
+use midnight_transient_crypto_v3::commitment::PureGeneratorPedersen as PureGeneratorPedersenV9;
 use std::{io, string::FromUtf8Error};
 use thiserror::Error;
 
@@ -52,12 +53,12 @@ type IntentV8<D> =
 type TransactionV9<D> = midnight_ledger_v9::structure::Transaction<
     SignatureV9,
     ProofMarkerV9,
-    PureGeneratorPedersen,
+    PureGeneratorPedersenV9,
     D,
 >;
 
 type IntentV9<D> =
-    midnight_ledger_v9::structure::Intent<SignatureV9, ProofMarkerV9, PureGeneratorPedersen, D>;
+    midnight_ledger_v9::structure::Intent<SignatureV9, ProofMarkerV9, PureGeneratorPedersenV9, D>;
 
 /// Ledger related errors.
 #[derive(Debug, Error)]
