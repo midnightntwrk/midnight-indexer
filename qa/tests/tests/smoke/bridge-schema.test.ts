@@ -81,28 +81,30 @@ describe('bridge GraphQL schema — types (#941)', () => {
   it.todo('should expose BridgeUnapprovedTransfer type');
   it.todo('should expose BridgeSubminimalFlushTransfer type');
 
-  // BridgeClaim: ClaimRewardsTransaction with kind=CardanoBridge.
-  it.todo('should expose BridgeClaim type');
+  // BridgeClaimTransaction: a ClaimRewards transaction with kind=CardanoBridge,
+  // surfaced as its own Transaction type (no bridge-specific query).
+  it.todo('should expose BridgeClaimTransaction type implementing Transaction');
 
   // BridgeBalance: deposited / claimed / balance summary per address.
   it.todo('should expose BridgeBalance type with deposited, claimed, balance fields');
 
   // Discriminator enum used by bridgeEvents(variant: ...) filter.
-  it.todo('should expose BridgePalletEventVariant enum with 5 values');
+  it.todo('should expose BridgeEventVariant enum with 5 values');
 });
 
 describe('bridge GraphQL schema — queries (#941)', () => {
-  // bridgeEvents: filterable list of BridgeEvent (by block, recipient, variant).
+  // bridgeEvents: filterable list of BridgeEvent (by recipient, variant, block range).
   it.todo('should expose bridgeEvents query on Query type');
 
-  // bridgeClaims: list of BridgeClaim, filterable by recipient.
-  it.todo('should expose bridgeClaims query on Query type');
-
-  // bridgeBalance: aggregate summary (deposited - claimed) for a recipient address.
+  // bridgeBalance: deposited / claimed / balance summary for an address.
   it.todo('should expose bridgeBalance query on Query type');
 
   // bridgeDeposits: convenience filter combining UserTransfer + optional UnapprovedTransfer.
   it.todo('should expose bridgeDeposits query on Query type');
+
+  // Note: the bridge pool query surface (bridgeReserveInflows, bridgeTreasuryInflows,
+  // bridgePoolSummary) is owned by the pool-observability work (#944) and is asserted
+  // in that branch's tests, not here.
 });
 
 // #942 — GraphQL subscriptions for bridge events
@@ -110,11 +112,11 @@ describe('bridge GraphQL schema — subscriptions (#942)', () => {
   // Real-time push of new BridgeEvents; supports from-cursor reconnection.
   it.todo('should expose bridgeEvents subscription on Subscription type');
 
-  // Real-time push of new BridgeClaims; supports from-cursor reconnection.
-  it.todo('should expose bridgeClaims subscription on Subscription type');
-
   // Live BridgeBalance recomputed on every matching event for an address.
   it.todo('should expose bridgeBalance subscription on Subscription type');
+
+  // Note: the bridgePoolUpdates subscription is owned by the pool-observability
+  // work (#944) and is asserted in that branch's tests, not here.
 });
 
 // Reference implementation for when it.todo is removed:
@@ -127,7 +129,7 @@ describe('bridge GraphQL schema — subscriptions (#942)', () => {
 //   expect(response.data?.__type?.kind).toBe('INTERFACE');
 //   expect(response.data?.__type?.fields?.map((f) => f.name)).toContain('id');
 //   expect(response.data?.__type?.fields?.map((f) => f.name)).toContain('midnightTxHash');
-//   expect(response.data?.__type?.fields?.map((f) => f.name)).toContain('indexedAt');
+//   expect(response.data?.__type?.fields?.map((f) => f.name)).toContain('blockHeight');
 //   log.debug('BridgeEvent interface confirmed in schema');
 // });
 

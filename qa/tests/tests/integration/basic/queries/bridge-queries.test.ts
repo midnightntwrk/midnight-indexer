@@ -15,7 +15,7 @@
 
 // Integration tests for c2m-bridge GraphQL queries.
 //
-// Covers: bridgeEvents, bridgeClaims, bridgeBalance, bridgeDeposits (#941).
+// Covers: bridgeEvents, bridgeBalance, bridgeDeposits (#941).
 //
 // ── Status of tests ──────────────────────────────────────────────────────────
 //
@@ -46,22 +46,17 @@ import type { GraphQLResponse } from '@utils/indexer/indexer-types';
 
 // ── Stub types (move to indexer-types.ts once #941 lands) ──────────────────
 
-export type BridgePalletEventVariant =
+export type BridgeEventVariant =
   | 'USER_TRANSFER'
   | 'RESERVE_TRANSFER'
   | 'INVALID_TRANSFER'
   | 'UNAPPROVED_TRANSFER'
   | 'SUBMINIMAL_FLUSH_TRANSFER';
 
-export interface BlockReference {
-  blockHeight: number;
-  blockHash: string;
-}
-
 export interface BridgeEventBase {
   id: number;
+  blockHeight: number;
   midnightTxHash: string;
-  indexedAt: BlockReference;
 }
 
 export interface BridgeUserTransfer extends BridgeEventBase {
@@ -103,16 +98,7 @@ export type BridgeEvent =
   | BridgeUnapprovedTransfer
   | BridgeSubminimalFlushTransfer;
 
-export interface BridgeClaim {
-  id: number;
-  transactionHash: string;
-  recipient: string;
-  amount: string;
-  indexedAt: BlockReference;
-}
-
 export interface BridgeBalance {
-  address: string;
   deposited: string;
   claimed: string;
   balance: string;
@@ -123,8 +109,8 @@ export interface BridgeBalance {
 const BRIDGE_EVENT_FRAGMENT = `
   fragment BridgeEventFields on BridgeEvent {
     id
+    blockHeight
     midnightTxHash
-    indexedAt { blockHeight blockHash }
     ... on BridgeUserTransfer {
       __typename cardanoTxHash amount recipient
     }
@@ -146,18 +132,18 @@ const BRIDGE_EVENT_FRAGMENT = `
 const BRIDGE_EVENTS_QUERY = `
   ${BRIDGE_EVENT_FRAGMENT}
   query BridgeEvents(
-    $blockHeight: Int
-    $transactionId: Int
     $recipient: HexEncoded
-    $variant: BridgePalletEventVariant
+    $variant: BridgeEventVariant
+    $blockHeightFrom: Int
+    $blockHeightTo: Int
     $offset: Int
     $limit: Int
   ) {
     bridgeEvents(
-      blockHeight: $blockHeight
-      transactionId: $transactionId
       recipient: $recipient
       variant: $variant
+      blockHeightFrom: $blockHeightFrom
+      blockHeightTo: $blockHeightTo
       offset: $offset
       limit: $limit
     ) {
@@ -166,22 +152,9 @@ const BRIDGE_EVENTS_QUERY = `
   }
 `;
 
-const BRIDGE_CLAIMS_QUERY = `
-  query BridgeClaims($recipient: HexEncoded, $offset: Int, $limit: Int) {
-    bridgeClaims(recipient: $recipient, offset: $offset, limit: $limit) {
-      id
-      transactionHash
-      recipient
-      amount
-      indexedAt { blockHeight blockHash }
-    }
-  }
-`;
-
 const BRIDGE_BALANCE_QUERY = `
   query BridgeBalance($address: HexEncoded!) {
     bridgeBalance(address: $address) {
-      address
       deposited
       claimed
       balance
@@ -191,8 +164,18 @@ const BRIDGE_BALANCE_QUERY = `
 
 const BRIDGE_DEPOSITS_QUERY = `
   ${BRIDGE_EVENT_FRAGMENT}
-  query BridgeDeposits($recipient: HexEncoded!, $includeUnapproved: Boolean) {
-    bridgeDeposits(recipient: $recipient, includeUnapproved: $includeUnapproved) {
+  query BridgeDeposits(
+    $recipient: HexEncoded!
+    $includeUnapproved: Boolean
+    $offset: Int
+    $limit: Int
+  ) {
+    bridgeDeposits(
+      recipient: $recipient
+      includeUnapproved: $includeUnapproved
+      offset: $offset
+      limit: $limit
+    ) {
       ...BridgeEventFields
     }
   }
@@ -273,41 +256,22 @@ describe('bridge queries — bridgeEvents', () => {
    *
    * @given the with-data chain contains at least one UserTransfer event
    * @when we query bridgeEvents(variant: USER_TRANSFER, limit: 1)
-   * @then the single event has id, midnightTxHash, indexedAt, cardanoTxHash, amount, recipient
+   * @then the single event has id, blockHeight, midnightTxHash, cardanoTxHash, amount, recipient
    * @and all hex-encoded fields are non-empty strings
-   * @and indexedAt.blockHeight is a positive integer
+   * @and blockHeight is a positive integer
    */
   it.todo('should return events with the correct shape for BridgeUserTransfer');
 });
 
-describe('bridge queries — bridgeClaims', () => {
-  /**
-   * bridgeClaims for an unknown recipient returns an empty list.
-   *
-   * @given a 32-byte all-zeros hex address with no claims
-   * @when we query bridgeClaims(recipient: <zeros>)
-   * @then the response is successful and bridgeClaims is an empty array
-   */
-  it.todo('should return an empty list for an address with no claims');
-
-  /**
-   * bridgeClaims for a known claimer returns their claim records.
-   *
-   * @given the with-data chain contains a CardanoBridge claim for a known address
-   * @when we query bridgeClaims(recipient: <claimerAddress>)
-   * @then each claim has id, transactionHash, recipient, amount, indexedAt
-   * @and the recipient field matches the queried address
-   */
-  it.todo('should return claims for a known claimer address');
-
-  /**
-   * bridgeClaims respects offset and limit pagination.
-   *
-   * @given the with-data chain contains at least 3 bridge claims
-   * @when we paginate with limit 2 and offset 0, then offset 1
-   * @then results are consistent and ids are in ascending order
-   */
-  it.todo('should paginate claims with offset and limit');
+describe('bridge queries — claims (BridgeClaimTransaction)', () => {
+  // A claim is surfaced as a `BridgeClaimTransaction implements Transaction`
+  // via the existing `unshieldedTransactions` subscription, not a
+  // bridge-specific query. Covering it means subscribing for a known claim
+  // recipient address and asserting the __typename and bridged recipient /
+  // amount fields on the matched transaction.
+  it.todo(
+    'should surface a BridgeClaimTransaction (recipient, amount) via unshieldedTransactions for a claim recipient',
+  );
 });
 
 describe('bridge queries — bridgeBalance', () => {
@@ -332,23 +296,27 @@ describe('bridge queries — bridgeBalance', () => {
   it.todo('should set deposited to the sum of UserTransfer amounts for the address');
 
   /**
-   * bridgeBalance.balance = deposited - claimed, clamped to zero.
+   * bridgeBalance.balance is read from the ledger's remaining-claimable map, not
+   * derived from deposited/claimed. Once an address has fully claimed, balance is
+   * the zero-value hex string.
    *
-   * @given the with-data chain has UserTransfer and a subsequent BridgeClaim for the same address
+   * @given the with-data chain has a UserTransfer and a subsequent fully-claimed claim
+   * @given for the same address
    * @when we query bridgeBalance(address: <address>)
-   * @then balance = deposited - claimed
-   * @and balance is never negative (clamped to zero)
+   * @then balance is the zero-value hex string (net remaining-claimable is zero)
    */
-  it.todo('should return balance equal to deposited minus claimed');
+  it.todo('should return zero balance once an address has fully claimed');
 
   /**
-   * bridgeBalance supports partial claims (claimed < deposited).
+   * bridgeBalance.balance reflects the ledger's net remaining-claimable after a
+   * partial claim; it is read from the ledger and is not asserted to equal
+   * deposited minus claimed.
    *
-   * @given an address with a UserTransfer of amount A and a BridgeClaim of amount B (B < A)
-   * @when we query bridgeBalance
-   * @then balance = A - B (partial claim leaves remaining claimable balance)
+   * @given an address with a UserTransfer and a subsequent partial claim
+   * @when we query bridgeBalance(address: <address>)
+   * @then balance is a non-zero hex string reflecting the remaining-claimable amount
    */
-  it.todo('should reflect partial claims correctly in balance');
+  it.todo('should reflect a non-zero remaining-claimable balance after a partial claim');
 });
 
 describe('bridge queries — bridgeDeposits', () => {
@@ -386,7 +354,6 @@ describe('bridge queries — bridgeDeposits', () => {
 // Keep this at the bottom so unused imports are not flagged by the linter
 // until the test bodies are fleshed out.
 void BRIDGE_EVENTS_QUERY;
-void BRIDGE_CLAIMS_QUERY;
 void BRIDGE_BALANCE_QUERY;
 void BRIDGE_DEPOSITS_QUERY;
 void UNKNOWN_RECIPIENT;
