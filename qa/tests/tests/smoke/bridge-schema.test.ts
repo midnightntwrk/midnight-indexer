@@ -20,14 +20,13 @@
 // introspection so they cost only one HTTP round-trip each, and they fail fast
 // if a deployment is missing bridge support entirely.
 //
-// All tests are marked it.todo until the dev PRs (#938-#942) are merged and
-// the schema-v4.graphql is regenerated. Un-todo them as part of the final
-// QA sign-off on those PRs.
+// They require an environment whose indexer exposes the bridge surface (the
+// bridge feature is @beta and not yet on main). Run against an env that has it
+// deployed, e.g. TARGET_ENV=devnet.
 //
 // Tracking: https://github.com/midnightntwrk/midnight-indexer/issues/941
 //           https://github.com/midnightntwrk/midnight-indexer/issues/942
 
-import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 
@@ -39,25 +38,29 @@ const INTROSPECT_TYPE = (name: string) => `
       fields { name }
       enumValues { name }
       possibleTypes { name }
+      interfaces { name }
     }
   }
 `;
 
-const INTROSPECT_QUERY_FIELDS = `
+const INTROSPECT_ROOT_FIELDS = (rootType: 'Query' | 'Subscription') => `
   query {
-    __type(name: "Query") {
+    __type(name: "${rootType}") {
       fields { name }
     }
   }
 `;
 
-const INTROSPECT_SUBSCRIPTION_FIELDS = `
-  query {
-    __type(name: "Subscription") {
-      fields { name }
-    }
-  }
-`;
+interface IntrospectionTypeResult {
+  __type: {
+    name: string;
+    kind: string;
+    fields: { name: string }[] | null;
+    enumValues: { name: string }[] | null;
+    possibleTypes: { name: string }[] | null;
+    interfaces: { name: string }[] | null;
+  } | null;
+}
 
 const httpClient = new IndexerHttpClient();
 
@@ -69,38 +72,133 @@ function rawRequest<T>(query: string): Promise<{ data: T | null }> {
   ).client.rawRequest(query);
 }
 
+async function introspectType(name: string) {
+  const response = await rawRequest<IntrospectionTypeResult>(INTROSPECT_TYPE(name));
+  return response.data?.__type ?? null;
+}
+
+async function rootFieldNames(rootType: 'Query' | 'Subscription') {
+  const response = await rawRequest<IntrospectionTypeResult>(INTROSPECT_ROOT_FIELDS(rootType));
+  return (response.data?.__type?.fields ?? []).map((f) => f.name);
+}
+
 // #941 — GraphQL types and queries for bridge events
 describe('bridge GraphQL schema — types (#941)', () => {
-  // BridgeEvent interface: shared fields across all 5 event variants.
-  it.todo('should expose BridgeEvent interface');
+  /**
+   * @given an indexer deployment with the bridge surface
+   * @when the BridgeEvent type is introspected
+   * @then it is an INTERFACE exposing the flat fields id, blockHeight and midnightTxHash
+   * @and it does not expose a nested indexedAt field
+   */
+  test('should expose BridgeEvent interface with flat blockHeight', async (ctx) => {
+    ctx.task!.meta.custom = { labels: ['Smoke', 'Bridge', 'Schema'] };
+    const type = await introspectType('BridgeEvent');
+    expect(type).not.toBeNull();
+    expect(type?.kind).toBe('INTERFACE');
+    const fields = (type?.fields ?? []).map((f) => f.name);
+    expect(fields).toEqual(expect.arrayContaining(['id', 'blockHeight', 'midnightTxHash']));
+    expect(fields).not.toContain('indexedAt');
+  });
 
-  // Concrete types implementing BridgeEvent, one per pallet event variant.
-  it.todo('should expose BridgeUserTransfer type');
-  it.todo('should expose BridgeReserveTransfer type');
-  it.todo('should expose BridgeInvalidTransfer type');
-  it.todo('should expose BridgeUnapprovedTransfer type');
-  it.todo('should expose BridgeSubminimalFlushTransfer type');
+  /**
+   * @given an indexer deployment with the bridge surface
+   * @when each concrete bridge event type is introspected
+   * @then every variant exists and declares BridgeEvent as an implemented interface
+   */
+  test('should expose the five concrete BridgeEvent variants', async (ctx) => {
+    ctx.task!.meta.custom = { labels: ['Smoke', 'Bridge', 'Schema'] };
+    const variants = [
+      'BridgeUserTransfer',
+      'BridgeReserveTransfer',
+      'BridgeInvalidTransfer',
+      'BridgeUnapprovedTransfer',
+      'BridgeSubminimalFlushTransfer',
+    ];
+    for (const name of variants) {
+      const type = await introspectType(name);
+      expect(type, `${name} should exist`).not.toBeNull();
+      const interfaces = (type?.interfaces ?? []).map((i) => i.name);
+      expect(interfaces, `${name} should implement BridgeEvent`).toContain('BridgeEvent');
+    }
+  });
 
-  // BridgeClaimTransaction: a ClaimRewards transaction with kind=CardanoBridge,
-  // surfaced as its own Transaction type (no bridge-specific query).
-  it.todo('should expose BridgeClaimTransaction type implementing Transaction');
+  /**
+   * @given an indexer deployment with the bridge surface
+   * @when the BridgeSubminimalFlushTransfer type is introspected
+   * @then it exposes amount and count and carries no Cardano tx hash
+   */
+  test('should expose BridgeSubminimalFlushTransfer without a cardanoTxHash', async (ctx) => {
+    ctx.task!.meta.custom = { labels: ['Smoke', 'Bridge', 'Schema'] };
+    const type = await introspectType('BridgeSubminimalFlushTransfer');
+    expect(type).not.toBeNull();
+    const fields = (type?.fields ?? []).map((f) => f.name);
+    expect(fields).toEqual(expect.arrayContaining(['amount', 'count']));
+    expect(fields).not.toContain('cardanoTxHash');
+  });
 
-  // BridgeBalance: deposited / claimed / balance summary per address.
-  it.todo('should expose BridgeBalance type with deposited, claimed, balance fields');
+  /**
+   * @given an indexer deployment with the bridge surface
+   * @when the BridgeClaimTransaction type is introspected
+   * @then it exists and implements the Transaction interface
+   */
+  test('should expose BridgeClaimTransaction implementing Transaction', async (ctx) => {
+    ctx.task!.meta.custom = { labels: ['Smoke', 'Bridge', 'Schema'] };
+    const type = await introspectType('BridgeClaimTransaction');
+    expect(type).not.toBeNull();
+    const interfaces = (type?.interfaces ?? []).map((i) => i.name);
+    expect(interfaces).toContain('Transaction');
+  });
 
-  // Discriminator enum used by bridgeEvents(variant: ...) filter.
-  it.todo('should expose BridgeEventVariant enum with 5 values');
+  /**
+   * @given an indexer deployment with the bridge surface
+   * @when the BridgeBalance type is introspected
+   * @then it exposes deposited, claimed and balance and no per-type address field
+   */
+  test('should expose BridgeBalance with deposited, claimed, balance', async (ctx) => {
+    ctx.task!.meta.custom = { labels: ['Smoke', 'Bridge', 'Schema'] };
+    const type = await introspectType('BridgeBalance');
+    expect(type).not.toBeNull();
+    const fields = (type?.fields ?? []).map((f) => f.name);
+    expect(fields).toEqual(expect.arrayContaining(['deposited', 'claimed', 'balance']));
+    expect(fields).not.toContain('address');
+  });
+
+  /**
+   * @given an indexer deployment with the bridge surface
+   * @when the BridgeEventVariant enum is introspected
+   * @then it exposes exactly the five pallet event discriminators
+   */
+  test('should expose BridgeEventVariant enum with five values', async (ctx) => {
+    ctx.task!.meta.custom = { labels: ['Smoke', 'Bridge', 'Schema'] };
+    const type = await introspectType('BridgeEventVariant');
+    expect(type).not.toBeNull();
+    expect(type?.kind).toBe('ENUM');
+    const values = (type?.enumValues ?? []).map((v) => v.name).sort();
+    expect(values).toEqual(
+      [
+        'INVALID_TRANSFER',
+        'RESERVE_TRANSFER',
+        'SUBMINIMAL_FLUSH_TRANSFER',
+        'UNAPPROVED_TRANSFER',
+        'USER_TRANSFER',
+      ].sort(),
+    );
+  });
 });
 
 describe('bridge GraphQL schema — queries (#941)', () => {
-  // bridgeEvents: filterable list of BridgeEvent (by recipient, variant, block range).
-  it.todo('should expose bridgeEvents query on Query type');
-
-  // bridgeBalance: deposited / claimed / balance summary for an address.
-  it.todo('should expose bridgeBalance query on Query type');
-
-  // bridgeDeposits: convenience filter combining UserTransfer + optional UnapprovedTransfer.
-  it.todo('should expose bridgeDeposits query on Query type');
+  /**
+   * @given an indexer deployment with the bridge surface
+   * @when the Query root type is introspected
+   * @then the bridgeEvents, bridgeBalance and bridgeDeposits fields are present
+   */
+  test('should expose the #941 bridge query fields on Query', async (ctx) => {
+    ctx.task!.meta.custom = { labels: ['Smoke', 'Bridge', 'Schema'] };
+    const fields = await rootFieldNames('Query');
+    expect(fields).toEqual(
+      expect.arrayContaining(['bridgeEvents', 'bridgeBalance', 'bridgeDeposits']),
+    );
+  });
 
   // Note: the bridge pool query surface (bridgeReserveInflows, bridgeTreasuryInflows,
   // bridgePoolSummary) is owned by the pool-observability work (#944) and is asserted
@@ -109,32 +207,17 @@ describe('bridge GraphQL schema — queries (#941)', () => {
 
 // #942 — GraphQL subscriptions for bridge events
 describe('bridge GraphQL schema — subscriptions (#942)', () => {
-  // Real-time push of new BridgeEvents; supports from-cursor reconnection.
-  it.todo('should expose bridgeEvents subscription on Subscription type');
-
-  // Live BridgeBalance recomputed on every matching event for an address.
-  it.todo('should expose bridgeBalance subscription on Subscription type');
+  /**
+   * @given an indexer deployment with the bridge surface
+   * @when the Subscription root type is introspected
+   * @then the bridgeEvents and bridgeBalance subscription fields are present
+   */
+  test('should expose the #942 bridge subscription fields on Subscription', async (ctx) => {
+    ctx.task!.meta.custom = { labels: ['Smoke', 'Bridge', 'Schema'] };
+    const fields = await rootFieldNames('Subscription');
+    expect(fields).toEqual(expect.arrayContaining(['bridgeEvents', 'bridgeBalance']));
+  });
 
   // Note: the bridgePoolUpdates subscription is owned by the pool-observability
   // work (#944) and is asserted in that branch's tests, not here.
 });
-
-// Reference implementation for when it.todo is removed:
-// Replace each it.todo block with a test body like this example.
-//
-// test('should expose BridgeEvent interface', async (ctx) => {
-//   ctx.task!.meta.custom = { labels: ['Smoke', 'Bridge', 'Schema'] };
-//   const response = await rawRequest<IntrospectionTypeResult>(INTROSPECT_TYPE('BridgeEvent'));
-//   expect(response.data?.__type).not.toBeNull();
-//   expect(response.data?.__type?.kind).toBe('INTERFACE');
-//   expect(response.data?.__type?.fields?.map((f) => f.name)).toContain('id');
-//   expect(response.data?.__type?.fields?.map((f) => f.name)).toContain('midnightTxHash');
-//   expect(response.data?.__type?.fields?.map((f) => f.name)).toContain('blockHeight');
-//   log.debug('BridgeEvent interface confirmed in schema');
-// });
-
-void INTROSPECT_TYPE;
-void INTROSPECT_QUERY_FIELDS;
-void INTROSPECT_SUBSCRIPTION_FIELDS;
-void log;
-void rawRequest;
