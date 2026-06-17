@@ -19,16 +19,16 @@
 //
 // ── What bridgePoolUpdates does ───────────────────────────────────────────────
 //
-// `bridgePoolUpdates(from: Int)` pushes a `BridgePoolUpdate` frame on every
-// newly indexed bridge event that affects a protocol pool (Reserve or Treasury).
-// Each frame contains:
-//   - `newEvent: BridgeEvent` — the event that triggered the update
+// `bridgePoolUpdates` pushes a `BridgePoolUpdate` frame on every newly indexed
+// bridge event that affects a protocol pool (Reserve or Treasury). Each frame
+// contains:
+//   - `newEvent: BridgeEvent` — the event that triggered the update; null on
+//     the initial snapshot emitted on subscribe
 //   - `pool: BridgePoolSummary` — the recomputed pool snapshot after the event
 //
 // The subscription emits the current summary immediately on connect (similar
-// to `bridgeBalance` in #942). If `from` is provided, it also replays past
-// pool-affecting events with their at-time summaries before switching to
-// live mode.
+// to `bridgeBalance` in #942), with `newEvent` null, then switches to live
+// mode. It takes no arguments.
 //
 // ── Status of tests ──────────────────────────────────────────────────────────
 //
@@ -50,11 +50,6 @@ import type { TestContext } from 'vitest';
 
 // ── Stub types (consolidate with bridge-pool-queries.test.ts once #944 lands) ─
 
-interface BlockReference {
-  blockHeight: number;
-  blockHash: string;
-}
-
 interface BridgeTreasuryAggregate {
   reason: string;
   total: string;
@@ -65,13 +60,13 @@ interface BridgePoolSummary {
   reserveTotal: string;
   treasuryByReason: BridgeTreasuryAggregate[];
   subminimumTxCount: number;
-  lastEventAt: BlockReference | null;
+  lastEventBlockHeight: number | null;
 }
 
 interface BridgeEventBase {
   id: number;
+  blockHeight: number;
   midnightTxHash: string;
-  indexedAt: BlockReference;
 }
 
 interface BridgeReserveTransfer extends BridgeEventBase {
@@ -92,44 +87,37 @@ interface BridgeSubminimalFlushTransfer extends BridgeEventBase {
   count: number;
 }
 
-type PoolAffectingEvent =
-  | BridgeReserveTransfer
-  | BridgeInvalidTransfer
-  | BridgeSubminimalFlushTransfer;
+type BridgeEvent = BridgeReserveTransfer | BridgeInvalidTransfer | BridgeSubminimalFlushTransfer;
 
 interface BridgePoolUpdate {
-  newEvent: PoolAffectingEvent;
+  newEvent: BridgeEvent | null;
   pool: BridgePoolSummary;
 }
 
 // ── GraphQL subscription string ──────────────────────────────────────────────
 
 const BRIDGE_POOL_UPDATES_SUBSCRIPTION = `
-  subscription BridgePoolUpdates($from: Int) {
-    bridgePoolUpdates(from: $from) {
+  subscription BridgePoolUpdates {
+    bridgePoolUpdates {
       newEvent {
         ... on BridgeReserveTransfer {
-          __typename id midnightTxHash cardanoTxHash amount
-          indexedAt { blockHeight blockHash }
+          __typename id blockHeight midnightTxHash cardanoTxHash amount
         }
         ... on BridgeInvalidTransfer {
-          __typename id midnightTxHash cardanoTxHash amount
-          indexedAt { blockHeight blockHash }
+          __typename id blockHeight midnightTxHash cardanoTxHash amount
         }
         ... on BridgeUnapprovedTransfer {
-          __typename id midnightTxHash cardanoTxHash amount recipient
-          indexedAt { blockHeight blockHash }
+          __typename id blockHeight midnightTxHash cardanoTxHash amount recipient
         }
         ... on BridgeSubminimalFlushTransfer {
-          __typename id midnightTxHash amount count
-          indexedAt { blockHeight blockHash }
+          __typename id blockHeight midnightTxHash amount count
         }
       }
       pool {
         reserveTotal
         treasuryByReason { reason total count }
         subminimumTxCount
-        lastEventAt { blockHeight blockHash }
+        lastEventBlockHeight
       }
     }
   }
@@ -156,19 +144,9 @@ describe('bridge pool subscription — bridgePoolUpdates', () => {
    * @given no pool-affecting bridge events have been indexed
    * @when we subscribe to bridgePoolUpdates
    * @then the first frame has pool.reserveTotal=0, all treasury totals=0,
-   *       subminimumTxCount=0, and pool.lastEventAt=null
+   *       subminimumTxCount=0, pool.lastEventBlockHeight=null, and newEvent=null
    */
   it.todo('should emit current pool summary immediately on subscribe');
-
-  /**
-   * bridgePoolUpdates replays historical pool updates from the given cursor.
-   *
-   * @given the with-data chain has ReserveTransfer events with known ids
-   * @when we subscribe with from=<firstEventId - 1>
-   * @then we receive a BridgePoolUpdate frame for each pool-affecting event in id order
-   * @and each frame's pool.reserveTotal is the running sum at that point in time
-   */
-  it.todo('should replay historical pool updates from the given cursor id');
 
   /**
    * bridgePoolUpdates pushes a live update when a new ReserveTransfer is indexed.
@@ -205,11 +183,11 @@ describe('bridge pool subscription — bridgePoolUpdates', () => {
    * After N pool-affecting events, the Nth frame's pool totals equal the sum
    * of all previous events' amounts.
    *
-   * @given the with-data chain has 3 ReserveTransfer events with known amounts A1, A2, A3
-   * @when we subscribe with from=0 and receive 3 frames
-   * @then frame[0].pool.reserveTotal = A1
-   * @and frame[1].pool.reserveTotal = A1 + A2
-   * @and frame[2].pool.reserveTotal = A1 + A2 + A3
+   * @given 3 ReserveTransfer events with known amounts A1, A2, A3 are indexed while subscribed
+   * @when we subscribe and receive a frame per pool-affecting event
+   * @then the frame after A1 has pool.reserveTotal = A1
+   * @and the frame after A2 has pool.reserveTotal = A1 + A2
+   * @and the frame after A3 has pool.reserveTotal = A1 + A2 + A3
    */
   it.todo('should carry a running pool total in each frame (cumulative consistency)');
 

@@ -75,49 +75,44 @@ export interface BridgeTreasuryAggregate {
   count: number;
 }
 
-export interface BlockReference {
-  blockHeight: number;
-  blockHash: string;
-}
-
 export interface BridgePoolSummary {
   reserveTotal: string;
   treasuryByReason: BridgeTreasuryAggregate[];
   subminimumTxCount: number;
-  lastEventAt: BlockReference | null;
+  lastEventBlockHeight: number | null;
 }
 
 export interface BridgeReserveTransfer {
   id: number;
+  blockHeight: number;
   midnightTxHash: string;
   cardanoTxHash: string;
   amount: string;
-  indexedAt: BlockReference;
 }
 
 export interface BridgeInvalidTransfer {
   id: number;
+  blockHeight: number;
   midnightTxHash: string;
   cardanoTxHash: string;
   amount: string;
-  indexedAt: BlockReference;
 }
 
 export interface BridgeUnapprovedTransfer {
   id: number;
+  blockHeight: number;
   midnightTxHash: string;
   cardanoTxHash: string;
   amount: string;
   recipient: string;
-  indexedAt: BlockReference;
 }
 
 export interface BridgeSubminimalFlushTransfer {
   id: number;
+  blockHeight: number;
   midnightTxHash: string;
   amount: string;
   count: number;
-  indexedAt: BlockReference;
 }
 
 export type BridgeTreasuryEvent =
@@ -137,49 +132,44 @@ const BRIDGE_POOL_SUMMARY_QUERY = `
         count
       }
       subminimumTxCount
-      lastEventAt { blockHeight blockHash }
+      lastEventBlockHeight
     }
   }
 `;
 
 const BRIDGE_RESERVE_INFLOWS_QUERY = `
-  query BridgeReserveInflows($fromBlock: Int, $toBlock: Int, $offset: Int, $limit: Int) {
-    bridgeReserveInflows(fromBlock: $fromBlock, toBlock: $toBlock, offset: $offset, limit: $limit) {
-      id
-      midnightTxHash
-      cardanoTxHash
-      amount
-      indexedAt { blockHeight blockHash }
+  query BridgeReserveInflows($blockHeightFrom: Int, $blockHeightTo: Int, $offset: Int, $limit: Int) {
+    bridgeReserveInflows(blockHeightFrom: $blockHeightFrom, blockHeightTo: $blockHeightTo, offset: $offset, limit: $limit) {
+      ... on BridgeReserveTransfer {
+        __typename id blockHeight midnightTxHash cardanoTxHash amount
+      }
     }
   }
 `;
 
 const BRIDGE_TREASURY_INFLOWS_QUERY = `
   query BridgeTreasuryInflows(
-    $fromBlock: Int
-    $toBlock: Int
+    $blockHeightFrom: Int
+    $blockHeightTo: Int
     $reason: BridgeTreasuryReason
     $offset: Int
     $limit: Int
   ) {
     bridgeTreasuryInflows(
-      fromBlock: $fromBlock
-      toBlock: $toBlock
+      blockHeightFrom: $blockHeightFrom
+      blockHeightTo: $blockHeightTo
       reason: $reason
       offset: $offset
       limit: $limit
     ) {
       ... on BridgeInvalidTransfer {
-        __typename id midnightTxHash cardanoTxHash amount
-        indexedAt { blockHeight blockHash }
+        __typename id blockHeight midnightTxHash cardanoTxHash amount
       }
       ... on BridgeUnapprovedTransfer {
-        __typename id midnightTxHash cardanoTxHash amount recipient
-        indexedAt { blockHeight blockHash }
+        __typename id blockHeight midnightTxHash cardanoTxHash amount recipient
       }
       ... on BridgeSubminimalFlushTransfer {
-        __typename id midnightTxHash amount count
-        indexedAt { blockHeight blockHash }
+        __typename id blockHeight midnightTxHash amount count
       }
     }
   }
@@ -214,7 +204,7 @@ describe('bridge pool queries — bridgePoolSummary', () => {
    * @given no bridge pallet events have been indexed (or atBlock before first bridge block)
    * @when we query bridgePoolSummary
    * @then reserveTotal is zero, all treasuryByReason totals are zero,
-   *       subminimumTxCount is 0, and lastEventAt is null
+   *       subminimumTxCount is 0, and lastEventBlockHeight is null
    */
   it.todo('should return all-zero totals when no bridge events have been indexed');
 
@@ -238,13 +228,13 @@ describe('bridge pool queries — bridgePoolSummary', () => {
   it.todo('should aggregate treasury inflows separately by INVALID and UNAPPROVED reason');
 
   /**
-   * bridgePoolSummary.lastEventAt references the most recently indexed bridge event block.
+   * bridgePoolSummary.lastEventBlockHeight references the most recently indexed bridge event block.
    *
    * @given bridge events exist up to a known block height H
    * @when we query bridgePoolSummary
-   * @then lastEventAt.blockHeight equals H
+   * @then lastEventBlockHeight equals H
    */
-  it.todo('should set lastEventAt to the most recently indexed bridge event block');
+  it.todo('should set lastEventBlockHeight to the most recently indexed bridge event block');
 
   /**
    * bridgePoolSummary respects the atBlock snapshot parameter.
@@ -292,8 +282,8 @@ describe('bridge pool queries — bridgeReserveInflows', () => {
    * bridgeReserveInflows returns ReserveTransfer events in the specified block range.
    *
    * @given the with-data chain has ReserveTransfer events across multiple blocks
-   * @when we query bridgeReserveInflows(fromBlock: B1, toBlock: B2)
-   * @then only events with indexedAt.blockHeight in [B1, B2] are returned
+   * @when we query bridgeReserveInflows(blockHeightFrom: B1, blockHeightTo: B2)
+   * @then only events with blockHeight in [B1, B2] are returned
    */
   it.todo('should return ReserveTransfer events within the specified block range');
 
@@ -302,7 +292,7 @@ describe('bridge pool queries — bridgeReserveInflows', () => {
    *
    * @given at least one ReserveTransfer is indexed
    * @when we query bridgeReserveInflows(limit: 1)
-   * @then the event has id, midnightTxHash, cardanoTxHash, amount, indexedAt
+   * @then the event has id, blockHeight, midnightTxHash, cardanoTxHash, amount
    * @and all hex fields are non-empty strings
    */
   it.todo('should return events with correct BridgeReserveTransfer field shape');
@@ -349,10 +339,10 @@ describe('bridge pool queries — bridgeTreasuryInflows', () => {
    * bridgeTreasuryInflows respects the block range filter.
    *
    * @given treasury events exist at blocks B1 and B3
-   * @when we query bridgeTreasuryInflows(fromBlock: B1, toBlock: B2) where B2 < B3
+   * @when we query bridgeTreasuryInflows(blockHeightFrom: B1, blockHeightTo: B2) where B2 < B3
    * @then only events at B1 are returned (B3 is outside the range)
    */
-  it.todo('should respect fromBlock and toBlock filters for treasury inflows');
+  it.todo('should respect blockHeightFrom and blockHeightTo filters for treasury inflows');
 
   // Skipped: UNAPPROVED reason filter — blocked on approval governance logic.
   // Tracking: https://github.com/midnightntwrk/midnight-indexer/issues/940
