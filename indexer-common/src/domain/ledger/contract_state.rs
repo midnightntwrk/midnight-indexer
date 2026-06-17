@@ -17,6 +17,7 @@ use crate::domain::{
 };
 use fastrace::trace;
 use midnight_coin_structure_v2::coin::TokenType as MidnightTokenType;
+use midnight_coin_structure_v3::coin::TokenType as MidnightTokenTypeV9;
 use midnight_onchain_runtime_v3::state::ContractState as ContractStateV3;
 use midnight_onchain_runtime_v4::state::ContractState as ContractStateV4;
 use midnight_serialize_v1::tagged_deserialize;
@@ -106,7 +107,7 @@ impl ContractState {
                     .map(|(token_type, amount)| {
                         match token_type {
                             // For unshielded tokens extract the type directly.
-                            MidnightTokenType::Unshielded(unshielded) => Ok(ContractBalance {
+                            MidnightTokenTypeV9::Unshielded(unshielded) => Ok(ContractBalance {
                                 token_type: unshielded.0.0.into(),
                                 amount,
                             }),

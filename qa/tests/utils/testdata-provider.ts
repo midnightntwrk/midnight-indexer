@@ -33,6 +33,19 @@ export interface ContractInfo {
 }
 
 /**
+ * A contract known to hold a non-zero unshielded token balance on the current
+ * environment's chain. Used by the unshieldedBalances regression tests (#1245):
+ * the field silently returned an empty array for every contract from 3.0.0 to
+ * 4.3.3, which format-only assertions could not catch.
+ */
+export interface TokenHoldingContractInfo {
+  /** Hex-encoded contract address. */
+  'contract-address': string;
+  /** Hex-encoded unshielded token type expected among the contract's balances. */
+  'token-type'?: string;
+}
+
+/**
  * Snapshot of a Cardano stake credential whose wallet has multiple backing
  * cNIGHT UTXOs. Used by the `dustGenerationStatus` aggregation test (#926):
  * the test asserts the indexer's reported `nightBalance` matches
@@ -459,6 +472,26 @@ class TestDataProvider {
         : [];
     }
     return this.multiUtxoCandidates;
+  }
+
+  /**
+   * Gets the contracts known to hold non-zero unshielded token balances on the current
+   * environment's chain. Used by the unshieldedBalances regression tests (#1245).
+   * @returns An array of token-holding contract entries.
+   * @throws Error if the current environment has no token-holding contracts file.
+   */
+  getTokenHoldingContracts(): TokenHoldingContractInfo[] {
+    const envName = env.getCurrentEnvironmentName();
+    const baseDir = `data/static/${envName}`;
+    let contracts: JsonValue;
+    try {
+      contracts = importJsoncData(`${baseDir}/token-holding-contracts.jsonc`);
+    } catch (_) {
+      throw new Error(
+        `Test data provider is missing the token holding contracts file for ${envName} environment`,
+      );
+    }
+    return Array.isArray(contracts) ? (contracts as unknown as TokenHoldingContractInfo[]) : [];
   }
 
   /**
