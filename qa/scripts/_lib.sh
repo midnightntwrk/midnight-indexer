@@ -43,22 +43,29 @@ teardown_prior_stack() {
     fi
 }
 
-# Poll the indexer /ready endpoint until it responds or the 20s budget is spent.
-# Exits non-zero on timeout after dumping container state and indexer-api logs.
+# Poll the indexer /ready endpoint until it responds or the budget is spent.
+# The loop early-exits the moment /ready answers, so warm starts still return
+# in a couple of seconds; the budget only bounds genuinely slow cold starts
+# (image pulls plus initial chain catch-up), which exceeded the old 20s cap.
+# Override the budget with INDEXER_READY_TIMEOUT_SECONDS. Exits non-zero on
+# timeout after dumping container state and indexer-api logs.
 wait_for_indexer_ready() {
-    echo "Waiting for indexer API to become ready (20s budget)..."
+    local budget="${INDEXER_READY_TIMEOUT_SECONDS:-120}"
+    local interval=2
+    local attempts=$(( budget / interval ))
+    echo "Waiting for indexer API to become ready (${budget}s budget)..."
     local ready=0 i
-    for i in {1..10}; do
+    for (( i=1; i<=attempts; i++ )); do
         if curl -sf http://localhost:8088/ready >/dev/null; then
             echo "Indexer API is ready"
             ready=1
             break
         fi
-        echo "Not ready yet... ($i/10)"
-        sleep 2
+        echo "Not ready yet... ($i/$attempts)"
+        sleep "$interval"
     done
     if [ "$ready" -ne 1 ]; then
-        echo "ERROR: Indexer API did not become ready within 20s. Dumping container state:"
+        echo "ERROR: Indexer API did not become ready within ${budget}s. Dumping container state:"
         docker compose --profile cloud ps
         echo "Last 50 lines of indexer-api logs:"
         docker compose --profile cloud logs --tail=50 indexer-api 2>&1 || true
