@@ -15,7 +15,14 @@
 
 import pino, { Logger } from 'pino';
 import pretty from 'pino-pretty';
-import { existsSync, readFileSync, createWriteStream, WriteStream } from 'fs';
+import {
+  existsSync,
+  readFileSync,
+  createWriteStream,
+  WriteStream,
+  mkdirSync,
+  writeFileSync,
+} from 'fs';
 import { join, basename } from 'path';
 
 // This is an hack to have a log file per test file that is created in a
@@ -25,10 +32,37 @@ import { join, basename } from 'path';
 // The session path will be written into a file for the logger to import it,
 // avoiding race conditions
 const SESSION_PATH_FILE = 'logs/sessionPath';
-if (!existsSync(SESSION_PATH_FILE)) {
-  throw new Error('Session directory not initialized. Define a globalSetup script to create it.');
+
+// Resolve the session directory, self-healing if it is missing.
+//
+// The session dir is normally created by the logging globalSetup
+// (utils/logging/setup.ts). But that setup imports this module (via
+// environment/model), so the import below runs *before* setup() executes — and
+// on a fresh checkout/worktree, where `logs/sessionPath` does not yet exist, a
+// hard throw here aborts the whole run before globalSetup can create it. (It
+// only ever "worked" because a previous run had left the file behind.)
+//
+// Instead of throwing, create a default session dir so a first run on a clean
+// worktree works with no manual seeding. globalSetup still runs afterwards and
+// overwrites `sessionPath` with its canonical timestamped dir.
+function resolveSessionDir(): string {
+  if (existsSync(SESSION_PATH_FILE)) {
+    return readFileSync(SESSION_PATH_FILE, 'utf8').trim();
+  }
+  const base = 'logs';
+  if (!existsSync(base)) {
+    mkdirSync(base, { recursive: true });
+  }
+  const ts = new Date().toISOString().replace(/T/, '_').replace(/:/g, '-').replace(/\..+/, '');
+  const sessionDir = join(base, ts);
+  if (!existsSync(sessionDir)) {
+    mkdirSync(sessionDir, { recursive: true });
+  }
+  writeFileSync(SESSION_PATH_FILE, sessionDir, 'utf8');
+  return sessionDir;
 }
-const SESSION_DIR = readFileSync(SESSION_PATH_FILE, 'utf8').trim();
+
+const SESSION_DIR = resolveSessionDir();
 
 // Can we do this differently, lookout for a library that can help with this
 // I mean this works but it's quite horrible
