@@ -11,17 +11,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Cross-subscriber cache for shielded and unshielded progress polling. Multiple
-//! subscribers for the same wallet or address reuse one recent query result instead
-//! of each hitting the database. Entries are invalidated by pub-sub events with a
-//! time-to-live backstop in case pub-sub stalls.
+//! Cross-subscriber cache for shielded and unshielded progress polling. Concurrent subscribers
+//! for the same wallet or address collapse into a single database hit instead of each polling.
+//! Each entry is served for a short time-to-live, after which the next poll re-queries, so a
+//! shared value is at most one time-to-live stale.
 
 use crate::infra::api::ApiResult;
-use futures::{StreamExt, TryStreamExt, stream};
-use indexer_common::domain::{
-    BlockIndexed, Subscriber, UnshieldedAddress, UnshieldedUtxoIndexed, WalletIndexed,
-};
-use log::warn;
+use indexer_common::domain::UnshieldedAddress;
 use moka::future::Cache;
 use serde::Deserialize;
 use std::{future::Future, time::Duration};
@@ -34,11 +30,11 @@ type ShieldedIndices = (Option<u64>, Option<u64>, Option<u64>);
 /// Configuration for the [`ProgressCache`].
 #[derive(Debug, Clone, Copy, Deserialize)]
 pub struct ProgressCacheConfig {
-    /// Maximum number of entries (the shielded and unshielded caches are bounded separately).
+    /// Maximum number of entries, applied independently to the shielded and unshielded caches.
     max_capacity: u64,
 
-    /// How long an entry is served before it is treated as stale, as a backstop to the
-    /// event-driven invalidation.
+    /// How long a cached progress value is served before the next poll re-queries. Kept short
+    /// (around the block interval) so a shared value is at most this stale.
     #[serde(with = "humantime_serde")]
     time_to_live: Duration,
 }
@@ -48,6 +44,8 @@ pub struct ProgressCacheConfig {
 #[derive(Clone)]
 pub struct ProgressCache {
     shielded: Cache<Uuid, ShieldedIndices>,
+
+    /// `UnshieldedAddress` => highest transaction ID for that address.
     unshielded: Cache<UnshieldedAddress, Option<u64>>,
 }
 
@@ -69,79 +67,32 @@ impl ProgressCache {
     }
 
     /// Return the cached shielded indices for `wallet_id`, else run `query`, cache and return
-    /// its result. Concurrent subscribers for the same wallet within the cache window share a
-    /// single database hit.
+    /// its result. Concurrent subscribers for the same wallet collapse into a single database
+    /// hit via `try_get_with`; the value is served for at most the configured time-to-live.
     pub async fn shielded_indices(
         &self,
         wallet_id: Uuid,
         query: impl Future<Output = ApiResult<ShieldedIndices>>,
     ) -> ApiResult<ShieldedIndices> {
-        if let Some(indices) = self.shielded.get(&wallet_id).await {
-            return Ok(indices);
-        }
-
-        let indices = query.await?;
-        self.shielded.insert(wallet_id, indices).await;
-
-        Ok(indices)
+        self.shielded
+            .try_get_with(wallet_id, query)
+            .await
+            .map_err(|error| (*error).clone())
     }
 
     /// Return the cached highest transaction ID for `address`, else run `query`, cache and
-    /// return its result.
+    /// return its result. Concurrent subscribers for the same address collapse into a single
+    /// database hit via `try_get_with`; the value is served for at most the configured
+    /// time-to-live.
     pub async fn unshielded_highest_transaction_id(
         &self,
         address: UnshieldedAddress,
         query: impl Future<Output = ApiResult<Option<u64>>>,
     ) -> ApiResult<Option<u64>> {
-        if let Some(highest_transaction_id) = self.unshielded.get(&address).await {
-            return Ok(highest_transaction_id);
-        }
-
-        let highest_transaction_id = query.await?;
         self.unshielded
-            .insert(address, highest_transaction_id)
-            .await;
-
-        Ok(highest_transaction_id)
-    }
-
-    /// Run the background task that invalidates cache entries on relevant pub-sub events: a
-    /// `WalletIndexed` invalidates that wallet's shielded entry, an `UnshieldedUtxoIndexed`
-    /// invalidates that address, and a `BlockIndexed` invalidates all shielded entries (the
-    /// global highest end index advanced). Returns when the event streams end, after which the
-    /// cache relies on its time-to-live.
-    pub async fn run_invalidation<B>(self, subscriber: B)
-    where
-        B: Subscriber,
-    {
-        enum Invalidation {
-            AllShielded,
-            Shielded(Uuid),
-            Unshielded(UnshieldedAddress),
-        }
-
-        let blocks = subscriber
-            .subscribe::<BlockIndexed>()
-            .map_ok(|_| Invalidation::AllShielded);
-        let wallets = subscriber
-            .subscribe::<WalletIndexed>()
-            .map_ok(|event| Invalidation::Shielded(event.wallet_id));
-        let utxos = subscriber
-            .subscribe::<UnshieldedUtxoIndexed>()
-            .map_ok(|event| Invalidation::Unshielded(event.address));
-
-        let mut events = stream::select_all([blocks.boxed(), wallets.boxed(), utxos.boxed()]);
-        while let Some(event) = events.next().await {
-            match event {
-                Ok(Invalidation::AllShielded) => self.shielded.invalidate_all(),
-                Ok(Invalidation::Shielded(wallet_id)) => self.shielded.invalidate(&wallet_id).await,
-                Ok(Invalidation::Unshielded(address)) => self.unshielded.invalidate(&address).await,
-
-                Err(error) => {
-                    warn!(error:%; "progress cache invalidation subscription failed");
-                }
-            }
-        }
+            .try_get_with(address, query)
+            .await
+            .map_err(|error| (*error).clone())
     }
 }
 
@@ -151,6 +102,7 @@ mod tests {
         ApiError,
         progress_cache::{ProgressCache, ProgressCacheConfig},
     };
+    use futures::future::join_all;
     use indexer_common::domain::UnshieldedAddress;
     use std::{
         sync::atomic::{AtomicUsize, Ordering},
@@ -166,17 +118,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn shielded_dedups_then_requeries_after_invalidation() {
+    async fn shielded_dedups_within_ttl() {
         let cache = ProgressCache::new(config());
         let wallet_id = Uuid::from_u128(1);
         let calls = AtomicUsize::new(0);
         let query = || async {
             calls.fetch_add(1, Ordering::SeqCst);
-            Ok::<(Option<u64>, Option<u64>, Option<u64>), ApiError>((Some(1), Some(2), Some(3)))
+            Ok::<_, ApiError>((Some(1u64), Some(2u64), Some(3u64)))
         };
 
         let first = cache.shielded_indices(wallet_id, query()).await.unwrap();
         let second = cache.shielded_indices(wallet_id, query()).await.unwrap();
+
         assert_eq!(first, (Some(1), Some(2), Some(3)));
         assert_eq!(second, first);
         assert_eq!(
@@ -184,50 +137,82 @@ mod tests {
             1,
             "second read should hit the cache"
         );
+    }
 
-        cache.shielded.invalidate(&wallet_id).await;
-        cache.shielded_indices(wallet_id, query()).await.unwrap();
+    #[tokio::test]
+    async fn shielded_coalesces_concurrent_misses() {
+        let cache = ProgressCache::new(config());
+        let wallet_id = Uuid::from_u128(1);
+        let calls = AtomicUsize::new(0);
+
+        // The slow query keeps the load in flight so all callers overlap on the same cold key.
+        let reads = (0..16).map(|_| {
+            cache.shielded_indices(wallet_id, async {
+                calls.fetch_add(1, Ordering::SeqCst);
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                Ok::<_, ApiError>((Some(1u64), Some(2u64), Some(3u64)))
+            })
+        });
+
+        for result in join_all(reads).await {
+            assert_eq!(result.unwrap(), (Some(1), Some(2), Some(3)));
+        }
         assert_eq!(
             calls.load(Ordering::SeqCst),
-            2,
-            "read after invalidation should re-query"
+            1,
+            "concurrent cold misses should coalesce into one query"
         );
     }
 
     #[tokio::test]
-    async fn unshielded_dedups_then_requeries_after_invalidation() {
+    async fn unshielded_dedups_within_ttl() {
         let cache = ProgressCache::new(config());
         let address = UnshieldedAddress::from([1u8; 32]);
         let calls = AtomicUsize::new(0);
         let query = || async {
             calls.fetch_add(1, Ordering::SeqCst);
-            Ok::<Option<u64>, ApiError>(Some(7))
+            Ok::<_, ApiError>(Some(7u64))
         };
 
         let first = cache
             .unshielded_highest_transaction_id(address, query())
             .await
             .unwrap();
-        cache
+        let second = cache
             .unshielded_highest_transaction_id(address, query())
             .await
             .unwrap();
+
         assert_eq!(first, Some(7));
+        assert_eq!(second, first);
         assert_eq!(
             calls.load(Ordering::SeqCst),
             1,
             "second read should hit the cache"
         );
+    }
 
-        cache.unshielded.invalidate(&address).await;
-        cache
-            .unshielded_highest_transaction_id(address, query())
-            .await
-            .unwrap();
+    #[tokio::test]
+    async fn unshielded_coalesces_concurrent_misses() {
+        let cache = ProgressCache::new(config());
+        let address = UnshieldedAddress::from([1u8; 32]);
+        let calls = AtomicUsize::new(0);
+
+        let reads = (0..16).map(|_| {
+            cache.unshielded_highest_transaction_id(address, async {
+                calls.fetch_add(1, Ordering::SeqCst);
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                Ok::<_, ApiError>(Some(7u64))
+            })
+        });
+
+        for result in join_all(reads).await {
+            assert_eq!(result.unwrap(), Some(7));
+        }
         assert_eq!(
             calls.load(Ordering::SeqCst),
-            2,
-            "read after invalidation should re-query"
+            1,
+            "concurrent cold misses should coalesce into one query"
         );
     }
 }

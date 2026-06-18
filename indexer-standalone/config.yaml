@@ -73,7 +73,8 @@ infra:
         batch_size: 20
       progress_cache:
         max_capacity: 10000
-        time_to_live: "60s"
+        # Short TTL bounds how stale a shared progress value can be (about one block interval).
+        time_to_live: "5s"
     quota:
       max_concurrent_per_connection: 20
       max_session_subscriptions_per_minute: 10

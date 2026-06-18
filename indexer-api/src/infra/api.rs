@@ -263,7 +263,6 @@ where
     let ledger_state_cache = LedgerStateCache::default();
     let quotas = SubscriptionQuotas::new(quota_config);
     let progress_cache = ProgressCache::new(subscription_config.progress_cache);
-    tokio::spawn(progress_cache.clone().run_invalidation(subscriber.clone()));
 
     let v4_app = v4::make_app(
         network_id,
