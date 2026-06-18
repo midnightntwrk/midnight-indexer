@@ -15,26 +15,38 @@ use crate::{
     domain::{
         ContractAction, ContractAttributes, LedgerVersion, SerializedContractAddress,
         SerializedContractState, SerializedTransactionIdentifier, TransactionHash, ViewingKey,
-        ledger::{Error, SerializableExt, TransactionV8},
+        ledger::{Error, SerializableExt, TransactionV8, TransactionV9},
     },
     infra::ledger_db::v1_1,
 };
 use fastrace::trace;
 use futures::{StreamExt, TryStreamExt};
 use midnight_coin_structure_v2::{coin::Info, contract::ContractAddress};
+use midnight_coin_structure_v3::{
+    coin::Info as InfoV9, contract::ContractAddress as ContractAddressV9,
+};
 use midnight_ledger_v8::structure::{
     ContractAction as ContractActionV8, StandardTransaction as StandardTransactionV8,
     SystemTransaction as LedgerSystemTransactionV8,
 };
+use midnight_ledger_v9::structure::{
+    ContractAction as ContractActionV9, StandardTransaction as StandardTransactionV9,
+    SystemTransaction as LedgerSystemTransactionV9,
+};
 use midnight_serialize_v1::tagged_deserialize;
 use midnight_storage_core_v1::db::DB;
 use midnight_transient_crypto_v2::{encryption::SecretKey, proofs::Proof};
+use midnight_transient_crypto_v3::{
+    encryption::SecretKey as SecretKeyV9, proofs::Proof as ProofV9,
+};
 use midnight_zswap_v8::Offer as OfferV8;
+use midnight_zswap_v9::Offer as OfferV9;
 use std::error::Error as StdError;
 
 #[derive(Debug, Clone)]
 pub enum Transaction {
     V8(TransactionV8<v1_1::LedgerDb>),
+    V9(TransactionV9<v1_1::LedgerDb>),
 }
 
 impl Transaction {
@@ -49,6 +61,11 @@ impl Transaction {
                     .map_err(|error| Error::Deserialize("LedgerTransactionV8", error))?;
                 Self::V8(transaction)
             }
+            LedgerVersion::V9 => {
+                let transaction = tagged_deserialize(&mut transaction.as_ref())
+                    .map_err(|error| Error::Deserialize("LedgerTransactionV9", error))?;
+                Self::V9(transaction)
+            }
         };
 
         Ok(transaction)
@@ -58,6 +75,7 @@ impl Transaction {
     pub fn hash(&self) -> TransactionHash {
         match self {
             Self::V8(transaction) => transaction.transaction_hash().0.0.into(),
+            Self::V9(transaction) => transaction.transaction_hash().0.0.into(),
         }
     }
 
@@ -70,6 +88,15 @@ impl Transaction {
                     let identifier = identifier
                         .serialize()
                         .map_err(|error| Error::Serialize("TransactionIdentifierV8", error))?;
+                    Ok(identifier)
+                })
+                .collect(),
+            Self::V9(transaction) => transaction
+                .identifiers()
+                .map(|identifier| {
+                    let identifier = identifier
+                        .serialize()
+                        .map_err(|error| Error::Serialize("TransactionIdentifierV9", error))?;
                     Ok(identifier)
                 })
                 .collect(),
@@ -151,6 +178,71 @@ impl Transaction {
 
                 TransactionV8::ClaimRewards(_) => Ok(vec![]),
             },
+
+            Self::V9(transaction) => match transaction {
+                TransactionV9::Standard(standard_transaction) => {
+                    let contract_actions = futures::stream::iter(standard_transaction.actions())
+                        .then(|(_, contract_action)| async {
+                            match contract_action {
+                                ContractActionV9::Deploy(deploy) => {
+                                    let address = serialize_contract_address_v9(deploy.address())?;
+                                    let state = get_contract_state(address.clone()).await.map_err(
+                                        |error| {
+                                            Error::GetContractState(address.clone(), error.into())
+                                        },
+                                    )?;
+
+                                    Ok::<_, Error>(ContractAction {
+                                        address,
+                                        state,
+                                        attributes: ContractAttributes::Deploy,
+                                    })
+                                }
+
+                                ContractActionV9::Call(call) => {
+                                    let address = serialize_contract_address_v9(call.address)?;
+                                    let state = get_contract_state(address.clone()).await.map_err(
+                                        |error| {
+                                            Error::GetContractState(address.clone(), error.into())
+                                        },
+                                    )?;
+                                    let entry_point =
+                                        String::from_utf8(call.entry_point.as_ref().to_owned())
+                                            .map_err(|error| {
+                                                Error::FromUtf8("EntryPointBufV9", error)
+                                            })?;
+
+                                    Ok(ContractAction {
+                                        address,
+                                        state,
+                                        attributes: ContractAttributes::Call { entry_point },
+                                    })
+                                }
+
+                                ContractActionV9::Maintain(update) => {
+                                    let address = serialize_contract_address_v9(update.address)?;
+                                    let state = get_contract_state(address.clone()).await.map_err(
+                                        |error| {
+                                            Error::GetContractState(address.clone(), error.into())
+                                        },
+                                    )?;
+
+                                    Ok(ContractAction {
+                                        address,
+                                        state,
+                                        attributes: ContractAttributes::Update,
+                                    })
+                                }
+                            }
+                        })
+                        .try_collect::<Vec<_>>()
+                        .await?;
+
+                    Ok(contract_actions)
+                }
+
+                TransactionV9::ClaimRewards(_) => Ok(vec![]),
+            },
         }
     }
 
@@ -182,6 +274,32 @@ impl Transaction {
 
                 TransactionV8::ClaimRewards(_) => false,
             },
+
+            Self::V9(transaction) => match transaction {
+                TransactionV9::Standard(StandardTransactionV9 {
+                    guaranteed_coins,
+                    fallible_coins,
+                    ..
+                }) => {
+                    let secret_key = SecretKeyV9::from_repr(&viewing_key.expose_secret().0)
+                        .expect("SecretKey can be created from repr");
+
+                    let can_decrypt_guaranteed_coins = guaranteed_coins
+                        .as_ref()
+                        .map(|guaranteed_coins| can_decrypt_v9(&secret_key, guaranteed_coins))
+                        .unwrap_or_default();
+
+                    let can_decrypt_fallible_coins = || {
+                        fallible_coins
+                            .values()
+                            .any(|fallible_coins| can_decrypt_v9(&secret_key, &fallible_coins))
+                    };
+
+                    can_decrypt_guaranteed_coins || can_decrypt_fallible_coins()
+                }
+
+                TransactionV9::ClaimRewards(_) => false,
+            },
         }
     }
 }
@@ -190,6 +308,7 @@ impl Transaction {
 #[derive(Debug, Clone)]
 pub enum SystemTransaction {
     V8(LedgerSystemTransactionV8),
+    V9(LedgerSystemTransactionV9),
 }
 
 impl SystemTransaction {
@@ -204,6 +323,11 @@ impl SystemTransaction {
                     .map_err(|error| Error::Deserialize("LedgerSystemTransactionV8", error))?;
                 Self::V8(transaction)
             }
+            LedgerVersion::V9 => {
+                let transaction = tagged_deserialize(&mut transaction.as_ref())
+                    .map_err(|error| Error::Deserialize("LedgerSystemTransactionV9", error))?;
+                Self::V9(transaction)
+            }
         };
 
         Ok(transaction)
@@ -213,6 +337,7 @@ impl SystemTransaction {
     pub fn hash(&self) -> TransactionHash {
         match self {
             Self::V8(transaction) => transaction.transaction_hash().0.0.into(),
+            Self::V9(transaction) => transaction.transaction_hash().0.0.into(),
         }
     }
 }
@@ -225,6 +350,14 @@ fn serialize_contract_address(
         .map_err(|error| Error::Serialize("ContractAddress", error))
 }
 
+fn serialize_contract_address_v9(
+    address: ContractAddressV9,
+) -> Result<SerializedContractAddress, Error> {
+    address
+        .serialize()
+        .map_err(|error| Error::Serialize("ContractAddressV9", error))
+}
+
 fn can_decrypt_v8<D: DB>(key: &SecretKey, offer: &OfferV8<Proof, D>) -> bool {
     let outputs = offer.outputs.iter().filter_map(|o| o.ciphertext.clone());
     let transient = offer.transient.iter().filter_map(|o| o.ciphertext.clone());
@@ -232,6 +365,17 @@ fn can_decrypt_v8<D: DB>(key: &SecretKey, offer: &OfferV8<Proof, D>) -> bool {
 
     ciphertexts.any(|ciphertext| {
         key.decrypt::<Info>(&(*ciphertext).to_owned().into())
+            .is_some()
+    })
+}
+
+fn can_decrypt_v9<D: DB>(key: &SecretKeyV9, offer: &OfferV9<ProofV9, D>) -> bool {
+    let outputs = offer.outputs.iter().filter_map(|o| o.ciphertext.clone());
+    let transient = offer.transient.iter().filter_map(|o| o.ciphertext.clone());
+    let mut ciphertexts = outputs.chain(transient);
+
+    ciphertexts.any(|ciphertext| {
+        key.decrypt::<InfoV9>(&(*ciphertext).to_owned().into())
             .is_some()
     })
 }
@@ -328,7 +472,7 @@ mod tests {
 
         let transaction = fs::read(format!("{}/tests/tx_1_2_2.raw", env!("CARGO_MANIFEST_DIR")))
             .expect("transaction file can be read");
-        let transaction = Transaction::deserialize(transaction, LedgerVersion::V8)
+        let transaction = Transaction::deserialize(transaction, LedgerVersion::V9)
             .expect("transaction can be deserialized");
 
         assert!(transaction.relevant(viewing_key(1)));
@@ -337,7 +481,7 @@ mod tests {
 
         let transaction = fs::read(format!("{}/tests/tx_1_2_3.raw", env!("CARGO_MANIFEST_DIR")))
             .expect("transaction file can be read");
-        let transaction = Transaction::deserialize(transaction, LedgerVersion::V8)
+        let transaction = Transaction::deserialize(transaction, LedgerVersion::V9)
             .expect("transaction can be deserialized");
 
         assert!(transaction.relevant(viewing_key(1)));

@@ -110,7 +110,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           components: rustfmt
-          toolchain: nightly-2026-01-19
+          toolchain: nightly-2026-06-09
 
       - name: Install just
         uses: taiki-e/install-action@213ccc1a076163c093f914550b94feb90fab916d # v2.79.2
@@ -209,7 +209,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           components: rust-docs
-          toolchain: nightly-2026-01-19
+          toolchain: nightly-2026-06-09
 
       - name: Install just
         uses: taiki-e/install-action@213ccc1a076163c093f914550b94feb90fab916d # v2.79.2
