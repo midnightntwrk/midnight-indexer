@@ -77,3 +77,14 @@ clear_block_scanner_cache() {
     rm -f qa/tools/block-scanner/tmp_scan/undeployed_*.jsonl
     rm -f qa/tools/block-scanner/stats/undeployed_*.json
 }
+
+# Ensure the block-scanner's dependencies are installed before `generate:data`.
+# On a fresh checkout/worktree there is no node_modules, so the scan would fail
+# with an opaque module-resolution error (e.g. "ENOENT while resolving package
+# 'esprima'"). Install on demand so a first run on a clean worktree works.
+ensure_block_scanner_deps() {
+    if [ ! -d qa/tools/block-scanner/node_modules ]; then
+        echo "Installing block-scanner dependencies (first run on this checkout)..."
+        (cd qa/tools/block-scanner && bun install)
+    fi
+}
