@@ -52,7 +52,10 @@ teardown_prior_stack() {
 wait_for_indexer_ready() {
     local budget="${INDEXER_READY_TIMEOUT_SECONDS:-120}"
     local interval=2
-    local attempts=$(( budget / interval ))
+    # Ceiling division so elapsed time always covers the budget and there is at
+    # least one attempt even for small overrides (e.g. budget=1 → 1 attempt,
+    # not 0; budget=5 → 3 attempts → 6s rather than an undercounted 4s).
+    local attempts=$(( (budget + interval - 1) / interval ))
     echo "Waiting for indexer API to become ready (${budget}s budget)..."
     local ready=0 i
     for (( i=1; i<=attempts; i++ )); do
@@ -92,6 +95,12 @@ clear_block_scanner_cache() {
 ensure_block_scanner_deps() {
     if [ ! -d qa/tools/block-scanner/node_modules ]; then
         echo "Installing block-scanner dependencies (first run on this checkout)..."
-        (cd qa/tools/block-scanner && bun install)
+        # The startup scripts don't set errexit, so guard explicitly: otherwise
+        # a failed install falls through to `generate:data` and surfaces the
+        # same opaque module-resolution error this helper exists to prevent.
+        if ! (cd qa/tools/block-scanner && bun install); then
+            echo "ERROR: bun install failed in qa/tools/block-scanner" >&2
+            return 1
+        fi
     fi
 }

@@ -62,7 +62,14 @@ function resolveSessionDir(): string {
   return sessionDir;
 }
 
-const SESSION_DIR = resolveSessionDir();
+// Resolve lazily and memoize. Deferring resolution until the first log write
+// lets globalSetup run first and point `sessionPath` at its canonical
+// timestamped dir, so a fresh checkout no longer leaves an empty orphaned
+// `logs/<ts>/` behind from an import-time self-heal.
+let sessionDir: string | undefined;
+function getSessionDir(): string {
+  return (sessionDir ??= resolveSessionDir());
+}
 
 // Can we do this differently, lookout for a library that can help with this
 // I mean this works but it's quite horrible
@@ -99,7 +106,7 @@ function getFileStream(testPath: string): WriteStream {
   const name = basename(testPath)
     .replace(/\.[jt]sx?$/, '')
     .replace(/[^\w.-]/g, '_');
-  const filePath = join(SESSION_DIR, `${name}.log`);
+  const filePath = join(getSessionDir(), `${name}.log`);
   if (!fileStreams.has(filePath)) {
     fileStreams.set(filePath, createWriteStream(filePath, { flags: 'a' }));
   }
