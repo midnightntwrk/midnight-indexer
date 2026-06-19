@@ -43,6 +43,14 @@ type Block {
 	"""
 	dustGenerationEndIndex: Int! @beta
 	"""
+	The hex-encoded dust commitment Merkle tree root at this block.
+	"""
+	dustCommitmentMerkleTreeRoot: HexEncoded @beta
+	"""
+	The hex-encoded dust generation Merkle tree root at this block.
+	"""
+	dustGenerationMerkleTreeRoot: HexEncoded @beta
+	"""
 	The parent of this block.
 	"""
 	parent: Block
@@ -54,14 +62,6 @@ type Block {
 	The system parameters (governance) at this block height.
 	"""
 	systemParameters: SystemParameters!
-	"""
-	The hex-encoded dust commitment Merkle tree root at the latest indexed state.
-	"""
-	dustCommitmentMerkleTreeRoot: HexEncoded
-	"""
-	The hex-encoded dust generation Merkle tree root at the latest indexed state.
-	"""
-	dustGenerationMerkleTreeRoot: HexEncoded
 }
 
 """
