@@ -334,6 +334,7 @@ where
     S: Storage,
 {
     let storage = cx.get_storage::<S>();
+    let progress_cache = cx.get_progress_cache();
     let base = cx
         .get_subscription_config()
         .shielded_transactions
@@ -341,14 +342,19 @@ where
 
     // Emit progress immediately, then re-poll after a jittered interval that
     // backs off while the indices are unchanged (idle) and resets when they move.
+    // The cache lets concurrent subscribers for the same wallet share one query.
     let mut current_interval = base;
     let mut last_indices = None;
     try_stream! {
         loop {
-            let indices = storage
-                .get_highest_zswap_end_indices(wallet_id)
-                .await
-                .map_err_into_server_error(|| "get highest indices")?;
+            let indices = progress_cache
+                .shielded_indices(wallet_id, async {
+                    storage
+                        .get_highest_zswap_end_indices(wallet_id)
+                        .await
+                        .map_err_into_server_error(|| "get highest indices")
+                })
+                .await?;
             current_interval =
                 next_poll_interval(current_interval, base, last_indices.as_ref() != Some(&indices));
             last_indices = Some(indices);
