@@ -46,7 +46,7 @@ humantime-serde              = { workspace = true }
 indoc                        = { workspace = true }
 itertools                    = { workspace = true }
 log                          = { workspace = true, features = [ "kv_std" ] }
-logforth                     = { workspace = true, features = [ "append-fastrace", "diagnostic-fastrace", "starter-log" ] }
+logforth                     = { workspace = true, features = [ "append-fastrace", "diagnostic-fastrace", "filter-rustlog", "starter-log" ] }
 metrics-exporter-prometheus  = { workspace = true, features = [ "http-listener" ] }
 opentelemetry                = { workspace = true }
 opentelemetry_sdk            = { workspace = true }

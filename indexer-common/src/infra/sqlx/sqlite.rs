@@ -33,7 +33,7 @@ impl<'r> Decode<'r, Sqlite> for U128BeBytes {
 impl<'q> Encode<'q, Sqlite> for U128BeBytes {
     fn encode_by_ref(
         &self,
-        buf: &mut <Sqlite as Database>::ArgumentBuffer<'q>,
+        buf: &mut <Sqlite as Database>::ArgumentBuffer,
     ) -> Result<IsNull, BoxDynError> {
         let bytes = Box::from(self.0);
         <Box<[u8]> as Encode<'q, Sqlite>>::encode(bytes, buf)

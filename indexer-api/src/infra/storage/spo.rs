@@ -1204,7 +1204,7 @@ impl SpoStorage for Storage {
                     Option<String>, // declared_pledge
                     Option<String>, // live_pledge
                 ),
-            >(&sql)
+            >(sqlx::AssertSqlSafe(sql.as_str()))
             .bind(limit)
             .bind(offset)
             .bind(s_like.clone())
@@ -1227,7 +1227,7 @@ impl SpoStorage for Storage {
                     Option<String>,
                     Option<String>,
                 ),
-            >(&sql)
+            >(sqlx::AssertSqlSafe(sql.as_str()))
             .bind(limit)
             .bind(offset)
             .fetch_all(&*self.pool)
