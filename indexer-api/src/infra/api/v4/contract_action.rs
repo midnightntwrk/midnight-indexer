@@ -332,8 +332,13 @@ where
 /// Either a block offset or a transaction offset.
 #[derive(Debug, OneofObject)]
 pub enum ContractActionOffset {
-    /// Either a block hash or a block height.
+    /// Either a block hash or a block height; selects the contract action *in* that exact block.
     BlockOffset(BlockOffset),
+
+    /// Either a block hash or a block height; selects the address's state *as of* that block — the
+    /// latest contract action in any block at or before it. Use this to resolve a contract's state
+    /// at a pinned block even if it did not act in that exact block (e.g. cross-contract callees).
+    AsOfBlockOffset(BlockOffset),
 
     /// Either a transaction hash or a transaction identifier.
     TransactionOffset(TransactionOffset),

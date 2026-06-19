@@ -49,6 +49,22 @@ where
         height: u32,
     ) -> Result<Option<ContractAction>, sqlx::Error>;
 
+    /// Get the contract action giving the address's state as of (in the latest block at or before)
+    /// the block with the given hash.
+    async fn get_contract_action_by_address_as_of_block_hash(
+        &self,
+        address: &SerializedContractAddress,
+        hash: BlockHash,
+    ) -> Result<Option<ContractAction>, sqlx::Error>;
+
+    /// Get the contract action giving the address's state as of (in the latest block at or before)
+    /// the given block height.
+    async fn get_contract_action_by_address_as_of_block_height(
+        &self,
+        address: &SerializedContractAddress,
+        height: u32,
+    ) -> Result<Option<ContractAction>, sqlx::Error>;
+
     /// Get the latest contract action for the given address and transaction hash.
     async fn get_contract_action_by_address_and_transaction_hash(
         &self,
@@ -123,6 +139,22 @@ impl ContractActionStorage for NoopStorage {
     }
 
     async fn get_contract_action_by_address_and_block_height(
+        &self,
+        address: &SerializedContractAddress,
+        height: u32,
+    ) -> Result<Option<ContractAction>, sqlx::Error> {
+        unimplemented!()
+    }
+
+    async fn get_contract_action_by_address_as_of_block_hash(
+        &self,
+        address: &SerializedContractAddress,
+        hash: BlockHash,
+    ) -> Result<Option<ContractAction>, sqlx::Error> {
+        unimplemented!()
+    }
+
+    async fn get_contract_action_by_address_as_of_block_height(
         &self,
         address: &SerializedContractAddress,
         height: u32,

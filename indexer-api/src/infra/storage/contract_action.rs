@@ -146,6 +146,69 @@ impl ContractActionStorage for Storage {
     }
 
     #[trace(properties = { "address": "{address}", "hash": "{hash}" })]
+    async fn get_contract_action_by_address_as_of_block_hash(
+        &self,
+        address: &SerializedContractAddress,
+        hash: BlockHash,
+    ) -> Result<Option<ContractAction>, sqlx::Error> {
+        // "State as of" the given block: the latest action for the address in any block at or
+        // before the one with the given hash — not just actions *in* that exact block. Lets a
+        // cross-contract callee that was deployed earlier still resolve at a later pinned block.
+        let query = indoc! {"
+            SELECT
+                contract_actions.id,
+                address,
+                state,
+                attributes,
+                zswap_state,
+                transaction_id
+            FROM contract_actions
+            INNER JOIN transactions ON transactions.id = transaction_id
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            WHERE address = $1
+            AND blocks.height <= (SELECT height FROM blocks WHERE hash = $2)
+            ORDER BY contract_actions.id DESC
+            LIMIT 1
+        "};
+
+        sqlx::query_as(query)
+            .bind(address.as_ref())
+            .bind(hash.as_ref())
+            .fetch_optional(&*self.pool)
+            .await
+    }
+
+    #[trace(properties = { "address": "{address}", "block_height": "{block_height}" })]
+    async fn get_contract_action_by_address_as_of_block_height(
+        &self,
+        address: &SerializedContractAddress,
+        block_height: u32,
+    ) -> Result<Option<ContractAction>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT
+                contract_actions.id,
+                address,
+                state,
+                attributes,
+                zswap_state,
+                transaction_id
+            FROM contract_actions
+            INNER JOIN transactions ON transactions.id = transaction_id
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            WHERE address = $1
+            AND blocks.height <= $2
+            ORDER BY contract_actions.id DESC
+            LIMIT 1
+        "};
+
+        sqlx::query_as(query)
+            .bind(address)
+            .bind(block_height as i64)
+            .fetch_optional(&*self.pool)
+            .await
+    }
+
+    #[trace(properties = { "address": "{address}", "hash": "{hash}" })]
     async fn get_contract_action_by_address_and_transaction_hash(
         &self,
         address: &SerializedContractAddress,

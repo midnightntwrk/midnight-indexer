@@ -210,6 +210,28 @@ where
                     format!("get contract action by address {address} and block height {height}")
                 })?,
 
+            Some(ContractActionOffset::AsOfBlockOffset(BlockOffset::Hash(hash))) => {
+                let hash = hash
+                    .hex_decode()
+                    .map_err_into_client_error(|| "invalid offset")?;
+
+                storage
+                    .get_contract_action_by_address_as_of_block_hash(address, hash)
+                    .await
+                    .map_err_into_server_error(|| {
+                        format!(
+                            "get contract action by address {address} as of block hash {hash}"
+                        )
+                    })?
+            }
+
+            Some(ContractActionOffset::AsOfBlockOffset(BlockOffset::Height(height))) => storage
+                .get_contract_action_by_address_as_of_block_height(address, height)
+                .await
+                .map_err_into_server_error(|| {
+                    format!("get contract action by address {address} as of block height {height}")
+                })?,
+
             Some(ContractActionOffset::TransactionOffset(TransactionOffset::Hash(hash))) => {
                 let hash = hash
                     .hex_decode()
