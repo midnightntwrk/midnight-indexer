@@ -17,6 +17,7 @@ mod contract_event;
 mod dust_generations;
 mod dust_ledger_events;
 mod dust_nullifier_transactions;
+mod polling;
 mod shielded;
 mod shielded_nullifier_transactions;
 mod unshielded;
