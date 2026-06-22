@@ -17,14 +17,14 @@ use crate::{
     application::metrics::Metrics,
     domain::{
         Block, BlockRef, LedgerState, SystemParametersChange, Transaction,
-        node::{self, Node},
+        node::{self, Node, RecoverableError},
         storage::Storage,
     },
 };
 use anyhow::{Context, bail};
 use async_stream::stream;
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
-use futures::{Stream, StreamExt, TryStreamExt, future::ok};
+use futures::{Stream, StreamExt, TryStreamExt};
 use indexer_common::domain::{
     BlockIndexed, LedgerVersion, NetworkId, Publisher, UnshieldedUtxoIndexed,
 };
@@ -106,36 +106,10 @@ pub async fn run(
     let highest_block_on_node = Arc::new(RwLock::new(None));
 
     // Spawn task to set info for highest block on node.
-    let mut highest_block_on_node_task = task::spawn({
-        let node = node.clone();
-        let highest_block_on_node = highest_block_on_node.clone();
-
-        async move {
-            let highest_blocks = node
-                .highest_blocks()
-                .await
-                .context("get stream of highest blocks")?;
-
-            highest_blocks
-                .try_for_each(|block_info| {
-                    info!(
-                        hash:% = block_info.hash,
-                        height = block_info.height;
-                        "highest finalized block on node"
-                    );
-
-                    *highest_block_on_node.write() = Some(block_info);
-
-                    ok(())
-                })
-                .await
-                .context("get next block of highest_blocks")?;
-
-            warn!("highest_block_on_node_task completed");
-
-            Ok::<_, anyhow::Error>(())
-        }
-    });
+    let mut highest_block_on_node_task = task::spawn(track_highest_blocks(
+        node.clone(),
+        highest_block_on_node.clone(),
+    ));
 
     // Spawn task to index blocks.
     let mut index_blocks_task = task::spawn({
@@ -198,6 +172,55 @@ pub async fn run(
     }
 }
 
+/// Continuously track the highest finalized block on the node, recovering from transient node
+/// errors by re-subscribing instead of terminating the process. Only fatal errors are propagated.
+async fn track_highest_blocks<N>(
+    node: N,
+    highest_block_on_node: Arc<RwLock<Option<BlockRef>>>,
+) -> anyhow::Result<()>
+where
+    N: Node,
+{
+    loop {
+        let highest_blocks = match node.highest_blocks().await {
+            Ok(highest_blocks) => highest_blocks,
+
+            Err(error) if error.is_transient() => {
+                warn!(error:% = &error; "transient error subscribing to highest blocks; retrying");
+                sleep(Duration::from_millis(100)).await;
+                continue;
+            }
+
+            Err(error) => return Err(error).context("get stream of highest blocks"),
+        };
+        let mut highest_blocks = pin!(highest_blocks);
+
+        while let Some(block_info) = highest_blocks.next().await {
+            match block_info {
+                Ok(block_info) => {
+                    info!(
+                        hash:% = block_info.hash,
+                        height = block_info.height;
+                        "highest finalized block on node"
+                    );
+
+                    *highest_block_on_node.write() = Some(block_info);
+                }
+
+                Err(error) if error.is_transient() => {
+                    warn!(error:% = &error; "transient error reading highest blocks; re-subscribing");
+                    break;
+                }
+
+                Err(error) => return Err(error).context("get next block of highest_blocks"),
+            }
+        }
+
+        // Stream ended or broke for re-subscription; avoid busy-spin before re-subscribing.
+        sleep(Duration::from_millis(100)).await;
+    }
+}
+
 /// An infinite stream of node blocks, neither with duplicates, nor with gaps or otherwise
 /// unexpected blocks.
 fn node_blocks<N>(
@@ -213,26 +236,40 @@ where
             let mut blocks = pin!(blocks);
 
             while let Some(block) = blocks.next().await {
-                if let Ok(block) = &block {
-                    let parent_hash = block.parent_hash;
-                    let (highest_hash, highest_height) = highest_block
-                        .map(|BlockRef { hash, height }| (hash, height))
-                        .unzip();
+                match &block {
+                    Ok(block) => {
+                        let parent_hash = block.parent_hash;
+                        let (highest_hash, highest_height) = highest_block
+                            .map(|BlockRef { hash, height }| (hash, height))
+                            .unzip();
 
-                    // In case of unexpected blocks, e.g. because of a gap or the node lagging
-                    // behind, break and rerun the `finalized_blocks` stream.
-                    if parent_hash != highest_hash.unwrap_or_default() {
-                        warn!(
-                            parent_hash:%,
-                            height = block.height,
-                            highest_hash:?,
-                            highest_height:?;
-                            "unexpected block"
-                        );
+                        // In case of unexpected blocks, e.g. because of a gap or the node lagging
+                        // behind, break and rerun the `finalized_blocks` stream.
+                        if parent_hash != highest_hash.unwrap_or_default() {
+                            warn!(
+                                parent_hash:%,
+                                height = block.height,
+                                highest_hash:?,
+                                highest_height:?;
+                                "unexpected block"
+                            );
+                            break;
+                        }
+
+                        highest_block = Some(block.into());
+                    }
+
+                    // Transient node/RPC errors (a dropped connection, a stuck subscription, an
+                    // invalid block hash near the tip after a reconnect, ...) are recoverable:
+                    // break to rerun `finalized_blocks`, which re-subscribes from the last
+                    // processed block, instead of propagating the error and terminating indexing.
+                    Err(error) if error.is_transient() => {
+                        warn!(error:% = error; "transient node error; re-subscribing to finalized blocks");
                         break;
                     }
 
-                    highest_block = Some(block.into());
+                    // Non-transient errors are propagated and ultimately terminate the process.
+                    Err(_) => {}
                 }
 
                 yield block;
@@ -601,7 +638,7 @@ mod tests {
         application::node_blocks,
         domain::{
             BlockRef, SystemParametersChange,
-            node::{self, Node},
+            node::{self, Node, RecoverableError},
         },
     };
     use fake::{Fake, Faker};
@@ -626,6 +663,99 @@ mod tests {
         assert_eq!(heights, vec![0, 1, 2, 3]);
 
         Ok(())
+    }
+
+    // A transient node error mid-stream must be recovered from (by re-subscribing), not propagated
+    // to the caller, so the consumer still observes a contiguous block sequence.
+    #[tokio::test]
+    async fn test_recovers_from_transient_error() -> Result<(), BoxError> {
+        let blocks = node_blocks(None, FlakyNode { injected: false });
+        let heights = blocks
+            .take(4)
+            .map_ok(|block| block.height)
+            .try_collect::<Vec<_>>()
+            .await?;
+        assert_eq!(heights, vec![0, 1, 2, 3]);
+
+        Ok(())
+    }
+
+    #[derive(Debug)]
+    struct TransientTestError;
+
+    impl std::fmt::Display for TransientTestError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "transient test error")
+        }
+    }
+
+    impl std::error::Error for TransientTestError {}
+
+    impl RecoverableError for TransientTestError {
+        fn is_transient(&self) -> bool {
+            true
+        }
+    }
+
+    // Yields a transient error once, after block 1 on its first subscription; on re-subscription it
+    // continues normally from the requested block.
+    #[derive(Clone)]
+    struct FlakyNode {
+        injected: bool,
+    }
+
+    impl Node for FlakyNode {
+        type Error = TransientTestError;
+
+        async fn highest_blocks(
+            &self,
+        ) -> Result<impl Stream<Item = Result<BlockRef, Self::Error>>, Self::Error> {
+            Ok(stream::empty())
+        }
+
+        fn finalized_blocks(
+            &mut self,
+            after: Option<BlockRef>,
+        ) -> impl Stream<Item = Result<node::Block, Self::Error>> {
+            let from = after.map(|BlockRef { height, .. }| height + 1).unwrap_or(0);
+            let inject = !self.injected;
+            self.injected = true;
+
+            let mut items = Vec::new();
+            for block in [&*BLOCK_0, &*BLOCK_1, &*BLOCK_2, &*BLOCK_3] {
+                if block.height < from {
+                    continue;
+                }
+                let height = block.height;
+                items.push(Ok(block.to_owned()));
+                if inject && height == 1 {
+                    items.push(Err(TransientTestError));
+                    break;
+                }
+            }
+
+            stream::iter(items)
+        }
+
+        async fn fetch_system_parameters(
+            &self,
+            block_hash: BlockHash,
+            block_height: u64,
+            timestamp: u64,
+            _node_version: NodeVersion,
+        ) -> Result<SystemParametersChange, Self::Error> {
+            Ok(SystemParametersChange {
+                block_height,
+                block_hash,
+                timestamp,
+                d_parameter: None,
+                terms_and_conditions: None,
+            })
+        }
+
+        async fn fetch_genesis_ledger_state(&self) -> Result<ByteVec, Self::Error> {
+            Ok(Default::default())
+        }
     }
 
     #[derive(Clone)]

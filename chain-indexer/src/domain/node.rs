@@ -29,7 +29,7 @@ where
     Self: Clone + Send + Sync + 'static,
 {
     /// Error type for items of the stream of finalized [Block]s.
-    type Error: StdError + Send + Sync + 'static;
+    type Error: StdError + Send + Sync + 'static + RecoverableError;
 
     /// A stream of the latest/highest finalized blocks.
     async fn highest_blocks(
@@ -55,6 +55,24 @@ where
     /// Fetch serialized genesis ledger state from the chain spec's system properties.
     /// Returns the raw bytes of the genesis `LedgerState`, errs if unavailable.
     async fn fetch_genesis_ledger_state(&self) -> Result<ByteVec, Self::Error>;
+}
+
+/// Classifies a [Node] error as transient (recoverable by re-subscribing/retrying) or fatal.
+///
+/// Transient errors - e.g. a dropped RPC connection, a stuck subscription, or an invalid block
+/// hash returned for a block near the tip right after a reconnect - should be recovered from by
+/// re-subscribing to the node rather than terminating the indexing process. Fatal errors - e.g. a
+/// parent hash mismatch, a decoding failure, or a protocol version error - indicate a real problem
+/// and must be propagated.
+pub trait RecoverableError {
+    /// Whether this error is transient and the caller should retry instead of terminating.
+    fn is_transient(&self) -> bool;
+}
+
+impl RecoverableError for std::convert::Infallible {
+    fn is_transient(&self) -> bool {
+        match *self {}
+    }
 }
 
 #[derive(Debug, Clone)]

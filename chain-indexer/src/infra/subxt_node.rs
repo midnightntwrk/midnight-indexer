@@ -610,6 +610,34 @@ pub enum SubxtNodeError {
     Ledger(#[from] ledger::Error),
 }
 
+impl crate::domain::node::RecoverableError for SubxtNodeError {
+    /// Transient errors are those originating from the RPC connection/transport (dropped
+    /// connections, stuck subscriptions, an invalid block hash for a block near the tip right
+    /// after a reconnect, or a failed read from the node). Recovering from these by
+    /// re-subscribing is safe. Errors that indicate corrupt/inconsistent data or a version
+    /// mismatch (parent hash mismatch, decode failures, protocol version errors) are fatal.
+    fn is_transient(&self) -> bool {
+        matches!(
+            self,
+            SubxtNodeError::SubscribeFinalizedBlocks(_)
+                | SubxtNodeError::ReceiveBlock(_)
+                | SubxtNodeError::GetOnlineClientAt(_, _)
+                | SubxtNodeError::GetOnlineClientAtHeight(_, _)
+                | SubxtNodeError::GetBlockHeader(_)
+                | SubxtNodeError::FetchExtrinsics(_)
+                | SubxtNodeError::FetchEvents(_)
+                | SubxtNodeError::FetchAuthorities(_)
+                | SubxtNodeError::FetchGenesisCnightRegistrations(_)
+                | SubxtNodeError::GetContractState(_, _)
+                | SubxtNodeError::GetZswapStateRoot(_)
+                | SubxtNodeError::GetDParameter(_)
+                | SubxtNodeError::GetTermsAndConditions(_)
+                | SubxtNodeError::GetLedgerStateRoot(_)
+                | SubxtNodeError::FetchSystemProperties(_)
+        )
+    }
+}
+
 #[trace]
 async fn receive_block(
     finalized_blocks: &mut (impl Stream<Item = Result<SubxtBlock, SubxtNodeError>> + Unpin),
