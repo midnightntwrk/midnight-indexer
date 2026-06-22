@@ -13,7 +13,8 @@
 
 use crate::domain::DustRegistrationEvent;
 use indexer_common::domain::{
-    BlockAuthor, BlockHash, ByteVec, ProtocolVersion, SerializedLedgerParameters,
+    BlockAuthor, BlockHash, ByteVec, ProtocolVersion, SerializedDustCommitmentMerkleTreeRoot,
+    SerializedDustGenerationMerkleTreeRoot, SerializedLedgerParameters,
     SerializedZswapMerkleTreeRoot, bridge::BridgePalletEvent,
 };
 use std::fmt::Debug;
@@ -41,6 +42,8 @@ pub struct Block {
     pub zswap_end_index: u64,
     pub dust_commitment_end_index: u64,
     pub dust_generation_end_index: u64,
+    pub dust_commitment_merkle_tree_root: SerializedDustCommitmentMerkleTreeRoot,
+    pub dust_generation_merkle_tree_root: SerializedDustGenerationMerkleTreeRoot,
 }
 
 #[derive(Debug, Clone, Copy)]

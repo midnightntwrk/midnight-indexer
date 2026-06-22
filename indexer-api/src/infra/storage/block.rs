@@ -38,7 +38,9 @@ impl BlockStorage for Storage {
                 ledger_parameters,
                 zswap_end_index,
                 dust_commitment_end_index,
-                dust_generation_end_index
+                dust_generation_end_index,
+                dust_commitment_merkle_tree_root,
+                dust_generation_merkle_tree_root
             FROM blocks
             ORDER BY height DESC
             LIMIT 1
@@ -69,7 +71,9 @@ impl BlockStorage for Storage {
                 ledger_parameters,
                 zswap_end_index,
                 dust_commitment_end_index,
-                dust_generation_end_index
+                dust_generation_end_index,
+                dust_commitment_merkle_tree_root,
+                dust_generation_merkle_tree_root
             FROM blocks
             WHERE height = $1
             LIMIT 1
@@ -121,7 +125,9 @@ impl Storage {
                 ledger_parameters,
                 zswap_end_index,
                 dust_commitment_end_index,
-                dust_generation_end_index
+                dust_generation_end_index,
+                dust_commitment_merkle_tree_root,
+                dust_generation_merkle_tree_root
             FROM blocks
             WHERE hash = ANY($1)
         "};
@@ -149,7 +155,9 @@ impl Storage {
                 ledger_parameters,
                 zswap_end_index,
                 dust_commitment_end_index,
-                dust_generation_end_index
+                dust_generation_end_index,
+                dust_commitment_merkle_tree_root,
+                dust_generation_merkle_tree_root
             FROM blocks
             WHERE hash IN (
         "};
@@ -183,7 +191,9 @@ impl Storage {
                 ledger_parameters,
                 zswap_end_index,
                 dust_commitment_end_index,
-                dust_generation_end_index
+                dust_generation_end_index,
+                dust_commitment_merkle_tree_root,
+                dust_generation_merkle_tree_root
             FROM blocks
             WHERE height >= $1
             ORDER BY height
