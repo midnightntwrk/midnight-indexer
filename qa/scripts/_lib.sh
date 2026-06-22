@@ -43,22 +43,32 @@ teardown_prior_stack() {
     fi
 }
 
-# Poll the indexer /ready endpoint until it responds or the 20s budget is spent.
-# Exits non-zero on timeout after dumping container state and indexer-api logs.
+# Poll the indexer /ready endpoint until it responds or the budget is spent.
+# The loop early-exits the moment /ready answers, so warm starts still return
+# in a couple of seconds; the budget only bounds genuinely slow cold starts
+# (image pulls plus initial chain catch-up), which exceeded the old 20s cap.
+# Override the budget with INDEXER_READY_TIMEOUT_SECONDS. Exits non-zero on
+# timeout after dumping container state and indexer-api logs.
 wait_for_indexer_ready() {
-    echo "Waiting for indexer API to become ready (20s budget)..."
+    local budget="${INDEXER_READY_TIMEOUT_SECONDS:-120}"
+    local interval=2
+    # Ceiling division so elapsed time always covers the budget and there is at
+    # least one attempt even for small overrides (e.g. budget=1 → 1 attempt,
+    # not 0; budget=5 → 3 attempts → 6s rather than an undercounted 4s).
+    local attempts=$(( (budget + interval - 1) / interval ))
+    echo "Waiting for indexer API to become ready (${budget}s budget)..."
     local ready=0 i
-    for i in {1..10}; do
+    for (( i=1; i<=attempts; i++ )); do
         if curl -sf http://localhost:8088/ready >/dev/null; then
             echo "Indexer API is ready"
             ready=1
             break
         fi
-        echo "Not ready yet... ($i/10)"
-        sleep 2
+        echo "Not ready yet... ($i/$attempts)"
+        sleep "$interval"
     done
     if [ "$ready" -ne 1 ]; then
-        echo "ERROR: Indexer API did not become ready within 20s. Dumping container state:"
+        echo "ERROR: Indexer API did not become ready within ${budget}s. Dumping container state:"
         docker compose --profile cloud ps
         echo "Last 50 lines of indexer-api logs:"
         docker compose --profile cloud logs --tail=50 indexer-api 2>&1 || true
@@ -76,4 +86,21 @@ clear_block_scanner_cache() {
     echo "Clearing block-scanner cache for undeployed..."
     rm -f qa/tools/block-scanner/tmp_scan/undeployed_*.jsonl
     rm -f qa/tools/block-scanner/stats/undeployed_*.json
+}
+
+# Ensure the block-scanner's dependencies are installed before `generate:data`.
+# On a fresh checkout/worktree there is no node_modules, so the scan would fail
+# with an opaque module-resolution error (e.g. "ENOENT while resolving package
+# 'esprima'"). Install on demand so a first run on a clean worktree works.
+ensure_block_scanner_deps() {
+    if [ ! -d qa/tools/block-scanner/node_modules ]; then
+        echo "Installing block-scanner dependencies (first run on this checkout)..."
+        # The startup scripts don't set errexit, so guard explicitly: otherwise
+        # a failed install falls through to `generate:data` and surfaces the
+        # same opaque module-resolution error this helper exists to prevent.
+        if ! (cd qa/tools/block-scanner && bun install); then
+            echo "ERROR: bun install failed in qa/tools/block-scanner" >&2
+            return 1
+        fi
+    fi
 }
