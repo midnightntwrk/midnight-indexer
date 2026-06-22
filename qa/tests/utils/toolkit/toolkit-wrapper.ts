@@ -90,6 +90,15 @@ const DEFAULT_RNG_SEED = '000000000000000000000000000000000000000000000000000000
 const DEFAULT_NEW_AUTHORITY_SEED =
   '1000000000000000000000000000000000000000000000000000000000000001';
 
+// Human-readable description of the schema `getDustBalance` accepts, reused in its error
+// messages so a mismatch reports expected-vs-actual rather than a cryptic "structure not found".
+const DUST_BALANCE_EXPECTED = [
+  'Expected one of:',
+  '  (1) full DustBalance object: { generation_infos: Array<…>, source: Record<hexKey, number>, total: number }',
+  '  (2) source-only object:      Record<hexKey, number>',
+  '  where hexKey is currently constrained by DustBalanceSchema to a 66-character hex string.',
+].join('\n');
+
 class ToolkitWrapper {
   private container: GenericContainer;
   private startedContainer?: StartedTestContainer;
@@ -664,20 +673,34 @@ class ToolkitWrapper {
 
     if (jsonObjects.length === 0) {
       throw new Error(
-        `Could not find any JSON objects in dust-balance output. Output: ${output.substring(0, 500)}...`,
+        'Could not parse dust-balance output: no JSON object found ' +
+          '(the toolkit usually emits this when it could not reach the node / produce a balance).\n' +
+          `${DUST_BALANCE_EXPECTED}\n` +
+          `Actual toolkit output:\n${output.substring(0, 1000)}`,
       );
     }
 
-    // Try to find the JSON object with the expected structure using schema validation
-    const fullObject = this.parseFirstValid(jsonObjects, DustBalanceSchema);
-
-    if (fullObject) {
-      return fullObject;
+    // Try to find the JSON object matching the full schema, capturing per-object validation
+    // errors so a mismatch can be reported precisely (expected vs actual) instead of cryptically.
+    const fullSchemaErrors: string[] = [];
+    for (const jsonString of jsonObjects) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(jsonString);
+      } catch {
+        continue; // not valid JSON (e.g. a Rust Debug-formatted struct), skip
+      }
+      const validation = DustBalanceSchema.safeParse(parsed);
+      if (validation.success) {
+        return validation.data;
+      }
+      fullSchemaErrors.push(this.formatZodIssues(validation.error));
     }
 
-    // If we didn't find the full structure, check if we have just the source object
-    // The toolkit may output only the source object, in which case we construct the response
+    // Fallback: the toolkit may emit only the `source` map. Accept that shape and synthesise
+    // the rest. Capture why it failed too, for the error message below.
     const lastJsonString = jsonObjects[jsonObjects.length - 1];
+    let sourceOnlyError = 'last JSON object was not parseable as JSON';
     try {
       const parsed: unknown = JSON.parse(lastJsonString);
       const sourceValidation = DustBalanceSchema.shape.source.safeParse(parsed);
@@ -690,15 +713,36 @@ class ToolkitWrapper {
           total: total,
         };
       }
+      sourceOnlyError = this.formatZodIssues(sourceValidation.error);
     } catch {
-      log.error(
-        `Could not find expected dust balance structure in output. Found ${jsonObjects.length} JSON object(s).`,
-      );
+      // keep the default sourceOnlyError
     }
 
+    // Nothing matched — build an actionable expected-vs-actual error.
+    const actual = jsonObjects
+      .map((j, i) => `  [${i}] ${j.length > 1000 ? `${j.slice(0, 1000)}… (truncated)` : j}`)
+      .join('\n');
+    const fullErrText = fullSchemaErrors.length
+      ? fullSchemaErrors.map((e, i) => `    object[${i}]: ${e}`).join('\n')
+      : '    (no JSON object was parseable)';
     throw new Error(
-      `Could not find expected dust balance structure in output. Found ${jsonObjects.length} JSON object(s).`,
+      `dust-balance output did not match the expected schema (found ${jsonObjects.length} JSON object(s)).\n` +
+        `${DUST_BALANCE_EXPECTED}\n` +
+        `Why it failed:\n` +
+        `  - full-schema validation errors (per object):\n${fullErrText}\n` +
+        `  - source-only fallback error: ${sourceOnlyError}\n` +
+        `Actual JSON object(s) received:\n${actual}`,
     );
+  }
+
+  /**
+   * Format Zod validation issues as a compact, readable `path: message` list, e.g.
+   * `source.6fa1…: String must contain exactly 66 character(s)`.
+   */
+  private formatZodIssues(error: z.ZodError): string {
+    return error.issues
+      .map((issue) => `${issue.path.length ? issue.path.join('.') : '<root>'}: ${issue.message}`)
+      .join('; ');
   }
 
   /**
