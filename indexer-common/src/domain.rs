@@ -52,6 +52,8 @@ pub type DustUtxoId = ByteVec;
 pub type SerializedLedgerStateKey = ByteVec;
 pub type SerializedTransactionIdentifier = ByteVec;
 pub type SerializedZswapMerkleTreeRoot = ByteVec;
+pub type SerializedDustCommitmentMerkleTreeRoot = ByteVec;
+pub type SerializedDustGenerationMerkleTreeRoot = ByteVec;
 
 // Tagged serialization: complex types that may evolve; tags allow version-awareness.
 pub type SerializedContractAddress = ByteVec;
