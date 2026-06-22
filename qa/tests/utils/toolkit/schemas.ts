@@ -43,7 +43,11 @@ export const DustGenerationInfoSchema = z.object({
 // Dust Balance Schema - validates toolkit dust-balance command output
 export const DustBalanceSchema = z.object({
   generation_infos: z.array(DustGenerationInfoSchema),
-  source: z.record(z.string().length(66), z.number()),
+  // `source` keys are hex-encoded byte strings whose length varies (the value's
+  // serialized length is encoded in the leading byte), so keys legitimately come
+  // through at different lengths — e.g. 64-char (32-byte) and 66-char (33-byte).
+  // Constrain to even-length lowercase hex (whole bytes) only; do NOT pin a length.
+  source: z.record(z.string().regex(/^([0-9a-f]{2})+$/i), z.number()),
   total: z.number(),
 });
 
