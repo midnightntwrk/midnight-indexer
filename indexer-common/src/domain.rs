@@ -221,6 +221,36 @@ pub struct ContractBalance {
     pub amount: u128,
 }
 
+/// Maintenance authority of a contract, extracted from its on-chain state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContractMaintenanceAuthority {
+    /// The committee of verifying keys authorised to maintain the contract.
+    pub committee: Vec<ContractMaintenanceVerifyingKey>,
+
+    /// The number of committee signatures required to authorise maintenance.
+    pub threshold: u32,
+
+    /// Monotonic counter guarding against replay of maintenance operations.
+    pub counter: u32,
+}
+
+/// A verifying key in a contract maintenance authority committee.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContractMaintenanceVerifyingKey {
+    /// The signature scheme of the key.
+    pub kind: VerifyingKeyKind,
+
+    /// Tagged-serialized verifying key bytes.
+    pub key: ByteVec,
+}
+
+/// The signature scheme of a maintenance authority verifying key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VerifyingKeyKind {
+    Schnorr,
+    Ecdsa,
+}
+
 /// An unshielded UTXO.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UnshieldedUtxo {
