@@ -49,6 +49,22 @@ where
         height: u32,
     ) -> Result<Option<ContractAction>, sqlx::Error>;
 
+    /// Get the contract action giving the address's state as of (the latest action in any block at
+    /// or before) the block with the given hash.
+    async fn get_contract_action_by_address_as_of_block_hash(
+        &self,
+        address: &SerializedContractAddress,
+        hash: BlockHash,
+    ) -> Result<Option<ContractAction>, sqlx::Error>;
+
+    /// Get the contract action giving the address's state as of (the latest action in any block at
+    /// or before) the given block height.
+    async fn get_contract_action_by_address_as_of_block_height(
+        &self,
+        address: &SerializedContractAddress,
+        height: u32,
+    ) -> Result<Option<ContractAction>, sqlx::Error>;
+
     /// Get the latest contract action for the given address and transaction hash.
     async fn get_contract_action_by_address_and_transaction_hash(
         &self,
@@ -73,6 +89,17 @@ where
     async fn get_contract_actions_by_transaction_ids(
         &self,
         ids: &[u64],
+    ) -> Result<Vec<ContractAction>, sqlx::Error>;
+
+    /// Get up to `limit` most recent contract actions for the given address, newest first,
+    /// optionally filtered to a single variant ("Deploy" | "Call" | "Update"). Backs the bounded
+    /// `Contract.actions(limit, type)` sub-query; full enumeration uses the `contractActions`
+    /// subscription instead.
+    async fn get_recent_contract_actions_by_address(
+        &self,
+        address: &SerializedContractAddress,
+        limit: u32,
+        variant: Option<&str>,
     ) -> Result<Vec<ContractAction>, sqlx::Error>;
 
     /// Get a stream of contract actions for the given address starting at the given contract_action
@@ -130,6 +157,22 @@ impl ContractActionStorage for NoopStorage {
         unimplemented!()
     }
 
+    async fn get_contract_action_by_address_as_of_block_hash(
+        &self,
+        address: &SerializedContractAddress,
+        hash: BlockHash,
+    ) -> Result<Option<ContractAction>, sqlx::Error> {
+        unimplemented!()
+    }
+
+    async fn get_contract_action_by_address_as_of_block_height(
+        &self,
+        address: &SerializedContractAddress,
+        height: u32,
+    ) -> Result<Option<ContractAction>, sqlx::Error> {
+        unimplemented!()
+    }
+
     async fn get_contract_action_by_address_and_transaction_hash(
         &self,
         address: &SerializedContractAddress,
@@ -156,6 +199,15 @@ impl ContractActionStorage for NoopStorage {
     async fn get_contract_actions_by_transaction_ids(
         &self,
         _ids: &[u64],
+    ) -> Result<Vec<ContractAction>, sqlx::Error> {
+        unimplemented!()
+    }
+
+    async fn get_recent_contract_actions_by_address(
+        &self,
+        address: &SerializedContractAddress,
+        limit: u32,
+        variant: Option<&str>,
     ) -> Result<Vec<ContractAction>, sqlx::Error> {
         unimplemented!()
     }

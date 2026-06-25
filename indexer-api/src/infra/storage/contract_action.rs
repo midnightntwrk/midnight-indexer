@@ -146,6 +146,111 @@ impl ContractActionStorage for Storage {
     }
 
     #[trace(properties = { "address": "{address}", "hash": "{hash}" })]
+    async fn get_contract_action_by_address_as_of_block_hash(
+        &self,
+        address: &SerializedContractAddress,
+        hash: BlockHash,
+    ) -> Result<Option<ContractAction>, sqlx::Error> {
+        // "State as of" the given block: the latest action for the address in any block at or
+        // before the one with the given hash, not just actions in that exact block. Lets a contract
+        // deployed in an earlier block still resolve at a later pinned block.
+        let query = indoc! {"
+            SELECT
+                contract_actions.id,
+                address,
+                state,
+                attributes,
+                zswap_state,
+                transaction_id
+            FROM contract_actions
+            INNER JOIN transactions ON transactions.id = transaction_id
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            WHERE address = $1
+            AND blocks.height <= (SELECT height FROM blocks WHERE hash = $2)
+            ORDER BY contract_actions.id DESC
+            LIMIT 1
+        "};
+
+        sqlx::query_as(query)
+            .bind(address.as_ref())
+            .bind(hash.as_ref())
+            .fetch_optional(&*self.pool)
+            .await
+    }
+
+    #[trace(properties = { "address": "{address}", "block_height": "{block_height}" })]
+    async fn get_contract_action_by_address_as_of_block_height(
+        &self,
+        address: &SerializedContractAddress,
+        block_height: u32,
+    ) -> Result<Option<ContractAction>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT
+                contract_actions.id,
+                address,
+                state,
+                attributes,
+                zswap_state,
+                transaction_id
+            FROM contract_actions
+            INNER JOIN transactions ON transactions.id = transaction_id
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            WHERE address = $1
+            AND blocks.height <= $2
+            ORDER BY contract_actions.id DESC
+            LIMIT 1
+        "};
+
+        sqlx::query_as(query)
+            .bind(address)
+            .bind(block_height as i64)
+            .fetch_optional(&*self.pool)
+            .await
+    }
+
+    #[trace(properties = { "address": "{address}", "limit": "{limit}", "variant": "{variant:?}" })]
+    async fn get_recent_contract_actions_by_address(
+        &self,
+        address: &SerializedContractAddress,
+        limit: u32,
+        variant: Option<&str>,
+    ) -> Result<Vec<ContractAction>, sqlx::Error> {
+        let mut query_builder = sqlx::QueryBuilder::new(indoc! {"
+            SELECT
+                contract_actions.id,
+                address,
+                state,
+                attributes,
+                zswap_state,
+                transaction_id
+            FROM contract_actions
+            WHERE address =
+        "});
+        query_builder.push_bind(address.as_ref().to_vec());
+
+        if let Some(variant) = variant {
+            // The variant column is a Postgres enum (cast to text to compare) and a SQLite TEXT.
+            #[cfg(feature = "cloud")]
+            query_builder
+                .push(" AND variant::text = ")
+                .push_bind(variant.to_string());
+            #[cfg(feature = "standalone")]
+            query_builder
+                .push(" AND variant = ")
+                .push_bind(variant.to_string());
+        }
+
+        query_builder
+            .push(" ORDER BY contract_actions.id DESC LIMIT ")
+            .push_bind(limit as i64);
+
+        query_builder
+            .build_query_as::<ContractAction>()
+            .fetch_all(&*self.pool)
+            .await
+    }
+
+    #[trace(properties = { "address": "{address}", "hash": "{hash}" })]
     async fn get_contract_action_by_address_and_transaction_hash(
         &self,
         address: &SerializedContractAddress,
