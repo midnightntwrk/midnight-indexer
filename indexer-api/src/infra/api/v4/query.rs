@@ -18,6 +18,7 @@ use crate::{
         v4::{
             CardanoNetworkId, CardanoRewardAddress, HexEncoded,
             block::{Block, BlockOffset},
+            contract::Contract,
             contract_action::{ContractAction, ContractActionOffset},
             contract_event::{ContractEvent, ContractEventFilter as GraphQLContractEventFilter},
             directives::beta,
@@ -232,6 +233,54 @@ where
                     .await
                     .map_err_into_server_error(|| format!("get contract action by address {address} and transaction identifier {identifier}"))?
             }
+
+            None => storage
+                .get_latest_contract_action_by_address(address)
+                .await
+                .map_err_into_server_error(|| {
+                    format!("get latest contract action by address {address}")
+                })?,
+        };
+
+        Ok(contract_action.map(Into::into))
+    }
+
+    /// Find a contract by address, resolved as of the given block offset (or its latest state if no
+    /// offset is given). Returns null if the contract has no action at or before that block.
+    #[graphql(directive = beta::apply())]
+    #[trace(properties = { "address": "{address}", "offset": "{offset:?}" })]
+    async fn contract(
+        &self,
+        cx: &Context<'_>,
+        address: HexEncoded,
+        offset: Option<BlockOffset>,
+    ) -> ApiResult<Option<Contract<S>>> {
+        let storage = cx.get_storage::<S>();
+
+        let address = &address
+            .hex_decode()
+            .map_err_into_client_error(|| "invalid address")?;
+
+        let contract_action = match offset {
+            Some(BlockOffset::Hash(hash)) => {
+                let hash = hash
+                    .hex_decode()
+                    .map_err_into_client_error(|| "invalid offset")?;
+
+                storage
+                    .get_contract_action_by_address_as_of_block_hash(address, hash)
+                    .await
+                    .map_err_into_server_error(|| {
+                        format!("get contract by address {address} as of block hash {hash}")
+                    })?
+            }
+
+            Some(BlockOffset::Height(height)) => storage
+                .get_contract_action_by_address_as_of_block_height(address, height)
+                .await
+                .map_err_into_server_error(|| {
+                    format!("get contract by address {address} as of block height {height}")
+                })?,
 
             None => storage
                 .get_latest_contract_action_by_address(address)

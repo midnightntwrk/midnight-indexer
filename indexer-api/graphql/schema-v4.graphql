@@ -151,6 +151,31 @@ input ConnectOptions {
 }
 
 """
+A contract, identified by address, resolved as of a given block (or the latest state if no
+offset is given). The topmost contract concept; its actions are a sub-query.
+"""
+type Contract @beta {
+	"""
+	The hex-encoded contract address.
+	"""
+	address: HexEncoded!
+	"""
+	The hex-encoded serialized contract state as of the queried block (the latest contract
+	action at or before it).
+	"""
+	state: HexEncoded!
+	"""
+	The contract's maintenance authority as of the queried block.
+	"""
+	maintenanceAuthority: ContractMaintenanceAuthority! @beta
+	"""
+	Recent contract actions for this contract, newest first, optionally filtered by type. Use
+	the `contractActions` subscription to enumerate all actions.
+	"""
+	actions(limit: Int, type: ContractActionType): [ContractAction!]! @beta
+}
+
+"""
 A contract action.
 """
 interface ContractAction {
@@ -173,6 +198,15 @@ input ContractActionOffset @oneOf {
 	Either a transaction hash or a transaction identifier.
 	"""
 	transactionOffset: TransactionOffset
+}
+
+"""
+Contract action variant, used to filter `Contract.actions`.
+"""
+enum ContractActionType {
+	DEPLOY
+	CALL
+	UPDATE
 }
 
 """
@@ -331,6 +365,46 @@ enum ContractEventType {
 	PAUSED
 	UNPAUSED
 	MISC
+}
+
+"""
+The maintenance authority of a contract.
+"""
+type ContractMaintenanceAuthority @beta {
+	"""
+	The committee of verifying keys authorised to maintain the contract.
+	"""
+	committee: [ContractMaintenanceVerifyingKey!]!
+	"""
+	The number of committee signatures required to authorise maintenance.
+	"""
+	threshold: Int!
+	"""
+	Monotonic counter guarding against replay of maintenance operations.
+	"""
+	counter: Int!
+}
+
+"""
+A verifying key in a contract maintenance authority committee.
+"""
+type ContractMaintenanceVerifyingKey @beta {
+	"""
+	The signature scheme of the key.
+	"""
+	kind: ContractMaintenanceVerifyingKeyKind!
+	"""
+	The hex-encoded tagged-serialized verifying key.
+	"""
+	key: HexEncoded!
+}
+
+"""
+The signature scheme of a maintenance authority verifying key.
+"""
+enum ContractMaintenanceVerifyingKeyKind {
+	SCHNORR
+	ECDSA
 }
 
 """
@@ -892,6 +966,11 @@ type Query {
 	Find a contract action for the given address and optional offset.
 	"""
 	contractAction(address: HexEncoded!, offset: ContractActionOffset): ContractAction
+	"""
+	Find a contract by address, resolved as of the given block offset (or its latest state if no
+	offset is given). Returns null if the contract has no action at or before that block.
+	"""
+	contract(address: HexEncoded!, offset: BlockOffset): Contract @beta
 	"""
 	Get DUST generation status for specific Cardano reward addresses.
 	"""

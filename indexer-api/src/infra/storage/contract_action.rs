@@ -20,8 +20,8 @@ use fastrace::trace;
 use futures::{Stream, TryStreamExt};
 use indexer_common::{
     domain::{
-        BlockHash, ContractAttributes, SerializedContractAddress, SerializedTransactionIdentifier,
-        TransactionHash,
+        BlockHash, ContractAttributes, ProtocolVersion, SerializedContractAddress,
+        SerializedTransactionIdentifier, TransactionHash,
     },
     stream::flatten_chunks,
 };
@@ -226,18 +226,16 @@ impl ContractActionStorage for Storage {
             FROM contract_actions
             WHERE address =
         "});
-        query_builder.push_bind(address.as_ref().to_vec());
+        query_builder.push_bind(address.as_ref());
 
         if let Some(variant) = variant {
             // The variant column is a Postgres enum (cast to text to compare) and a SQLite TEXT.
             #[cfg(feature = "cloud")]
             query_builder
                 .push(" AND variant::text = ")
-                .push_bind(variant.to_string());
+                .push_bind(variant);
             #[cfg(feature = "standalone")]
-            query_builder
-                .push(" AND variant = ")
-                .push_bind(variant.to_string());
+            query_builder.push(" AND variant = ").push_bind(variant);
         }
 
         query_builder
@@ -431,6 +429,30 @@ impl ContractActionStorage for Storage {
             .await?;
 
         Ok(id.map(|(id,)| id as u64))
+    }
+
+    #[trace(properties = { "transaction_id": "{transaction_id}" })]
+    async fn get_protocol_version_by_transaction_id(
+        &self,
+        transaction_id: u64,
+    ) -> Result<Option<ProtocolVersion>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT protocol_version
+            FROM transactions
+            WHERE id = $1
+        "};
+
+        let protocol_version = sqlx::query_as::<_, (i64,)>(query)
+            .bind(transaction_id as i64)
+            .fetch_optional(&*self.pool)
+            .await?;
+
+        protocol_version
+            .map(|(protocol_version,)| {
+                ProtocolVersion::try_from(protocol_version)
+                    .map_err(|error| sqlx::Error::Decode(error.into()))
+            })
+            .transpose()
     }
 }
 
