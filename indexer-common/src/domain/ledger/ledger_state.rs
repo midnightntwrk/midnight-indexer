@@ -104,25 +104,25 @@ use std::{collections::HashSet, ops::Deref, sync::LazyLock};
 
 const OUTPUT_INDEX_ZERO: u32 = 0;
 
-/// Canonical serialized payload sizes per `LogEventType` variant, matching
-/// CoIP-442 + MIP-0002 head. For `UnshieldedSpend` / `UnshieldedReceive` the
-/// spec includes `domain_sep` (113 bytes). Compact `issue-377` currently
-/// emits 81 bytes without `domain_sep`; when that catches up to the spec,
-/// no indexer change is needed. Until then, the size assertion below logs
-/// a warning and the decoder falls back to empty fields.
+/// Canonical serialized payload sizes per `LogEventType` variant. The address in the Unshielded
+/// Spend/Receive/Burn events is `Either<ZswapCoinPublicKey, ContractAddress>`, which Compact
+/// serialises as 65 bytes (`[is_left:1][left:32][right:32]`, both variant slots present; see
+/// `take_either_address`). Per MIP-0002, Spend/Receive then carry `domain_sep` (32) + `token_type`
+/// (32) + `amount` (16) = 145; Burn has no `domain_sep`, so `65 + 32 + 16 = 113`. `UnshieldedMint`
+/// has a `domain_sep` in place of the address (`32 + 32 + 16 = 80`).
 const SHIELDED_SPEND_SIZE: usize = 32;
 const SHIELDED_RECEIVE_SIZE: usize = 578; // 32 + (1 + 32) + (1 + 512).
 const SHIELDED_MINT_SIZE: usize = 81; // 32 + 32 + (1 + 16).
 const SHIELDED_BURN_SIZE: usize = 49; // 32 + (1 + 16).
-const UNSHIELDED_SPEND_SIZE: usize = 113; // (1 + 32) + 32 + 32 + 16.
-const UNSHIELDED_RECEIVE_SIZE: usize = 113; // (1 + 32) + 32 + 32 + 16.
+const UNSHIELDED_SPEND_SIZE: usize = 145; // (1 + 32 + 32) + 32 + 32 + 16.
+const UNSHIELDED_RECEIVE_SIZE: usize = 145; // (1 + 32 + 32) + 32 + 32 + 16.
 const UNSHIELDED_MINT_SIZE: usize = 80; // 32 + 32 + 16.
-const UNSHIELDED_BURN_SIZE: usize = 81; // (1 + 32) + 32 + 16.
+const UNSHIELDED_BURN_SIZE: usize = 113; // (1 + 32 + 32) + 32 + 16.
 const MISC_SIZE: usize = 288; // 32 + 256.
 
 const BYTES_32_SIZE: usize = 32;
 const UINT_128_SIZE: usize = 16;
-const EITHER_32_SIZE: usize = 1 + 32;
+const EITHER_SIZE: usize = 1 + 2 * BYTES_32_SIZE; // is_left + left(32) + right(32).
 const MAYBE_512_SIZE: usize = 1 + 512;
 
 static STRICTNESS_V8: LazyLock<WellFormedStrictnessV8> = LazyLock::new(|| {
@@ -1571,10 +1571,8 @@ where
             }
         }
         LogEventType::UnshieldedSpend => {
-            // Spec layout: (sender Either<32,32> 33, domain_sep 32, token_type 32, amount u128 16).
-            // 113 bytes. Min = 97 (= 113 - 16, only the amount u128 fully stripped to
-            // zero). Compact issue-377 emits 81 bytes (no domain_sep); 81 < 97 →
-            // fallback.
+            // (sender Either 65, domain_sep 32, token_type 32, amount u128 16). 145 bytes.
+            // Min = 129 (= 145 - 16, only the amount u128 fully stripped to zero).
             let bytes = extract_flat_bytes(
                 &item.data,
                 UNSHIELDED_SPEND_SIZE - UINT_128_SIZE,
@@ -1586,15 +1584,15 @@ where
                 .unwrap_or_else(|| AddressOrContract::User(ByteVec::default()));
             let domain_sep = bytes
                 .as_deref()
-                .and_then(|b| take_bytes(b, EITHER_32_SIZE, BYTES_32_SIZE))
+                .and_then(|b| take_bytes(b, EITHER_SIZE, BYTES_32_SIZE))
                 .unwrap_or_default();
             let token_type = bytes
                 .as_deref()
-                .and_then(|b| take_bytes(b, EITHER_32_SIZE + BYTES_32_SIZE, BYTES_32_SIZE))
+                .and_then(|b| take_bytes(b, EITHER_SIZE + BYTES_32_SIZE, BYTES_32_SIZE))
                 .unwrap_or_default();
             let amount = bytes
                 .as_deref()
-                .and_then(|b| take_uint_128_le(b, EITHER_32_SIZE + 2 * BYTES_32_SIZE))
+                .and_then(|b| take_uint_128_le(b, EITHER_SIZE + 2 * BYTES_32_SIZE))
                 .unwrap_or_else(|| "0".to_string());
             LedgerEventAttributes::ContractUnshieldedSpend {
                 version,
@@ -1618,15 +1616,15 @@ where
                 .unwrap_or_else(|| AddressOrContract::User(ByteVec::default()));
             let domain_sep = bytes
                 .as_deref()
-                .and_then(|b| take_bytes(b, EITHER_32_SIZE, BYTES_32_SIZE))
+                .and_then(|b| take_bytes(b, EITHER_SIZE, BYTES_32_SIZE))
                 .unwrap_or_default();
             let token_type = bytes
                 .as_deref()
-                .and_then(|b| take_bytes(b, EITHER_32_SIZE + BYTES_32_SIZE, BYTES_32_SIZE))
+                .and_then(|b| take_bytes(b, EITHER_SIZE + BYTES_32_SIZE, BYTES_32_SIZE))
                 .unwrap_or_default();
             let amount = bytes
                 .as_deref()
-                .and_then(|b| take_uint_128_le(b, EITHER_32_SIZE + 2 * BYTES_32_SIZE))
+                .and_then(|b| take_uint_128_le(b, EITHER_SIZE + 2 * BYTES_32_SIZE))
                 .unwrap_or_else(|| "0".to_string());
             LedgerEventAttributes::ContractUnshieldedReceive {
                 version,
@@ -1666,8 +1664,8 @@ where
             }
         }
         LogEventType::UnshieldedBurn => {
-            // (sender Either<32,32> 33, token_type 32, amount u128 16). 81 bytes.
-            // Min = 65 (amount fully stripped to zero).
+            // (sender Either 65, token_type 32, amount u128 16). 113 bytes.
+            // Min = 97 (amount fully stripped to zero).
             let bytes = extract_flat_bytes(
                 &item.data,
                 UNSHIELDED_BURN_SIZE - UINT_128_SIZE,
@@ -1679,11 +1677,11 @@ where
                 .unwrap_or_else(|| AddressOrContract::User(ByteVec::default()));
             let token_type = bytes
                 .as_deref()
-                .and_then(|b| take_bytes(b, EITHER_32_SIZE, BYTES_32_SIZE))
+                .and_then(|b| take_bytes(b, EITHER_SIZE, BYTES_32_SIZE))
                 .unwrap_or_default();
             let amount = bytes
                 .as_deref()
-                .and_then(|b| take_uint_128_le(b, EITHER_32_SIZE + BYTES_32_SIZE))
+                .and_then(|b| take_uint_128_le(b, EITHER_SIZE + BYTES_32_SIZE))
                 .unwrap_or_else(|| "0".to_string());
             LedgerEventAttributes::ContractUnshieldedBurn {
                 version,
@@ -1799,16 +1797,22 @@ fn take_maybe_uint_128_le(bytes: &[u8], offset: usize) -> Option<String> {
     Some(u128::from_le_bytes(slice).to_string())
 }
 
+// Decode an `Either<ZswapCoinPublicKey, ContractAddress>` address. Compact serialises `Either<A,B>`
+// as the full struct `{ is_left: Boolean, left: A, right: B }`, so on the wire it is 65 bytes:
+// `[is_left:1][left:32][right:32]` with both slots present and the inactive one zero-filled
+// (`compiler/standard-library.compact`, where `left(v) = { is_left: true, left: v, right: default
+// }`). `left` is `ZswapCoinPublicKey` (a user key) and `right` is `ContractAddress`, so `is_left`
+// selects the variant and which slot holds the value.
 fn take_either_address(bytes: &[u8], offset: usize) -> Option<AddressOrContract> {
-    let tag = *bytes.get(offset)?;
-    let value: ByteVec = bytes
-        .get(offset + 1..offset + 1 + BYTES_32_SIZE)?
-        .to_vec()
-        .into();
-    Some(if tag == 0 {
-        AddressOrContract::User(value)
-    } else {
+    let is_left = *bytes.get(offset)?;
+    let left = offset + 1;
+    let right = left + BYTES_32_SIZE;
+    Some(if is_left == 0 {
+        let value = bytes.get(right..right + BYTES_32_SIZE)?.to_vec().into();
         AddressOrContract::Contract(value)
+    } else {
+        let value = bytes.get(left..left + BYTES_32_SIZE)?.to_vec().into();
+        AddressOrContract::User(value)
     })
 }
 
@@ -2195,7 +2199,10 @@ mod tests {
     use crate::{
         domain::{
             AddressOrContract, LedgerEventAttributes, LedgerVersion,
-            ledger::{LedgerState, ledger_state::make_contract_event_attributes},
+            ledger::{
+                LedgerState,
+                ledger_state::{make_contract_event_attributes, take_either_address},
+            },
         },
         error::BoxError,
     };
@@ -2575,10 +2582,48 @@ mod tests {
     }
 
     #[test]
-    fn decodes_unshielded_spend_with_domain_sep_per_spec() {
-        let mut bytes = Vec::with_capacity(113);
-        bytes.push(1); // sender tag = Contract
-        bytes.extend_from_slice(&[0xCC; 32]); // sender value
+    fn decodes_unshielded_spend_user_sender() {
+        // is_left = 1 → left variant = user; value from the left slot.
+        let mut bytes = Vec::with_capacity(145);
+        bytes.push(1); // is_left
+        bytes.extend_from_slice(&[0xCC; 32]); // left slot (user key)
+        bytes.extend_from_slice(&[0x00; 32]); // right slot (unused)
+        bytes.extend_from_slice(&[0xDD; 32]); // domain_sep
+        bytes.extend_from_slice(&[0xEE; 32]); // token_type
+        bytes.extend_from_slice(&500u128.to_le_bytes()); // amount
+        let item = VersionedLogItem {
+            version: 1,
+            event_type: LogEventType::UnshieldedSpend,
+            data: make_cell_data(bytes),
+        };
+        let attrs = make_contract_event_attributes(&item, EntryPointBuf(b"u_spend".to_vec()));
+        match attrs {
+            LedgerEventAttributes::ContractUnshieldedSpend {
+                sender,
+                domain_sep,
+                token_type,
+                amount,
+                ..
+            } => {
+                assert!(matches!(sender, AddressOrContract::User(_)));
+                if let AddressOrContract::User(bytes) = sender {
+                    assert_eq!(&*bytes, &[0xCC; 32]);
+                }
+                assert_eq!(&*domain_sep, &[0xDD; 32]);
+                assert_eq!(&*token_type, &[0xEE; 32]);
+                assert_eq!(amount, "500");
+            }
+            other => panic!("unexpected variant {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decodes_unshielded_spend_contract_sender() {
+        // is_left = 0 → right variant = contract; value from the right slot.
+        let mut bytes = Vec::with_capacity(145);
+        bytes.push(0); // is_left
+        bytes.extend_from_slice(&[0x00; 32]); // left slot (unused)
+        bytes.extend_from_slice(&[0xCC; 32]); // right slot (contract address)
         bytes.extend_from_slice(&[0xDD; 32]); // domain_sep
         bytes.extend_from_slice(&[0xEE; 32]); // token_type
         bytes.extend_from_slice(&500u128.to_le_bytes()); // amount
@@ -2601,6 +2646,76 @@ mod tests {
                     assert_eq!(&*bytes, &[0xCC; 32]);
                 }
                 assert_eq!(&*domain_sep, &[0xDD; 32]);
+                assert_eq!(&*token_type, &[0xEE; 32]);
+                assert_eq!(amount, "500");
+            }
+            other => panic!("unexpected variant {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decodes_unshielded_receive_contract_recipient() {
+        // 145-byte Receive (Either 65 + domain_sep 32 + token_type 32 + amount 16); is_left = 0.
+        let mut bytes = Vec::with_capacity(145);
+        bytes.push(0); // is_left
+        bytes.extend_from_slice(&[0x00; 32]); // left slot (unused)
+        bytes.extend_from_slice(&[0xCC; 32]); // right slot (contract address)
+        bytes.extend_from_slice(&[0xDD; 32]); // domain_sep
+        bytes.extend_from_slice(&[0xEE; 32]); // token_type
+        bytes.extend_from_slice(&500u128.to_le_bytes()); // amount
+        let item = VersionedLogItem {
+            version: 1,
+            event_type: LogEventType::UnshieldedReceive,
+            data: make_cell_data(bytes),
+        };
+        let attrs = make_contract_event_attributes(&item, EntryPointBuf(b"u_recv".to_vec()));
+        match attrs {
+            LedgerEventAttributes::ContractUnshieldedReceive {
+                recipient,
+                domain_sep,
+                token_type,
+                amount,
+                ..
+            } => {
+                assert!(matches!(recipient, AddressOrContract::Contract(_)));
+                if let AddressOrContract::Contract(bytes) = recipient {
+                    assert_eq!(&*bytes, &[0xCC; 32]);
+                }
+                assert_eq!(&*domain_sep, &[0xDD; 32]);
+                assert_eq!(&*token_type, &[0xEE; 32]);
+                assert_eq!(amount, "500");
+            }
+            other => panic!("unexpected variant {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decodes_unshielded_burn() {
+        // 113-byte Burn (Either 65 + token_type 32 + amount 16). #1279 rejected this as 81 bytes
+        // and returned empty fields; it must now decode.
+        let mut bytes = Vec::with_capacity(113);
+        bytes.push(1); // is_left → user
+        bytes.extend_from_slice(&[0xCC; 32]); // left slot (user key)
+        bytes.extend_from_slice(&[0x00; 32]); // right slot (unused)
+        bytes.extend_from_slice(&[0xEE; 32]); // token_type
+        bytes.extend_from_slice(&500u128.to_le_bytes()); // amount
+        let item = VersionedLogItem {
+            version: 1,
+            event_type: LogEventType::UnshieldedBurn,
+            data: make_cell_data(bytes),
+        };
+        let attrs = make_contract_event_attributes(&item, EntryPointBuf(b"u_burn".to_vec()));
+        match attrs {
+            LedgerEventAttributes::ContractUnshieldedBurn {
+                sender,
+                token_type,
+                amount,
+                ..
+            } => {
+                assert!(matches!(sender, AddressOrContract::User(_)));
+                if let AddressOrContract::User(bytes) = sender {
+                    assert_eq!(&*bytes, &[0xCC; 32]);
+                }
                 assert_eq!(&*token_type, &[0xEE; 32]);
                 assert_eq!(amount, "500");
             }
@@ -2660,7 +2775,7 @@ mod tests {
     fn falls_back_to_empty_when_data_exceeds_max() {
         // Atom longer than the canonical max for the event type. Decoder
         // logs warning + falls back to empty payload fields.
-        let bytes = vec![0xFF; 200]; // larger than the expected 113-byte spec size
+        let bytes = vec![0xFF; 200]; // larger than the expected 145-byte spec size
         let item = VersionedLogItem {
             version: 1,
             event_type: LogEventType::UnshieldedSpend,
@@ -2670,13 +2785,11 @@ mod tests {
         match attrs {
             LedgerEventAttributes::ContractUnshieldedSpend {
                 sender,
-                domain_sep,
                 token_type,
                 amount,
                 ..
             } => {
                 assert!(matches!(sender, AddressOrContract::User(b) if b.is_empty()));
-                assert!(domain_sep.is_empty());
                 assert!(token_type.is_empty());
                 assert_eq!(amount, "0");
             }
@@ -2685,19 +2798,10 @@ mod tests {
     }
 
     #[test]
-    fn falls_back_to_empty_on_compact_issue_377_unshielded_spend_layout() {
-        // Compact issue-377 emits UnshieldedSpend at 81 bytes (no domain_sep).
-        // Spec is 113 bytes. The 81-byte payload is BELOW the 97-byte min
-        // (= 113 - 16 amount strip), so the decoder must reject it and fall
-        // back to empty rather than misinterpret the bytes as a 113-byte
-        // payload with shifted fields (which would silently corrupt
-        // domain_sep / token_type / amount).
-        let mut bytes = Vec::with_capacity(81);
-        bytes.push(0); // sender tag = User
-        bytes.extend_from_slice(&[0xAA; 32]); // sender value
-        bytes.extend_from_slice(&[0xBB; 32]); // token_type per Compact issue-377 (no domain_sep here)
-        bytes.extend_from_slice(&999u128.to_le_bytes()); // amount
-        assert_eq!(bytes.len(), 81);
+    fn falls_back_to_empty_when_data_below_min() {
+        // A payload shorter than the 129-byte min (= 145 - 16 amount strip) is rejected and falls
+        // back to empty rather than misinterpreting shifted fields.
+        let bytes = vec![0xAA; 81]; // below the 129-byte min
         let item = VersionedLogItem {
             version: 1,
             event_type: LogEventType::UnshieldedSpend,
@@ -2707,14 +2811,11 @@ mod tests {
         match attrs {
             LedgerEventAttributes::ContractUnshieldedSpend {
                 sender,
-                domain_sep,
                 token_type,
                 amount,
                 ..
             } => {
-                // All fields default, not partial-corrupt.
                 assert!(matches!(sender, AddressOrContract::User(b) if b.is_empty()));
-                assert!(domain_sep.is_empty());
                 assert!(token_type.is_empty());
                 assert_eq!(amount, "0");
             }
@@ -2723,17 +2824,17 @@ mod tests {
     }
 
     #[test]
-    fn decodes_unshielded_spend_with_amount_zero_fully_stripped() {
-        // Spec-compliant 113-byte UnshieldedSpend with amount=0 strips the
-        // entire u128 (16 trailing zeros), leaving 97 bytes on the wire.
-        // The decoder pads back to 113 and decodes correctly.
-        let mut bytes = Vec::with_capacity(97);
-        bytes.push(0); // sender tag = User
-        bytes.extend_from_slice(&[0x11; 32]); // sender value
+    fn decodes_unshielded_spend_amount_zero_fully_stripped() {
+        // amount=0 strips the trailing u128 (16 zeros), leaving 129 bytes (Either 65 + domain_sep
+        // 32 + token_type 32). The decoder pads back to 145 and decodes correctly.
+        let mut bytes = Vec::with_capacity(129);
+        bytes.push(1); // is_left → user
+        bytes.extend_from_slice(&[0x11; 32]); // left slot (user key)
+        bytes.extend_from_slice(&[0x00; 32]); // right slot (unused)
         bytes.extend_from_slice(&[0x22; 32]); // domain_sep
         bytes.extend_from_slice(&[0x33; 32]); // token_type
         // amount = 0, all 16 bytes stripped by ValueAtom
-        assert_eq!(bytes.len(), 97);
+        assert_eq!(bytes.len(), 129);
         let item = VersionedLogItem {
             version: 1,
             event_type: LogEventType::UnshieldedSpend,
@@ -2757,6 +2858,27 @@ mod tests {
                 assert_eq!(amount, "0");
             }
             other => panic!("unexpected variant {other:?}"),
+        }
+    }
+
+    #[test]
+    fn take_either_address_maps_is_left_tag() {
+        // 65-byte Either: [is_left][left:32][right:32].
+        // is_left = 1 → user (left slot); is_left = 0 → contract (right slot).
+        let mut left = vec![1u8];
+        left.extend_from_slice(&[0xAB; 32]); // left slot
+        left.extend_from_slice(&[0xCD; 32]); // right slot
+        match take_either_address(&left, 0) {
+            Some(AddressOrContract::User(b)) => assert_eq!(&*b, &[0xAB; 32]),
+            other => panic!("expected user, got {other:?}"),
+        }
+
+        let mut right = vec![0u8];
+        right.extend_from_slice(&[0xAB; 32]); // left slot
+        right.extend_from_slice(&[0xCD; 32]); // right slot
+        match take_either_address(&right, 0) {
+            Some(AddressOrContract::Contract(b)) => assert_eq!(&*b, &[0xCD; 32]),
+            other => panic!("expected contract, got {other:?}"),
         }
     }
 
