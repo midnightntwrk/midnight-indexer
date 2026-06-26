@@ -106,20 +106,23 @@ trait-variant               = { version = "0.1" }
 uuid                        = { version = "1.23", features = [ "serde" ] }
 walkdir                     = { version = "2.5" }
 
-# Ledger 9.1.0.0-rc.2, the ledger team's published patch set (resolves
-# midnight-ledger#580). The rc crates aren't on crates.io yet, hence git tags.
-# Entries without package/version replace their registry crate outright
-# (base-crypto and serialize, shared with v8 within-major; zkir, v9-only); the
-# cross-major v9 crates carry package + version to patch only their major,
-# leaving v8's registry versions intact.
+# Ledger 9.1.0.0-rc.3, the ledger team's published patch set (matches the
+# indexer's `bump-ledger-9-rc3` branch). The rc crates aren't on crates.io yet, so
+# each is pinned to its own per-crate release tag. Entries without package/version
+# replace their registry crate outright (base-crypto and its derive macro,
+# serialize, zkir — shared with v8 within-major; transient-crypto-old supplies the
+# 2.2.0 line that zkir requires); the cross-major v9 crates carry package + version
+# to patch only their major, leaving v8's registry versions intact.
 [patch.crates-io]
-midnight-base-crypto         = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "base-crypto-1.1.0-rc.1" }
-midnight-serialize           = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "serialize-1.2.0-rc.1" }
-midnight-zkir                = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "zkir-2.2.0-rc.2" }
-midnight-ledger-v9           = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "crate-ledger-9.1.0.0-rc.2" }
-midnight-zswap_v9            = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "zswap-9.0.0-rc.2",           package = "midnight-zswap",           version = "9.0.0" }
-midnight-coin-structure_v3   = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "coin-structure-3.0.0-rc.1",  package = "midnight-coin-structure",  version = "3.0.0" }
-midnight-transient-crypto_v3 = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "transient-crypto-3.0.0-rc.1", package = "midnight-transient-crypto", version = "3.0.0" }
-midnight-onchain-runtime_v4  = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "onchain-runtime-4.0.0-rc.2", package = "midnight-onchain-runtime", version = "4.0.0" }
-midnight-onchain-state_v4    = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "onchain-state-4.0.0-rc.2",   package = "midnight-onchain-state",   version = "4.0.0" }
-midnight-onchain-vm_v4       = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "onchain-vm-4.0.0-rc.2",      package = "midnight-onchain-vm",      version = "4.0.0" }
+midnight-base-crypto          = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "base-crypto-1.1.0-rc.2" }
+midnight-base-crypto-derive   = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "base-crypto-derive-1.1.0-rc.2" }
+midnight-serialize            = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "serialize-1.2.0-rc.1" }
+midnight-zkir                 = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "zkir-2.2.0-rc.3" }
+midnight-transient-crypto-old = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "transient-crypto-2.2.0-rc.1", package = "midnight-transient-crypto", version = "2.2.0" }
+midnight-ledger-v9            = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "crate-ledger-9.1.0.0-rc.3" }
+midnight-zswap_v9             = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "zswap-9.0.0-rc.3",           package = "midnight-zswap",           version = "9.0.0" }
+midnight-coin-structure_v3    = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "coin-structure-3.0.0-rc.1",  package = "midnight-coin-structure",  version = "3.0.0" }
+midnight-transient-crypto_v3  = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "transient-crypto-3.0.0-rc.2", package = "midnight-transient-crypto", version = "3.0.0" }
+midnight-onchain-runtime_v4   = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "onchain-runtime-4.0.0-rc.2", package = "midnight-onchain-runtime", version = "4.0.0" }
+midnight-onchain-state_v4     = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "onchain-state-4.0.0-rc.3",   package = "midnight-onchain-state",   version = "4.0.0" }
+midnight-onchain-vm_v4        = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "onchain-vm-4.0.0-rc.2",      package = "midnight-onchain-vm",      version = "4.0.0" }
