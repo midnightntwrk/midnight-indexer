@@ -105,8 +105,9 @@ trait-variant               = { version = "0.1" }
 uuid                        = { version = "1.23", features = [ "serde" ] }
 walkdir                     = { version = "2.5" }
 
-# Ledger 9.1.0.0-rc.2, the ledger team's published patch set (resolves
-# midnight-ledger#580). The rc crates aren't on crates.io yet, hence git tags.
+# Ledger 9.1.0.0-rc.3, the ledger team's published patch set; the v8/v9
+# coexistence shape traces to midnight-ledger#580. The rc crates aren't on
+# crates.io yet, hence git tags.
 # Entries without package/version replace their registry crate outright
 # (base-crypto and serialize, shared with v8 within-major; zkir, v9-only); the
 # cross-major v9 crates carry package + version to patch only their major,
