@@ -24,6 +24,7 @@ import {
   GraphQLCloseSessionMessage,
   ShieldedTxSubscriptionResponse,
 } from '@utils/indexer/websocket-client';
+import { buildErrorPayload } from '@utils/indexer/subscription-error';
 import { generateSyntheticViewingKey } from '@utils/bech32-codec';
 import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
@@ -60,7 +61,7 @@ describe('shielded transaction subscriptions', () => {
     // Initialise the indexer websocket client and connect to it
     indexerWsClient = new IndexerWsClient();
     await indexerWsClient.connectionInit();
-  });
+  }, 30_000);
 
   afterEach(async () => {
     // Close the indexer websocket client
@@ -415,18 +416,20 @@ describe('shielded transaction subscriptions', () => {
             ),
           );
         }, 10_000);
+        const checkForExpiredSession = (payload: ShieldedTxSubscriptionResponse) => {
+          afterLogoutEvents.push(payload);
+          log.debug(`Received event after logout: ${JSON.stringify(payload)}`);
+          if (payload.errors?.some((e) => e.message.includes('unknown or expired session ID'))) {
+            clearTimeout(timeout);
+            unsubscribe();
+            resolve();
+          }
+        };
         const unsubscribe = indexerWsClient.subscribeToShieldedTransactionEvents(
           {
-            next: (payload) => {
-              afterLogoutEvents.push(payload);
-              log.debug(`Received event after logout: ${JSON.stringify(payload)}`);
-              if (
-                payload.errors?.some((e) => e.message.includes('unknown or expired session ID'))
-              ) {
-                clearTimeout(timeout);
-                unsubscribe();
-                resolve();
-              }
+            next: checkForExpiredSession,
+            error: (err) => {
+              checkForExpiredSession(buildErrorPayload<ShieldedTxSubscriptionResponse>(err));
             },
           },
           sessionId,

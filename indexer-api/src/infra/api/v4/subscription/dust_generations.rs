@@ -12,10 +12,13 @@
 // limitations under the License.
 
 use crate::{
-    domain::{LedgerStateCache, storage::Storage},
+    domain::{LedgerStateCache, dust::DustGenerationDtimeUpdateEntry, storage::Storage},
     infra::api::{
         ApiResult, ContextExt, ResultExt,
-        v4::{HexEncodable, HexEncoded, merkle_tree_collapsed_update::MerkleTreeCollapsedUpdate},
+        v4::{
+            HexEncodable, HexEncoded, directives::beta, dust::DustAddress,
+            merkle_tree_collapsed_update::MerkleTreeCollapsedUpdate,
+        },
     },
 };
 use async_graphql::{Context, SimpleObject, Subscription, Union};
@@ -26,10 +29,14 @@ use log::{debug, warn};
 use std::{marker::PhantomData, pin::pin};
 
 /// An event of the dust generations subscription.
+// The `Dust*` prefix on every variant matches the existing GraphQL type
+// names; renaming would change the public union members.
+#[allow(clippy::enum_variant_names)]
 #[derive(Union)]
 pub enum DustGenerationsEvent {
     DustGenerationsItem(DustGenerationsItem),
     DustGenerationsProgress(DustGenerationsProgress),
+    DustGenerationDtimeUpdateItem(DustGenerationDtimeUpdateItem),
 }
 
 pub struct DustGenerationsSubscription<S, B> {
@@ -48,6 +55,7 @@ impl<S, B> Default for DustGenerationsSubscription<S, B> {
 
 /// A dust generations item with optional collapsed Merkle tree update.
 #[derive(Debug, Clone, SimpleObject)]
+#[graphql(directive = beta::apply())]
 pub struct DustGenerationsItem {
     /// Index of this output in the dust commitment Merkle tree.
     pub commitment_mt_index: u64,
@@ -63,19 +71,45 @@ pub struct DustGenerationsItem {
     pub backing_night: HexEncoded,
     /// The creation timestamp.
     pub ctime: u64,
-    /// The originating transaction ID.
+    /// The originating transaction ID (indexer-internal BIGSERIAL).
     pub transaction_id: u64,
+    /// The hex-encoded originating transaction hash (32-byte chain identifier).
+    pub transaction_hash: HexEncoded,
     /// Collapsed Merkle tree update filling the gap before this entry.
     pub collapsed_merkle_tree: Option<MerkleTreeCollapsedUpdate>,
 }
 
 /// Progress indicator for dust generations subscription (includes final collapsed update).
 #[derive(Debug, Clone, SimpleObject)]
+#[graphql(directive = beta::apply())]
 pub struct DustGenerationsProgress {
     /// The highest index processed so far.
     pub highest_index: u64,
     /// Final collapsed Merkle tree update covering remaining range.
     pub collapsed_merkle_tree: Option<MerkleTreeCollapsedUpdate>,
+}
+
+/// A dust generation dtime update emitted when the backing Night UTXO is
+/// spent and the entry's decay time is set.
+#[derive(Debug, Clone, SimpleObject)]
+#[graphql(directive = beta::apply())]
+pub struct DustGenerationDtimeUpdateItem {
+    /// Generation-tree index of the entry whose dtime changed.
+    pub generation_mt_index: u64,
+    /// The hex-encoded owner (dust address).
+    pub owner: HexEncoded,
+    /// Hex-encoded hash of the NIGHT UTXO that backs this dust output.
+    pub night_utxo_hash: HexEncoded,
+    /// The decay time as observed in this ledger event.
+    pub new_dtime: u64,
+    /// The originating transaction ID (indexer-internal BIGSERIAL).
+    pub transaction_id: u64,
+    /// The hex-encoded originating transaction hash (32-byte chain identifier).
+    pub transaction_hash: HexEncoded,
+    /// Hex-encoded tagged-serialised `TreeInsertionPath<DustGenerationInfo>`
+    /// from the originating ledger event. Wallets deserialise this and hand
+    /// it to `generating_tree.update_from_evidence(...)`.
+    pub tree_insertion_path: HexEncoded,
 }
 
 #[Subscription]
@@ -84,13 +118,14 @@ where
     S: Storage,
     B: Subscriber,
 {
-    /// Subscribe to dust generation entries for a dust address within an index range.
-    /// Entries are interleaved with collapsed Merkle tree updates to fill gaps.
-    /// The subscription finishes after reaching the end index with a final collapsed update.
+    /// Subscribe to dust generation entries for a dust address in `[start_index, end_index]`
+    /// inclusive. `dustGenerationEndIndex` is exclusive, pass `dustGenerationEndIndex - 1`.
+    /// Entries interleaved with collapsed Merkle tree updates and owned-entry dtime updates.
+    #[graphql(directive = beta::apply())]
     async fn dust_generations<'a>(
         &self,
         cx: &'a Context<'a>,
-        dust_address: HexEncoded,
+        dust_address: DustAddress,
         start_index: u64,
         end_index: u64,
     ) -> impl Stream<Item = ApiResult<DustGenerationsEvent>> {
@@ -98,13 +133,56 @@ where
         let subscriber = cx.get_subscriber::<B>();
         let ledger_state_cache = cx.get_ledger_state_cache();
         let batch_size = cx.get_subscription_config().dust_generations.batch_size;
+        let network_id = cx.get_network_id();
+        let quotas = cx.get_subscription_quotas();
+        let per_connection_counter = cx.get_per_connection_counter();
 
         let block_indexed_stream = subscriber.subscribe::<BlockIndexed>();
 
         try_stream! {
-            let dust_address_bytes = const_hex::decode(dust_address.as_ref())
-                .map_err_into_client_error(|| "invalid hex-encoded dust address")?;
+            let _quota_guard = quotas
+                .try_acquire(per_connection_counter, None)
+                .map_err_into_client_error(|| "subscription limit exceeded")?;
+
+            let dust_address_bytes = dust_address
+                .try_into_domain(network_id)
+                .map_err_into_client_error(|| "invalid bech32m dust address")?;
             let mut cursor = start_index;
+
+            // Fall back to 0 (= replay all dtime updates for this address) when
+            // the wallet has no entry below `start_index`. The dtime SQL filters
+            // by owner and per-stream event-id cursor, so cutoff = 0 is safe.
+            let dtime_cutoff_block_id = storage
+                .get_dust_generation_dtime_cutoff_block_id(&dust_address_bytes, start_index)
+                .await
+                .map_err_into_server_error(|| "get dtime cutoff block id")?
+                .unwrap_or(0);
+
+            // Single dtime cursor across initial backfill and live tail. It
+            // advances past every emitted DustGenerationDtimeUpdateItem so
+            // subsequent block-driven polls don't re-emit.
+            let mut dtime_after_event_id = 0u64;
+
+            debug!(cutoff = dtime_cutoff_block_id; "replaying dtime updates after cutoff");
+            let updates = storage
+                .get_dust_generation_dtime_updates(
+                    &dust_address_bytes,
+                    dtime_cutoff_block_id,
+                    dtime_after_event_id,
+                    batch_size,
+                )
+                .await;
+            let mut updates = pin!(updates);
+            while let Some(update) = updates
+                .try_next()
+                .await
+                .map_err_into_server_error(|| "get next dtime update")?
+            {
+                dtime_after_event_id = update.ledger_event_id;
+                yield DustGenerationsEvent::DustGenerationDtimeUpdateItem(
+                    dtime_update_item(update),
+                );
+            }
 
             debug!(start_index, end_index; "streaming existing dust generation entries");
 
@@ -135,11 +213,53 @@ where
                     backing_night: entry.backing_night.hex_encode(),
                     ctime: entry.ctime,
                     transaction_id: entry.transaction_id,
+                    transaction_hash: entry.transaction_hash.hex_encode(),
                     collapsed_merkle_tree,
                 });
             }
 
-            if cursor > end_index {
+            // Terminate on chain progress, not the subscriber's `cursor`,
+            // which only crosses `end_index` when the wallet owns an
+            // entry there.
+            let chain_first_free = storage
+                .get_dust_generations_chain_first_free()
+                .await
+                .map_err_into_server_error(|| "get dust generations chain first free")?;
+            if chain_first_free > end_index {
+                // Re-drain to catch entries committed in the window between
+                // the backfill drain ending and the chain-progress read.
+                let entries = storage
+                    .get_dust_generation_entries(&dust_address_bytes, cursor, end_index, batch_size)
+                    .await;
+                let mut entries = pin!(entries);
+                while let Some(entry) = entries
+                    .try_next()
+                    .await
+                    .map_err_into_server_error(|| "get next dust generation entry")?
+                {
+                    let collapsed_merkle_tree = make_collapsed_update(
+                        cursor,
+                        entry.generation_mt_index,
+                        storage,
+                        ledger_state_cache,
+                    ).await?;
+
+                    cursor = entry.generation_mt_index + 1;
+
+                    yield DustGenerationsEvent::DustGenerationsItem(DustGenerationsItem {
+                        commitment_mt_index: entry.commitment_mt_index,
+                        generation_mt_index: entry.generation_mt_index,
+                        owner: entry.owner.hex_encode(),
+                        value: entry.value.to_string(),
+                        initial_value: entry.initial_value.to_string(),
+                        backing_night: entry.backing_night.hex_encode(),
+                        ctime: entry.ctime,
+                        transaction_id: entry.transaction_id,
+                        transaction_hash: entry.transaction_hash.hex_encode(),
+                        collapsed_merkle_tree,
+                    });
+                }
+
                 let final_update = make_final_collapsed_update(
                     cursor, end_index, storage, ledger_state_cache,
                 ).await?;
@@ -187,12 +307,73 @@ where
                         backing_night: entry.backing_night.hex_encode(),
                         ctime: entry.ctime,
                         transaction_id: entry.transaction_id,
+                        transaction_hash: entry.transaction_hash.hex_encode(),
                         collapsed_merkle_tree,
                     });
                 }
 
-                // Check if we've now reached end_index.
-                if cursor > end_index {
+                // Drain any new dtime updates for entries the subscriber
+                // owns. Reuses the same cutoff (initial entry-block anchor)
+                // and the running event cursor so we don't re-emit.
+                let updates = storage
+                    .get_dust_generation_dtime_updates(
+                        &dust_address_bytes,
+                        dtime_cutoff_block_id,
+                        dtime_after_event_id,
+                        batch_size,
+                    )
+                    .await;
+                let mut updates = pin!(updates);
+                while let Some(update) = updates
+                    .try_next()
+                    .await
+                    .map_err_into_server_error(|| "get next dtime update")?
+                {
+                    dtime_after_event_id = update.ledger_event_id;
+                    yield DustGenerationsEvent::DustGenerationDtimeUpdateItem(
+                        dtime_update_item(update),
+                    );
+                }
+
+                let chain_first_free = storage
+                    .get_dust_generations_chain_first_free()
+                    .await
+                    .map_err_into_server_error(|| "get dust generations chain first free")?;
+                if chain_first_free > end_index {
+                    // Re-drain to catch entries committed in the window between
+                    // the live-tail drain ending and the chain-progress read.
+                    let entries = storage
+                        .get_dust_generation_entries(&dust_address_bytes, cursor, end_index, batch_size)
+                        .await;
+                    let mut entries = pin!(entries);
+                    while let Some(entry) = entries
+                        .try_next()
+                        .await
+                        .map_err_into_server_error(|| "get next dust generation entry")?
+                    {
+                        let collapsed_merkle_tree = make_collapsed_update(
+                            cursor,
+                            entry.generation_mt_index,
+                            storage,
+                            ledger_state_cache,
+                        ).await?;
+
+                        cursor = entry.generation_mt_index + 1;
+
+                        yield DustGenerationsEvent::DustGenerationsItem(DustGenerationsItem {
+                            commitment_mt_index: entry.commitment_mt_index,
+                            generation_mt_index: entry.generation_mt_index,
+                            owner: entry.owner.hex_encode(),
+                            value: entry.value.to_string(),
+                            initial_value: entry.initial_value.to_string(),
+                            backing_night: entry.backing_night.hex_encode(),
+                            ctime: entry.ctime,
+                            transaction_id: entry.transaction_id,
+                            transaction_hash: entry.transaction_hash.hex_encode(),
+                            collapsed_merkle_tree,
+                        });
+                    }
+
                     let final_update = make_final_collapsed_update(
                         cursor, end_index, storage, ledger_state_cache,
                     ).await?;
@@ -262,5 +443,18 @@ async fn make_final_collapsed_update<S: Storage>(
     match update {
         Ok(update) => Ok(Some(update.into())),
         Err(_) => Ok(None),
+    }
+}
+
+/// Convert a domain dtime update entry into the GraphQL item.
+fn dtime_update_item(update: DustGenerationDtimeUpdateEntry) -> DustGenerationDtimeUpdateItem {
+    DustGenerationDtimeUpdateItem {
+        generation_mt_index: update.generation_mt_index,
+        owner: update.owner.hex_encode(),
+        night_utxo_hash: update.night_utxo_hash.hex_encode(),
+        new_dtime: update.new_dtime,
+        transaction_id: update.transaction_id,
+        transaction_hash: update.transaction_hash.hex_encode(),
+        tree_insertion_path: update.tree_insertion_path.hex_encode(),
     }
 }

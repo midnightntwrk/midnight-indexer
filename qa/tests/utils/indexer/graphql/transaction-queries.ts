@@ -73,6 +73,10 @@ export const REGULAR_TRANSACTION_FRAGMENT = `   ... on RegularTransaction {
       identifiers
       zswapStartIndex
       zswapEndIndex
+      dustCommitmentStartIndex
+      dustCommitmentEndIndex
+      dustGenerationStartIndex
+      dustGenerationEndIndex
       fees {
         paidFees
         estimatedFees

@@ -19,7 +19,8 @@ import { retry } from '../retry-helper';
 import log from '@utils/logging/logger';
 import { env } from '../../environment/model';
 import { GenericContainer, StartedTestContainer } from 'testcontainers';
-import { getContractDeploymentHashes } from '../../tests/e2e/test-utils';
+import { getContractDeploymentHashes, resolveBlockHash } from '../../tests/e2e/test-utils';
+import { ensureToolkitCachePostgres } from './toolkit-cache';
 import { z } from 'zod';
 import {
   Coin,
@@ -56,9 +57,7 @@ interface ToolkitConfig {
   chain?: string;
   nodeTag?: string;
   nodeToolkitTag?: string;
-  syncCacheDir?: string;
   coinSeed?: string;
-  warmupCache?: boolean;
 }
 
 export interface ToolkitTransactionResult {
@@ -320,77 +319,54 @@ class ToolkitWrapper {
     const envName = env.getCurrentEnvironmentName();
 
     this.config.containerName = config.containerName || `mn-toolkit-${envName}-${randomId}`;
-    this.config.targetDir = config.targetDir || resolve('./.tmp/toolkit');
+    this.config.targetDir = config.targetDir || resolve(`./.tmp/toolkit/${envName}-${randomId}`);
     this.config.nodeTag = config.nodeTag || env.getNodeVersion();
     this.config.nodeToolkitTag =
       config.nodeToolkitTag || process.env.NODE_TOOLKIT_TAG || 'latest-main';
-    this.config.warmupCache = config.warmupCache || false;
 
-    // Ensure the target directory exists
-    if (!fs.existsSync(this.config.targetDir)) {
-      fs.mkdirSync(this.config.targetDir, { recursive: true });
-      console.debug(`[SETUP]Created target directory: ${this.config.targetDir}`);
-    }
+    // Shared, env-specific ledger state cache — persists across runs so the toolkit can restore
+    // from a snapshot rather than replaying the full chain on every warmup.
+    const ledgerCacheDir = resolve(`./.tmp/toolkit-ledger-cache/${envName}`);
 
-    // This block is making sure that if a golden cache directory is available, we use it.
-    if (this.config.warmupCache) {
-      log.debug('Warmup cache is enabled, using the golden cache directory');
-      this.config.syncCacheDir = `${this.config.targetDir}/.sync_cache-${envName}`;
+    // Shared ZK params cache — scoped by toolkit tag so different versions don't overwrite each
+    // other's circuit parameters. Kept outside targetDir so it is never deleted between runs
+    // (root-owned files written by the container would prevent host-side cleanup of per-run
+    // targetDirs otherwise).
+    const zkCacheDir = resolve(`./.tmp/toolkit-zk-cache/${this.config.nodeToolkitTag}`);
 
-      // Check if there is any .bin file in the golden cache directory
-      if (
-        fs.existsSync(this.config.syncCacheDir) &&
-        fs.readdirSync(this.config.syncCacheDir).some((file) => file.endsWith('.bin'))
-      ) {
-        console.debug(`[SETUP] Golden cache file found at: ${this.config.syncCacheDir}, using it`);
-      } else {
-        console.debug(`[SETUP] Golden cache directory not found at: ${this.config.syncCacheDir}`);
-      }
-    } else {
-      this.config.syncCacheDir = `${this.config.targetDir}/.sync_cache-${envName}-${randomId}`;
-      // copy the golden sync cache directory to the instance-specific cache
-      const goldenCacheDir = `${this.config.targetDir}/.sync_cache-${envName}`;
-
-      if (!fs.existsSync(goldenCacheDir)) {
-        fs.mkdirSync(goldenCacheDir);
-        log.warn(
-          `Golden cache directory not found at: ${goldenCacheDir}\n` +
-            `Please ensure the global setup has run to warm up the cache, or run with warmupCache: true first.`,
-        );
-      }
-
-      fs.cpSync(goldenCacheDir, this.config.syncCacheDir, { recursive: true });
-      log.debug(
-        `Copied sync cache from golden cache to instance cache: ${this.config.syncCacheDir}`,
-      );
-    }
+    fs.mkdirSync(this.config.targetDir, { recursive: true });
+    fs.mkdirSync(ledgerCacheDir, { recursive: true });
+    fs.mkdirSync(zkCacheDir, { recursive: true });
 
     log.debug(`NODE_TAG         : ${this.config.nodeTag}`);
     log.debug(`NODE_TOOLKIT_TAG : ${this.config.nodeToolkitTag}`);
     log.debug(`Toolkit target dir     : ${this.config.targetDir}`);
     log.debug(`Toolkit container name : ${this.config.containerName}`);
-    log.debug(`Toolkit sync cache dir : ${this.config.syncCacheDir}`);
+    log.debug(`Toolkit ledger cache   : ${ledgerCacheDir}`);
+    log.debug(`Toolkit ZK cache       : ${zkCacheDir}`);
 
     this.container = new GenericContainer(
-      `ghcr.io/midnight-ntwrk/midnight-node-toolkit:${this.config.nodeToolkitTag}`,
+      `midnightntwrk/midnight-node-toolkit:${this.config.nodeToolkitTag}`,
     )
       .withName(this.config.containerName)
-      .withNetworkMode('host') // equivalent to --network host
-      .withEntrypoint([]) // equivalent to --entrypoint ""
+      .withNetworkMode('host')
+      .withEntrypoint([])
       .withBindMounts([
         {
           source: this.config.targetDir,
           target: '/out',
         },
         {
-          source: this.config.syncCacheDir,
-          target: `/.cache`,
+          source: zkCacheDir,
+          target: '/.cache',
+        },
+        {
+          source: ledgerCacheDir,
+          target: '/ledger-cache',
         },
       ])
-      .withEnvironment({
-        MN_FETCH_CACHE: 'postgres://toolkit:toolkit@host.docker.internal:5434/toolkit',
-      })
-      .withCommand(['sleep', 'infinity']); // equivalent to sleep infinity
+      .withEnvironment({ MN_LEDGER_CACHE_DB: '/ledger-cache' })
+      .withCommand(['sleep', 'infinity']);
   }
 
   /**
@@ -402,17 +378,9 @@ class ToolkitWrapper {
    * @throws Error if the container fails to start after the maximum number of retries
    */
   async start() {
-    // Clean up output directory from previous runs (excluding sync cache)
-    if (this.config.targetDir && fs.existsSync(this.config.targetDir)) {
-      const files = fs.readdirSync(this.config.targetDir);
-      for (const file of files) {
-        if (!file.startsWith('.sync_cache')) {
-          const filePath = join(this.config.targetDir, file);
-          fs.rmSync(filePath, { recursive: true, force: true });
-        }
-      }
-      log.debug(`Cleaned output directory: ${this.config.targetDir}`);
-    }
+    const cache = await ensureToolkitCachePostgres();
+    log.debug(`Toolkit fetch cache    : ${cache.host}:${cache.port}/${cache.database}`);
+    this.container.withEnvironment({ MN_FETCH_CACHE: cache.fetchCacheUrl });
 
     this.startedContainer = await retry(async () => this.container.start(), {
       maxRetries: 2,
@@ -421,58 +389,92 @@ class ToolkitWrapper {
     });
   }
 
-  /**
-   * Stop the toolkit container and cleanup resources
-   *
-   * This method stops the running Docker container and removes the instance-specific sync cache
-   * directory (unless warmupCache is enabled). Cleanup errors are logged as warnings but do not
-   * throw exceptions.
-   *
-   * @returns A promise that resolves when the container has stopped and cleanup is complete
-   */
   async stop() {
     if (this.startedContainer) {
+      // Make /out world-writable before stopping so the host process can delete root-owned
+      // files that the container wrote there (e.g. transaction files).
+      try {
+        await this.startedContainer.exec(['chmod', '-R', '777', '/out']);
+      } catch {
+        // Best-effort; cleanup below may still warn if files remain root-owned.
+      }
       await this.startedContainer.stop();
     }
-
-    // Cleanup instance-specific cache directory (not the golden cache)
-    if (!this.config.warmupCache && this.config.syncCacheDir) {
+    if (this.config.targetDir) {
       try {
-        fs.rmSync(this.config.syncCacheDir, { recursive: true, force: true });
-        log.debug(`Cleaned up instance-specific sync cache: ${this.config.syncCacheDir}`);
+        fs.rmSync(this.config.targetDir, { recursive: true, force: true });
+        log.debug(`Cleaned up toolkit target dir: ${this.config.targetDir}`);
       } catch (error) {
-        log.warn(`Failed to cleanup sync cache: ${error}`);
+        log.warn(`Failed to clean up toolkit target dir: ${error}`);
       }
     }
   }
 
   /**
-   * Warm up the cache by generating a single unshielded transaction
-   * This method displays sync progress to the console during warmup.
+   * Returns true when the toolkit error message indicates an RPC-level request timeout,
+   * regardless of how it is spelled (camelCase "RequestTimeout" from the substrate client
+   * or spaced "Request timeout" from the compute-task error path).
+   */
+  private isRpcTimeoutError(error: unknown): boolean {
+    // Match both the camelCase "RequestTimeout" from the substrate client and the
+    // spaced "Request timeout" from the compute-task error path. A plain
+    // toLowerCase().includes('request timeout') misses the camelCase form, which
+    // would silently treat a mid-sync timeout as a completed warmup.
+    return /request[\s_]?timeout/i.test(String(error));
+  }
+
+  /**
+   * Warm up the cache by generating a single unshielded transaction, retrying on RPC timeouts.
    *
-   * @returns void
+   * The toolkit syncs the postgres fetch-cache before attempting the tx. If it hits an
+   * RPC timeout mid-sync it exits with code 1 without writing highest_verified, so the
+   * next run replays from block 0 (cache hits are fast). We retry until the toolkit exits
+   * for a non-timeout reason, which means the sync completed and the tx failed as expected
+   * (invalid seed / insufficient funds).
    */
   async warmupCache() {
     if (!this.startedContainer) {
       throw new Error('Container is not started. Call start() first.');
     }
 
-    // We use generate single tx to warm up the cache because it will try to sync the cache
-    // before it gets to validate the arguments that are wrong on purpose.
-    let output: ToolkitTransactionResult;
-    try {
-      output = await this.generateSingleTx(
-        '0'.repeat(64), // Invalid seed
-        'unshielded',
-        (await this.showAddress('0'.repeat(63) + '9')).unshielded,
-        1,
-      );
-      console.debug(`[SETUP] Warmup cache output:\n${JSON.stringify(output, null, 2)}`);
-    } catch (_error) {
-      log.debug(
-        'Heads up, we are expecting an error here, the following log message is only reported for debugging purposes',
-      );
-      console.debug(`${_error}`);
+    const RETRY_DELAY_MS = 5_000;
+    const MAX_ATTEMPTS = 20;
+    // Resolve destination address once — it is stable across retries.
+    const destinationAddress = (await this.showAddress('0'.repeat(63) + '9')).unshielded;
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        const output = await this.generateSingleTx(
+          '0'.repeat(64), // Invalid seed — forces a full cache sync before the tx is attempted
+          'unshielded',
+          destinationAddress,
+          1,
+        );
+        console.debug(`[SETUP] Warmup cache output:\n${JSON.stringify(output, null, 2)}`);
+        return;
+      } catch (error) {
+        if (this.isRpcTimeoutError(error) && attempt < MAX_ATTEMPTS) {
+          console.log(
+            `[SETUP] Cache sync interrupted by RPC timeout (attempt ${attempt}/${MAX_ATTEMPTS}), ` +
+              `retrying in ${RETRY_DELAY_MS / 1_000}s…`,
+          );
+          await new Promise((res) => setTimeout(res, RETRY_DELAY_MS));
+          continue;
+        }
+        if (this.isRpcTimeoutError(error)) {
+          // Persistent timeout (node down / wedged): give up with a clear error rather
+          // than looping until the CI job-level timeout kills the run.
+          throw new Error(
+            `[SETUP] Cache warmup exhausted ${MAX_ATTEMPTS} RPC-timeout retries; ` +
+              `node RPC appears unreachable. Last error: ${error}`,
+          );
+        }
+        // Any non-timeout error means the sync completed and the tx failed for an expected
+        // reason (invalid seed, insufficient funds, etc.) — warmup is done.
+        log.debug('Warmup completed — expected toolkit error after cache sync');
+        console.debug(`${error}`);
+        return;
+      }
     }
   }
 
@@ -832,7 +834,9 @@ class ToolkitWrapper {
 
     log.info('Submitting transaction to network...');
     const rawOutput = await this.sendGeneratedTx(txFileName);
-    return this.parseTransactionOutput(rawOutput);
+    const result = this.parseTransactionOutput(rawOutput);
+    await resolveBlockHash(result);
+    return result;
   }
 
   /**
@@ -882,8 +886,10 @@ class ToolkitWrapper {
     }
 
     log.info('Running contract maintenance (update)...');
-    const result = await this.execToolkit(maintenanceArgs, 'contract maintenance failed');
-    return this.parseTransactionOutput(result.output.trim());
+    const execResult = await this.execToolkit(maintenanceArgs, 'contract maintenance failed');
+    const result = this.parseTransactionOutput(execResult.output.trim());
+    await resolveBlockHash(result);
+    return result;
   }
 
   /**

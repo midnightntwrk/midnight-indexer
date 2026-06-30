@@ -14,6 +14,7 @@
 pub mod block;
 pub mod contract_action;
 pub mod dataloader;
+pub mod directives;
 pub mod dust;
 pub mod dust_generations;
 pub mod ledger_events;
@@ -34,6 +35,8 @@ use crate::{
     },
     infra::api::{
         ApiResult, ContextExt, Metrics, OptionExt, ResultExt, SubscriptionConfig,
+        progress_cache::ProgressCache,
+        quota::{PerConnectionCounter, SubscriptionQuotas},
         v4::{
             block::BlockOffset,
             dataloader::{
@@ -46,9 +49,17 @@ use crate::{
         },
     },
 };
-use async_graphql::{Context, Schema, SchemaBuilder, dataloader::DataLoader, scalar};
-use async_graphql_axum::{GraphQLRequest, GraphQLResponse, GraphQLSubscription};
-use axum::{Extension, Router, routing::post};
+use async_graphql::{
+    Context, Data, Schema, SchemaBuilder, dataloader::DataLoader, http::ALL_WEBSOCKET_PROTOCOLS,
+    scalar,
+};
+use async_graphql_axum::{GraphQLProtocol, GraphQLRequest, GraphQLResponse, GraphQLWebSocket};
+use axum::{
+    Extension, Router,
+    extract::WebSocketUpgrade,
+    response::Response,
+    routing::{get, post},
+};
 use bech32::{Bech32, Bech32m, Hrp};
 use const_hex::FromHexError;
 use derive_more::{AsRef, Debug, Display};
@@ -353,6 +364,7 @@ pub fn export_schema() -> String {
         .sdl()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn make_app<S, B>(
     network_id: NetworkId,
     ledger_state_cache: LedgerStateCache,
@@ -361,6 +373,8 @@ pub fn make_app<S, B>(
     max_complexity: usize,
     max_depth: usize,
     subscription_config: SubscriptionConfig,
+    quotas: SubscriptionQuotas,
+    progress_cache: ProgressCache,
 ) -> Router<Arc<AtomicBool>>
 where
     S: Storage,
@@ -391,6 +405,8 @@ where
         .data(subscriber)
         .data(metrics)
         .data(subscription_config)
+        .data(quotas)
+        .data(progress_cache)
         .limit_complexity(max_complexity)
         .limit_depth(max_depth)
         .limit_recursive_depth(max_depth)
@@ -398,8 +414,34 @@ where
 
     Router::new()
         .route("/graphql", post(graphql_no_batch::<S, B>))
-        .route_service("/graphql/ws", GraphQLSubscription::new(schema.clone()))
+        .route("/graphql/ws", get(graphql_ws::<S, B>))
         .layer(Extension(schema))
+}
+
+/// Custom WebSocket handler that wires `on_connection_init` to attach a [`PerConnectionCounter`]
+/// to each connection's async-graphql `Data`. The default `GraphQLSubscription` axum service does
+/// not expose `on_connection_init`, so we open the WebSocket directly via `GraphQLWebSocket`.
+#[allow(clippy::type_complexity)]
+async fn graphql_ws<S, B>(
+    Extension(schema): Extension<Schema<Query<S>, Mutation<S>, Subscription<S, B>>>,
+    protocol: GraphQLProtocol,
+    upgrade: WebSocketUpgrade,
+) -> Response
+where
+    S: Storage,
+    B: Subscriber,
+{
+    upgrade
+        .protocols(ALL_WEBSOCKET_PROTOCOLS)
+        .on_upgrade(move |stream| {
+            GraphQLWebSocket::new(stream, schema, protocol)
+                .on_connection_init(|_payload: serde_json::Value| async move {
+                    let mut data = Data::default();
+                    data.insert(PerConnectionCounter::default());
+                    Ok(data)
+                })
+                .serve()
+        })
 }
 
 // This prevents batch requests, because `GraphQLRequest` only accepts single requests.

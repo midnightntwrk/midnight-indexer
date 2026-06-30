@@ -173,6 +173,7 @@ pub async fn run(
                     caught_up_leeway,
                     &mut blocks,
                     ledger_state,
+                    &network_id,
                     &highest_block_on_node,
                     &mut caught_up,
                     &mut parent_block_timestamp,
@@ -292,6 +293,7 @@ async fn get_and_index_block<E, N>(
     caught_up_leeway: u32,
     blocks: &mut (impl Stream<Item = Result<node::Block, E>> + Unpin),
     ledger_state: LedgerState,
+    network_id: &NetworkId,
     highest_block_on_node: &Arc<RwLock<Option<BlockRef>>>,
     caught_up: &mut bool,
     parent_block_timestamp: &mut u64,
@@ -311,6 +313,7 @@ where
         caught_up_leeway,
         block,
         ledger_state,
+        network_id,
         highest_block_on_node,
         caught_up,
         parent_block_timestamp,
@@ -345,6 +348,7 @@ async fn index_block<N>(
     caught_up_leeway: u32,
     block: node::Block,
     mut ledger_state: LedgerState,
+    network_id: &NetworkId,
     highest_block_on_node: &Arc<RwLock<Option<BlockRef>>>,
     caught_up: &mut bool,
     parent_block_timestamp: &mut u64,
@@ -363,9 +367,17 @@ where
     let (mut block, transactions) = block.try_into().context("convert node block into domain")?;
 
     let ledger_version = block.protocol_version.ledger_version();
-    ledger_state = ledger_state
-        .translate(ledger_version)
-        .context("translate ledger state")?;
+    ledger_state = if block.height == 0 {
+        // The genesis block establishes the chain's ledger version. The inherited
+        // bootstrap state was created at OLDEST and is replaced by the genesis state below, so
+        // seed a fresh state at the block's version rather than translating across versions
+        // (which is not supported, e.g. V8 to V9).
+        LedgerState::new(network_id.clone(), ledger_version).context("create ledger state")?
+    } else {
+        ledger_state
+            .translate(ledger_version)
+            .context("translate ledger state")?
+    };
 
     if *parent_block_timestamp == 0 {
         *parent_block_timestamp = block.timestamp;
@@ -427,6 +439,9 @@ where
 
     *parent_block_timestamp = block.timestamp;
     block.ledger_parameters = ledger_parameters.serialize()?;
+    block.zswap_end_index = ledger_state.zswap_first_free();
+    block.dust_commitment_end_index = ledger_state.dust_commitments_first_free();
+    block.dust_generation_end_index = ledger_state.dust_generations_first_free();
 
     // Validate ledger state.
     // TODO: Only use ledger state root comparison once support for Node < 0.22 is dropped!

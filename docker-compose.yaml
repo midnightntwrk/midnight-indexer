@@ -130,6 +130,8 @@ services:
       RUST_LOG: "indexer_standalone=debug,chain_indexer=debug,indexer_api=debug,wallet_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info"
       APP__INFRA__SECRET: $APP__INFRA__SECRET
       APP__INFRA__NODE__URL: "ws://node:9944"
+      APP__INFRA__SPO_NODE__URL: "ws://node:9944"
+      APP__INFRA__SPO_NODE__BLOCKFROST_ID: ${APP__INFRA__SPO_NODE__BLOCKFROST_ID:-dummy-not-using-spo}
     healthcheck:
       test: ["CMD-SHELL", "cat /var/run/indexer-standalone/running"]
       start_interval: "2s"

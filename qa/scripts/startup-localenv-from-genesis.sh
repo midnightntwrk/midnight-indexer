@@ -1,29 +1,11 @@
 #!/bin/bash
 
-if [ -n "$(docker ps -a|grep -e ghcr.io -e nats -e postgres|awk -F " " '{print $1}'
-)" ]; then
-    docker rm -f $(docker ps -a|grep -e ghcr.io -e nats -e postgres|awk -F " " '{print $1}')
-    echo "All Midnight containers removed."
-else
-    echo "No Midnight containers to remove."
-    echo "Everything is clear!"
-fi
+# shellcheck source=qa/scripts/_lib.sh
+. "$(dirname "$0")/_lib.sh"
 
-# Derive Docker Compose project name from directory basename (same way Docker Compose does)
-# Docker Compose normalizes: lowercase, remove dots, keep hyphens
-PROJECT_DIR=$(basename "$(pwd)")
-DOCKER_PROJECT_NAME=$(echo "$PROJECT_DIR" | tr '[:upper:]' '[:lower:]' | sed 's/\.//g')
+DOCKER_PROJECT_NAME=$(derive_docker_project_name)
 
-# Remove the named volume to ensure fresh node data
-if docker volume ls | grep -q "${DOCKER_PROJECT_NAME}_node_data"; then
-    volumes=$(docker volume ls | grep "${DOCKER_PROJECT_NAME}_node_data" | awk -F " " '{print $2}')
-    for volume in $volumes; do
-        docker volume rm $volume
-    done
-    echo "Named volumes removed."
-else
-    echo "No named volumes to remove."
-fi
+teardown_prior_stack "$DOCKER_PROJECT_NAME"
 
 # Use docker to clean postgres and nats data (avoids sudo issues)
 if [ -d "target/data/postgres" ] || [ -d "target/data/nats" ]; then
@@ -45,8 +27,6 @@ export NODE_TAG=${NODE_TAG:-`cat NODE_VERSION`}
 if [ -n "$NODE_TOOLKIT_TAG" ]; then
   echo "Using explicit NODE_TOOLKIT_TAG: $NODE_TOOLKIT_TAG"
 else
-  # If the user explicitly sets NODE_TOOLKIT_TAG=$NODE_TAG, they control it
-  # Otherwise default to latest-main
   export NODE_TOOLKIT_TAG=latest-main
   echo "NODE_TOOLKIT_TAG not set; defaulting to 'latest-main'"
 fi
@@ -70,7 +50,7 @@ echo "      We explicitly manage the node volume externally to ensure it exists 
 if [ -z "${INDEXER_TAG:-}" ]; then
     # Find the commit where NODE_VERSION was set to the current NODE_TAG
     COMMIT_SHA=$(git log --all --format=%H --max-count=1 -S"$NODE_TAG" -- NODE_VERSION)
-    
+
     if [ -n "$COMMIT_SHA" ]; then
         TMP_INDEXER_TAG="3.0.0-$(git rev-parse --short=8 $COMMIT_SHA)"
         echo "Found NODE_VERSION=$NODE_TAG in commit $COMMIT_SHA"
@@ -99,21 +79,13 @@ fi
 echo "Using the following tags:"
 echo " NODE_TAG: $NODE_TAG"
 echo " INDEXER_TAG: $INDEXER_TAG"
-echo " NODE_TOOLKIT_TAG: $NODE_TOOLKIT_TAG" 
+echo " NODE_TOOLKIT_TAG: $NODE_TOOLKIT_TAG"
 
 docker compose --profile cloud up -d
 
-echo "Waiting for indexer API to become ready..."
-for i in {1..30}; do
-  if curl -sf http://localhost:8088/ready >/dev/null; then
-    echo "Indexer API is ready"
-    break
-  fi
-  echo "Not ready yet... ($i)"
-  sleep 2
-done
+wait_for_indexer_ready
 
-docker compose --profile cloud logs | grep "Highest known block" 
+docker compose --profile cloud logs | grep "Highest known block"
 
 
 docker ps --format "table {{.Image}}\t{{.Names}}\t{{.Status}}"
@@ -121,10 +93,10 @@ docker ps --format "table {{.Image}}\t{{.Names}}\t{{.Status}}"
 
 echo "Plase make sure all the services are running and healthy"
 
-echo "Deleting toolkit cache..."
-rm -rf qa/tests/.tmp/toolkit/.sync_cache-undeployed/
+clear_block_scanner_cache
 
 echo "Regenarating new test data... "
+ensure_block_scanner_deps
 pushd qa/tools/block-scanner
 bun run generate:data
 popd

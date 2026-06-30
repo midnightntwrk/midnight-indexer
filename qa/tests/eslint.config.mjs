@@ -41,6 +41,7 @@ export default [
         fetch: 'readonly',
         WebSocket: 'readonly',
         MessageEvent: 'readonly',
+        AbortSignal: 'readonly',
       },
     },
     plugins: {
@@ -90,6 +91,7 @@ export default [
       '**/*.config.ts',
       '**/*.config.mjs',
       'data/**',
+      '.tmp/**',
     ],
   },
 ];

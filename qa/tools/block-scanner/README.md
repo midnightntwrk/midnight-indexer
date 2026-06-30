@@ -41,10 +41,8 @@ START_BLOCK_HEIGHT=1000 TARGET_ENV=devnet bun run src/scanner.ts
 ### Available Environments (these might change in future)
 
 - `undeployed` - Local development (ws://localhost:8088/api/v4/graphql/ws)
-- `nodedev01` - Node dev environment
 - `devnet` - Development network
 - `qanet` - QA network
-- `testnet02` - Test network
 
 ### Scripts
 

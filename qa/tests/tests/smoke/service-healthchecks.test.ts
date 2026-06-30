@@ -36,4 +36,51 @@ describe(`service health checks`, () => {
       expect(response.ok).toBe(true);
     });
   });
+
+  describe.each([
+    ['/api/v3/__regression_unknown_path', '/api/v3/v3'],
+    ['/api/v4/__regression_unknown_path', '/api/v4/v4'],
+  ])(`a request to an unrecognised path %s`, (unknownPath, doubledPrefix) => {
+    /**
+     * Regression test for midnight-indexer#1085: unrecognised paths under
+     * a versioned prefix must not respond with a 308 whose Location
+     * double-prepends that prefix (e.g. /api/v4/schema -> /api/v4/v4/schema),
+     * which causes any client that follows redirects to loop until its
+     * redirect cap is hit. The fix in #1093 covers both /api/v3 and /api/v4,
+     * so this regression suite asserts the same on both.
+     *
+     * @When a GET is sent to an unrecognised path under /api/vN
+     * @Then the response is NOT a 308 redirect whose Location contains the
+     *       doubled version prefix (a 404, or any non-prefix-doubling
+     *       response, is fine)
+     */
+    test('should not 308 to a version-double-prefixed Location', async () => {
+      const targetUrl = baseUrl + unknownPath;
+      log.debug(`Target URL: ${targetUrl}`);
+      const response = await fetch(targetUrl, { redirect: 'manual' });
+      log.debug(`Status: ${response.status}`);
+
+      if (response.status === 308 || response.status === 301 || response.status === 302) {
+        const location = response.headers.get('location') ?? '';
+        log.debug(`Location: ${location}`);
+        expect(location.includes(doubledPrefix)).toBe(false);
+      } else {
+        expect(response.status).toBeGreaterThanOrEqual(400);
+      }
+    });
+
+    /**
+     * Regression test for midnight-indexer#1085: when redirects are followed,
+     * the request must terminate (no infinite redirect loop).
+     *
+     * @When a GET to an unrecognised /api/vN path follows redirects
+     * @Then fetch resolves with a 4xx (no redirect-cap exhaustion)
+     */
+    test('should terminate when redirects are followed', async () => {
+      const targetUrl = baseUrl + unknownPath;
+      const response = await fetch(targetUrl, { redirect: 'follow' });
+      log.debug(`Status (after redirects): ${response.status}`);
+      expect(response.status).toBeGreaterThanOrEqual(400);
+    });
+  });
 });

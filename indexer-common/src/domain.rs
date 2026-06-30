@@ -56,6 +56,7 @@ pub type SerializedZswapMerkleTreeRoot = ByteVec;
 // Tagged serialization: complex types that may evolve; tags allow version-awareness.
 pub type SerializedContractAddress = ByteVec;
 pub type SerializedContractState = ByteVec;
+pub type SerializedDustTreeInsertionPath = ByteVec;
 pub type SerializedLedgerEvent = ByteVec;
 pub type SerializedLedgerParameters = ByteVec;
 pub type SerializedTransaction = ByteVec;
@@ -279,7 +280,7 @@ impl LedgerEvent {
         raw: SerializedLedgerEvent,
         generation_info: dust::DustGenerationInfo,
         generation_index: u64,
-        merkle_path: Vec<dust::DustMerklePathEntry>,
+        tree_insertion_path: SerializedDustTreeInsertionPath,
     ) -> Self {
         Self {
             grouping: LedgerEventGrouping::Dust,
@@ -287,7 +288,7 @@ impl LedgerEvent {
             attributes: LedgerEventAttributes::DustGenerationDtimeUpdate {
                 generation_info,
                 generation_index,
-                merkle_path,
+                tree_insertion_path,
             },
         }
     }
@@ -327,7 +328,10 @@ pub enum LedgerEventAttributes {
     DustGenerationDtimeUpdate {
         generation_info: dust::DustGenerationInfo,
         generation_index: u64,
-        merkle_path: Vec<dust::DustMerklePathEntry>,
+        /// Tagged-serialised `TreeInsertionPath<DustGenerationInfo>` from the
+        /// originating ledger event. Surfaced verbatim on the GraphQL API so
+        /// wallets can hand it to `generating_tree.update_from_evidence(...)`.
+        tree_insertion_path: SerializedDustTreeInsertionPath,
     },
 
     DustSpendProcessed {

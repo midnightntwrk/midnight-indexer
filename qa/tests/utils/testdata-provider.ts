@@ -33,6 +33,40 @@ export interface ContractInfo {
 }
 
 /**
+ * A contract known to hold a non-zero unshielded token balance on the current
+ * environment's chain. Used by the unshieldedBalances regression tests (#1245):
+ * the field silently returned an empty array for every contract from 3.0.0 to
+ * 4.3.3, which format-only assertions could not catch.
+ */
+export interface TokenHoldingContractInfo {
+  /** Hex-encoded contract address. */
+  'contract-address': string;
+  /** Hex-encoded unshielded token type expected among the contract's balances. */
+  'token-type'?: string;
+}
+
+/**
+ * Snapshot of a Cardano stake credential whose wallet has multiple backing
+ * cNIGHT UTXOs. Used by the `dustGenerationStatus` aggregation test (#926):
+ * the test asserts the indexer's reported `nightBalance` matches
+ * `expectedTotalRaw`, and uses `individualAmountsRaw` for drift detection
+ * (pre-fix the indexer reports a single UTXO's amount, which should match
+ * one of the recorded individual amounts).
+ */
+export interface MultiUtxoCandidate {
+  /** Cardano payment address currently holding the backing cNIGHT UTXOs. */
+  cardanoAddress: string;
+  /** CIP-19 stake address registered for DUST generation. */
+  cardanoStakeKey: string;
+  /** Number of backing cNIGHT UTXOs at the snapshot date. */
+  expectedUtxoCount: number;
+  /** Sum of raw cNIGHT amounts across all backing UTXOs at the snapshot date. */
+  expectedTotalRaw: number;
+  /** Raw cNIGHT amount of each backing UTXO at the snapshot date. */
+  individualAmountsRaw: number[];
+}
+
+/**
  * Imports and parses JSONC data from a file.
  * @param filePath - The path to the JSONC file.
  * @returns The parsed JSON data.
@@ -49,19 +83,18 @@ function importJsoncData(filePath: string): JsonValue {
 class TestDataProvider {
   private cardanoRewardAddresses: Record<string, string>;
   private unshieldedAddresses: Record<string, string>;
+  private multiUtxoCandidates: MultiUtxoCandidate[] | null;
 
   constructor() {
     this.cardanoRewardAddresses = {};
     this.unshieldedAddresses = {};
+    this.multiUtxoCandidates = null;
   }
 
   /**
    * Gets the funding seed for the current environment.
    * First checks for an environment-specific variable (e.g., FUNDING_SEED_PREVIEW),
    * then falls back to a default seed for undeployed environments.
-   *
-   * Note that for node-dev-01 the variable will have to be FUNDING_SEED_NODE_DEV_01
-   * as "-" is not allowed in environment variable names.
    * @returns The funding seed as a string.
    */
   getFundingSeed() {
@@ -411,6 +444,54 @@ class TestDataProvider {
       );
     }
     return this.cardanoRewardAddresses[property];
+  }
+
+  /**
+   * Returns the multi-UTXO candidate snapshots for the current environment.
+   * Each entry is a Cardano stake credential whose wallet has multiple
+   * backing cNIGHT UTXOs (per-UTXO amounts + total). Loaded lazily from
+   * `cardano-stake-addresses.jsonc` under the `multi-utxo` key.
+   * @returns The array of candidate snapshots (empty if the fixture has none).
+   * @throws Error if the fixture file is missing for the current environment.
+   */
+  getMultiUtxoCandidates(): MultiUtxoCandidate[] {
+    const envName = env.getCurrentEnvironmentName();
+    if (this.multiUtxoCandidates === null) {
+      const baseDir = `data/static/${envName}`;
+      let parsed: JsonValue;
+      try {
+        parsed = importJsoncData(`${baseDir}/cardano-stake-addresses.jsonc`);
+      } catch (_) {
+        throw new Error(
+          `Test data provider is missing the cardano stake address file for ${envName} environment`,
+        );
+      }
+      const candidates = (parsed as JsonObject)['multi-utxo'];
+      this.multiUtxoCandidates = Array.isArray(candidates)
+        ? (candidates as unknown as MultiUtxoCandidate[])
+        : [];
+    }
+    return this.multiUtxoCandidates;
+  }
+
+  /**
+   * Gets the contracts known to hold non-zero unshielded token balances on the current
+   * environment's chain. Used by the unshieldedBalances regression tests (#1245).
+   * @returns An array of token-holding contract entries.
+   * @throws Error if the current environment has no token-holding contracts file.
+   */
+  getTokenHoldingContracts(): TokenHoldingContractInfo[] {
+    const envName = env.getCurrentEnvironmentName();
+    const baseDir = `data/static/${envName}`;
+    let contracts: JsonValue;
+    try {
+      contracts = importJsoncData(`${baseDir}/token-holding-contracts.jsonc`);
+    } catch (_) {
+      throw new Error(
+        `Test data provider is missing the token holding contracts file for ${envName} environment`,
+      );
+    }
+    return Array.isArray(contracts) ? (contracts as unknown as TokenHoldingContractInfo[]) : [];
   }
 
   /**

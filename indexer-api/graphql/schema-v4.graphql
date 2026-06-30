@@ -31,6 +31,18 @@ type Block {
 	"""
 	ledgerParameters: HexEncoded!
 	"""
+	The zswap commitment tree end index at this block; exclusive, i.e. the next free index.
+	"""
+	zswapEndIndex: Int!
+	"""
+	The dust commitment tree end index at this block; exclusive, i.e. the next free index.
+	"""
+	dustCommitmentEndIndex: Int! @beta
+	"""
+	The dust generation tree end index at this block; exclusive, i.e. the next free index.
+	"""
+	dustGenerationEndIndex: Int! @beta
+	"""
 	The parent of this block.
 	"""
 	parent: Block
@@ -302,6 +314,43 @@ type DustGenerationDtimeUpdate implements DustLedgerEvent {
 }
 
 """
+A dust generation dtime update emitted when the backing Night UTXO is
+spent and the entry's decay time is set.
+"""
+type DustGenerationDtimeUpdateItem @beta {
+	"""
+	Generation-tree index of the entry whose dtime changed.
+	"""
+	generationMtIndex: Int!
+	"""
+	The hex-encoded owner (dust address).
+	"""
+	owner: HexEncoded!
+	"""
+	Hex-encoded hash of the NIGHT UTXO that backs this dust output.
+	"""
+	nightUtxoHash: HexEncoded!
+	"""
+	The decay time as observed in this ledger event.
+	"""
+	newDtime: Int!
+	"""
+	The originating transaction ID (indexer-internal BIGSERIAL).
+	"""
+	transactionId: Int!
+	"""
+	The hex-encoded originating transaction hash (32-byte chain identifier).
+	"""
+	transactionHash: HexEncoded!
+	"""
+	Hex-encoded tagged-serialised `TreeInsertionPath<DustGenerationInfo>`
+	from the originating ledger event. Wallets deserialise this and hand
+	it to `generating_tree.update_from_evidence(...)`.
+	"""
+	treeInsertionPath: HexEncoded!
+}
+
+"""
 DUST generation status for a specific Cardano reward address.
 """
 type DustGenerationStatus {
@@ -360,12 +409,12 @@ type DustGenerations {
 """
 An event of the dust generations subscription.
 """
-union DustGenerationsEvent = DustGenerationsItem | DustGenerationsProgress
+union DustGenerationsEvent = DustGenerationsItem | DustGenerationsProgress | DustGenerationDtimeUpdateItem
 
 """
 A dust generations item with optional collapsed Merkle tree update.
 """
-type DustGenerationsItem {
+type DustGenerationsItem @beta {
 	"""
 	Index of this output in the dust commitment Merkle tree.
 	"""
@@ -395,9 +444,13 @@ type DustGenerationsItem {
 	"""
 	ctime: Int!
 	"""
-	The originating transaction ID.
+	The originating transaction ID (indexer-internal BIGSERIAL).
 	"""
 	transactionId: Int!
+	"""
+	The hex-encoded originating transaction hash (32-byte chain identifier).
+	"""
+	transactionHash: HexEncoded!
 	"""
 	Collapsed Merkle tree update filling the gap before this entry.
 	"""
@@ -407,7 +460,7 @@ type DustGenerationsItem {
 """
 Progress indicator for dust generations subscription (includes final collapsed update).
 """
-type DustGenerationsProgress {
+type DustGenerationsProgress @beta {
 	"""
 	The highest index processed so far.
 	"""
@@ -456,17 +509,21 @@ A transaction containing a dust nullifier match with block context.
 """
 type DustNullifierTransaction {
 	"""
-	The hex-encoded matched nullifier.
+	The hex-encoded matched nullifier, in 32-byte little-endian form.
 	"""
-	nullifier: HexEncoded!
+	nullifierLeBytes: HexEncoded! @beta
 	"""
-	The hex-encoded commitment.
+	The hex-encoded commitment, in 32-byte little-endian form.
 	"""
-	commitment: HexEncoded!
+	commitmentLeBytes: HexEncoded! @beta
 	"""
-	The transaction ID (use to query full transaction via `transaction` query).
+	The transaction ID (indexer-internal BIGSERIAL, use as resumption cursor).
 	"""
 	transactionId: Int!
+	"""
+	The hex-encoded transaction hash (32-byte chain identifier).
+	"""
+	transactionHash: HexEncoded!
 	"""
 	The block height containing this transaction.
 	"""
@@ -475,6 +532,10 @@ type DustNullifierTransaction {
 	The hex-encoded block hash (use to query block with ledger parameters).
 	"""
 	blockHash: HexEncoded!
+	"""
+	The transaction containing this nullifier match.
+	"""
+	transaction: Transaction! @beta
 }
 
 """
@@ -680,11 +741,11 @@ type Query {
 	"""
 	Get a collapsed Merkle tree update for the dust commitment tree.
 	"""
-	dustCommitmentMerkleTreeUpdate(startIndex: Int!, endIndex: Int!): MerkleTreeCollapsedUpdate!
+	dustCommitmentMerkleTreeUpdate(startIndex: Int!, endIndex: Int!): MerkleTreeCollapsedUpdate! @beta
 	"""
 	Get a collapsed Merkle tree update for the dust generation tree.
 	"""
-	dustGenerationMerkleTreeUpdate(startIndex: Int!, endIndex: Int!): MerkleTreeCollapsedUpdate!
+	dustGenerationMerkleTreeUpdate(startIndex: Int!, endIndex: Int!): MerkleTreeCollapsedUpdate! @beta
 	"""
 	Get the full history of D-parameter changes for governance auditability.
 	"""
@@ -851,19 +912,19 @@ type RegularTransaction implements Transaction {
 	"""
 	The dust commitment tree start index.
 	"""
-	dustCommitmentStartIndex: Int!
+	dustCommitmentStartIndex: Int! @beta
 	"""
 	The dust commitment tree end index.
 	"""
-	dustCommitmentEndIndex: Int!
+	dustCommitmentEndIndex: Int! @beta
 	"""
 	The dust generation tree start index.
 	"""
-	dustGenerationStartIndex: Int!
+	dustGenerationStartIndex: Int! @beta
 	"""
 	The dust generation tree end index.
 	"""
-	dustGenerationEndIndex: Int!
+	dustGenerationEndIndex: Int! @beta
 	"""
 	The fee for this transaction in SPECK (atomic unit of DUST).
 	"""
@@ -939,9 +1000,13 @@ A transaction containing a shielded (zswap) nullifier match with block context.
 """
 type ShieldedNullifierTransaction {
 	"""
-	The transaction ID (use to query full transaction via `transaction` query).
+	The transaction ID (indexer-internal BIGSERIAL, use as resumption cursor).
 	"""
 	transactionId: Int!
+	"""
+	The hex-encoded transaction hash (32-byte chain identifier).
+	"""
+	transactionHash: HexEncoded!
 	"""
 	The hex-encoded block hash (use to query block with ledger parameters).
 	"""
@@ -954,6 +1019,10 @@ type ShieldedNullifierTransaction {
 	The hex-encoded matched nullifier.
 	"""
 	nullifier: HexEncoded!
+	"""
+	The transaction containing this nullifier match.
+	"""
+	transaction: Transaction! @beta
 }
 
 """
@@ -1109,21 +1178,22 @@ type Subscription {
 	"""
 	contractActions(address: HexEncoded!, offset: BlockOffset): ContractAction!
 	"""
-	Subscribe to dust generation entries for a dust address within an index range.
-	Entries are interleaved with collapsed Merkle tree updates to fill gaps.
-	The subscription finishes after reaching the end index with a final collapsed update.
+	Subscribe to dust generation entries for a dust address in `[start_index, end_index]`
+	inclusive. `dustGenerationEndIndex` is exclusive, pass `dustGenerationEndIndex - 1`.
+	Entries interleaved with collapsed Merkle tree updates and owned-entry dtime updates.
 	"""
-	dustGenerations(dustAddress: HexEncoded!, startIndex: Int!, endIndex: Int!): DustGenerationsEvent!
+	dustGenerations(dustAddress: DustAddress!, startIndex: Int!, endIndex: Int!): DustGenerationsEvent! @beta
 	"""
 	Subscribe to dust ledger events starting at the given ID or at the very start if omitted.
 	"""
 	dustLedgerEvents(id: Int): DustLedgerEvent!
 	"""
-	Subscribe to transactions containing dust nullifiers matching the provided prefixes.
-	Returns transaction and block references for wallet to fetch full data.
-	If `toBlock` is specified, the subscription finishes after reaching that block.
+	Subscribe to transactions containing dust nullifiers whose 32-byte little-endian form
+	starts with one of the provided prefixes. Returns transaction and block references for
+	the wallet to fetch full data. If `toBlock` is specified, the subscription finishes
+	after reaching that block.
 	"""
-	dustNullifierTransactions(nullifierPrefixes: [HexEncoded!]!, fromBlock: Int, toBlock: Int): DustNullifierTransaction!
+	dustNullifierTransactions(nullifierLeBytesPrefixes: [HexEncoded!]!, fromBlock: Int, toBlock: Int): DustNullifierTransaction!
 	"""
 	Subscribe to transactions containing shielded (zswap) nullifiers matching the provided
 	prefixes. Returns transaction and block references for wallet to fetch full data.
@@ -1415,6 +1485,15 @@ type ZswapLedgerEvent {
 	protocolVersion: Int!
 }
 
+"""
+Marks a schema field or type as in-flight / unstable. Consumers should
+expect the marked surface to change without notice; stability is signalled
+by removal of the directive.
+
+Currently used for the dust-generation API surface that's in mid-redesign
+pending #1181. See #1173.
+"""
+directive @beta on FIELD_DEFINITION | OBJECT
 """
 Marks an element of a GraphQL schema as no longer supported.
 """

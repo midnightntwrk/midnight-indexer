@@ -66,8 +66,8 @@ describe('key material derivation validation', () => {
         const address = (await toolkit.showAddress(seed, envName)).shielded;
         log.info(`Shielded address: ${address}`);
 
-        // Address prefix uses network ID (e.g. qanet.dev env uses network ID "qanet")
-        const networkId = envName === 'qanet.dev' ? 'qanet' : envName;
+        // Address prefix uses network ID
+        const networkId = envName;
         const addressPrefix =
           networkId === 'mainnet' ? `mn_shield-addr` : `mn_shield-addr_${networkId}`;
         expect(address).toMatch(new RegExp(`^${addressPrefix}`));
@@ -108,8 +108,8 @@ describe('key material derivation validation', () => {
         const address = (await toolkit.showAddress(seed, envName)).unshielded;
         log.info(`Unshielded address: ${address}`);
 
-        // Address prefix uses network ID (e.g. qanet.dev env uses network ID "qanet")
-        const networkId = envName === 'qanet.dev' ? 'qanet' : envName;
+        // Address prefix uses network ID
+        const networkId = envName;
         const addressPrefix = networkId === 'mainnet' ? `mn_addr` : `mn_addr_${networkId}`;
         expect(address).toMatch(new RegExp(`^${addressPrefix}`));
       }
@@ -147,8 +147,8 @@ describe('key material derivation validation', () => {
         const address = await toolkit.showViewingKey(seed, envName);
         log.info(`Viewing key for ${envName}: ${address}`);
 
-        // Viewing key prefix uses network ID (e.g. qanet.dev env uses network ID "qanet")
-        const networkId = envName === 'qanet.dev' ? 'qanet' : envName;
+        // Viewing key prefix uses network ID
+        const networkId = envName;
         const addressPrefix =
           networkId === 'mainnet' ? `mn_shield-esk` : `mn_shield-esk_${networkId}`;
         expect(address).toMatch(new RegExp(`^${addressPrefix}`));

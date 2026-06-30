@@ -378,6 +378,90 @@ describe('block queries', () => {
       }
     });
   });
+
+  /**
+   * Coverage for midnight-indexer#1139.
+   *
+   * Three new fields were added to the `Block` GraphQL type:
+   *   - `zswapEndIndex: Int!`
+   *   - `dustCommitmentEndIndex: Int! @beta`
+   *   - `dustGenerationEndIndex: Int! @beta`
+   *
+   * These carry the chain's per-tree first-free index as of each block,
+   * monotonically non-decreasing, letting wallets bound their sync range
+   * directly from a block query instead of scanning transactions.
+   */
+  describe('block-level tree end indexes', () => {
+    /**
+     * @given the latest indexed block
+     * @when tree end index fields are read
+     * @then zswapEndIndex, dustCommitmentEndIndex and dustGenerationEndIndex
+     *       are non-negative integers
+     *
+     * midnight-indexer#1139
+     */
+    test('should return non-negative integers for all three tree end index fields', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['Query', 'Block', 'EndIndex', '#1139'],
+      };
+
+      const response = await indexerHttpClient.getLatestBlock();
+      expect(response).toBeSuccess();
+      const block = response.data!.block;
+
+      log.debug(
+        `Latest block ${block.hash} (height=${block.height}): ` +
+          `zswapEndIndex=${block.zswapEndIndex}, ` +
+          `dustCommitmentEndIndex=${block.dustCommitmentEndIndex}, ` +
+          `dustGenerationEndIndex=${block.dustGenerationEndIndex}`,
+      );
+
+      expect(block.zswapEndIndex).toBeGreaterThanOrEqual(0);
+      expect(Number.isInteger(block.zswapEndIndex)).toBe(true);
+
+      expect(block.dustCommitmentEndIndex).toBeGreaterThanOrEqual(0);
+      expect(Number.isInteger(block.dustCommitmentEndIndex)).toBe(true);
+
+      expect(block.dustGenerationEndIndex).toBeGreaterThanOrEqual(0);
+      expect(Number.isInteger(block.dustGenerationEndIndex)).toBe(true);
+    });
+
+    /**
+     * @given two consecutive blocks — the latest block and its parent
+     * @when tree end indexes are compared between parent and child
+     * @then each index on the parent is <= the same index on the child
+     */
+    test('should return non-decreasing tree end indexes from parent to child block', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['Query', 'Block', 'EndIndex', 'Monotonicity', '#1139'],
+      };
+
+      const latestResponse = await indexerHttpClient.getLatestBlock();
+      expect(latestResponse).toBeSuccess();
+      const latest = latestResponse.data!.block;
+
+      if (latest.height === 0) {
+        log.warn('Only genesis block available — skipping monotonicity check');
+        ctx.skip?.();
+        return;
+      }
+
+      const parentResponse = await indexerHttpClient.getBlockByOffset({
+        height: latest.height - 1,
+      });
+      expect(parentResponse).toBeSuccess();
+      const parent = parentResponse.data!.block;
+
+      log.debug(
+        `Monotonicity: parent(h=${parent.height}) zswap=${parent.zswapEndIndex} dustC=${parent.dustCommitmentEndIndex} dustG=${parent.dustGenerationEndIndex}` +
+          ` ≤ child(h=${latest.height}) zswap=${latest.zswapEndIndex} dustC=${latest.dustCommitmentEndIndex} dustG=${latest.dustGenerationEndIndex}`,
+      );
+
+      expect(latest.zswapEndIndex).toBeGreaterThanOrEqual(parent.zswapEndIndex);
+      expect(latest.dustCommitmentEndIndex).toBeGreaterThanOrEqual(parent.dustCommitmentEndIndex);
+      expect(latest.dustGenerationEndIndex).toBeGreaterThanOrEqual(parent.dustGenerationEndIndex);
+    });
+  });
 });
 
 /**
@@ -561,6 +645,73 @@ describe(`genesis block`, () => {
         );
         expect.soft(currentOutputIndex).toBeGreaterThan(previousOutputIndex);
       }
+    });
+
+    /**
+     * Genesis block regular transactions should have valid index ranges
+     *
+     * @given the genesis block is indexed
+     * @when we inspect its regular transactions
+     * @then endIndex >= startIndex for zswap, dustCommitment, and dustGeneration indices
+     */
+    test('should contain valid index ranges on regular transactions', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['Query', 'Transaction', 'IndexFields', 'Genesis'],
+      };
+
+      const genesisTransactions = await extractGenesisTransactions(genesisBlock);
+      const regularTxs = genesisTransactions.filter(
+        (tx) => tx.__typename === 'RegularTransaction',
+      ) as RegularTransaction[];
+
+      expect(regularTxs.length).toBeGreaterThan(0);
+
+      for (const tx of regularTxs) {
+        log.debug(
+          `Transaction ${tx.hash}: zswap=[${tx.zswapStartIndex}, ${tx.zswapEndIndex}], dustCommitment=[${tx.dustCommitmentStartIndex}, ${tx.dustCommitmentEndIndex}], dustGeneration=[${tx.dustGenerationStartIndex}, ${tx.dustGenerationEndIndex}]`,
+        );
+
+        expect(tx.zswapEndIndex!).toBeGreaterThanOrEqual(tx.zswapStartIndex!);
+        expect(tx.dustCommitmentEndIndex!).toBeGreaterThanOrEqual(tx.dustCommitmentStartIndex!);
+        expect(tx.dustGenerationEndIndex!).toBeGreaterThanOrEqual(tx.dustGenerationStartIndex!);
+      }
+    });
+
+    /**
+     * @given the genesis block containing RegularTransactions and a SystemTransaction
+     * @when block-level end indexes are compared to the max RegularTransaction end indexes
+     * @then each block-level end index is >= the RegularTransaction max
+     *       (the SystemTransaction seeding dust generation advances the block
+     *       index beyond what RegularTransactions alone contribute,
+     *       e.g. dustGenerationEndIndex 85 vs RegularTransaction max 20)
+     *
+     * midnight-indexer#1139
+     */
+    test('should return block-level end indexes >= max RegularTransaction end indexes', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['Query', 'Block', 'EndIndex', 'Consistency', '#1139'],
+      };
+
+      const genesisTransactions = await extractGenesisTransactions(genesisBlock);
+      const regularTxs = genesisTransactions.filter(
+        (tx) => tx.__typename === 'RegularTransaction',
+      ) as RegularTransaction[];
+
+      expect(regularTxs.length).toBeGreaterThan(0);
+
+      const maxZswap = Math.max(...regularTxs.map((tx) => tx.zswapEndIndex ?? 0));
+      const maxDustCommitment = Math.max(...regularTxs.map((tx) => tx.dustCommitmentEndIndex ?? 0));
+      const maxDustGeneration = Math.max(...regularTxs.map((tx) => tx.dustGenerationEndIndex ?? 0));
+
+      log.debug(
+        `Genesis block end indexes — block: zswap=${genesisBlock.zswapEndIndex}, ` +
+          `dustC=${genesisBlock.dustCommitmentEndIndex}, dustG=${genesisBlock.dustGenerationEndIndex} | ` +
+          `max tx: zswap=${maxZswap}, dustC=${maxDustCommitment}, dustG=${maxDustGeneration}`,
+      );
+
+      expect(genesisBlock.zswapEndIndex).toBeGreaterThanOrEqual(maxZswap);
+      expect(genesisBlock.dustCommitmentEndIndex).toBeGreaterThanOrEqual(maxDustCommitment);
+      expect(genesisBlock.dustGenerationEndIndex).toBeGreaterThanOrEqual(maxDustGeneration);
     });
   });
 });

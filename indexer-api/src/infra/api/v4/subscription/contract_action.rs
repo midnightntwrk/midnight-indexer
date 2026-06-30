@@ -58,6 +58,11 @@ where
             .hex_decode()
             .map_err_into_client_error(|| "invalid address")?;
 
+        let quota_guard = cx
+            .get_subscription_quotas()
+            .try_acquire(cx.get_per_connection_counter(), None)
+            .map_err_into_client_error(|| "subscription limit exceeded")?;
+
         let storage = cx.get_storage::<S>();
         let subscriber = cx.get_subscriber::<B>();
         let batch_size = cx.get_subscription_config().contract_actions.batch_size;
@@ -73,6 +78,8 @@ where
             .unwrap_or_default();
 
         let contract_actions = try_stream! {
+            let _hold = quota_guard;
+
             // Stream existing contract actions.
             debug!(contract_action_id; "streaming existing contract actions");
 

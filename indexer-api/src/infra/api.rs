@@ -11,13 +11,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod progress_cache;
+pub mod quota;
 pub mod v4;
 
 use crate::{
     domain::{Api, LedgerStateCache, storage::Storage},
-    infra::api::v4::dataloader::{
-        BlockByHashLoader, ContractActionsByTransactionIdLoader, TransactionByIdLoader,
-        TransactionsByBlockIdLoader,
+    infra::api::{
+        progress_cache::{ProgressCache, ProgressCacheConfig},
+        quota::{PerConnectionCounter, QuotaConfig, SubscriptionQuotas},
+        v4::dataloader::{
+            BlockByHashLoader, ContractActionsByTransactionIdLoader, TransactionByIdLoader,
+            TransactionsByBlockIdLoader,
+        },
     },
 };
 use async_graphql::{Context, dataloader::DataLoader};
@@ -47,7 +53,7 @@ use std::{
     num::NonZeroU32,
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -100,6 +106,7 @@ where
             max_complexity,
             max_depth,
             subscription_config,
+            quota_config,
         } = self.config;
 
         let app = make_app(
@@ -111,6 +118,7 @@ where
             max_complexity,
             max_depth,
             subscription_config,
+            quota_config,
         );
 
         let listener = TcpListener::bind((address, port))
@@ -139,6 +147,9 @@ pub struct Config {
 
     #[serde(rename = "subscription")]
     pub subscription_config: SubscriptionConfig,
+
+    #[serde(rename = "quota")]
+    pub quota_config: QuotaConfig,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -148,6 +159,7 @@ pub struct SubscriptionConfig {
     pub dust_generations: DustGenerationsSubscriptionConfig,
     dust_ledger_events: DustLedgerEventsSubscriptionConfig,
     pub dust_nullifier_transactions: DustNullifierTransactionsSubscriptionConfig,
+    progress_cache: ProgressCacheConfig,
     pub shielded_nullifier_transactions: ShieldedNullifierTransactionsSubscriptionConfig,
     shielded_transactions: ShieldedTransactionsSubscriptionConfig,
     unshielded_transactions: UnshieldedTransactionsSubscriptionConfig,
@@ -242,12 +254,15 @@ fn make_app<S, B>(
     max_complexity: usize,
     max_depth: usize,
     subscription_config: SubscriptionConfig,
+    quota_config: QuotaConfig,
 ) -> Router
 where
     S: Storage,
     B: Subscriber,
 {
     let ledger_state_cache = LedgerStateCache::default();
+    let quotas = SubscriptionQuotas::new(quota_config);
+    let progress_cache = ProgressCache::new(subscription_config.progress_cache);
 
     let v4_app = v4::make_app(
         network_id,
@@ -257,11 +272,14 @@ where
         max_complexity,
         max_depth,
         subscription_config,
+        quotas,
+        progress_cache,
     );
 
     // For some reason the FastraceLayer and RequestBodyLimitLayer cannot be put into a
     // ServiceBuilder together, so we use `Router::layer` with the inverted (bottom to top) order.
     Router::new()
+        .route("/live", get(live))
         .route("/ready", get(ready))
         .nest("/api/v3", v4_app.clone()) // v3 is an alias to v4 for backwards compatibility.
         .nest("/api/v4", v4_app)
@@ -276,6 +294,13 @@ where
         .layer(CorsLayer::permissive())
 }
 
+// Returns 200 when reachable. If the runtime is parked (e.g. storage-core deadlock during
+// `creating dust generations collapsed update`), this handler does not run; kubelet's
+// liveness probe times out and the pod is terminated and recreated.
+async fn live() -> impl IntoResponse {
+    StatusCode::OK.into_response()
+}
+
 async fn ready(State(caught_up): State<Arc<AtomicBool>>) -> impl IntoResponse {
     if !caught_up.load(Ordering::Acquire) {
         (
@@ -288,8 +313,16 @@ async fn ready(State(caught_up): State<Arc<AtomicBool>>) -> impl IntoResponse {
     }
 }
 
-async fn redirect_api_to_latest(OriginalUri(uri): OriginalUri) -> Redirect {
-    redirect_to_latest(uri, "/api")
+async fn redirect_api_to_latest(OriginalUri(uri): OriginalUri) -> Response {
+    // Avoid redirecting paths already under a known API version, otherwise the redirect prepends
+    // `/api/v4` again and the client follows itself into an infinite loop. Unrecognised paths
+    // under a known version should 404 like any other unknown route.
+    let path = uri.path();
+    if path.starts_with("/api/v3/") || path.starts_with("/api/v4/") {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+
+    redirect_to_latest(uri, "/api").into_response()
 }
 
 fn redirect_to_latest(uri: Uri, target: &str) -> Redirect {
@@ -370,6 +403,12 @@ trait ContextExt {
     fn get_metrics(&self) -> &Metrics;
 
     fn get_subscription_config(&self) -> &SubscriptionConfig;
+
+    fn get_subscription_quotas(&self) -> &SubscriptionQuotas;
+
+    fn get_progress_cache(&self) -> &ProgressCache;
+
+    fn get_per_connection_counter(&self) -> &Arc<AtomicUsize>;
 }
 
 impl ContextExt for Context<'_> {
@@ -439,6 +478,23 @@ impl ContextExt for Context<'_> {
     fn get_subscription_config(&self) -> &SubscriptionConfig {
         self.data::<SubscriptionConfig>()
             .expect("SubscriptionConfig is stored in Context")
+    }
+
+    fn get_subscription_quotas(&self) -> &SubscriptionQuotas {
+        self.data::<SubscriptionQuotas>()
+            .expect("SubscriptionQuotas is stored in Context")
+    }
+
+    fn get_progress_cache(&self) -> &ProgressCache {
+        self.data::<ProgressCache>()
+            .expect("ProgressCache is stored in Context")
+    }
+
+    fn get_per_connection_counter(&self) -> &Arc<AtomicUsize> {
+        &self
+            .data::<PerConnectionCounter>()
+            .expect("PerConnectionCounter is stored in per-connection Data via on_connection_init")
+            .0
     }
 }
 
@@ -539,3 +595,35 @@ impl StdError for ApiError {}
 #[derive(Debug, Clone, Error)]
 #[error("{0}")]
 pub struct InnerApiError(String, #[source] Option<Arc<dyn StdError + Send + Sync>>);
+
+#[cfg(test)]
+mod tests {
+    use crate::infra::api::redirect_api_to_latest;
+    use axum::{
+        extract::OriginalUri,
+        http::{StatusCode, Uri, header},
+    };
+
+    /// Regression for #1085, an unrecognised path under `/api/v4` must not redirect to a
+    /// `/api/v4/v4/...` URL (which would loop indefinitely). Same guard applies to `/api/v3`.
+    #[tokio::test]
+    async fn unknown_versioned_paths_return_404() {
+        for path in ["/api/v4/schema", "/api/v3/schema"] {
+            let uri: Uri = path.parse().unwrap();
+            let response = redirect_api_to_latest(OriginalUri(uri)).await;
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        }
+    }
+
+    /// Unversioned `/api/...` paths still get the existing redirect to the latest version.
+    #[tokio::test]
+    async fn unversioned_api_path_redirects_to_latest() {
+        let uri: Uri = "/api/foo".parse().unwrap();
+        let response = redirect_api_to_latest(OriginalUri(uri)).await;
+        assert_eq!(response.status(), StatusCode::PERMANENT_REDIRECT);
+        assert_eq!(
+            response.headers().get(header::LOCATION).unwrap(),
+            "/api/v4/foo"
+        );
+    }
+}

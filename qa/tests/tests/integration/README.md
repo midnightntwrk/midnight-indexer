@@ -28,11 +28,17 @@ Integration tests should be executed:
 
 ## Execution
 
+The framework provisions the local stack automatically when
+`TARGET_ENV=undeployed`. `NODE_TAG` and `INDEXER_TAG` must be set; see the
+top-level [`qa/tests/README.md`](../../README.md) for the full flow and
+clash-safety rules.
+
 ```bash
-# Run only integration tests
-bash qa/scripts/startup-localenv-with-data.sh
-TARGET_ENV=undeployed yarn test:integration
+# From qa/tests
+NODE_TAG=1.0.0-rc.8 INDEXER_TAG=4.3.2-rc.1 TARGET_ENV=undeployed yarn test:integration
 ```
 
-These tests run without the toolkit cache warmup and can start immediately. They require a running indexer with pre-seeded test data.
+These tests run without the toolkit cache warmup and start as soon as the
+stack reports ready. They require an indexer with pre-seeded test data
+(handled by the with-data provisioning script the framework invokes).
 

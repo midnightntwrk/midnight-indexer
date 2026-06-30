@@ -15,7 +15,7 @@
 
 import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
-import { env, EnvironmentName } from 'environment/model';
+import { env } from 'environment/model';
 import dataProvider from 'utils/testdata-provider';
 import { GraphQLError } from 'graphql/error/GraphQLError';
 import {
@@ -24,6 +24,7 @@ import {
   UnshieldedTransactionSubscriptionParams,
   UnshieldedTxSubscriptionResponse,
 } from '@utils/indexer/websocket-client';
+import { buildErrorPayload } from '@utils/indexer/subscription-error';
 import type {
   UnshieldedTransaction,
   UnshieldedTransactionEvent,
@@ -38,6 +39,38 @@ import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
 
 let toolkit: ToolkitWrapper;
 let indexerWsClient: IndexerWsClient;
+
+/**
+ * Factory that returns a stateful stop-condition predicate for
+ * unshielded-transaction subscriptions.
+ *
+ * Each call to the returned predicate inspects only the *last* message
+ * (O(1)), updating running state rather than sweeping the full array.
+ * Returns true once a `UnshieldedTransactionsProgress` message has been
+ * seen AND the highest `UnshieldedTransaction` id collected so far meets
+ * or exceeds the progress message's `highestTransactionId`.
+ *
+ * Use this instead of `() => false` or `messages[0].errors !== undefined`
+ * — both of which never actually trigger on the happy path and force the
+ * subscription to be cut off by the helper's wall-clock timeout, which
+ * fails the equality assertion against a moving head on busy addresses.
+ */
+function makeCaughtUpPredicate(): (messages: UnshieldedTxSubscriptionResponse[]) => boolean {
+  let progressTxId = -1;
+  let sawProgress = false;
+  let highestFound = -1;
+  return (messages: UnshieldedTxSubscriptionResponse[]): boolean => {
+    const last = messages[messages.length - 1];
+    const ev = last?.data?.unshieldedTransactions as UnshieldedTransactionEvent | undefined;
+    if (ev?.__typename === 'UnshieldedTransactionsProgress') {
+      progressTxId = ev.highestTransactionId;
+      sawProgress = true;
+    } else if (ev?.__typename === 'UnshieldedTransaction' && ev.transaction.id != null) {
+      if (ev.transaction.id > highestFound) highestFound = ev.transaction.id;
+    }
+    return sawProgress && highestFound >= progressTxId;
+  };
+}
 
 /**
  * Utility function to subscribe to unshielded transaction events by address and/or transaction id.
@@ -75,6 +108,14 @@ async function subscribeToUnshieldedTransactionEvents(
       next: (payload) => {
         log.debug(`Received data:\n${JSON.stringify(payload, null, 2)}`);
         receivedUnshieldedTransactions.push(payload);
+        if (stopCondition(receivedUnshieldedTransactions)) {
+          stopListening();
+        }
+      },
+      error: (err) => {
+        const synthetic = buildErrorPayload<UnshieldedTxSubscriptionResponse>(err);
+        log.debug(`Received error frame:\n${JSON.stringify(synthetic, null, 2)}`);
+        receivedUnshieldedTransactions.push(synthetic);
         if (stopCondition(receivedUnshieldedTransactions)) {
           stopListening();
         }
@@ -172,13 +213,17 @@ describe('unshielded transaction subscriptions', async () => {
       expect(fundingSeed, 'Please provide a funding seed as environment variable').toBeDefined();
       const unshieldedAddress = (await toolkit.showAddress(fundingSeed)).unshielded;
 
-      // Here when subscribing we need to take into accounta that we are using a funding seed
-      // so the number of transactions can be massive. So we need to wait for the indexer
-      // to stream all the events and make sure it receives a progress message and they
-      // match in numbers. This is the same mechanism used by the wallet to sync transactions
+      // Here when subscribing we need to take into account that we are using a
+      // funding seed so the number of transactions can be massive. The
+      // `makeCaughtUpPredicate` stop condition lets us stop deterministically
+      // when the indexer's progress message and our collected events line up,
+      // rather than relying on a wall-clock cutoff that would truncate mid-stream
+      // for busy addresses. The 60s timeout is a safety ceiling — under healthy
+      // conditions the indexer delivers progress within seconds.
       messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress },
-        () => false,
+        makeCaughtUpPredicate(),
+        60_000,
       );
 
       messages.forEach((message) => {
@@ -338,7 +383,6 @@ describe('unshielded transaction subscriptions', async () => {
      */
     test('should return an error message, given the address provided is for another network', async () => {
       const currentEnvironment = env.getCurrentEnvironmentName();
-      const currentNetworkId = env.getNetworkId();
 
       for (const environment of env.getAllEnvironmentNames()) {
         if (environment === currentEnvironment) {
@@ -346,19 +390,6 @@ describe('unshielded transaction subscriptions', async () => {
           // should be accepted in this case
           log.info(
             `Skipping test for environment ${environment} because it is the current environment`,
-          );
-          continue;
-        }
-
-        // Environments can share the same underlying network id (e.g. qanet and qanet.dev both map
-        // to the "qanet" network id). In those cases, an address for that environment should be
-        // accepted, so we skip the check here as well.
-        const environmentNetworkId =
-          environment === EnvironmentName.QANET_DEV ? 'qanet' : environment;
-
-        if (environmentNetworkId === currentNetworkId) {
-          log.info(
-            `Skipping test for environment ${environment} because it shares the same network id as ${currentEnvironment}`,
           );
           continue;
         }
@@ -403,9 +434,15 @@ describe('unshielded transaction subscriptions', async () => {
       expect(fundingSeed, 'Please provide a funding seed as environment variable').toBeDefined();
       const targetAddress = (await toolkit.showAddress(fundingSeed)).unshielded;
 
+      // Same caught-up stop condition as the sibling test — see
+      // `makeCaughtUpPredicate` for rationale. The previous condition
+      // (`messages[0].errors !== undefined`) never fired on the happy path,
+      // so the helper's 5s wall-clock timeout truncated the stream and the
+      // equality assertion against the moving head failed on busy addresses.
       const messages = await subscribeToUnshieldedTransactionEvents(
         { address: targetAddress, transactionId: targetTransactionId },
-        (messages) => messages[0].errors !== undefined,
+        makeCaughtUpPredicate(),
+        60_000,
       );
 
       expect(messages.length).toBeGreaterThanOrEqual(2);

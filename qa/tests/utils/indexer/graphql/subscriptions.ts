@@ -115,6 +115,11 @@ export const BLOCKS_SUBSCRIPTION_FROM_LATEST_BLOCK = `subscription BlocksSubscri
     protocolVersion
     ledgerParameters
     zswapMerkleTreeRoot
+    dustCommitmentMerkleTreeRoot
+    dustGenerationMerkleTreeRoot
+    zswapEndIndex
+    dustCommitmentEndIndex
+    dustGenerationEndIndex
     parent {
       hash
       height
@@ -147,6 +152,11 @@ export const BLOCKS_SUBSCRIPTION_FROM_BLOCK_BY_OFFSET = `subscription BlocksSubs
     protocolVersion
     ledgerParameters
     zswapMerkleTreeRoot
+    dustCommitmentMerkleTreeRoot
+    dustGenerationMerkleTreeRoot
+    zswapEndIndex
+    dustCommitmentEndIndex
+    dustGenerationEndIndex
     parent {
       hash
       height
@@ -333,6 +343,82 @@ export const ZSWAP_LEDGER_EVENTS_SUBSCRIPTION_FROM_ID = `
       raw
       maxId
       protocolVersion
+    }
+  }
+`;
+
+export const DUST_GENERATIONS_SUBSCRIPTION = `
+  subscription DustGenerations($dustAddress: DustAddress!, $startIndex: Int!, $endIndex: Int!) {
+    dustGenerations(dustAddress: $dustAddress, startIndex: $startIndex, endIndex: $endIndex) {
+      ... on DustGenerationsItem {
+        __typename
+        commitmentMtIndex
+        generationMtIndex
+        owner
+        value
+        initialValue
+        backingNight
+        ctime
+        transactionId
+        transactionHash
+        collapsedMerkleTree {
+          startIndex
+          endIndex
+          update
+          protocolVersion
+        }
+      }
+      ... on DustGenerationsProgress {
+        __typename
+        highestIndex
+        collapsedMerkleTree {
+          startIndex
+          endIndex
+          update
+          protocolVersion
+        }
+      }
+      ... on DustGenerationDtimeUpdateItem {
+        __typename
+        generationMtIndex
+        owner
+        nightUtxoHash
+        newDtime
+        transactionId
+        transactionHash
+        treeInsertionPath
+      }
+    }
+  }
+`;
+
+export const DUST_NULLIFIER_TRANSACTIONS_SUBSCRIPTION = `
+  subscription DustNullifierTransactions($nullifierLeBytesPrefixes: [HexEncoded!]!, $fromBlock: Int, $toBlock: Int) {
+    dustNullifierTransactions(nullifierLeBytesPrefixes: $nullifierLeBytesPrefixes, fromBlock: $fromBlock, toBlock: $toBlock) {
+      nullifierLeBytes
+      commitmentLeBytes
+      transactionId
+      transactionHash
+      blockHeight
+      blockHash
+      transaction {
+        hash
+      }
+    }
+  }
+`;
+
+export const SHIELDED_NULLIFIER_TRANSACTIONS_SUBSCRIPTION = `
+  subscription ShieldedNullifierTransactions($nullifierPrefixes: [HexEncoded!]!, $fromBlock: Int, $toBlock: Int) {
+    shieldedNullifierTransactions(nullifierPrefixes: $nullifierPrefixes, fromBlock: $fromBlock, toBlock: $toBlock) {
+      transactionId
+      transactionHash
+      blockHash
+      blockHeight
+      nullifier
+      transaction {
+        hash
+      }
     }
   }
 `;

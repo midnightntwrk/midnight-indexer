@@ -88,6 +88,7 @@ By default it connects to a local Midnight Node at `ws://localhost:9944` and exp
 | APP__INFRA__NODE__URL | WebSocket Endpoint of Midnight Node | `ws://localhost:9944` |
 | APP__INFRA__API__PORT | Port of the GraphQL API | `8088` |
 | APP__INFRA__SECRET | Hex-encoded 32-byte secret to encrypt stored sensitive data | - |
+| APP__INFRA__SPO_NODE__BLOCKFROST_ID | Blockfrost API key (required, must be non-empty; needed by spo-indexer which is included in the standalone binary). Use any non-empty placeholder if you are not exercising SPO features. | - |
 
 For the full set of configuration options see [config.yaml](indexer-standalone/config.yaml).
 
@@ -199,7 +200,8 @@ It is recommended to provide these environment variables via a `~/.midnight-inde
 export APP__INFRA__STORAGE__PASSWORD=postgres
 export APP__INFRA__PUB_SUB__PASSWORD=nats
 export APP__INFRA__SECRET=303132333435363738393031323334353637383930313233343536373839303132
-# export APP__INFRA__NODE__BLOCKFROST_ID=<your-blockfrost-api-key>  # only required for spo-indexer
+# export APP__INFRA__NODE__BLOCKFROST_ID=<your-blockfrost-api-key>  # required for spo-indexer (cloud mode)
+# export APP__INFRA__SPO_NODE__BLOCKFROST_ID=<your-blockfrost-api-key>  # required for indexer-standalone (any non-empty value works if not testing SPO features)
 ```
 
 ### Benchmarks

@@ -49,14 +49,14 @@ fn init_ledger_db(rt: &Runtime) -> tempfile::TempDir {
 fn make_regular_tx(raw_bytes: Vec<u8>) -> node::RegularTransaction {
     let raw: ByteVec = raw_bytes.into();
 
-    let deserialized = LedgerTransaction::deserialize(&raw, LedgerVersion::V8)
+    let deserialized = LedgerTransaction::deserialize(&raw, LedgerVersion::V9)
         .expect("deserialize fixture transaction");
     let hash: TransactionHash = deserialized.hash();
     let identifiers = deserialized.identifiers().expect("identifiers");
 
     node::RegularTransaction {
         hash,
-        protocol_version: ProtocolVersion::V1_0(1_000_000),
+        protocol_version: ProtocolVersion::V2_0(2_000_000),
         raw,
         identifiers,
         contract_actions: vec![],
@@ -80,8 +80,11 @@ fn bench_apply_real_tx(c: &mut Criterion) {
     let tx_1_2_3 = read_fixture("tx_1_2_3.raw");
 
     let parent_block_hash = BlockHash::from([0u8; 32]);
-    // Must fit the fixtures' intent TTL window; adjust on regen.
-    let block_timestamp: u64 = 1_777_040_000_000;
+    // Must fit the fixtures' validity windows; adjust on regen. The intent TTL
+    // allows [generation, generation + 14d], but the dust spend is tighter: the
+    // dust ctime must lie in [block_timestamp - 3h, block_timestamp], so pick a
+    // timestamp within ~3h after `just generate-txs` ran.
+    let block_timestamp: u64 = 1_780_525_000_000;
     let parent_block_timestamp: u64 = block_timestamp - 6_000;
 
     let mut group = c.benchmark_group("LedgerState::apply_transactions");
@@ -89,7 +92,7 @@ fn bench_apply_real_tx(c: &mut Criterion) {
     group.bench_function("tx_1_2_2 on genesis (1-tx block)", |b| {
         b.iter_batched(
             || {
-                let state = LedgerState::from_genesis(&genesis_bytes, LedgerVersion::V8)
+                let state = LedgerState::from_genesis(&genesis_bytes, LedgerVersion::V9)
                     .expect("from_genesis");
                 let tx = make_regular_tx(tx_1_2_2.clone());
                 (state, tx)
@@ -111,7 +114,7 @@ fn bench_apply_real_tx(c: &mut Criterion) {
     group.bench_function("tx_1_2_2 + tx_1_2_3 on genesis (2-tx block)", |b| {
         b.iter_batched(
             || {
-                let state = LedgerState::from_genesis(&genesis_bytes, LedgerVersion::V8)
+                let state = LedgerState::from_genesis(&genesis_bytes, LedgerVersion::V9)
                     .expect("from_genesis");
                 let txs = [
                     node::Transaction::Regular(make_regular_tx(tx_1_2_2.clone())),

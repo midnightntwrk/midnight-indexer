@@ -39,6 +39,11 @@ export const BlockSchema = z.lazy(() =>
     author: z.string().optional(),
     ledgerParameters: z.string(),
     zswapMerkleTreeRoot: VarLenghtHex,
+    dustCommitmentMerkleTreeRoot: VarLenghtHex.nullable(),
+    dustGenerationMerkleTreeRoot: VarLenghtHex.nullable(),
+    zswapEndIndex: z.number().int().nonnegative(),
+    dustCommitmentEndIndex: z.number().int().nonnegative(),
+    dustGenerationEndIndex: z.number().int().nonnegative(),
     parent: PartialBlockSchema,
     transactions: z.array(FullTransactionSchema).min(0),
   }),
@@ -158,6 +163,10 @@ export const RegularTransactionSchema = z.lazy(() =>
     identifiers: z.array(z.string()),
     zswapStartIndex: z.number(),
     zswapEndIndex: z.number(),
+    dustCommitmentStartIndex: z.number(),
+    dustCommitmentEndIndex: z.number(),
+    dustGenerationStartIndex: z.number(),
+    dustGenerationEndIndex: z.number(),
     fees: z.object({
       paidFees: z.string(),
       estimatedFees: z.string(),
@@ -211,10 +220,11 @@ export const ContractActionSchema = z.discriminatedUnion('type', [
   ContractUpdateSchema,
 ]);
 
-// Contract balance schema
+// Contract balance schema. tokenType is a 32-byte hex string and amount a decimal
+// u128 string; enforcing the shape here makes every parse a format assertion.
 export const ContractBalanceSchema = z.object({
-  tokenType: z.string(),
-  amount: z.string(),
+  tokenType: z.string().regex(/^[0-9a-fA-F]{64}$/),
+  amount: z.string().regex(/^[0-9]+$/),
 });
 
 // Updated contract action schemas to match current API
@@ -263,11 +273,15 @@ const isCardanoRewardAddress = (value: string) => {
   }
 };
 
+const DustAddressBech32m = z.string().regex(/^mn_dust(_[a-z0-9]+)?1/, {
+  message: 'must be a bech32m DustAddress (mn_dust... / mn_dust_<network>...)',
+});
+
 export const DustGenerationStatusSchema = z.object({
   cardanoRewardAddress: z
     .string()
     .refine(isCardanoRewardAddress, { message: 'Invalid Cardano reward address format' }),
-  dustAddress: z.string().nullable(),
+  dustAddress: DustAddressBech32m.nullable(),
   registered: z.boolean(),
   nightBalance: z.string().regex(/^\d+$/),
   generationRate: z.string().regex(/^\d+$/),
@@ -332,3 +346,85 @@ export const ShieldedTransactionEventSchema = z.union([
   RelevantTransactionSchema,
   ShieldedTransactionsProgressSchema,
 ]);
+
+// Dust Generations schemas (PR #980)
+export const DustRegistrationSchema = z.object({
+  dustAddress: DustAddressBech32m,
+  valid: z.boolean(),
+  nightBalance: z.string().regex(/^\d+$/),
+  generationRate: z.string().regex(/^\d+$/),
+  maxCapacity: z.string().regex(/^\d+$/),
+  currentCapacity: z.string().regex(/^\d+$/),
+  utxoTxHash: z.string().nullable(),
+  utxoOutputIndex: z.number().int().nullable(),
+});
+
+export const DustGenerationsSchema = z.object({
+  cardanoRewardAddress: z
+    .string()
+    .refine(isCardanoRewardAddress, { message: 'Invalid Cardano reward address format' }),
+  registrations: z.array(DustRegistrationSchema),
+});
+
+export const CollapsedMerkleTreeSchema = z.object({
+  startIndex: z.number(),
+  endIndex: z.number(),
+  update: VarLenghtHex,
+  protocolVersion: z.number(),
+});
+
+export const DustGenerationsItemSchema = z.object({
+  __typename: z.literal('DustGenerationsItem'),
+  commitmentMtIndex: z.number(),
+  generationMtIndex: z.number(),
+  owner: VarLenghtHex,
+  value: z.string().regex(/^\d+$/),
+  initialValue: z.string().regex(/^\d+$/),
+  backingNight: VarLenghtHex,
+  ctime: z.number(),
+  transactionId: z.number(),
+  transactionHash: Hash64,
+  collapsedMerkleTree: CollapsedMerkleTreeSchema.nullable(),
+});
+
+export const DustGenerationsProgressSchema = z.object({
+  __typename: z.literal('DustGenerationsProgress'),
+  highestIndex: z.number(),
+  collapsedMerkleTree: CollapsedMerkleTreeSchema.nullable(),
+});
+
+export const DustGenerationDtimeUpdateItemSchema = z.object({
+  __typename: z.literal('DustGenerationDtimeUpdateItem'),
+  generationMtIndex: z.number(),
+  owner: VarLenghtHex,
+  nightUtxoHash: VarLenghtHex,
+  newDtime: z.number(),
+  transactionId: z.number(),
+  transactionHash: Hash64,
+  treeInsertionPath: VarLenghtHex,
+});
+
+export const DustGenerationsEventSchema = z.discriminatedUnion('__typename', [
+  DustGenerationsItemSchema,
+  DustGenerationsProgressSchema,
+  DustGenerationDtimeUpdateItemSchema,
+]);
+
+export const DustNullifierTransactionSchema = z.object({
+  nullifierLeBytes: VarLenghtHex,
+  commitmentLeBytes: VarLenghtHex,
+  transactionId: z.number(),
+  transactionHash: Hash64,
+  blockHeight: z.number(),
+  blockHash: Hash64,
+  transaction: z.object({ hash: Hash64 }),
+});
+
+export const ShieldedNullifierTransactionSchema = z.object({
+  transactionId: z.number(),
+  transactionHash: Hash64,
+  blockHash: Hash64,
+  blockHeight: z.number(),
+  nullifier: VarLenghtHex,
+  transaction: z.object({ hash: Hash64 }),
+});

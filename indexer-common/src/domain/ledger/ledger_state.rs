@@ -19,7 +19,10 @@ use crate::{
         SerializedZswapMerkleTreeRoot, SerializedZswapState, TokenType, TransactionResult,
         UnshieldedUtxo,
         dust::{self},
-        ledger::{Error, IntentV8, SerializableExt, TaggedSerializableExt, TransactionV8},
+        ledger::{
+            Error, IntentV8, IntentV9, SerializableExt, TaggedSerializableExt, TransactionV8,
+            TransactionV9,
+        },
     },
     infra::ledger_db::v1_1,
 };
@@ -34,6 +37,13 @@ use midnight_base_crypto_v1::{
 use midnight_coin_structure_v2::{
     coin::{NIGHT, TokenType as LedgerTokenType, UnshieldedTokenType, UserAddress},
     contract::ContractAddress as ContractAddressV8,
+};
+use midnight_coin_structure_v3::{
+    coin::{
+        NIGHT as NIGHT_V9, UnshieldedTokenType as UnshieldedTokenTypeV9,
+        UserAddress as UserAddressV9,
+    },
+    contract::ContractAddress as ContractAddressV9,
 };
 use midnight_ledger_v8::{
     dust::{
@@ -51,7 +61,26 @@ use midnight_ledger_v8::{
     },
     verify::WellFormedStrictness as WellFormedStrictnessV8,
 };
+use midnight_ledger_v9::{
+    dust::{
+        DustGenerationInfo as DustGenerationInfoV9, InitialNonce as InitialNonceV9,
+        QualifiedDustOutput as QualifiedDustOutputV9,
+    },
+    error::FeeCalculationError as FeeCalculationErrorV9,
+    events::{Event as EventV9, EventDetails as EventDetailsV9},
+    semantics::{
+        TransactionContext as TransactionContextV9, TransactionResult as TransactionResultV9,
+    },
+    structure::{
+        LedgerParameters as LedgerParametersV9, LedgerState as LedgerStateV9,
+        OutputInstructionUnshielded as OutputInstructionUnshieldedV9,
+        SPECKS_PER_DUST as SPECKS_PER_DUST_V9, SystemTransaction as SystemTransactionV9,
+        Utxo as UtxoV9,
+    },
+    verify::WellFormedStrictness as WellFormedStrictnessV9,
+};
 use midnight_onchain_runtime_v3::context::BlockContext as BlockContextV3;
+use midnight_onchain_runtime_v4::context::BlockContext as BlockContextV4;
 use midnight_serialize_v1::{Deserializable, tagged_deserialize};
 use midnight_storage_core_v1::{
     arena::{Sp, TypedArenaKey},
@@ -61,7 +90,12 @@ use midnight_storage_core_v1::{
 use midnight_transient_crypto_v2::merkle_tree::{
     MerkleTreeCollapsedUpdate, MerkleTreeDigest, TreeInsertionPath,
 };
+use midnight_transient_crypto_v3::merkle_tree::{
+    MerkleTreeCollapsedUpdate as MerkleTreeCollapsedUpdateV9,
+    MerkleTreeDigest as MerkleTreeDigestV9, TreeInsertionPath as TreeInsertionPathV9,
+};
 use midnight_zswap_v8::ledger::State as ZswapStateV8;
+use midnight_zswap_v9::ledger::State as ZswapStateV9;
 use std::{collections::HashSet, ops::Deref, sync::LazyLock};
 
 const OUTPUT_INDEX_ZERO: u32 = 0;
@@ -72,10 +106,22 @@ static STRICTNESS_V8: LazyLock<WellFormedStrictnessV8> = LazyLock::new(|| {
     strictness
 });
 
+static STRICTNESS_V9: LazyLock<WellFormedStrictnessV9> = LazyLock::new(|| {
+    let mut strictness = WellFormedStrictnessV9::default();
+    strictness.enforce_balancing = false;
+    strictness
+});
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LedgerState {
     V8 {
         ledger_state: LedgerStateV8<v1_1::LedgerDb>,
+        block_fullness: SyntheticCost,
+    },
+    V9 {
+        ledger_state: LedgerStateV9<v1_1::LedgerDb>,
+        // base-crypto is unified at 1.1.0 across v8 and v9, so the cost model
+        // types (incl. SyntheticCost) are shared with the V8 variant.
         block_fullness: SyntheticCost,
     },
 }
@@ -86,6 +132,10 @@ impl LedgerState {
         let ledger_state = match ledger_version {
             LedgerVersion::V8 => Self::V8 {
                 ledger_state: LedgerStateV8::new(network_id),
+                block_fullness: Default::default(),
+            },
+            LedgerVersion::V9 => Self::V9 {
+                ledger_state: LedgerStateV9::new(network_id),
                 block_fullness: Default::default(),
             },
         };
@@ -122,6 +172,17 @@ impl LedgerState {
                     block_fullness: Default::default(),
                 })
             }
+
+            LedgerVersion::V9 => {
+                let ledger_state =
+                    tagged_deserialize::<LedgerStateV9<v1_1::LedgerDb>>(&mut raw.as_ref())
+                        .map_err(|error| Error::Deserialize("GenesisLedgerStateV9", error))?;
+
+                Ok(Self::V9 {
+                    ledger_state,
+                    block_fullness: Default::default(),
+                })
+            }
         }
     }
 
@@ -129,6 +190,9 @@ impl LedgerState {
         match self {
             Self::V8 { ledger_state, .. } => {
                 LedgerParameters::V8(ledger_state.parameters.deref().to_owned())
+            }
+            Self::V9 { ledger_state, .. } => {
+                LedgerParameters::V9(ledger_state.parameters.deref().to_owned())
             }
         }
     }
@@ -154,6 +218,23 @@ impl LedgerState {
                     block_fullness: Default::default(),
                 }
             }
+
+            LedgerVersion::V9 => {
+                let arena_key = TypedArenaKey::<
+                    LedgerStateV9<v1_1::LedgerDb>,
+                    <v1_1::LedgerDb as DB>::Hasher,
+                >::deserialize(&mut key.as_slice(), 0)
+                .map_err(|error| Error::Deserialize("TypedArenaKeyV9", error))?;
+                let ledger_state = default_storage::<v1_1::LedgerDb>()
+                    .get_lazy(&arena_key)
+                    .map_err(|error| Error::LoadLedgerState(key.to_owned(), error))?;
+                let ledger_state = (*ledger_state).clone();
+
+                Self::V9 {
+                    ledger_state,
+                    block_fullness: Default::default(),
+                }
+            }
         };
 
         Ok(ledger_state)
@@ -162,12 +243,20 @@ impl LedgerState {
     pub fn translate(self, ledger_version: LedgerVersion) -> Result<Self, Error> {
         match (self, ledger_version) {
             (s @ LedgerState::V8 { .. }, LedgerVersion::V8) => Ok(s),
+            (s @ LedgerState::V9 { .. }, LedgerVersion::V9) => Ok(s),
+            (LedgerState::V8 { .. }, LedgerVersion::V9) => Err(
+                Error::UnsupportedLedgerStateTranslation(LedgerVersion::V8, LedgerVersion::V9),
+            ),
+            (LedgerState::V9 { .. }, LedgerVersion::V8) => Err(
+                Error::BackwardsLedgerStateTranslation(LedgerVersion::V9, LedgerVersion::V8),
+            ),
         }
     }
 
     pub fn ledger_version(&self) -> LedgerVersion {
         match self {
             LedgerState::V8 { .. } => LedgerVersion::V8,
+            LedgerState::V9 { .. } => LedgerVersion::V9,
         }
     }
 
@@ -178,6 +267,11 @@ impl LedgerState {
                 .as_typed_key()
                 .serialize()
                 .map_err(|error| Error::Serialize("LedgerStateV8", error)),
+            Self::V9 { ledger_state, .. } => default_storage::<v1_1::LedgerDb>()
+                .alloc(ledger_state.to_owned())
+                .as_typed_key()
+                .serialize()
+                .map_err(|error| Error::Serialize("LedgerStateV9", error)),
         }
     }
 
@@ -198,6 +292,28 @@ impl LedgerState {
 
                 let ledger_state = Sp::into_inner(ledger_state).expect("ledger state exists");
                 let ledger_state = LedgerState::V8 {
+                    ledger_state,
+                    block_fullness,
+                };
+
+                Ok((ledger_state, key))
+            }
+
+            LedgerState::V9 {
+                ledger_state,
+                block_fullness,
+            } => {
+                let mut ledger_state = Sp::new(ledger_state);
+                ledger_state.persist();
+                default_storage::<v1_1::LedgerDb>().with_backend(|b| b.flush_all_changes_to_db());
+
+                let key = ledger_state
+                    .as_typed_key()
+                    .serialize()
+                    .map_err(|error| Error::Serialize("TypedArenaKeyV9", error))?;
+
+                let ledger_state = Sp::into_inner(ledger_state).expect("ledger state exists");
+                let ledger_state = LedgerState::V9 {
                     ledger_state,
                     block_fullness,
                 };
@@ -324,6 +440,95 @@ impl LedgerState {
                     fees,
                 })
             }
+
+            Self::V9 {
+                ledger_state,
+                block_fullness,
+            } => {
+                let transaction =
+                    tagged_deserialize::<TransactionV9<v1_1::LedgerDb>>(&mut transaction.as_ref())
+                        .map_err(|error| Error::Deserialize("LedgerTransactionV9", error))?;
+
+                let cx = TransactionContextV9 {
+                    ref_state: ledger_state.clone(),
+                    block_context: BlockContextV4 {
+                        tblock: timestamp(block_timestamp),
+                        tblock_err: 30,
+                        parent_block_hash: HashOutput(parent_block_hash.0),
+                        last_block_time: timestamp(parent_block_timestamp),
+                    },
+                    whitelist: None,
+                };
+
+                // The stateless `cost` estimates verifier-key sizes, under-costing
+                // contract calls; `cost_with_state` reads them from the ledger state.
+                // The ledger has no state-aware `fees`, so the fee is computed from
+                // the cost the same way `Transaction::fees` does.
+                let cost = transaction
+                    .cost_with_state(&ledger_state.parameters, ledger_state, true)
+                    .map_err(|error| Error::TransactionCost(error.into()))?;
+                let fees = {
+                    let normalized = cost
+                        .normalize(ledger_state.parameters.limits.block_limits)
+                        .ok_or(FeeCalculationErrorV9::BlockLimitExceeded)
+                        .map_err(|error| Error::TransactionCost(error.into()))?;
+                    ledger_state
+                        .parameters
+                        .fee_prices
+                        .overall_cost(&normalized)
+                        .into_atomic_units(SPECKS_PER_DUST_V9)
+                };
+                let verified_ledger_transaction = transaction
+                    .well_formed(&cx.ref_state, *STRICTNESS_V9, cx.block_context.tblock)
+                    .map_err(|error| Error::MalformedTransaction(error.into()))?;
+                let (ledger_state, transaction_result) =
+                    ledger_state.apply(&verified_ledger_transaction, &cx);
+
+                let (transaction_result, events, should_count_cost) = match transaction_result {
+                    TransactionResultV9::Success(events) => {
+                        (TransactionResult::Success, events, true)
+                    }
+
+                    TransactionResultV9::PartialSuccess(segments, events) => {
+                        let segments = segments
+                            .into_iter()
+                            .map(|(id, result)| (id, result.is_ok()))
+                            .collect::<Vec<_>>();
+                        (TransactionResult::PartialSuccess(segments), events, true)
+                    }
+
+                    TransactionResultV9::Failure(_) => (TransactionResult::Failure, vec![], false),
+                };
+
+                // Only count cost for successful/partial transactions (match node behavior)
+                let block_fullness = if should_count_cost {
+                    *block_fullness + cost
+                } else {
+                    *block_fullness
+                };
+
+                let (created_unshielded_utxos, spent_unshielded_utxos) =
+                    make_unshielded_utxos_for_regular_transaction_v9(
+                        transaction,
+                        &transaction_result,
+                        &ledger_state,
+                    );
+
+                let ledger_events = make_ledger_events_v9(events)?;
+
+                *self = Self::V9 {
+                    ledger_state,
+                    block_fullness,
+                };
+
+                Ok(ApplyRegularTransactionOutcome {
+                    transaction_result,
+                    created_unshielded_utxos,
+                    spent_unshielded_utxos,
+                    ledger_events,
+                    fees,
+                })
+            }
         }
     }
 
@@ -364,6 +569,36 @@ impl LedgerState {
                     ledger_events,
                 })
             }
+
+            Self::V9 {
+                ledger_state,
+                block_fullness,
+            } => {
+                let transaction =
+                    tagged_deserialize::<SystemTransactionV9>(&mut transaction.as_ref())
+                        .map_err(|error| Error::Deserialize("SystemTransactionV9", error))?;
+
+                let cost = transaction.cost(&ledger_state.parameters);
+                let (ledger_state, events) = ledger_state
+                    .apply_system_tx(&transaction, timestamp(block_timestamp))
+                    .map_err(|error| Error::SystemTransaction(error.into()))?;
+                let block_fullness = *block_fullness + cost;
+
+                let created_unshielded_utxos =
+                    make_unshielded_utxos_for_system_transaction_v9(transaction, &ledger_state);
+
+                let ledger_events = make_ledger_events_v9(events)?;
+
+                *self = Self::V9 {
+                    ledger_state,
+                    block_fullness,
+                };
+
+                Ok(ApplySystemTransactionOutcome {
+                    created_unshielded_utxos,
+                    ledger_events,
+                })
+            }
         }
     }
 
@@ -371,6 +606,7 @@ impl LedgerState {
     pub fn zswap_first_free(&self) -> u64 {
         match self {
             Self::V8 { ledger_state, .. } => ledger_state.zswap.first_free,
+            Self::V9 { ledger_state, .. } => ledger_state.zswap.first_free,
         }
     }
 
@@ -378,6 +614,7 @@ impl LedgerState {
     pub fn dust_commitments_first_free(&self) -> u64 {
         match self {
             Self::V8 { ledger_state, .. } => ledger_state.dust.utxo.commitments_first_free,
+            Self::V9 { ledger_state, .. } => ledger_state.dust.utxo.commitments_first_free,
         }
     }
 
@@ -385,6 +622,9 @@ impl LedgerState {
     pub fn dust_generations_first_free(&self) -> u64 {
         match self {
             Self::V8 { ledger_state, .. } => {
+                ledger_state.dust.generation.generating_tree_first_free
+            }
+            Self::V9 { ledger_state, .. } => {
                 ledger_state.dust.generation.generating_tree_first_free
             }
         }
@@ -402,6 +642,15 @@ impl LedgerState {
                     .expect("zswap state Merkle tree root should exist");
                 ZswapMerkleTreeRoot::V8(root)
             }
+            Self::V9 { ledger_state, .. } => {
+                let root = ledger_state
+                    .zswap
+                    .coin_coms
+                    .rehash()
+                    .root()
+                    .expect("zswap state Merkle tree root should exist");
+                ZswapMerkleTreeRoot::V9(root)
+            }
         }
     }
 
@@ -417,6 +666,15 @@ impl LedgerState {
                 .expect("dust commitment merkle tree root should exist")
                 .serialize()
                 .map_err(|error| Error::Serialize("DustCommitmentMerkleTreeRoot", error)),
+            Self::V9 { ledger_state, .. } => ledger_state
+                .dust
+                .utxo
+                .commitments
+                .rehash()
+                .root()
+                .expect("dust commitment merkle tree root should exist")
+                .serialize()
+                .map_err(|error| Error::Serialize("DustCommitmentMerkleTreeRoot", error)),
         }
     }
 
@@ -424,6 +682,15 @@ impl LedgerState {
     pub fn dust_generation_merkle_tree_root(&self) -> Result<ByteVec, Error> {
         match self {
             Self::V8 { ledger_state, .. } => ledger_state
+                .dust
+                .generation
+                .generating_tree
+                .rehash()
+                .root()
+                .expect("dust generation merkle tree root should exist")
+                .serialize()
+                .map_err(|error| Error::Serialize("DustGenerationMerkleTreeRoot", error)),
+            Self::V9 { ledger_state, .. } => ledger_state
                 .dust
                 .generation
                 .generating_tree
@@ -453,6 +720,18 @@ impl LedgerState {
                     .tagged_serialize()
                     .map_err(|error| Error::Serialize("ZswapStateV8", error))
             }
+
+            Self::V9 { ledger_state, .. } => {
+                let address = ContractAddressV9::deserialize(&mut address.as_ref(), 0)
+                    .map_err(|error| Error::Deserialize("ContractAddressV9", error))?;
+
+                let mut contract_zswap_state = ZswapStateV9::new();
+                contract_zswap_state.coin_coms = ledger_state.zswap.filter(&[address]);
+
+                contract_zswap_state
+                    .tagged_serialize()
+                    .map_err(|error| Error::Serialize("ZswapStateV9", error))
+            }
         }
     }
 
@@ -464,6 +743,14 @@ impl LedgerState {
     ) -> Result<ByteVec, Error> {
         match self {
             Self::V8 { ledger_state, .. } => MerkleTreeCollapsedUpdate::new(
+                &ledger_state.zswap.coin_coms,
+                start_index,
+                end_index,
+            )
+            .map_err(|error| Error::InvalidUpdate(error.into()))?
+            .tagged_serialize()
+            .map_err(|error| Error::Serialize("MerkleTreeCollapsedUpdate", error)),
+            Self::V9 { ledger_state, .. } => MerkleTreeCollapsedUpdateV9::new(
                 &ledger_state.zswap.coin_coms,
                 start_index,
                 end_index,
@@ -489,6 +776,14 @@ impl LedgerState {
             .map_err(|error| Error::InvalidUpdate(error.into()))?
             .tagged_serialize()
             .map_err(|error| Error::Serialize("DustGenerationsMerkleTreeCollapsedUpdate", error)),
+            Self::V9 { ledger_state, .. } => MerkleTreeCollapsedUpdateV9::new(
+                &ledger_state.dust.generation.generating_tree,
+                start_index,
+                end_index,
+            )
+            .map_err(|error| Error::InvalidUpdate(error.into()))?
+            .tagged_serialize()
+            .map_err(|error| Error::Serialize("DustGenerationsMerkleTreeCollapsedUpdate", error)),
         }
     }
 
@@ -500,6 +795,14 @@ impl LedgerState {
     ) -> Result<ByteVec, Error> {
         match self {
             Self::V8 { ledger_state, .. } => MerkleTreeCollapsedUpdate::new(
+                &ledger_state.dust.utxo.commitments,
+                start_index,
+                end_index,
+            )
+            .map_err(|error| Error::InvalidUpdate(error.into()))?
+            .tagged_serialize()
+            .map_err(|error| Error::Serialize("DustCommitmentsMerkleTreeCollapsedUpdate", error)),
+            Self::V9 { ledger_state, .. } => MerkleTreeCollapsedUpdateV9::new(
                 &ledger_state.dust.utxo.commitments,
                 start_index,
                 end_index,
@@ -551,6 +854,42 @@ impl LedgerState {
 
                 Ok(LedgerParameters::V8(ledger_parameters))
             }
+
+            Self::V9 {
+                ledger_state,
+                block_fullness,
+            } => {
+                let timestamp = timestamp(block_timestamp);
+                let block_limits = ledger_state.parameters.limits.block_limits;
+                let normalized_fullness =
+                    clamp_and_normalize(block_fullness, &block_limits, "post_block_update");
+                let overall_fullness = FixedPoint::max(
+                    FixedPoint::max(
+                        FixedPoint::max(
+                            normalized_fullness.read_time,
+                            normalized_fullness.compute_time,
+                        ),
+                        normalized_fullness.block_usage,
+                    ),
+                    FixedPoint::max(
+                        normalized_fullness.bytes_written,
+                        normalized_fullness.bytes_churned,
+                    ),
+                );
+
+                let ledger_state = ledger_state
+                    .post_block_update(timestamp, normalized_fullness, overall_fullness)
+                    .map_err(|error| Error::BlockLimitExceeded(error.into()))?;
+
+                let ledger_parameters = ledger_state.parameters.deref().to_owned();
+
+                *self = Self::V9 {
+                    ledger_state,
+                    block_fullness: Default::default(),
+                };
+
+                Ok(LedgerParameters::V9(ledger_parameters))
+            }
         }
     }
 }
@@ -559,6 +898,7 @@ impl LedgerState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LedgerParameters {
     V8(LedgerParametersV8),
+    V9(LedgerParametersV9),
 }
 
 impl LedgerParameters {
@@ -569,6 +909,9 @@ impl LedgerParameters {
             Self::V8(parameters) => parameters
                 .tagged_serialize()
                 .map_err(|error| Error::Serialize("SerializedLedgerParametersV8", error)),
+            Self::V9(parameters) => parameters
+                .tagged_serialize()
+                .map_err(|error| Error::Serialize("SerializedLedgerParametersV9", error)),
         }
     }
 }
@@ -577,6 +920,7 @@ impl LedgerParameters {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ZswapMerkleTreeRoot {
     V8(MerkleTreeDigest),
+    V9(MerkleTreeDigestV9),
 }
 
 impl ZswapMerkleTreeRoot {
@@ -592,6 +936,11 @@ impl ZswapMerkleTreeRoot {
                     .map_err(|error| Error::Deserialize("MerkleTreeDigestV8", error))?;
                 Self::V8(digest)
             }
+            LedgerVersion::V9 => {
+                let digest = MerkleTreeDigestV9::deserialize(&mut zswap_state_root.as_ref(), 0)
+                    .map_err(|error| Error::Deserialize("MerkleTreeDigestV9", error))?;
+                Self::V9(digest)
+            }
         };
 
         Ok(zswap_state_root)
@@ -604,6 +953,9 @@ impl ZswapMerkleTreeRoot {
             Self::V8(digest) => digest
                 .serialize()
                 .map_err(|error| Error::Serialize("MerkleTreeDigestV8", error)),
+            Self::V9(digest) => digest
+                .serialize()
+                .map_err(|error| Error::Serialize("MerkleTreeDigestV9", error)),
         }
     }
 }
@@ -664,7 +1016,7 @@ where
                 commitment.0.0.to_bytes_le().to_vec().into(),
             ))),
 
-            other => panic!("unexpected EventDetailsV8 variant {other:?}"),
+            other => Some(Err(Error::UnsupportedEventVariant(format!("{other:?}")))),
         })
         .flatten()
         .collect::<Result<_, _>>()
@@ -746,20 +1098,15 @@ fn make_dust_generation_dtime_update_v8(
             }
         });
 
-    let merkle_path = update
-        .path
-        .iter()
-        .map(|entry| dust::DustMerklePathEntry {
-            sibling_hash: entry.hash.as_ref().map(|h| h.0.0.to_bytes_le().to_vec()),
-            goes_left: entry.goes_left,
-        })
-        .collect();
+    let tree_insertion_path = update
+        .tagged_serialize()
+        .map_err(|error| Error::Serialize("TreeInsertionPath<DustGenerationInfoV8>", error))?;
 
     Ok(LedgerEvent::dust_generation_dtime_update(
         raw,
         generation_info,
         mt_index,
-        merkle_path,
+        tree_insertion_path,
     ))
 }
 
@@ -1032,6 +1379,423 @@ where
         .map(|meta| meta.ctime.to_secs())
 }
 
+// --- ledger v9 mirrors of the above helpers ---
+//
+// base-crypto, coin-structure and transient-crypto are unified across v8 and
+// v9, so the shared domain / cost / merkle types are reused; only the ledger
+// (events, dust, structure) types are v9-specific.
+
+fn make_ledger_events_v9<D>(events: Vec<EventV9<D>>) -> Result<Vec<LedgerEvent>, Error>
+where
+    D: DB,
+{
+    events
+        .into_iter()
+        .map(|event| {
+            let raw = event
+                .tagged_serialize()
+                .map_err(|error| Error::Serialize("EventV9", error))?;
+            Ok::<_, Error>((event, raw))
+        })
+        .filter_map_ok(|(event, raw)| match event.content {
+            EventDetailsV9::ZswapInput { nullifier, .. } => Some(Ok(LedgerEvent::zswap_input(
+                raw,
+                nullifier.0.0.to_vec().into(),
+            ))),
+
+            EventDetailsV9::ZswapOutput { .. } => Some(Ok(LedgerEvent::zswap_output(raw))),
+
+            EventDetailsV9::ContractDeploy { .. } => None,
+
+            EventDetailsV9::ContractLog { .. } => None,
+
+            EventDetailsV9::ParamChange(..) => Some(Ok(LedgerEvent::param_change(raw))),
+
+            EventDetailsV9::DustInitialUtxo {
+                output,
+                generation,
+                generation_index,
+                ..
+            } => Some(make_dust_initial_utxo_v9(
+                output,
+                generation,
+                generation_index,
+                raw,
+            )),
+
+            EventDetailsV9::DustGenerationDtimeUpdate { update, .. } => {
+                Some(make_dust_generation_dtime_update_v9(update, raw))
+            }
+
+            EventDetailsV9::DustSpendProcessed {
+                nullifier,
+                commitment,
+                ..
+            } => Some(Ok(LedgerEvent::dust_spend_processed(
+                raw,
+                nullifier.0.0.to_bytes_le().to_vec().into(),
+                commitment.0.0.to_bytes_le().to_vec().into(),
+            ))),
+
+            other => Some(Err(Error::UnsupportedEventVariant(format!("{other:?}")))),
+        })
+        .flatten()
+        .collect::<Result<_, _>>()
+}
+
+fn make_dust_initial_utxo_v9(
+    output: QualifiedDustOutputV9,
+    generation: DustGenerationInfoV9,
+    generation_index: u64,
+    raw: ByteVec,
+) -> Result<LedgerEvent, Error> {
+    let owner = output
+        .owner
+        .serialize()
+        .map_err(|error| Error::Serialize("DustPublicKeyV9", error))?;
+
+    let qualified_output = dust::QualifiedDustOutput {
+        initial_value: output.initial_value,
+        owner,
+        nonce: output.nonce.0.to_bytes_le().into(),
+        seq: output.seq,
+        ctime: output.ctime.to_secs(),
+        backing_night: output.backing_night.0.0.into(),
+        mt_index: output.mt_index,
+    };
+
+    let owner = generation
+        .owner
+        .serialize()
+        .map_err(|error| Error::Serialize("DustPublicKeyV9", error))?;
+
+    let generation_info = dust::DustGenerationInfo {
+        night_utxo_hash: output.backing_night.0.0.into(),
+        value: generation.value,
+        owner,
+        nonce: generation.nonce.0.0.into(),
+        ctime: output.ctime.to_secs(),
+        dtime: generation.dtime.to_secs(),
+    };
+
+    Ok(LedgerEvent::dust_initial_utxo(
+        raw,
+        qualified_output,
+        generation_info,
+        generation_index,
+    ))
+}
+
+fn make_dust_generation_dtime_update_v9(
+    update: TreeInsertionPathV9<DustGenerationInfoV9>,
+    raw: ByteVec,
+) -> Result<LedgerEvent, Error> {
+    let generation = &update.leaf.1;
+
+    let owner = generation
+        .owner
+        .serialize()
+        .map_err(|error| Error::Serialize("DustPublicKeyV9", error))?;
+
+    let generation_info = dust::DustGenerationInfo {
+        night_utxo_hash: generation.nonce.0.0.into(),
+        value: generation.value,
+        owner,
+        nonce: generation.nonce.0.0.into(),
+        ctime: 0, // DustGenerationInfo from ledger doesn't have ctime, only dtime
+        dtime: generation.dtime.to_secs(),
+    };
+
+    let mt_index = update
+        .path
+        .iter()
+        .rev()
+        .enumerate()
+        .fold(0u64, |mt_index, (depth, entry)| {
+            if !entry.goes_left {
+                mt_index | (1u64 << depth)
+            } else {
+                mt_index
+            }
+        });
+
+    let tree_insertion_path = update
+        .tagged_serialize()
+        .map_err(|error| Error::Serialize("TreeInsertionPath<DustGenerationInfoV9>", error))?;
+
+    Ok(LedgerEvent::dust_generation_dtime_update(
+        raw,
+        generation_info,
+        mt_index,
+        tree_insertion_path,
+    ))
+}
+
+fn make_unshielded_utxos_for_regular_transaction_v9<D>(
+    transaction: TransactionV9<D>,
+    transaction_result: &TransactionResult,
+    ledger_state: &LedgerStateV9<D>,
+) -> (Vec<UnshieldedUtxo>, Vec<UnshieldedUtxo>)
+where
+    D: DB,
+{
+    // Skip UTXO creation entirely for failed transactions, because no state changes occurred on the
+    // ledger.
+    if matches!(transaction_result, TransactionResult::Failure) {
+        return (vec![], vec![]);
+    }
+
+    match transaction {
+        TransactionV9::Standard(transaction) => {
+            let successful_segments = match &transaction_result {
+                TransactionResult::Success => transaction.segments().into_iter().collect(),
+
+                TransactionResult::PartialSuccess(segments) => segments
+                    .iter()
+                    .filter_map(|(id, success)| success.then_some(id))
+                    .copied()
+                    .collect(),
+
+                TransactionResult::Failure => HashSet::new(),
+            };
+
+            let mut outputs = vec![];
+            let mut inputs = vec![];
+
+            for segment in transaction.segments() {
+                // Guaranteed phase.
+                if segment == 0 {
+                    for intent in transaction.intents.values() {
+                        extend_unshielded_utxos_v9(
+                            &mut outputs,
+                            &mut inputs,
+                            segment,
+                            &intent,
+                            true,
+                            ledger_state,
+                        );
+                    }
+
+                // Fallible phase.
+                } else if let Some(intent) = transaction.intents.get(&segment)
+                    && successful_segments.contains(&segment)
+                {
+                    extend_unshielded_utxos_v9(
+                        &mut outputs,
+                        &mut inputs,
+                        segment,
+                        &intent,
+                        false,
+                        ledger_state,
+                    );
+                }
+            }
+
+            (outputs, inputs)
+        }
+
+        // ClaimRewards creates a single unshielded UTXO for the claimed amount.
+        TransactionV9::ClaimRewards(claim) => {
+            let owner = UserAddressV9::from(claim.owner);
+            let ledger_intent_hash = {
+                // ClaimRewards don't have intents, but UTXOs need an intent hash. We compute this
+                // hash the same way that the ledger does internally.
+                let output = OutputInstructionUnshieldedV9 {
+                    amount: claim.value,
+                    target_address: owner,
+                    nonce: claim.nonce,
+                };
+                output.mk_intent_hash(NIGHT_V9)
+            };
+            let intent_hash = ledger_intent_hash.0.0.into();
+            let initial_nonce = make_initial_nonce_v9(OUTPUT_INDEX_ZERO, intent_hash);
+            let registered_for_dust_generation =
+                registered_for_dust_generation_v9(OUTPUT_INDEX_ZERO, intent_hash, ledger_state);
+            let utxo = UtxoV9 {
+                value: claim.value,
+                owner,
+                type_: UnshieldedTokenTypeV9::default(),
+                intent_hash: ledger_intent_hash,
+                output_no: OUTPUT_INDEX_ZERO,
+            };
+
+            let utxo = UnshieldedUtxo {
+                owner: owner.0.0.into(),
+                token_type: TokenType::default(), // Native token (all zeros).
+                value: claim.value,
+                intent_hash,
+                output_index: OUTPUT_INDEX_ZERO,
+                ctime: ctime_v9(&utxo, ledger_state),
+                initial_nonce,
+                registered_for_dust_generation,
+            };
+
+            (vec![utxo], vec![]) // Creates one UTXO, spends none.
+        }
+    }
+}
+
+fn make_unshielded_utxos_for_system_transaction_v9<D>(
+    transaction: SystemTransactionV9,
+    ledger_state: &LedgerStateV9<D>,
+) -> Vec<UnshieldedUtxo>
+where
+    D: DB,
+{
+    match transaction {
+        SystemTransactionV9::PayFromTreasuryUnshielded {
+            outputs,
+            token_type,
+        } => outputs
+            .iter()
+            .enumerate()
+            .map(|(index, output)| {
+                let ledger_intent_hash = output.clone().mk_intent_hash(token_type);
+                let intent_hash = ledger_intent_hash.0.0.into();
+                let initial_nonce = make_initial_nonce_v9(index as u32, intent_hash);
+                let registered_for_dust_generation =
+                    registered_for_dust_generation_v9(index as u32, intent_hash, ledger_state);
+                let utxo = UtxoV9 {
+                    value: output.amount,
+                    owner: output.target_address,
+                    type_: token_type,
+                    intent_hash: ledger_intent_hash,
+                    output_no: index as u32,
+                };
+
+                UnshieldedUtxo {
+                    owner: output.target_address.0.0.into(),
+                    token_type: token_type.0.0.into(),
+                    value: output.amount,
+                    intent_hash,
+                    output_index: index as u32,
+                    ctime: ctime_v9(&utxo, ledger_state),
+                    initial_nonce,
+                    registered_for_dust_generation,
+                }
+            })
+            .collect(),
+
+        _ => vec![], // Other system transaction types don't create unshielded UTXOs.
+    }
+}
+
+fn extend_unshielded_utxos_v9<D>(
+    outputs: &mut Vec<UnshieldedUtxo>,
+    inputs: &mut Vec<UnshieldedUtxo>,
+    segment_id: u16,
+    intent: &IntentV9<D>,
+    guaranteed: bool,
+    ledger_state: &LedgerStateV9<D>,
+) where
+    D: DB,
+{
+    let ledger_intent_hash = intent
+        .erase_proofs()
+        .erase_signatures()
+        .intent_hash(segment_id);
+    let intent_hash = ledger_intent_hash.0.0.into();
+
+    let intent_outputs = if guaranteed {
+        intent.guaranteed_outputs()
+    } else {
+        intent.fallible_outputs()
+    };
+    let intent_outputs = intent_outputs
+        .into_iter()
+        .enumerate()
+        .map(|(output_index, output)| {
+            let output_index = output_index as u32;
+            let initial_nonce = make_initial_nonce_v9(output_index, intent_hash);
+            let registered_for_dust_generation =
+                registered_for_dust_generation_v9(output_index, intent_hash, ledger_state);
+            let utxo = UtxoV9 {
+                value: output.value,
+                owner: output.owner,
+                type_: output.type_,
+                intent_hash: ledger_intent_hash,
+                output_no: output_index,
+            };
+
+            UnshieldedUtxo {
+                owner: output.owner.0.0.into(),
+                token_type: output.type_.0.0.into(),
+                value: output.value,
+                intent_hash,
+                output_index,
+                ctime: ctime_v9(&utxo, ledger_state),
+                initial_nonce,
+                registered_for_dust_generation,
+            }
+        });
+    outputs.extend(intent_outputs);
+
+    let intent_inputs = if guaranteed {
+        intent.guaranteed_inputs()
+    } else {
+        intent.fallible_inputs()
+    };
+    let intent_inputs = intent_inputs.into_iter().map(|spend| {
+        let intent_hash = spend.intent_hash.0.0.into();
+        let initial_nonce = make_initial_nonce_v9(spend.output_no, intent_hash);
+        let registered_for_dust_generation =
+            registered_for_dust_generation_v9(spend.output_no, intent_hash, ledger_state);
+        let utxo = UtxoV9 {
+            value: spend.value,
+            owner: UserAddressV9::from(spend.owner.clone()),
+            type_: spend.type_,
+            intent_hash: spend.intent_hash,
+            output_no: spend.output_no,
+        };
+
+        UnshieldedUtxo {
+            owner: UserAddressV9::from(spend.owner).0.0.into(),
+            token_type: spend.type_.0.0.into(),
+            value: spend.value,
+            intent_hash,
+            output_index: spend.output_no,
+            ctime: ctime_v9(&utxo, ledger_state),
+            initial_nonce,
+            registered_for_dust_generation,
+        }
+    });
+    inputs.extend(intent_inputs);
+}
+
+fn make_initial_nonce_v9(output_index: u32, intent_hash: IntentHash) -> Nonce {
+    let intent_hash = HashOutput(intent_hash.0);
+    let initial_nonce = InitialNonceV9(persistent_commit(&output_index, intent_hash));
+    ByteArray(initial_nonce.0.0)
+}
+
+fn registered_for_dust_generation_v9<D>(
+    output_index: u32,
+    intent_hash: IntentHash,
+    ledger_state: &LedgerStateV9<D>,
+) -> bool
+where
+    D: DB,
+{
+    let intent_hash = HashOutput(intent_hash.0);
+    let initial_nonce = InitialNonceV9(persistent_commit(&output_index, intent_hash));
+    ledger_state
+        .dust
+        .generation
+        .night_indices
+        .contains_key(&initial_nonce)
+}
+
+fn ctime_v9<D>(utxo: &UtxoV9, ledger_state: &LedgerStateV9<D>) -> Option<u64>
+where
+    D: DB,
+{
+    ledger_state
+        .utxo
+        .utxos
+        .get(utxo)
+        .map(|meta| meta.ctime.to_secs())
+}
+
 /// Matches the node's `clamp_and_normalize`: falling back to `NormalizedCost::ZERO` on
 /// overflow would drive `overall_price` opposite to the node and compound drift.
 fn clamp_and_normalize(
@@ -1153,6 +1917,20 @@ mod tests {
             .translate(LedgerVersion::V8)
             .expect("ledger state v8 can be translated to v8");
         assert_eq!(new_ledger_state, ledger_state);
+
+        let ledger_state_v9 = LedgerState::new("undeployed".try_into()?, LedgerVersion::V9)
+            .expect("ledger state v9 can be constructed");
+        assert_eq!(ledger_state_v9.ledger_version(), LedgerVersion::V9);
+
+        let new_ledger_state_v9 = ledger_state_v9
+            .clone()
+            .translate(LedgerVersion::V9)
+            .expect("ledger state v9 can be translated to v9");
+        assert_eq!(new_ledger_state_v9, ledger_state_v9);
+
+        // Cross-version translations are unsupported in both directions.
+        assert!(ledger_state.translate(LedgerVersion::V9).is_err());
+        assert!(ledger_state_v9.translate(LedgerVersion::V8).is_err());
 
         Ok(())
     }
