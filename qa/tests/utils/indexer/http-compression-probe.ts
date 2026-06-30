@@ -22,11 +22,12 @@ export interface CompressionProbeResult {
   data: unknown;
 }
 
-// Large enough to exceed tower-http's default minimum-size threshold for
-// compression (~1 KiB). A minimal domain query (e.g. `{ block { hash } }`)
-// can return a body smaller than the threshold, causing the server to skip
-// compression even when the client advertises Accept-Encoding — which would
-// make the gzip/br/zstd assertions below fail spuriously.
+// Large enough to reliably exceed tower-http's default minimum-size threshold
+// for compression (SizeAbove(32), i.e. 32 bytes). A minimal domain query
+// (e.g. `{ block { hash } }`) can return a body smaller than the threshold,
+// causing the server to skip compression even when the client advertises
+// Accept-Encoding — which would make the gzip/br/zstd assertions below fail
+// spuriously.
 const INTROSPECTION_QUERY = `{
   __schema {
     types {

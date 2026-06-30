@@ -32,7 +32,7 @@ describe('graphql http response compression', () => {
      * @When a POST request is sent to the GraphQL endpoint with Accept-Encoding: gzip
      * @Then the response status should be 200
      * @And the Content-Encoding header should be gzip
-     * @And the response body should be valid GraphQL data
+     * @And the response body decompresses and parses as JSON
      */
     test('should return a gzip-compressed response', async () => {
       const result = await probeGraphQLCompression('gzip');
@@ -49,7 +49,7 @@ describe('graphql http response compression', () => {
      * @When a POST request is sent to the GraphQL endpoint with Accept-Encoding: br
      * @Then the response status should be 200
      * @And the Content-Encoding header should be br
-     * @And the response body should be valid GraphQL data
+     * @And the response body decompresses and parses as JSON
      */
     test('should return a brotli-compressed response', async () => {
       const result = await probeGraphQLCompression('br');
@@ -66,7 +66,7 @@ describe('graphql http response compression', () => {
      * @When a POST request is sent to the GraphQL endpoint with Accept-Encoding: zstd
      * @Then the response status should be 200
      * @And the Content-Encoding header should be zstd
-     * @And the response body should be valid GraphQL data
+     * @And the response body decompresses and parses as JSON
      */
     test('should return a zstd-compressed response', async () => {
       const result = await probeGraphQLCompression('zstd');
@@ -83,7 +83,7 @@ describe('graphql http response compression', () => {
      * @When a POST request is sent to the GraphQL endpoint with Accept-Encoding: identity
      * @Then the response status should be 200
      * @And no Content-Encoding header should be present
-     * @And the response body should be valid GraphQL data
+     * @And the response body parses as JSON
      *
      * Note: Accept-Encoding: identity is sent explicitly rather than omitting
      * the header. Node.js's fetch (undici) unconditionally appends its own
