@@ -60,7 +60,7 @@ drop-stream                 = { version = "0.3" }
 fake                        = { version = "2.10" }
 fastrace                    = { version = "0.7" }
 fastrace-axum               = { version = "0.2" }
-fastrace-opentelemetry      = { version = "0.16" }
+fastrace-opentelemetry      = { version = "0.18" }
 fastrace-tracing            = { version = "0.1" }
 figment                     = { version = "0.10" }
 flate2                      = { version = "1.1" }
@@ -77,9 +77,9 @@ metrics                     = { version = "0.24" }
 metrics-exporter-prometheus = { version = "0.18", default-features = false }
 moka                        = { version = "0.12", features = [ "future" ] }
 nix                         = { version = "0.31" }
-opentelemetry               = { version = "0.31" }
-opentelemetry-otlp          = { version = "0.31" }
-opentelemetry_sdk           = { version = "0.31" }
+opentelemetry               = { version = "0.32" }
+opentelemetry-otlp          = { version = "0.32" }
+opentelemetry_sdk           = { version = "0.32" }
 parity-scale-codec          = { version = "3.7" }
 parking_lot                 = { version = "0.12" }
 reqwest                     = { version = "0.13", default-features = false }
@@ -106,8 +106,9 @@ trait-variant               = { version = "0.1" }
 uuid                        = { version = "1.23", features = [ "serde" ] }
 walkdir                     = { version = "2.5" }
 
-# Ledger 9.1.0.0-rc.2, the ledger team's published patch set (resolves
-# midnight-ledger#580). The rc crates aren't on crates.io yet, hence git tags.
+# Ledger 9.1.0.0-rc.3, the ledger team's published patch set; the v8/v9
+# coexistence shape traces to midnight-ledger#580. The rc crates aren't on
+# crates.io yet, hence git tags.
 # Entries without package/version replace their registry crate outright
 # (base-crypto and serialize, shared with v8 within-major; zkir, v9-only); the
 # cross-major v9 crates carry package + version to patch only their major,

@@ -1781,11 +1781,15 @@ type Subscription {
 	"""
 	contractEvents(filter: ContractEventFilter!, id: Int): ContractEvent! @beta
 	"""
-	Subscribe to dust generation entries for a dust address in `[start_index, end_index]`
-	inclusive. `dustGenerationEndIndex` is exclusive, pass `dustGenerationEndIndex - 1`.
-	Entries interleaved with collapsed Merkle tree updates and owned-entry dtime updates.
+	Subscribe to a dust address's generations as a consistent snapshot at `block_hash`. The
+	wallet's owned generation entries, interleaved with collapsed Merkle tree updates for the
+	non-owned gaps, are served at that block's state (deterministic, independent of the tip).
+	The dtime updates for the wallet's own generations in `(dtime_cutoff_height, block_hash]`
+	are issued first, as a clean delta for the generations set rather than the tree (pass `0`
+	to replay all). The subscription completes once emitted; re-subscribe at a newer
+	`block_hash` to advance.
 	"""
-	dustGenerations(dustAddress: DustAddress!, startIndex: Int!, endIndex: Int!): DustGenerationsEvent! @beta
+	dustGenerations(dustAddress: DustAddress!, blockHash: HexEncoded!, dtimeCutoffHeight: Int!): DustGenerationsEvent! @beta
 	"""
 	Subscribe to dust ledger events starting at the given ID or at the very start if omitted.
 	"""

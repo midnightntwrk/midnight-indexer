@@ -147,7 +147,7 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_dust_ledger_events_subscription(&indexer_data, &ws_api_url)
         .await
         .context("test dust ledger events subscription")?;
-    test_dust_generations_subscription(&ws_api_url)
+    test_dust_generations_subscription(&indexer_data, &ws_api_url)
         .await
         .context("test dust generations subscription")?;
     test_shielded_nullifier_transactions_subscription(&ws_api_url)
@@ -1077,14 +1077,22 @@ async fn test_dust_ledger_events_subscription(
 /// it), yielding a single final `DustGenerationsProgress` event and closing.
 /// Verifies wire-format compatibility for all three union variants and the
 /// completion-event shape on the empty case.
-async fn test_dust_generations_subscription(ws_api_url: &str) -> anyhow::Result<()> {
-    let end_index: i64 = 0;
+async fn test_dust_generations_subscription(
+    indexer_data: &IndexerData,
+    ws_api_url: &str,
+) -> anyhow::Result<()> {
     let network_id: NetworkId = "undeployed".try_into().unwrap();
     let dust_address = DustAddress(encode_address([0u8; 32], AddressType::Dust, &network_id));
+    let block_hash = indexer_data
+        .blocks
+        .last()
+        .expect("there is at least one indexed block")
+        .hash
+        .to_owned();
     let variables = dust_generations_subscription::Variables {
         dust_address,
-        start_index: 1,
-        end_index,
+        block_hash,
+        dtime_cutoff_height: 0,
     };
     let events = graphql_ws_client::subscribe::<DustGenerationsSubscription>(ws_api_url, variables)
         .await
@@ -1106,12 +1114,7 @@ async fn test_dust_generations_subscription(ws_api_url: &str) -> anyhow::Result<
     assert_eq!(
         event.get("__typename").and_then(|v| v.as_str()),
         Some("DustGenerationsProgress"),
-        "expected DustGenerationsProgress variant, got: {event:?}"
-    );
-    assert_eq!(
-        event.get("highestIndex").and_then(|v| v.as_i64()),
-        Some(end_index),
-        "highestIndex should match the requested endIndex"
+        "expected DustGenerationsProgress for an address with no owned generations, got: {event:?}"
     );
 
     Ok(())
