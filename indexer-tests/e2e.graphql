@@ -753,13 +753,13 @@ subscription DustLedgerEventsSubscription($id: Int) {
 
 subscription DustGenerationsSubscription(
     $dustAddress: DustAddress!
-    $startIndex: Int!
-    $endIndex: Int!
+    $blockHash: HexEncoded!
+    $dtimeCutoffHeight: Int!
 ) {
     dustGenerations(
         dustAddress: $dustAddress
-        startIndex: $startIndex
-        endIndex: $endIndex
+        blockHash: $blockHash
+        dtimeCutoffHeight: $dtimeCutoffHeight
     ) {
         __typename
         ... on DustGenerationsItem {
