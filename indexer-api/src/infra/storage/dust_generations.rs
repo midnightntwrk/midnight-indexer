@@ -199,37 +199,11 @@ impl DustGenerationsStorage for Storage {
         }
     }
 
-    #[trace(properties = { "start_index": "{start_index}" })]
-    async fn get_dust_generation_dtime_cutoff_block_id(
-        &self,
-        dust_address: &[u8],
-        start_index: u64,
-    ) -> Result<Option<u64>, sqlx::Error> {
-        // Highest owned entry strictly below `start_index` gives the block we
-        // last fully synced through. `generation_index < start_index` also
-        // implicitly skips legacy NULL rows (NULL fails the comparison).
-        let query = indoc! {"
-            SELECT t.block_id
-            FROM dust_generation_info dgi
-            JOIN transactions t ON t.id = dgi.transaction_id
-            WHERE dgi.owner = $1
-            AND dgi.generation_index < $2
-            ORDER BY dgi.generation_index DESC
-            LIMIT 1
-        "};
-
-        sqlx::query_as::<_, (i64,)>(query)
-            .bind(dust_address)
-            .bind(start_index as i64)
-            .fetch_optional(&*self.pool)
-            .await
-            .map(|row| row.map(|(block_id,)| block_id as u64))
-    }
-
     async fn get_dust_generation_dtime_updates(
         &self,
         dust_address: &[u8],
         cutoff_block_id: u64,
+        upper_block_id: u64,
         mut after_event_id: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<DustGenerationDtimeUpdateEntry, sqlx::Error>> + Send {
@@ -274,6 +248,7 @@ impl DustGenerationsStorage for Storage {
                            'hex')
                     WHERE le.variant = 'DustGenerationDtimeUpdate'
                     AND t.block_id > $1
+                    AND t.block_id <= $5
                     AND dgi.owner = $2
                     AND le.id > $3
                     ORDER BY le.id
@@ -310,6 +285,7 @@ impl DustGenerationsStorage for Storage {
                             substr(e.hash_hex, 3),
                             e.hash_hex))
                     WHERE t.block_id > $1
+                    AND t.block_id <= $5
                     AND dgi.owner = $2
                     ORDER BY e.ledger_event_id
                     LIMIT $4
@@ -320,6 +296,7 @@ impl DustGenerationsStorage for Storage {
                     .bind(&dust_address[..])
                     .bind(after_event_id as i64)
                     .bind(batch_size.get() as i64)
+                    .bind(upper_block_id as i64)
                     .fetch_all(&*pool)
                     .await?;
 
@@ -433,18 +410,6 @@ impl DustGenerationsStorage for Storage {
                 }
             }
         }
-    }
-
-    #[trace]
-    async fn get_dust_generations_chain_first_free(&self) -> Result<u64, sqlx::Error> {
-        // `IS NOT NULL` skips legacy rows pre-dating the generation/commitment split.
-        let (max_index,) = sqlx::query_as::<_, (Option<i64>,)>(
-            "SELECT MAX(generation_index) FROM dust_generation_info WHERE generation_index IS NOT NULL",
-        )
-        .fetch_one(&*self.pool)
-        .await?;
-
-        Ok(max_index.map(|i| i as u64 + 1).unwrap_or(0))
     }
 }
 
