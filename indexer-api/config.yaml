@@ -46,12 +46,19 @@ infra:
       shielded_transactions:
         batch_size: 20
         progress_update_interval: "30s"
-        keep_wallet_alive_interval: "1m"
+        # Heartbeat that keeps a subscribed wallet marked active for indexing.
+        # Must stay comfortably below the wallet-indexer's active_wallets_ttl (30m);
+        # 10m leaves a safe margin while minimising keep-alive writes.
+        keep_wallet_alive_interval: "10m"
       unshielded_transactions:
         batch_size: 20
         progress_update_interval: "30s"
       zswap_ledger_events:
         batch_size: 20
+      progress_cache:
+        max_capacity: 10000
+        # Short TTL bounds how stale a shared progress value can be (about one block interval).
+        time_to_live: "5s"
     quota:
       max_concurrent_per_connection: 20
       max_session_subscriptions_per_minute: 10
