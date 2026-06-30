@@ -60,7 +60,7 @@ drop-stream                 = { version = "0.3" }
 fake                        = { version = "2.10" }
 fastrace                    = { version = "0.7" }
 fastrace-axum               = { version = "0.2" }
-fastrace-opentelemetry      = { version = "0.16" }
+fastrace-opentelemetry      = { version = "0.18" }
 fastrace-tracing            = { version = "0.1" }
 figment                     = { version = "0.10" }
 fs_extra                    = { version = "1.3" }
@@ -76,8 +76,8 @@ metrics                     = { version = "0.24" }
 metrics-exporter-prometheus = { version = "0.18", default-features = false }
 moka                        = { version = "0.12", features = [ "future" ] }
 nix                         = { version = "0.31" }
-opentelemetry               = { version = "0.31" }
-opentelemetry-otlp          = { version = "0.31" }
+opentelemetry               = { version = "0.32" }
+opentelemetry-otlp          = { version = "0.32" }
 opentelemetry_sdk           = { version = "0.32" }
 parity-scale-codec          = { version = "3.7" }
 parking_lot                 = { version = "0.12" }
