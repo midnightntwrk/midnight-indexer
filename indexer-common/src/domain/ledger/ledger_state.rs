@@ -447,7 +447,7 @@ impl LedgerState {
     ) -> Result<ByteVec, Error> {
         match self {
             Self::V8 { ledger_state, .. } => MerkleTreeCollapsedUpdate::new(
-                &ledger_state.zswap.coin_coms,
+                &ledger_state.zswap.coin_coms.rehash(),
                 start_index,
                 end_index,
             )
@@ -465,7 +465,7 @@ impl LedgerState {
     ) -> Result<ByteVec, Error> {
         match self {
             Self::V8 { ledger_state, .. } => MerkleTreeCollapsedUpdate::new(
-                &ledger_state.dust.generation.generating_tree,
+                &ledger_state.dust.generation.generating_tree.rehash(),
                 start_index,
                 end_index,
             )
@@ -483,7 +483,7 @@ impl LedgerState {
     ) -> Result<ByteVec, Error> {
         match self {
             Self::V8 { ledger_state, .. } => MerkleTreeCollapsedUpdate::new(
-                &ledger_state.dust.utxo.commitments,
+                &ledger_state.dust.utxo.commitments.rehash(),
                 start_index,
                 end_index,
             )
