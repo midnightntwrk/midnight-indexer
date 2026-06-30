@@ -23,6 +23,7 @@ export enum EnvironmentName {
   QANET = 'qanet',
   PREVIEW = 'preview',
   PREPROD = 'preprod',
+  STAGENET = 'stagenet',
 }
 
 export enum CardanoNetwork {
@@ -116,6 +117,11 @@ const hostEntries: HostEntry[] = [
   { env: EnvironmentName.DEVNET, domain: 'devnet.midnight.network' },
   { env: EnvironmentName.PREVIEW, domain: 'preview.midnight.network' },
   { env: EnvironmentName.PREPROD, domain: 'preprod.midnight.network' },
+  {
+    env: EnvironmentName.STAGENET,
+    indexerHost: 'indexer.stagenet.shielded.tools',
+    nodeHost: 'rpc.stagenet.shielded.tools',
+  },
 ];
 
 const hostConfigByEnvName: Record<EnvironmentName, HostConfig> = hostEntries.reduce(
@@ -252,6 +258,7 @@ export class Environment {
       case EnvironmentName.PREVIEW:
       case EnvironmentName.QANET:
       case EnvironmentName.DEVNET:
+      case EnvironmentName.STAGENET:
         return CardanoNetwork.PREVIEW;
       default:
         throw new Error(`Unsupported environment name: ${this.envName}`);
@@ -348,7 +355,7 @@ export class Environment {
     throw new Error(
       `INDEXER_INSTANCE="${instance}" (${this.indexerHost}) returned HTTP ${status} on /ready — ` +
         `no ingress for this colour, so it is almost certainly the PRIMARY (served at the bare ` +
-        `indexer.${this.envName}.midnight.network). Target the other colour, or unset ` +
+        `${hostConfigByEnvName[this.envName].indexerHost}). Target the other colour, or unset ` +
         `INDEXER_INSTANCE to use the primary.`,
     );
   }
