@@ -239,6 +239,160 @@ export interface ContractBalance {
   amount: string;
 }
 
+export type ContractEventResponse = GraphQLResponse<{ contractEvents: ContractEvent[] }>;
+
+/**
+ * The 11 standard contract-event variants per MIP-0002 Appendix A. Mirrors the
+ * `ContractEventType` GraphQL enum used by `ContractEventFilter.types`.
+ */
+export type ContractEventType =
+  | 'SHIELDED_SPEND'
+  | 'SHIELDED_RECEIVE'
+  | 'SHIELDED_MINT'
+  | 'SHIELDED_BURN'
+  | 'UNSHIELDED_SPEND'
+  | 'UNSHIELDED_RECEIVE'
+  | 'UNSHIELDED_MINT'
+  | 'UNSHIELDED_BURN'
+  | 'PAUSED'
+  | 'UNPAUSED'
+  | 'MISC';
+
+export const CONTRACT_EVENT_TYPES: ContractEventType[] = [
+  'SHIELDED_SPEND',
+  'SHIELDED_RECEIVE',
+  'SHIELDED_MINT',
+  'SHIELDED_BURN',
+  'UNSHIELDED_SPEND',
+  'UNSHIELDED_RECEIVE',
+  'UNSHIELDED_MINT',
+  'UNSHIELDED_BURN',
+  'PAUSED',
+  'UNPAUSED',
+  'MISC',
+];
+
+/** Prefix filter on an indexed contract-event field (e.g. nullifier, tokenType). */
+export interface FieldPrefixFilter {
+  fieldName: string;
+  prefix: string;
+}
+
+export interface ContractEventFilter {
+  contractAddress: string;
+  types?: ContractEventType[];
+  fieldPrefixes?: FieldPrefixFilter[];
+  fromBlock?: number;
+  toBlock?: number;
+  transactionHash?: string;
+}
+
+/**
+ * Tagged union for `Either<ZswapCoinPublicKey, ContractAddress>` fields
+ * (UnshieldedSpend/Receive `sender`/`recipient`, UnshieldedBurn `sender`).
+ * Exactly one of `userAddress` / `contractAddress` is populated per `kind`.
+ */
+export interface AddressOrContract {
+  kind: 'USER' | 'CONTRACT';
+  userAddress?: string;
+  contractAddress?: string;
+}
+
+/** Fields common to every concrete contract event (the `ContractEvent` interface). */
+export interface ContractEventBase {
+  __typename: string;
+  id: number;
+  raw: string;
+  maxId: number;
+  protocolVersion: number;
+  version: number;
+  contractAddress: string;
+  transactionId: number;
+  transaction: Transaction;
+}
+
+export interface ShieldedSpendEvent extends ContractEventBase {
+  __typename: 'ShieldedSpendEvent';
+  nullifier: string;
+}
+
+export interface ShieldedReceiveEvent extends ContractEventBase {
+  __typename: 'ShieldedReceiveEvent';
+  commitment: string;
+  ciphertext?: string | null;
+  receivingContractAddress?: string | null;
+}
+
+export interface ShieldedMintEvent extends ContractEventBase {
+  __typename: 'ShieldedMintEvent';
+  commitment: string;
+  domainSep: string;
+  amount?: string | null;
+}
+
+export interface ShieldedBurnEvent extends ContractEventBase {
+  __typename: 'ShieldedBurnEvent';
+  nullifier: string;
+  amount?: string | null;
+}
+
+export interface UnshieldedSpendEvent extends ContractEventBase {
+  __typename: 'UnshieldedSpendEvent';
+  sender: AddressOrContract;
+  domainSep: string;
+  tokenType: string;
+  amount: string;
+}
+
+export interface UnshieldedReceiveEvent extends ContractEventBase {
+  __typename: 'UnshieldedReceiveEvent';
+  recipient: AddressOrContract;
+  domainSep: string;
+  tokenType: string;
+  amount: string;
+}
+
+export interface UnshieldedMintEvent extends ContractEventBase {
+  __typename: 'UnshieldedMintEvent';
+  domainSep: string;
+  tokenType: string;
+  amount: string;
+}
+
+export interface UnshieldedBurnEvent extends ContractEventBase {
+  __typename: 'UnshieldedBurnEvent';
+  sender: AddressOrContract;
+  tokenType: string;
+  amount: string;
+}
+
+export interface PausedEvent extends ContractEventBase {
+  __typename: 'PausedEvent';
+}
+
+export interface UnpausedEvent extends ContractEventBase {
+  __typename: 'UnpausedEvent';
+}
+
+export interface MiscContractEvent extends ContractEventBase {
+  __typename: 'MiscContractEvent';
+  name: string;
+  payload: string;
+}
+
+export type ContractEvent =
+  | ShieldedSpendEvent
+  | ShieldedReceiveEvent
+  | ShieldedMintEvent
+  | ShieldedBurnEvent
+  | UnshieldedSpendEvent
+  | UnshieldedReceiveEvent
+  | UnshieldedMintEvent
+  | UnshieldedBurnEvent
+  | PausedEvent
+  | UnpausedEvent
+  | MiscContractEvent;
+
 export interface DustGenerationStatus {
   cardanoRewardAddress: string;
   dustAddress?: string;

@@ -38,6 +38,9 @@ import type {
   DustGenerationMerkleTreeUpdateResponse,
   ZswapMerkleTreeCollapsedUpdateResponse,
   ZswapMerkleTreeCollapsedUpdateResult,
+  ContractEvent,
+  ContractEventFilter,
+  ContractEventResponse,
 } from './indexer-types';
 import {
   GET_LATEST_BLOCK,
@@ -45,6 +48,7 @@ import {
   GET_ZSWAP_MERKLE_TREE_COLLAPSED_UPDATE,
 } from './graphql/block-queries';
 import { GET_TRANSACTION_BY_OFFSET } from './graphql/transaction-queries';
+import { GET_CONTRACT_EVENTS } from './graphql/contract-event-queries';
 import { GET_CONTRACT_ACTION, GET_CONTRACT_ACTION_BY_OFFSET } from './graphql/contract-queries';
 import {
   GET_DUST_GENERATION_STATUS,
@@ -398,6 +402,41 @@ export class IndexerHttpClient {
     const response = await this.rawRequestWithRetry<{
       dustGenerationMerkleTreeUpdate: DustGenerationMerkleTreeUpdateResult;
     }>(query, variables);
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  /**
+   * Retrieves public contract events matching a filter from the indexer.
+   *
+   * @param filter - The contract event filter (contractAddress is required; types,
+   *                 fieldPrefixes, fromBlock, toBlock, transactionHash are optional)
+   * @param limit - Optional maximum number of events to return
+   * @param offset - Optional number of events to skip
+   * @param queryOverride - Optional custom GraphQL query to override the default
+   *
+   * @returns Promise resolving to the contract events response
+   */
+  async getContractEvents(
+    filter: ContractEventFilter,
+    limit?: number,
+    offset?: number,
+    queryOverride?: string,
+  ): Promise<ContractEventResponse> {
+    log.debug(`Target URL endpoint ${this.getTargetUrl()}`);
+
+    const query = queryOverride || GET_CONTRACT_EVENTS;
+    const variables = { FILTER: filter, LIMIT: limit, OFFSET: offset };
+
+    log.debug(`Using query\n${query}`);
+    log.debug(`Using variables\n${JSON.stringify(variables, null, 2)}`);
+
+    const response = await this.rawRequestWithRetry<{ contractEvents: ContractEvent[] }>(
+      query,
+      variables,
+    );
 
     log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
 
