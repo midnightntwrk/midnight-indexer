@@ -155,6 +155,30 @@ docker run \
     --contract-address $(cat /tmp/contract_address.mn) \
     --new-authority-seed 1000000000000000000000000000000000000000000000000000000000000001
 
+# TODO(#1163): emit standard contract events so the e2e chain exercises the `contractEvents`
+# query + subscription (test_contract_event_query / test_contract_events_subscription in
+# indexer-tests/src/e2e.rs). The block below mirrors the existing contract-simple deploy+call
+# pattern, but is left commented because it needs:
+#   (a) the events-capable node-toolkit build (the branch build used for the stagenet events
+#       verification, NOT necessarily midnight-node-toolkit:2.0.0-rc.3), and
+#   (b) the correct emit-capable contract / call key (<EMIT_CALL_KEY> below).
+# Confirm the toolkit's emit interface with the events team (Giuseppe / Vanessa / Oscar), then
+# uncomment and fill in the call key. Until then the contract-events e2e fails with
+# "expected at least one contract event in the test chain".
+#
+# docker run --rm --network host -v toolkit_out:/out $toolkit_image \
+#     generate-txs --dest-file /out/contract_tx_emit_deploy.mn \
+#     contract-simple deploy --rng-seed $rng_seed
+# docker run --rm --network host -v toolkit_out:/out $toolkit_image \
+#     contract-address --src-file /out/contract_tx_emit_deploy.mn > /tmp/emit_contract_address.mn
+# docker run --rm --network host -v toolkit_out:/out $toolkit_image \
+#     generate-txs --src-file /out/contract_tx_emit_deploy.mn --dest-url ws://127.0.0.1:9944 send
+# docker run --rm --network host -v toolkit_out:/out $toolkit_image \
+#     generate-txs contract-simple call \
+#     --call-key <EMIT_CALL_KEY> \
+#     --rng-seed $rng_seed \
+#     --contract-address $(cat /tmp/emit_contract_address.mn)
+
 # Wait for enough blocks to be finalized so that the pre-populated chain data
 # contains sufficient blocks for e2e tests (MAX_HEIGHT = 32 in e2e.rs).
 readonly min_finalized_height=40

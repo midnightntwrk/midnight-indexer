@@ -379,6 +379,40 @@ query ContractActionQuery(
     }
 }
 
+query ContractEventQuery($filter: ContractEventFilter!, $limit: Int, $offset: Int) {
+    contractEvents(filter: $filter, limit: $limit, offset: $offset) {
+        id
+        raw
+        maxId
+        protocolVersion
+        version
+        contractAddress
+        transactionId
+        __typename
+        ... on MiscContractEvent {
+            name
+            payload
+        }
+    }
+}
+
+subscription ContractEventSubscription($filter: ContractEventFilter!, $id: Int) {
+    contractEvents(filter: $filter, id: $id) {
+        id
+        raw
+        maxId
+        protocolVersion
+        version
+        contractAddress
+        transactionId
+        __typename
+        ... on MiscContractEvent {
+            name
+            payload
+        }
+    }
+}
+
 mutation ConnectMutation($viewingKey: ViewingKey!) {
     connect(viewingKey: $viewingKey)
 }

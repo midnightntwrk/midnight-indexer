@@ -16,13 +16,14 @@
 use crate::{
     e2e::graphql::{
         BlockQuery, BlockSubscription, ConnectMutation, ContractActionQuery,
-        ContractActionSubscription, DParameterHistoryQuery, DisconnectMutation,
-        DustCommitmentMerkleTreeUpdateQuery, DustGenerationMerkleTreeUpdateQuery,
-        DustGenerationStatusQuery, DustGenerationsQuery, DustGenerationsSubscription,
-        DustLedgerEventsSubscription, DustNullifierTransactionsSubscription,
-        ShieldedNullifierTransactionsSubscription, ShieldedTransactionsSubscription,
-        TermsAndConditionsHistoryQuery, TransactionsQuery, UnshieldedTransactionsSubscription,
-        ZswapLedgerEventsSubscription, ZswapMerkleTreeCollapsedUpdateQuery, block_query,
+        ContractActionSubscription, ContractEventQuery, ContractEventSubscription,
+        DParameterHistoryQuery, DisconnectMutation, DustCommitmentMerkleTreeUpdateQuery,
+        DustGenerationMerkleTreeUpdateQuery, DustGenerationStatusQuery, DustGenerationsQuery,
+        DustGenerationsSubscription, DustLedgerEventsSubscription,
+        DustNullifierTransactionsSubscription, ShieldedNullifierTransactionsSubscription,
+        ShieldedTransactionsSubscription, TermsAndConditionsHistoryQuery, TransactionsQuery,
+        UnshieldedTransactionsSubscription, ZswapLedgerEventsSubscription,
+        ZswapMerkleTreeCollapsedUpdateQuery, block_query,
         block_subscription::{
             self, BlockSubscriptionBlocks, BlockSubscriptionBlocksTransactions,
             BlockSubscriptionBlocksTransactionsContractActions,
@@ -34,12 +35,14 @@ use crate::{
         },
         connect_mutation,
         contract_action_query::{self},
-        contract_action_subscription, disconnect_mutation,
-        dust_commitment_merkle_tree_update_query, dust_generation_merkle_tree_update_query,
-        dust_generation_status_query, dust_generations_query, dust_generations_subscription,
-        dust_ledger_events_subscription, dust_nullifier_transactions_subscription,
-        shielded_nullifier_transactions_subscription, shielded_transactions_subscription,
-        transactions_query, unshielded_transactions_subscription, zswap_ledger_events_subscription,
+        contract_action_subscription,
+        contract_event_query::{self},
+        contract_event_subscription, disconnect_mutation, dust_commitment_merkle_tree_update_query,
+        dust_generation_merkle_tree_update_query, dust_generation_status_query,
+        dust_generations_query, dust_generations_subscription, dust_ledger_events_subscription,
+        dust_nullifier_transactions_subscription, shielded_nullifier_transactions_subscription,
+        shielded_transactions_subscription, transactions_query,
+        unshielded_transactions_subscription, zswap_ledger_events_subscription,
         zswap_merkle_tree_collapsed_update_query,
     },
     graphql_ws_client,
@@ -112,6 +115,9 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_contract_action_query(&indexer_data, &api_client, &api_url)
         .await
         .context("test contract action query")?;
+    test_contract_event_query(&indexer_data, &api_client, &api_url)
+        .await
+        .context("test contract event query")?;
     test_dust_generation_status_query(&api_client, &api_url)
         .await
         .context("test dust generation status query")?;
@@ -135,6 +141,9 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_contract_actions_subscription(&indexer_data, &ws_api_url)
         .await
         .context("test contract action subscription")?;
+    test_contract_events_subscription(&indexer_data, &api_client, &api_url, &ws_api_url)
+        .await
+        .context("test contract events subscription")?;
     test_shielded_transactions_subscription(&ws_api_url, session_id.clone())
         .await
         .context("test shielded transactions subscription")?;
@@ -1351,6 +1360,144 @@ fn viewing_key(network_id: &NetworkId) -> &'static str {
     }
 }
 
+/// Test the contract event query: every contract address that produced events returns
+/// well-formed events scoped to that contract, the test chain contains at least one event, and
+/// an unknown address yields none.
+async fn test_contract_event_query(
+    indexer_data: &IndexerData,
+    api_client: &Client,
+    api_url: &str,
+) -> anyhow::Result<()> {
+    let addresses = indexer_data
+        .contract_actions
+        .iter()
+        .map(|contract_action| contract_action.address.to_owned())
+        .unique();
+
+    let mut total_events = 0;
+    for address in addresses {
+        let variables = contract_event_query::Variables {
+            filter: contract_event_query::ContractEventFilter {
+                contract_address: address.clone(),
+                types: None,
+                field_prefixes: None,
+                from_block: None,
+                to_block: None,
+                transaction_hash: None,
+            },
+            limit: None,
+            offset: None,
+        };
+        let contract_events = send_query::<ContractEventQuery>(api_client, api_url, variables)
+            .await?
+            .contract_events;
+
+        // Every returned event belongs to the filtered contract and carries raw bytes.
+        for contract_event in &contract_events {
+            assert_eq!(contract_event.contract_address, address);
+            assert!(!contract_event.raw.as_ref().is_empty());
+        }
+        total_events += contract_events.len();
+    }
+
+    // The test chain must contain at least one emitted contract event, otherwise the events path
+    // is not being exercised. If this fails, regenerate the node data with an emit-capable
+    // contract (see generate_node_data.sh).
+    assert!(
+        total_events > 0,
+        "expected at least one contract event in the test chain"
+    );
+
+    // Unknown contract address yields no events.
+    let variables = contract_event_query::Variables {
+        filter: contract_event_query::ContractEventFilter {
+            contract_address: [42; 32].hex_encode(),
+            types: None,
+            field_prefixes: None,
+            from_block: None,
+            to_block: None,
+            transaction_hash: None,
+        },
+        limit: None,
+        offset: None,
+    };
+    let contract_events = send_query::<ContractEventQuery>(api_client, api_url, variables)
+        .await?
+        .contract_events;
+    assert!(contract_events.is_empty());
+
+    Ok(())
+}
+
+/// Test the contract event subscription: for every contract address with events, the subscription
+/// replays the same events the query returns, in the same (monotonic `id`) order.
+async fn test_contract_events_subscription(
+    indexer_data: &IndexerData,
+    api_client: &Client,
+    api_url: &str,
+    ws_api_url: &str,
+) -> anyhow::Result<()> {
+    let addresses = indexer_data
+        .contract_actions
+        .iter()
+        .map(|contract_action| contract_action.address.to_owned())
+        .unique();
+
+    for address in addresses {
+        // Expected events via the query.
+        let variables = contract_event_query::Variables {
+            filter: contract_event_query::ContractEventFilter {
+                contract_address: address.clone(),
+                types: None,
+                field_prefixes: None,
+                from_block: None,
+                to_block: None,
+                transaction_hash: None,
+            },
+            limit: None,
+            offset: None,
+        };
+        let expected = send_query::<ContractEventQuery>(api_client, api_url, variables)
+            .await?
+            .contract_events
+            .iter()
+            .map(|contract_event| contract_event.to_json_value())
+            .collect::<Vec<_>>();
+
+        // Deploy-only contracts have no events; nothing to subscribe to.
+        if expected.is_empty() {
+            continue;
+        }
+
+        // `from_block: 0` makes the subscription replay from the start of the chain (mirrors the
+        // contract-action subscription's "height zero" case), so it yields the same historical
+        // events the query returns.
+        let variables = contract_event_subscription::Variables {
+            filter: contract_event_subscription::ContractEventFilter {
+                contract_address: address.clone(),
+                types: None,
+                field_prefixes: None,
+                from_block: Some(0),
+                to_block: None,
+                transaction_hash: None,
+            },
+            id: None,
+        };
+        let contract_events =
+            graphql_ws_client::subscribe::<ContractEventSubscription>(ws_api_url, variables)
+                .await
+                .context("subscribe to contract events")?
+                .take(expected.len())
+                .map_ok(|data| data.contract_events.to_json_value())
+                .try_collect::<Vec<_>>()
+                .await
+                .context("collect contract events from contract event subscription")?;
+        assert_eq!(contract_events, expected);
+    }
+
+    Ok(())
+}
+
 mod graphql {
     use graphql_client::GraphQLQuery;
     use indexer_api::infra::api::v4::{
@@ -1381,6 +1528,22 @@ mod graphql {
         response_derives = "Debug, Clone, Serialize"
     )]
     pub struct ContractActionQuery;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v4.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct ContractEventQuery;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v4.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct ContractEventSubscription;
 
     #[derive(GraphQLQuery)]
     #[graphql(
