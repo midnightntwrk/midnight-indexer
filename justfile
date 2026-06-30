@@ -16,10 +16,10 @@ license-headers:
     ./license_headers.sh
 
 fmt:
-    cargo +{{nightly}} fmt
+    cargo fmt
 
 fmt-check:
-    cargo +{{nightly}} fmt --check
+    cargo fmt --check
 
 fix:
     cargo fix --allow-dirty --allow-staged --features {{feature}} --tests
