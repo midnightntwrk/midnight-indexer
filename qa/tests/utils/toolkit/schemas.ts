@@ -47,7 +47,7 @@ export const DustBalanceSchema = z.object({
   // serialized length is encoded in the leading byte), so keys legitimately come
   // through at different lengths — e.g. 64-char (32-byte) and 66-char (33-byte).
   // Constrain to even-length lowercase hex (whole bytes) only; do NOT pin a length.
-  source: z.record(z.string().regex(/^([0-9a-f]{2})+$/i), z.number()),
+  source: z.record(z.string().regex(/^([0-9a-f]{2})+$/), z.number()),
   total: z.number(),
 });
 
