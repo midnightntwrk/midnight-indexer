@@ -1,6 +1,6 @@
 # Midnight Indexer API Documentation v4
 
-The Midnight Indexer API exposes a GraphQL API that enables clients to query and subscribe to blockchain data—blocks, transactions, contracts, DUST generation, and shielded/unshielded transaction events—indexed from the Midnight blockchain. These capabilities facilitate both historical lookups and real-time monitoring.
+The Midnight Indexer API exposes a GraphQL API that enables clients to query and subscribe to blockchain data—blocks, transactions, contracts, DUST generation, shielded/unshielded transaction events, stake-pool-operator (SPO) data, and governance history—indexed from the Midnight blockchain. These capabilities facilitate both historical lookups and real-time monitoring.
 
 **Version Information:**
 - Current API version: v4
@@ -14,25 +14,26 @@ The GraphQL schema is defined in [`indexer-api/graphql/schema-v4.graphql`](../..
 
 ## Overview of Operations
 
-- **Queries**: Fetch blocks, transactions, contract actions, and DUST generation status.
-  Examples:
-    - Retrieve the latest block or a specific block by hash or height.
-    - Look up transactions by their hash or identifier.
-    - Inspect the current state of a contract action at a given block or transaction offset.
-    - Query unshielded token balances held by contracts.
-    - Query DUST generation status for Cardano stake keys.
+- **Queries**:
+    - *Blocks, transactions, contracts:* `block`, `transactions`, `contractAction`, `zswapMerkleTreeCollapsedUpdate`.
+    - *DUST:* `dustGenerationStatus`, `dustGenerations`, `dustCommitmentMerkleTreeUpdate`, `dustGenerationMerkleTreeUpdate`.
+    - *Governance history:* `dParameterHistory`, `termsAndConditionsHistory`.
+    - *Stake Pool Operators (SPO):* identity and metadata (`spoIdentities`, `spoIdentityByPoolId`, `spoByPoolId`, `spoList`, `spoCompositeByPoolId`, `poolMetadata`, `poolMetadataList`, `spoCount`, `stakePoolOperators`), performance and epochs (`spoPerformanceLatest`, `spoPerformanceBySpoSk`, `epochPerformance`, `currentEpochInfo`, `epochUtilization`, `committee`), and registration series (`registeredTotalsSeries`, `registeredSpoSeries`, `registeredPresence`, `registeredFirstValidEpochs`, `stakeDistribution`).
 
 - **Mutations**: Manage wallet sessions.
-    - `connect(viewingKey: ViewingKey!)`: Creates a session associated with a viewing key.
+    - `connect(viewingKey: ViewingKey!, options: ConnectOptions)`: Creates a session associated with a viewing key.
     - `disconnect(sessionId: HexEncoded!)`: Ends a previously established session.
 
 - **Subscriptions**: Receive real-time updates.
-    - `blocks`: Stream newly indexed blocks.
+    - `blocks(offset)`: Stream newly indexed blocks.
     - `contractActions(address, offset)`: Stream contract actions.
-    - `shieldedTransactions(sessionId, ...)`: Stream shielded transaction updates, including relevant transactions and optional progress updates.
-    - `unshieldedTransactions(address)`: Stream unshielded transaction events for a specific address.
+    - `shieldedTransactions(sessionId, index)`: Stream shielded transaction updates, including relevant transactions and progress updates.
+    - `unshieldedTransactions(address, transactionId)`: Stream unshielded transaction events for a specific address.
+    - `dustGenerations(dustAddress, startIndex, endIndex)` *(@beta)*: Stream a dust address's generation entries interleaved with collapsed Merkle tree updates.
     - `dustLedgerEvents(id)`: Stream DUST ledger events.
     - `zswapLedgerEvents(id)`: Stream Zswap ledger events.
+    - `dustNullifierTransactions(nullifierLeBytesPrefixes, fromBlock, toBlock)`: Stream transactions matching DUST nullifier prefixes.
+    - `shieldedNullifierTransactions(nullifierPrefixes, fromBlock, toBlock)`: Stream transactions matching shielded nullifier prefixes.
 
 ## API Endpoints
 
@@ -332,6 +333,109 @@ The `currentCapacity` field represents the maximum DUST generation capacity base
 
 For accurate DUST balance after fee payments, query the connected wallet directly via wallet SDK or DApp Connector API. Use `currentCapacity` as an approximation when wallet connection is unavailable
 
+### dustGenerations(cardanoRewardAddresses: [CardanoRewardAddress!]!): [DustGenerations!]!
+
+Return all active DUST registrations with aggregated generation stats per Cardano reward address. Unlike `dustGenerationStatus`, this returns **every** active registration for each reward address (not capped at one), each as a `DustRegistration`.
+
+**Example:**
+
+```graphql
+query {
+  dustGenerations(cardanoRewardAddresses: ["stake_test1..."]) {
+    cardanoRewardAddress
+    registrations {
+      dustAddress
+      valid
+      nightBalance
+      generationRate
+      maxCapacity
+      currentCapacity
+      utxoTxHash
+      utxoOutputIndex
+    }
+  }
+}
+```
+
+### Merkle Tree Collapsed Update Queries
+
+Return a collapsed Merkle tree update for a `[startIndex, endIndex]` index range, so wallets can reconstruct tree state without downloading every leaf. Each returns a `MerkleTreeCollapsedUpdate` (`startIndex`, `endIndex`, `update: HexEncoded!`, `protocolVersion`).
+
+- `zswapMerkleTreeCollapsedUpdate(startIndex: Int!, endIndex: Int!): MerkleTreeCollapsedUpdate!` — zswap (shielded) state tree.
+- `dustCommitmentMerkleTreeUpdate(startIndex: Int!, endIndex: Int!): MerkleTreeCollapsedUpdate!` *(@beta)* — dust commitment tree.
+- `dustGenerationMerkleTreeUpdate(startIndex: Int!, endIndex: Int!): MerkleTreeCollapsedUpdate!` *(@beta)* — dust generation tree.
+
+**Example:**
+
+```graphql
+query {
+  zswapMerkleTreeCollapsedUpdate(startIndex: 0, endIndex: 100) {
+    startIndex
+    endIndex
+    update
+    protocolVersion
+  }
+}
+```
+
+### Governance History Queries
+
+Return the full history of on-chain governance parameter changes for auditability.
+
+- `dParameterHistory: [DParameterChange!]!` — D-parameter changes. Each entry: `blockHeight`, `blockHash`, `timestamp`, `numPermissionedCandidates`, `numRegisteredCandidates`.
+- `termsAndConditionsHistory: [TermsAndConditionsChange!]!` — Terms & Conditions changes. Each entry: `blockHeight`, `blockHash`, `timestamp`, `hash`, `url`.
+
+**Example:**
+
+```graphql
+query {
+  dParameterHistory {
+    blockHeight
+    timestamp
+    numPermissionedCandidates
+    numRegisteredCandidates
+  }
+}
+```
+
+### Stake Pool Operator (SPO) Queries
+
+The indexer surfaces Cardano stake-pool-operator data: identities, metadata, per-epoch performance, and registration series. These are read-only queries; most take `limit`/`offset` pagination.
+
+**Identity and metadata:**
+- `spoIdentities(limit: Int, offset: Int): [SpoIdentity!]!` — SPO identities (`poolIdHex`, `mainchainPubkeyHex`, `sidechainPubkeyHex`, `auraPubkeyHex`, `validatorClass`).
+- `spoIdentityByPoolId(poolIdHex: String!): SpoIdentity`
+- `spoByPoolId(poolIdHex: String!): Spo` and `spoList(limit: Int, offset: Int, search: String): [Spo!]!` — SPO with metadata (`poolIdHex`, `validatorClass`, `name`, `ticker`, `homepageUrl`, `logoUrl`, ...).
+- `spoCompositeByPoolId(poolIdHex: String!): SpoComposite` — combined identity, metadata and latest performance.
+- `poolMetadata(poolIdHex: String!): PoolMetadata` and `poolMetadataList(limit: Int, offset: Int, withNameOnly: Boolean): [PoolMetadata!]!`
+- `spoCount: Int`, `stakePoolOperators(limit: Int): [String!]!` — count and pool-id list.
+
+**Performance and epochs:**
+- `spoPerformanceLatest(limit, offset): [EpochPerf!]!`, `spoPerformanceBySpoSk(spoSkHex: String!, limit, offset): [EpochPerf!]!`, `epochPerformance(epoch: Int!, limit, offset): [EpochPerf!]!` — per-epoch produced/expected blocks (`epochNo`, `spoSkHex`, `produced`, `expected`, ...).
+- `currentEpochInfo: EpochInfo`, `epochUtilization(epoch: Int!): Float`, `committee(epoch: Int!): [CommitteeMember!]!`.
+
+**Registration series (analytics over an epoch range):**
+- `registeredTotalsSeries(fromEpoch: Int!, toEpoch: Int!): [RegisteredTotals!]!`
+- `registeredSpoSeries(fromEpoch: Int!, toEpoch: Int!): [RegisteredStat!]!`
+- `registeredPresence(fromEpoch: Int!, toEpoch: Int!): [PresenceEvent!]!`
+- `registeredFirstValidEpochs(uptoEpoch: Int): [FirstValidEpoch!]!`
+- `stakeDistribution(limit, offset, search, orderByStakeDesc: Boolean): [StakeShare!]!`
+
+**Example:**
+
+```graphql
+query {
+  spoList(limit: 10, search: "pool") {
+    poolIdHex
+    name
+    ticker
+    validatorClass
+  }
+}
+```
+
+For the exact field set of each SPO type (`SpoIdentity`, `Spo`, `PoolMetadata`, `SpoComposite`, `EpochPerf`, `EpochInfo`, `CommitteeMember`, `RegisteredTotals`, `RegisteredStat`, `PresenceEvent`, `FirstValidEpoch`, `StakeShare`), consult the schema.
+
 ## Contract Action Types
 
 All ContractAction types (ContractDeploy, ContractCall, ContractUpdate) implement the ContractAction interface with these common fields:
@@ -366,13 +470,21 @@ type ContractBalance {
 ## Block Type
 
 The Block type represents a blockchain block:
-- `hash`: The block hash (HexEncoded)
+- `hash`: The block hash (HexEncoded!)
 - `height`: The block height (Int!)
 - `protocolVersion`: The protocol version (Int!)
 - `timestamp`: The UNIX timestamp (Int!)
 - `author`: The block author (HexEncoded, optional)
+- `zswapMerkleTreeRoot`: The hex-encoded serialized zswap state Merkle tree root (HexEncoded!)
+- `ledgerParameters`: The hex-encoded ledger parameters for this block (HexEncoded!)
+- `zswapEndIndex`: The zswap commitment tree end index at this block, exclusive/next-free (Int!)
+- `dustCommitmentEndIndex`: The dust commitment tree end index at this block, exclusive/next-free (Int!, @beta)
+- `dustGenerationEndIndex`: The dust generation tree end index at this block, exclusive/next-free (Int!, @beta)
+- `dustCommitmentMerkleTreeRoot`: The hex-encoded dust commitment Merkle tree root at this block (HexEncoded, @beta)
+- `dustGenerationMerkleTreeRoot`: The hex-encoded dust generation Merkle tree root at this block (HexEncoded, @beta)
 - `parent`: Reference to the parent block (Block, optional)
 - `transactions`: Array of transactions within this block ([Transaction!]!)
+- `systemParameters`: The system (governance) parameters at this block height (SystemParameters!)
 
 ## Transaction Type
 
@@ -444,9 +556,9 @@ All DUST ledger event types share common fields:
 
 Mutations allow the client to connect a wallet (establishing a session) and disconnect it.
 
-### connect(viewingKey: ViewingKey!): HexEncoded!
+### connect(viewingKey: ViewingKey!, options: ConnectOptions): HexEncoded!
 
-Establishes a session for a given wallet viewing key in **either** bech32m or hex format. Returns the session ID.
+Establishes a session for a given wallet viewing key in **either** bech32m or hex format. Returns the session ID. The optional `options` argument (`ConnectOptions`) accepts `startIndex: Int` to begin syncing from a given zswap state index instead of the start.
 
 **Viewing Key Format Support**
 - **Bech32m** (preferred): A base-32 encoded format with a human-readable prefix, e.g., `mn_shield-esk_dev1...`
@@ -529,11 +641,9 @@ Subscribes to contract actions for a particular address. New contract actions (c
 
 ### Shielded Transactions Subscription
 
-`shieldedTransactions(sessionId: HexEncoded!, index: Int, sendProgressUpdates: Boolean): ShieldedTransactionsEvent!`
+`shieldedTransactions(sessionId: HexEncoded!, index: Int): ShieldedTransactionsEvent!`
 
-Subscribes to shielded transaction updates. This includes relevant transactions and possibly Merkle tree updates, as well as `ShieldedTransactionsProgress` events if `sendProgressUpdates` is set to `true`, which is also the default. The `index` parameter can be used to resume from a certain point.
-
-Adjust `index` and `offset` arguments as needed.
+Subscribes to shielded transaction updates. This includes relevant transactions and possibly Merkle tree updates, as well as `ShieldedTransactionsProgress` events. The `index` parameter can be used to resume from a certain point.
 
 **Example:**
 
@@ -639,6 +749,41 @@ Subscribe to Zswap ledger events. The `id` parameter allows resuming from a spec
   }
 }
 ```
+
+### DUST Generations Subscription
+
+`dustGenerations(dustAddress: DustAddress!, startIndex: Int!, endIndex: Int!): DustGenerationsEvent!` *(@beta)*
+
+Subscribe to a dust address's generation entries in the generation-tree index range `[startIndex, endIndex]` (inclusive; `endIndex` maps to `dustGenerationEndIndex`, which is exclusive, so pass `dustGenerationEndIndex - 1`). Owned entries are interleaved with collapsed Merkle tree updates that fill the non-owned gaps, plus owned-entry decay-time (dtime) updates.
+
+`DustGenerationsEvent` is a union of:
+- `DustGenerationsItem`: an owned generation entry (`commitmentMtIndex`, `generationMtIndex`, `owner`, `value`, `initialValue`, `backingNight`, `ctime`, `transactionId`, `transactionHash`) with an optional `collapsedMerkleTree` filling the gap before it.
+- `DustGenerationsProgress`: `highestIndex` and an optional final `collapsedMerkleTree` (the trailing gap).
+- `DustGenerationDtimeUpdateItem`: a decay-time update for an owned generation (`generationMtIndex`, `owner`, `nightUtxoHash`, `newDtime`, `transactionId`, `transactionHash`, `treeInsertionPath`).
+
+**Example:**
+
+```json
+{
+  "id": "7",
+  "type": "start",
+  "payload": {
+    "query": "subscription { dustGenerations(dustAddress: \"mn_dust...\", startIndex: 0, endIndex: 100) { __typename ... on DustGenerationsItem { generationMtIndex collapsedMerkleTree { startIndex endIndex update } } ... on DustGenerationsProgress { highestIndex collapsedMerkleTree { startIndex endIndex update } } ... on DustGenerationDtimeUpdateItem { generationMtIndex newDtime treeInsertionPath } } }"
+  }
+}
+```
+
+### DUST Nullifier Transactions Subscription
+
+`dustNullifierTransactions(nullifierLeBytesPrefixes: [HexEncoded!]!, fromBlock: Int, toBlock: Int): DustNullifierTransaction!`
+
+Subscribe to transactions containing DUST nullifiers whose 32-byte little-endian form starts with one of the provided prefixes, so wallets can discover their own DUST UTXOs. Each event carries `nullifierLeBytes`, `commitmentLeBytes`, `transactionId`, `transactionHash`, `blockHeight`, `blockHash`, and the full `transaction`. If `toBlock` is set, the subscription finishes after reaching that block; otherwise it continues live.
+
+### Shielded Nullifier Transactions Subscription
+
+`shieldedNullifierTransactions(nullifierPrefixes: [HexEncoded!]!, fromBlock: Int, toBlock: Int): ShieldedNullifierTransaction!`
+
+Subscribe to transactions containing shielded nullifiers matching one of the provided prefixes. Each event carries `nullifier`, `transactionId`, `transactionHash`, `blockHeight`, `blockHash`, and the full `transaction`. If `toBlock` is set, the subscription finishes after reaching that block; otherwise it continues live.
 
 ## Query Limits Configuration
 
