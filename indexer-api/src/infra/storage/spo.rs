@@ -1181,8 +1181,6 @@ impl SpoStorage for Storage {
             "}
         };
 
-        // AssertSqlSafe below is sound: `sql` is a static literal with only the sort
-        // direction flipped; the search term is bound ($3/$4), never interpolated.
         let sql = if order_desc {
             base_select.to_string()
         } else {
@@ -1206,7 +1204,7 @@ impl SpoStorage for Storage {
                     Option<String>, // declared_pledge
                     Option<String>, // live_pledge
                 ),
-            >(sqlx::AssertSqlSafe(sql))
+            >(&sql)
             .bind(limit)
             .bind(offset)
             .bind(s_like.clone())
@@ -1229,7 +1227,7 @@ impl SpoStorage for Storage {
                     Option<String>,
                     Option<String>,
                 ),
-            >(sqlx::AssertSqlSafe(sql))
+            >(&sql)
             .bind(limit)
             .bind(offset)
             .fetch_all(&*self.pool)
