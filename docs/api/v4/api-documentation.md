@@ -5,6 +5,14 @@ The Midnight Indexer API exposes a GraphQL API that enables clients to query and
 **Version Information:**
 - Current API version: v4
 
+**Stability (`@beta`):**
+Fields and types marked `@beta` in the schema are in-flight and may change without notice; stability is signalled by *removal* of the directive (a field losing `@beta` is a promise it has stabilised). Throughout this document, operations and fields that carry the directive are flagged with a *(@beta)* marker.
+
+The `@beta` surface in this version is entirely dust-related (the dust API is mid-redesign—see tickets #1181 and #1173):
+- **Queries:** `dustCommitmentMerkleTreeUpdate`, `dustGenerationMerkleTreeUpdate`.
+- **Subscriptions:** `dustGenerations`, and its event types `DustGenerationsItem`, `DustGenerationsProgress`, `DustGenerationDtimeUpdateItem`.
+- **Fields:** the dust start/end indices and roots on `Block` and on transactions (`dustCommitment…`/`dustGeneration…`), and the nullifier-transaction fields (`DustNullifierTransaction.nullifierLeBytes` / `.commitmentLeBytes` / `.transaction`, and `ShieldedNullifierTransaction.transaction`).
+
 **Disclaimer:**
 The examples provided here are illustrative and may need updating if the API changes. Always consider [`indexer-api/graphql/schema-v4.graphql`](../../../indexer-api/graphql/schema-v4.graphql) as the primary source of truth. Adjust queries as necessary to match the latest schema.
 
@@ -48,6 +56,28 @@ Content-Type: application/json
 wss://<host>:<port>/api/v4/graphql/ws
 Sec-WebSocket-Protocol: graphql-transport-ws
 ```
+
+## GraphQL Introspection
+
+The API supports standard [GraphQL introspection](https://graphql.org/learn/introspection/), so clients and tooling (GraphiQL, code generators, schema-diff tools) can discover the schema at runtime rather than relying on this document. Send an introspection query to the HTTP endpoint using the `__schema` and `__type` meta-fields.
+
+**Example** (list every subscription field and its arguments):
+
+```graphql
+query {
+  __type(name: "Subscription") {
+    fields {
+      name
+      args {
+        name
+        type { name kind ofType { name } }
+      }
+    }
+  }
+}
+```
+
+The committed [`indexer-api/graphql/schema-v4.graphql`](../../../indexer-api/graphql/schema-v4.graphql) is the canonical SDL and matches what introspection returns at runtime. (Some deployments may restrict introspection; if so, use the committed schema file instead.)
 
 ## Core Scalars
 
