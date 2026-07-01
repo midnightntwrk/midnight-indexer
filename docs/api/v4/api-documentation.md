@@ -8,10 +8,10 @@ The Midnight Indexer API exposes a GraphQL API that enables clients to query and
 **Stability (`@beta`):**
 Fields and types marked `@beta` in the schema are in-flight and may change without notice; stability is signalled by *removal* of the directive (a field losing `@beta` is a promise it has stabilised). Throughout this document, operations and fields that carry the directive are flagged with a *(@beta)* marker.
 
-The `@beta` surface in this version is entirely dust-related (the dust API is mid-redesign—see tickets #1181 and #1173):
+The `@beta` surface in this version (driven by the dust API mid-redesign—see tickets #1181 and #1173):
 - **Queries:** `dustCommitmentMerkleTreeUpdate`, `dustGenerationMerkleTreeUpdate`.
 - **Subscriptions:** `dustGenerations`, and its event types `DustGenerationsItem`, `DustGenerationsProgress`, `DustGenerationDtimeUpdateItem`.
-- **Fields:** the dust start/end indices and roots on `Block` and on transactions (`dustCommitment…`/`dustGeneration…`), and the nullifier-transaction fields (`DustNullifierTransaction.nullifierLeBytes` / `.commitmentLeBytes` / `.transaction`, and `ShieldedNullifierTransaction.transaction`).
+- **Fields:** the dust end indices and Merkle roots on `Block` (`dustCommitmentEndIndex`, `dustGenerationEndIndex`, `dustCommitmentMerkleTreeRoot`, `dustGenerationMerkleTreeRoot`), the dust start/end indices on `RegularTransaction`, and the nullifier-transaction fields (`DustNullifierTransaction.nullifierLeBytes` / `.commitmentLeBytes` / `.transaction`, and `ShieldedNullifierTransaction.transaction`).
 
 **Disclaimer:**
 The examples provided here are illustrative and may need updating if the API changes. Always consider [`indexer-api/graphql/schema-v4.graphql`](../../../indexer-api/graphql/schema-v4.graphql) as the primary source of truth. Adjust queries as necessary to match the latest schema.
@@ -85,6 +85,8 @@ The committed [`indexer-api/graphql/schema-v4.graphql`](../../../indexer-api/gra
 - `ViewingKey`: A viewing key in hex or Bech32 format for wallet sessions.
 - `Unit`: An empty return type for mutations that do not return data.
 - `UnshieldedAddress`: An unshielded address in Bech32m format (e.g., `mn_addr_test1...`). Used for unshielded token operations.
+- `CardanoRewardAddress`: A Bech32-encoded Cardano reward (stake) address (e.g., `stake1...` or `stake_test1...`). Used for DUST generation queries.
+- `DustAddress`: A Bech32m-encoded DUST address (`mn_dust...` on mainnet, `mn_dust_<network-id>...` elsewhere). Used for the DUST generations subscription.
 
 ## Input Types
 
@@ -588,7 +590,7 @@ Mutations allow the client to connect a wallet (establishing a session) and disc
 
 ### connect(viewingKey: ViewingKey!, options: ConnectOptions): HexEncoded!
 
-Establishes a session for a given wallet viewing key in **either** bech32m or hex format. Returns the session ID. The optional `options` argument (`ConnectOptions`) accepts `startIndex: Int` to begin syncing from a given zswap state index instead of the start.
+Establishes a session for a given wallet viewing key in **either** bech32m or hex format. Returns the session ID. The optional `options` argument (`ConnectOptions`) accepts `startIndex: Int`, the transaction index (inclusive) from which to start searching for relevant transactions.
 
 **Viewing Key Format Support**
 - **Bech32m** (preferred): A base-32 encoded format with a human-readable prefix, e.g., `mn_shield-esk_dev1...`
