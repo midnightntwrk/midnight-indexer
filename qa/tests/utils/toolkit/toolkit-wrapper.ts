@@ -737,7 +737,7 @@ class ToolkitWrapper {
 
   /**
    * Format Zod validation issues as a compact, readable `path: message` list, e.g.
-   * `source.6fa1…: String must contain exactly 66 character(s)`.
+   * `source.6fa1…: Invalid`.
    */
   private formatZodIssues(error: z.ZodError): string {
     return error.issues
