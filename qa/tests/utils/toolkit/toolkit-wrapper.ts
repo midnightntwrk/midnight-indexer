@@ -96,7 +96,7 @@ const DUST_BALANCE_EXPECTED = [
   'Expected one of:',
   '  (1) full DustBalance object: { generation_infos: Array<…>, source: Record<hexKey, number>, total: number }',
   '  (2) source-only object:      Record<hexKey, number>',
-  '  where hexKey is currently constrained by DustBalanceSchema to a 66-character hex string.',
+  '  where hexKey is an even-length lowercase hex string (whole bytes, any length).',
 ].join('\n');
 
 class ToolkitWrapper {
