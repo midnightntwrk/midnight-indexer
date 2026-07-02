@@ -12,7 +12,8 @@
 // limitations under the License.
 
 use indexer_common::domain::{
-    BlockAuthor, BlockHash, ProtocolVersion, SerializedLedgerParameters,
+    BlockAuthor, BlockHash, ProtocolVersion, SerializedDustCommitmentMerkleTreeRoot,
+    SerializedDustGenerationMerkleTreeRoot, SerializedLedgerParameters,
     SerializedZswapMerkleTreeRoot,
 };
 use sqlx::prelude::FromRow;
@@ -54,4 +55,8 @@ pub struct Block {
 
     #[sqlx(try_from = "i64")]
     pub dust_generation_end_index: u64,
+
+    pub dust_commitment_merkle_tree_root: Option<SerializedDustCommitmentMerkleTreeRoot>,
+
+    pub dust_generation_merkle_tree_root: Option<SerializedDustGenerationMerkleTreeRoot>,
 }

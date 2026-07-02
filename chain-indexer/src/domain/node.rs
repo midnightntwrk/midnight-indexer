@@ -93,6 +93,8 @@ impl TryFrom<Block> for (domain::Block, Vec<Transaction>) {
             zswap_end_index: 0,
             dust_commitment_end_index: 0,
             dust_generation_end_index: 0,
+            dust_commitment_merkle_tree_root: Default::default(),
+            dust_generation_merkle_tree_root: Default::default(),
         };
 
         Ok((block, transactions))
