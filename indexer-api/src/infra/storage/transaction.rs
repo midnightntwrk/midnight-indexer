@@ -449,16 +449,19 @@ impl TransactionStorage for Storage {
         &self,
         address: UnshieldedAddress,
     ) -> Result<Option<u64>, sqlx::Error> {
-        // Max transaction id across both link columns for the owner. Each
-        // branch is an index scan on unshielded_utxos(owner, …); aggregate
-        // MAX skips NULL spending_transaction_id values from unspent rows.
+        // Highest transaction id across both link columns for the owner. Each
+        // inner MAX is a top-1 reverse probe of unshielded_utxos(owner, <link>);
+        // aggregate MAX ignores NULLs (unspent rows, absent owner) in both
+        // Postgres and SQLite, so no IS NOT NULL guards are needed.
         let query = indoc! {"
             SELECT MAX(tx_id) FROM (
-                SELECT creating_transaction_id AS tx_id
+                SELECT MAX(creating_transaction_id) AS tx_id
                 FROM unshielded_utxos
                 WHERE owner = $1
+
                 UNION ALL
-                SELECT spending_transaction_id AS tx_id
+
+                SELECT MAX(spending_transaction_id)
                 FROM unshielded_utxos
                 WHERE owner = $1
             ) AS t
@@ -622,10 +625,10 @@ impl Storage {
         transaction_id: u64,
         batch_size: NonZeroU32,
     ) -> Result<Vec<Transaction>, sqlx::Error> {
-        // Collect matching tx ids in a deduplicated UNION subquery over both
-        // link columns, then probe transactions by primary key. LEFT JOIN
-        // regular_transactions yields populated regular_* fields for Regular
-        // rows and NULL fields for System rows.
+        // Collect matching tx ids in a deduplicated UNION subquery (replacing
+        // the old SELECT DISTINCT), then probe transactions by primary key.
+        // LEFT JOIN regular_transactions: the chain-indexer writes exactly one
+        // such row per Regular tx (atomically), so NULLs occur exactly for System.
         #[cfg(feature = "cloud")]
         let query = indoc! {"
             SELECT
