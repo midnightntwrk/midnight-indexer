@@ -29,7 +29,7 @@ node ──subxt──▶ chain-indexer ──writes──▶ DB ◀─reads/wri
   `keep_wallet_active` heartbeat. A newly connected wallet is picked up by wallet-indexer **polling
   the active wallet set**, not via a connect event; subscriptions then stream that wallet's
   relevant transactions.
-- **spo-indexer** (cloud) indexes stake-pool data via Blockfrost.
+- **spo-indexer** indexes stake-pool data via Blockfrost.
 
 ## NATS is a signal bus, not a data bus
 
