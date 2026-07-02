@@ -109,9 +109,10 @@ pub async fn run(
     let (mut ledger_state, mut previous_ledger_state_key) =
         match highest_protocol_version_and_ledger_state_key {
             Some((protocol_version, ledger_state_key)) => {
-                let state = LedgerState::load(&ledger_state_key, protocol_version.ledger_version())
+                let ledger_version = protocol_version.ledger_version();
+                let state = LedgerState::load(&ledger_state_key, ledger_version)
                     .context("load ledger state")?;
-                (state, Some(ledger_state_key))
+                (state, Some((ledger_state_key, ledger_version)))
             }
 
             None => {
@@ -187,12 +188,13 @@ pub async fn run(
 
                 ledger_state = next_ledger_state;
 
-                // Unpersist the previous ledger state's key (if any). This balances the persist()
-                // call from the prior block (or the prior process run, for the first iteration)
-                // and lets the arena nodes it referenced become eligible for gc.
-                let ledger_version = ledger_state.ledger_version();
-                if let Some(prev_key) = previous_ledger_state_key.replace(new_ledger_state_key) {
-                    LedgerState::unpersist(&prev_key, ledger_version)
+                // Unpersist the previous ledger state's key (if any) with the version it was
+                // persisted under (they differ at a protocol upgrade boundary). This balances the
+                // prior block's persist() and lets its arena nodes become eligible for gc.
+                if let Some((prev_key, prev_version)) = previous_ledger_state_key
+                    .replace((new_ledger_state_key, ledger_state.ledger_version()))
+                {
+                    LedgerState::unpersist(&prev_key, prev_version)
                         .context("unpersist previous ledger state")?;
                 }
 

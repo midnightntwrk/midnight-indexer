@@ -356,6 +356,10 @@ impl DB for LedgerDb {
         })
     }
 
+    /// Called by storage-core's gc-v1 sweep phase (`gc.rs`): after marking
+    /// reachable nodes, `gc()` scans the DB in batches, culls every scanned
+    /// node not in the mark set, and uses the returned resume handle to pick
+    /// up where a time-bounded pass left off. Not called by indexer code.
     fn scan(
         &self,
         resume_from: Option<Self::ScanResumeHandle>,

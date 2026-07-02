@@ -343,6 +343,19 @@ impl LedgerState {
 
                 Ok(())
             }
+
+            LedgerVersion::V9 => {
+                let arena_key = TypedArenaKey::<
+                    LedgerStateV9<v1_1::LedgerDb>,
+                    <v1_1::LedgerDb as DB>::Hasher,
+                >::deserialize(&mut key.as_slice(), 0)
+                .map_err(|error| Error::Deserialize("TypedArenaKeyV9", error))?;
+
+                default_storage::<v1_1::LedgerDb>()
+                    .with_backend(|b| b.unpersist(arena_key.key.hash()));
+
+                Ok(())
+            }
         }
     }
 
