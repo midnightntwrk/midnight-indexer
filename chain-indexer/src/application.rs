@@ -442,6 +442,12 @@ where
     block.zswap_end_index = ledger_state.zswap_first_free();
     block.dust_commitment_end_index = ledger_state.dust_commitments_first_free();
     block.dust_generation_end_index = ledger_state.dust_generations_first_free();
+    block.dust_commitment_merkle_tree_root = ledger_state
+        .dust_commitment_merkle_tree_root()
+        .context("get dust commitment merkle tree root")?;
+    block.dust_generation_merkle_tree_root = ledger_state
+        .dust_generation_merkle_tree_root()
+        .context("get dust generation merkle tree root")?;
 
     // Validate ledger state.
     // TODO: Only use ledger state root comparison once support for Node < 0.22 is dropped!

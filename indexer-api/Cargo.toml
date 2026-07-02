@@ -30,6 +30,7 @@ drop-stream        = { workspace = true }
 derive_more        = { workspace = true, features = [ "debug", "display", "from" ] }
 fastrace           = { workspace = true, features = [ "enable" ] }
 fastrace-axum      = { workspace = true }
+flate2             = { workspace = true }
 futures            = { workspace = true }
 humantime-serde    = { workspace = true }
 indexer-common     = { path = "../indexer-common" }
@@ -48,7 +49,7 @@ thiserror          = { workspace = true }
 tokio              = { workspace = true, features = [ "macros", "rt-multi-thread", "time", "signal" ] }
 tokio-stream       = { workspace = true }
 tower              = { workspace = true }
-tower-http         = { workspace = true, features = [ "cors", "limit" ] }
+tower-http         = { workspace = true, features = [ "compression-br", "compression-gzip", "compression-zstd", "cors", "limit" ] }
 trait-variant      = { workspace = true }
 uuid               = { workspace = true, features = [ "v7" ] }
 
