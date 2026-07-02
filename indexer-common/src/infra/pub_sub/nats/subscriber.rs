@@ -17,7 +17,7 @@ use crate::{
 };
 use async_nats::{Client, ConnectOptions, Event};
 use futures::{Stream, StreamExt, TryFutureExt, TryStreamExt, stream};
-use log::{debug, warn};
+use log::{info, warn};
 use secrecy::ExposeSecret;
 use std::time::Duration;
 use thiserror::Error;
@@ -44,7 +44,7 @@ impl NatsSubscriber {
             .max_reconnects(max_reconnects)
             .event_callback(|event| async {
                 match event {
-                    Event::Connected => debug!("NATS client connected"),
+                    Event::Connected => info!("NATS client connected"),
                     Event::Disconnected => warn!("NATS client disconnected"),
                     Event::LameDuckMode => warn!("NATS client in lame duck mode"),
                     Event::Draining => warn!("NATS client draining"),
