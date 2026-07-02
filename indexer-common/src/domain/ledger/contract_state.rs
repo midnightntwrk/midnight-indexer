@@ -139,6 +139,9 @@ mod tests {
     };
     use midnight_base_crypto_v1::hash::HashOutput;
     use midnight_coin_structure_v2::coin::{TokenType as MidnightTokenType, UnshieldedTokenType};
+    use midnight_coin_structure_v3::coin::{
+        TokenType as MidnightTokenTypeV9, UnshieldedTokenType as UnshieldedTokenTypeV9,
+    };
     use midnight_onchain_runtime_v3::state::ContractState as ContractStateV3;
     use midnight_onchain_runtime_v4::state::ContractState as ContractStateV4;
     use midnight_storage_core_v1::DefaultDB;
@@ -168,7 +171,7 @@ mod tests {
     fn test_balances_v9() {
         let mut contract_state = ContractStateV4::<DefaultDB>::default();
         contract_state.balance = contract_state.balance.insert(
-            MidnightTokenType::Unshielded(UnshieldedTokenType(HashOutput(TOKEN_TYPE.0))),
+            MidnightTokenTypeV9::Unshielded(UnshieldedTokenTypeV9(HashOutput(TOKEN_TYPE.0))),
             AMOUNT,
         );
         let contract_state = contract_state
