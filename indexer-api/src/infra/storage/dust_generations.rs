@@ -420,10 +420,10 @@ impl DustGenerationsStorage for Storage {
                         None => break,
                     }
 
-                    for (_, nullifier, commitment, transaction_id, transaction_hash, block_height, block_hash) in rows {
+                    for (_, nullifier_le_bytes, commitment_le_bytes, transaction_id, transaction_hash, block_height, block_hash) in rows {
                         yield DustNullifierTransaction {
-                            nullifier,
-                            commitment,
+                            nullifier_le_bytes,
+                            commitment_le_bytes,
                             transaction_id: transaction_id as u64,
                             transaction_hash,
                             block_height: block_height as u32,
@@ -433,6 +433,18 @@ impl DustGenerationsStorage for Storage {
                 }
             }
         }
+    }
+
+    #[trace]
+    async fn get_dust_generations_chain_first_free(&self) -> Result<u64, sqlx::Error> {
+        // `IS NOT NULL` skips legacy rows pre-dating the generation/commitment split.
+        let (max_index,) = sqlx::query_as::<_, (Option<i64>,)>(
+            "SELECT MAX(generation_index) FROM dust_generation_info WHERE generation_index IS NOT NULL",
+        )
+        .fetch_one(&*self.pool)
+        .await?;
+
+        Ok(max_index.map(|i| i as u64 + 1).unwrap_or(0))
     }
 }
 

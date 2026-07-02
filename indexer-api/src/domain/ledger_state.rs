@@ -175,50 +175,6 @@ impl LedgerStateCache {
 
         Ok(collapsed_update)
     }
-
-    /// Get dust Merkle tree roots from the latest ledger state.
-    pub async fn dust_merkle_tree_roots(
-        &self,
-        storage: &impl Storage,
-    ) -> Result<DustMerkleTreeRoots, LedgerStateCacheError> {
-        let mut ledger_state_read = self.0.read().await;
-
-        if ledger_state_read.is_none() {
-            drop(ledger_state_read);
-            let mut ledger_state_write = self.0.write().await;
-
-            if ledger_state_write.is_none() {
-                let Some((protocol_version, ledger_state_key)) =
-                    storage.get_highest_ledger_state().await?
-                else {
-                    return Err(LedgerStateCacheError::NotFound);
-                };
-
-                let ledger_state =
-                    LedgerState::load(&ledger_state_key, protocol_version.ledger_version())?;
-                *ledger_state_write = Some(ledger_state);
-            }
-
-            ledger_state_read = ledger_state_write.downgrade();
-        }
-
-        let ledger_state = ledger_state_read
-            .as_ref()
-            .expect("ledger state should exist after loading");
-        let commitment_root = ledger_state.dust_commitment_merkle_tree_root()?;
-        let generation_root = ledger_state.dust_generation_merkle_tree_root()?;
-
-        Ok(DustMerkleTreeRoots {
-            commitment_root,
-            generation_root,
-        })
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct DustMerkleTreeRoots {
-    pub commitment_root: ByteVec,
-    pub generation_root: ByteVec,
 }
 
 #[derive(Debug, Error)]

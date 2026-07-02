@@ -19,6 +19,7 @@ const INDEXER_BASE_URL: Record<string, string> = {
   preview: "indexer.preview.midnight.network",
   preprod: "indexer.preprod.midnight.network",
   qanet: "indexer.qanet.midnight.network",
+  stagenet: "indexer.stagenet.shielded.tools",
 };
 
 export let TARGET_ENV: string;

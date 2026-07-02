@@ -53,7 +53,10 @@ function generateRewardAddress(
 
 const TOOLKIT_STARTUP_TIMEOUT = 60_000;
 
-describe('dust generation status queries', () => {
+// Dust generation registrations require a Cardano-side mapping which has no
+// counterpart in the `undeployed` environment. Skip the whole surface there;
+// re-enable once #1152 lands local Cardano test-data provisioning.
+describe.skipIf(env.isUndeployedEnv())('dust generation status queries', () => {
   let toolkit: ToolkitWrapper;
 
   beforeAll(async () => {

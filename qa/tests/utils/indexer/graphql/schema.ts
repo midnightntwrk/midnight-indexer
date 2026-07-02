@@ -41,6 +41,9 @@ export const BlockSchema = z.lazy(() =>
     zswapMerkleTreeRoot: VarLenghtHex,
     dustCommitmentMerkleTreeRoot: VarLenghtHex.nullable(),
     dustGenerationMerkleTreeRoot: VarLenghtHex.nullable(),
+    zswapEndIndex: z.number().int().nonnegative(),
+    dustCommitmentEndIndex: z.number().int().nonnegative(),
+    dustGenerationEndIndex: z.number().int().nonnegative(),
     parent: PartialBlockSchema,
     transactions: z.array(FullTransactionSchema).min(0),
   }),
@@ -217,10 +220,11 @@ export const ContractActionSchema = z.discriminatedUnion('type', [
   ContractUpdateSchema,
 ]);
 
-// Contract balance schema
+// Contract balance schema. tokenType is a 32-byte hex string and amount a decimal
+// u128 string; enforcing the shape here makes every parse a format assertion.
 export const ContractBalanceSchema = z.object({
-  tokenType: z.string(),
-  amount: z.string(),
+  tokenType: z.string().regex(/^[0-9a-fA-F]{64}$/),
+  amount: z.string().regex(/^[0-9]+$/),
 });
 
 // Updated contract action schemas to match current API
@@ -379,6 +383,7 @@ export const DustGenerationsItemSchema = z.object({
   backingNight: VarLenghtHex,
   ctime: z.number(),
   transactionId: z.number(),
+  transactionHash: Hash64,
   collapsedMerkleTree: CollapsedMerkleTreeSchema.nullable(),
 });
 
@@ -395,6 +400,7 @@ export const DustGenerationDtimeUpdateItemSchema = z.object({
   nightUtxoHash: VarLenghtHex,
   newDtime: z.number(),
   transactionId: z.number(),
+  transactionHash: Hash64,
   treeInsertionPath: VarLenghtHex,
 });
 
@@ -405,16 +411,20 @@ export const DustGenerationsEventSchema = z.discriminatedUnion('__typename', [
 ]);
 
 export const DustNullifierTransactionSchema = z.object({
-  nullifier: VarLenghtHex,
-  commitment: VarLenghtHex,
+  nullifierLeBytes: VarLenghtHex,
+  commitmentLeBytes: VarLenghtHex,
   transactionId: z.number(),
+  transactionHash: Hash64,
   blockHeight: z.number(),
   blockHash: Hash64,
+  transaction: z.object({ hash: Hash64 }),
 });
 
 export const ShieldedNullifierTransactionSchema = z.object({
   transactionId: z.number(),
+  transactionHash: Hash64,
   blockHash: Hash64,
   blockHeight: z.number(),
   nullifier: VarLenghtHex,
+  transaction: z.object({ hash: Hash64 }),
 });

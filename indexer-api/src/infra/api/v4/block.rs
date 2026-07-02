@@ -17,6 +17,7 @@ use crate::{
         ApiResult, ContextExt, ResultExt,
         v4::{
             HexEncodable, HexEncoded,
+            directives::beta,
             system_parameters::{DParameter, SystemParameters, TermsAndConditions},
             transaction::Transaction,
         },
@@ -55,6 +56,25 @@ where
 
     /// The hex-encoded ledger parameters for this block.
     ledger_parameters: HexEncoded,
+
+    /// The zswap commitment tree end index at this block; exclusive, i.e. the next free index.
+    zswap_end_index: u64,
+
+    /// The dust commitment tree end index at this block; exclusive, i.e. the next free index.
+    #[graphql(directive = beta::apply())]
+    dust_commitment_end_index: u64,
+
+    /// The dust generation tree end index at this block; exclusive, i.e. the next free index.
+    #[graphql(directive = beta::apply())]
+    dust_generation_end_index: u64,
+
+    /// The hex-encoded dust commitment Merkle tree root at this block.
+    #[graphql(directive = beta::apply())]
+    dust_commitment_merkle_tree_root: Option<HexEncoded>,
+
+    /// The hex-encoded dust generation Merkle tree root at this block.
+    #[graphql(directive = beta::apply())]
+    dust_generation_merkle_tree_root: Option<HexEncoded>,
 
     #[graphql(skip)]
     id: u64,
@@ -121,34 +141,6 @@ where
             terms_and_conditions,
         })
     }
-
-    /// The hex-encoded dust commitment Merkle tree root at the latest indexed state.
-    async fn dust_commitment_merkle_tree_root(
-        &self,
-        cx: &Context<'_>,
-    ) -> ApiResult<Option<HexEncoded>> {
-        let ledger_state_cache = cx.get_ledger_state_cache();
-        let storage = cx.get_storage::<S>();
-
-        match ledger_state_cache.dust_merkle_tree_roots(storage).await {
-            Ok(roots) => Ok(Some(roots.commitment_root.hex_encode())),
-            Err(_) => Ok(None),
-        }
-    }
-
-    /// The hex-encoded dust generation Merkle tree root at the latest indexed state.
-    async fn dust_generation_merkle_tree_root(
-        &self,
-        cx: &Context<'_>,
-    ) -> ApiResult<Option<HexEncoded>> {
-        let ledger_state_cache = cx.get_ledger_state_cache();
-        let storage = cx.get_storage::<S>();
-
-        match ledger_state_cache.dust_merkle_tree_roots(storage).await {
-            Ok(roots) => Ok(Some(roots.generation_root.hex_encode())),
-            Err(_) => Ok(None),
-        }
-    }
 }
 
 impl<S> From<domain::Block> for Block<S>
@@ -166,6 +158,11 @@ where
             parent_hash,
             zswap_merkle_tree_root,
             ledger_parameters,
+            zswap_end_index,
+            dust_commitment_end_index,
+            dust_generation_end_index,
+            dust_commitment_merkle_tree_root,
+            dust_generation_merkle_tree_root,
         } = value;
 
         Block {
@@ -176,6 +173,13 @@ where
             zswap_merkle_tree_root: zswap_merkle_tree_root.hex_encode(),
             ledger_parameters: ledger_parameters.hex_encode(),
             timestamp,
+            zswap_end_index,
+            dust_commitment_end_index,
+            dust_generation_end_index,
+            dust_commitment_merkle_tree_root: dust_commitment_merkle_tree_root
+                .map(|root| root.hex_encode()),
+            dust_generation_merkle_tree_root: dust_generation_merkle_tree_root
+                .map(|root| root.hex_encode()),
             id,
             parent_hash,
             _s: PhantomData,

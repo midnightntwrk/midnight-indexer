@@ -90,6 +90,11 @@ impl TryFrom<Block> for (domain::Block, Vec<Transaction>) {
             ledger_state_root: block.ledger_state_root,
             dust_registration_events: block.dust_registration_events,
             ledger_parameters: Default::default(),
+            zswap_end_index: 0,
+            dust_commitment_end_index: 0,
+            dust_generation_end_index: 0,
+            dust_commitment_merkle_tree_root: Default::default(),
+            dust_generation_merkle_tree_root: Default::default(),
         };
 
         Ok((block, transactions))

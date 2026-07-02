@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use super::polling::{jittered, jittered_interval, next_poll_interval};
 use crate::{
     domain::{self, LedgerStateCache, storage::Storage},
     infra::api::{
@@ -37,8 +38,7 @@ use indexer_common::domain::{Subscriber, WalletIndexed};
 use log::{debug, warn};
 use std::{future::ready, marker::PhantomData, pin::pin};
 use stream_cancel::{StreamExt as _, Trigger, Tripwire};
-use tokio::time::interval;
-use tokio_stream::wrappers::IntervalStream;
+use tokio::time::sleep;
 use uuid::Uuid;
 
 /// An event of the shielded transactions subscription.
@@ -143,6 +143,12 @@ where
 
         let session_id =
             decode_session_id(session_id).map_err_into_client_error(|| "invalid session ID")?;
+
+        let quota_guard = cx
+            .get_subscription_quotas()
+            .try_acquire(cx.get_per_connection_counter(), Some(session_id))
+            .map_err_into_client_error(|| "subscription limit exceeded")?;
+
         let wallet_id = cx
             .get_storage::<S>()
             .resolve_session_id(session_id)
@@ -179,13 +185,14 @@ where
             .get_subscription_config()
             .shielded_transactions
             .keep_wallet_alive_interval;
-        let keep_wallet_active = IntervalStream::new(interval(keep_wallet_alive_interval))
+        let keep_wallet_active = jittered_interval(keep_wallet_alive_interval)
             .then(move |_| async move { storage.keep_wallet_active(wallet_id).await })
             .map_err(|error| ApiError::server("keep wallet active", error));
         let events = stream::select(events.map_ok(Some), keep_wallet_active.map_ok(|_| None))
             .try_filter_map(ok)
             .on_drop(move || {
                 cx.get_metrics().wallets_connected.decrement(1);
+                drop(quota_guard);
                 debug!(wallet_id:%; "shielded transaction subscription ended");
             });
 
@@ -327,39 +334,51 @@ where
     S: Storage,
 {
     let storage = cx.get_storage::<S>();
-    let progress_update_interval = cx
+    let progress_cache = cx.get_progress_cache();
+    let base = cx
         .get_subscription_config()
         .shielded_transactions
         .progress_update_interval;
 
-    let intervals = IntervalStream::new(interval(progress_update_interval));
-    intervals.then(move |_| make_progress_update(wallet_id, storage))
+    // Emit progress immediately, then re-poll after a jittered interval that
+    // backs off while the indices are unchanged (idle) and resets when they move.
+    // The cache lets concurrent subscribers for the same wallet share one query.
+    let mut current_interval = base;
+    let mut last_indices = None;
+    try_stream! {
+        loop {
+            let indices = progress_cache
+                .shielded_indices(wallet_id, async {
+                    storage
+                        .get_highest_zswap_end_indices(wallet_id)
+                        .await
+                        .map_err_into_server_error(|| "get highest indices")
+                })
+                .await?;
+            current_interval =
+                next_poll_interval(current_interval, base, last_indices.as_ref() != Some(&indices));
+            last_indices = Some(indices);
+            yield to_progress(indices);
+            sleep(jittered(current_interval)).await;
+        }
+    }
 }
 
-async fn make_progress_update<S>(
-    wallet_id: Uuid,
-    storage: &S,
-) -> ApiResult<ShieldedTransactionsProgress>
-where
-    S: Storage,
-{
-    let (highest, highest_checked, highest_relevant) = storage
-        .get_highest_zswap_end_indices(wallet_id)
-        .await
-        .map_err_into_server_error(|| "get highest indices")?;
-
+fn to_progress(
+    (highest, highest_checked, highest_relevant): (Option<u64>, Option<u64>, Option<u64>),
+) -> ShieldedTransactionsProgress {
     let highest_zswap_end_index = highest.unwrap_or_default();
     let highest_checked_zswap_end_index = highest_checked.unwrap_or_default();
     let highest_relevant_zswap_end_index = highest_relevant.unwrap_or_default();
 
-    Ok(ShieldedTransactionsProgress {
+    ShieldedTransactionsProgress {
         highest_zswap_end_index,
         highest_end_index: highest_zswap_end_index,
         highest_checked_zswap_end_index,
         highest_checked_end_index: highest_checked_zswap_end_index,
         highest_relevant_zswap_end_index,
         highest_relevant_end_index: highest_relevant_zswap_end_index,
-    })
+    }
 }
 
 async fn get_next_transaction<E>(

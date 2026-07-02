@@ -23,6 +23,7 @@ export enum EnvironmentName {
   QANET = 'qanet',
   PREVIEW = 'preview',
   PREPROD = 'preprod',
+  STAGENET = 'stagenet',
 }
 
 export enum CardanoNetwork {
@@ -34,6 +35,60 @@ export enum CardanoNetwork {
 export enum CardanoNetworkType {
   MAINNET = 'mainnet',
   TESTNET = 'testnet',
+}
+
+/**
+ * Selectable indexer deployment instance.
+ *
+ * Each deployed environment runs two indexer instances behind the public
+ * `indexer.<env>.midnight.network` URL (blue/green). A new indexer version is
+ * rolled out to the secondary instance first, so QA can target it explicitly
+ * before it is promoted to primary.
+ */
+export enum IndexerInstance {
+  BLUE = 'blue',
+  GREEN = 'green',
+}
+
+/**
+ * Resolves the indexer host for an optional blue/green instance override.
+ *
+ * - When `rawInstance` is unset/empty, the host is returned unchanged so the
+ *   public URL keeps pointing at whichever instance is currently primary.
+ * - `blue`/`green` (case-insensitive) rewrite the leading `indexer` label to
+ *   `indexer-blue`/`indexer-green` (e.g. `indexer-green.qanet.midnight.network`).
+ * - Any other value fails fast, mirroring the `TARGET_ENV` validation style.
+ * - The undeployed/localhost environment has no blue/green split, so the
+ *   override is ignored there (with a warning) rather than corrupting the host.
+ */
+export function resolveIndexerHost(
+  baseHost: string,
+  rawInstance: string | undefined,
+  isUndeployed: boolean,
+): string {
+  const instance = rawInstance?.trim();
+  if (!instance) {
+    return baseHost;
+  }
+
+  if (isUndeployed) {
+    log.warn(
+      `Ignoring INDEXER_INSTANCE="${instance}": the undeployed environment has no blue/green instances.`,
+    );
+    return baseHost;
+  }
+
+  const normalized = instance.toLowerCase();
+  const validInstances = Object.values(IndexerInstance);
+  if (!validInstances.includes(normalized as IndexerInstance)) {
+    throw new Error(
+      `Invalid INDEXER_INSTANCE: "${rawInstance}". ` +
+        `Expected one of: ${validInstances.map((name) => `"${name}"`).join(', ')} ` +
+        `(or unset to target the primary indexer instance).`,
+    );
+  }
+
+  return baseHost.replace(/^indexer\./, `indexer-${normalized}.`);
 }
 
 type HostConfig = {
@@ -62,6 +117,11 @@ const hostEntries: HostEntry[] = [
   { env: EnvironmentName.DEVNET, domain: 'devnet.midnight.network' },
   { env: EnvironmentName.PREVIEW, domain: 'preview.midnight.network' },
   { env: EnvironmentName.PREPROD, domain: 'preprod.midnight.network' },
+  {
+    env: EnvironmentName.STAGENET,
+    indexerHost: 'indexer.stagenet.shielded.tools',
+    nodeHost: 'rpc.stagenet.shielded.tools',
+  },
 ];
 
 const hostConfigByEnvName: Record<EnvironmentName, HostConfig> = hostEntries.reduce(
@@ -154,8 +214,13 @@ export class Environment {
     // These should be now safe to assign as we already
     // checked envName
     this.networkId = this.envName;
-    this.indexerHost = hostConfigByEnvName[this.envName].indexerHost;
+    this.indexerHost = resolveIndexerHost(
+      hostConfigByEnvName[this.envName].indexerHost,
+      process.env.INDEXER_INSTANCE,
+      this.isUndeployed,
+    );
     this.nodeHost = hostConfigByEnvName[this.envName].nodeHost;
+    log.debug(`Using indexer host: ${this.indexerHost}`);
 
     // What we are actually doing here is the following:
     // 1. If the NODE_TAG is specified as an environment variable, use it. otherwise
@@ -193,6 +258,7 @@ export class Environment {
       case EnvironmentName.PREVIEW:
       case EnvironmentName.QANET:
       case EnvironmentName.DEVNET:
+      case EnvironmentName.STAGENET:
         return CardanoNetwork.PREVIEW;
       default:
         throw new Error(`Unsupported environment name: ${this.envName}`);
@@ -244,6 +310,54 @@ export class Environment {
 
   getNodeToolkitVersion(): string {
     return this.nodeToolkitTag;
+  }
+
+  /**
+   * When INDEXER_INSTANCE targets a blue/green colour, verify the resolved host
+   * is actually routed and ready before any tests run.
+   *
+   * An unrouted colour host does NOT fail at the transport layer: deployed
+   * environments use wildcard DNS plus a default ingress backend, so a colour
+   * with no ingress rule answers `/ready` with HTTP 404 rather than refusing
+   * the connection. We therefore discriminate on the HTTP status:
+   *   - 200 → routed and ready, proceed.
+   *   - 503 → routed but not caught up yet (instance still syncing).
+   *   - 404 / any other status / transport error → no ingress for this colour,
+   *     so it is almost certainly the primary (served at the bare host).
+   *
+   * No-op when INDEXER_INSTANCE is unset or the env has no blue/green split.
+   */
+  async preflightInstanceSelection(): Promise<void> {
+    const instance = process.env.INDEXER_INSTANCE?.trim();
+    if (!instance || this.isUndeployed) return;
+
+    const url = `${this.getIndexerHttpBaseURL()}/ready`;
+    let status: number;
+    try {
+      status = (await fetch(url, { signal: AbortSignal.timeout(10_000) })).status;
+    } catch (err) {
+      throw new Error(
+        `INDEXER_INSTANCE="${instance}": could not reach ${this.indexerHost} ` +
+          `(${(err as Error).message}). Unset INDEXER_INSTANCE to target the primary instance.`,
+      );
+    }
+
+    if (status === 200) {
+      log.info(`INDEXER_INSTANCE="${instance}" → ${this.indexerHost} is routed and ready.`);
+      return;
+    }
+    if (status === 503) {
+      throw new Error(
+        `INDEXER_INSTANCE="${instance}" (${this.indexerHost}) is routed but NOT caught up yet ` +
+          `(HTTP 503). Wait for it to finish syncing before testing against it.`,
+      );
+    }
+    throw new Error(
+      `INDEXER_INSTANCE="${instance}" (${this.indexerHost}) returned HTTP ${status} on /ready — ` +
+        `no ingress for this colour, so it is almost certainly the PRIMARY (served at the bare ` +
+        `${hostConfigByEnvName[this.envName].indexerHost}). Target the other colour, or unset ` +
+        `INDEXER_INSTANCE to use the primary.`,
+    );
   }
 }
 

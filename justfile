@@ -4,7 +4,7 @@ set shell := ["bash", "-uc"]
 feature := "cloud"
 packages := "indexer-common chain-indexer wallet-indexer indexer-api spo-indexer indexer-standalone indexer-tests"
 rust_version := `grep channel rust-toolchain.toml | sed -r 's/channel = "(.*)"/\1/'`
-nightly := "nightly-2026-01-19"
+nightly := "nightly-2026-06-09"
 latest_node_version := `tail -n 1 NODE_VERSIONS`
 
 check:
@@ -16,10 +16,10 @@ license-headers:
     ./license_headers.sh
 
 fmt:
-    cargo +{{nightly}} fmt
+    cargo fmt
 
 fmt-check:
-    cargo +{{nightly}} fmt --check
+    cargo fmt --check
 
 fix:
     cargo fix --allow-dirty --allow-staged --features {{feature}} --tests

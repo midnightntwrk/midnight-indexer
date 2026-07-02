@@ -56,6 +56,11 @@ where
         cx: &'a Context<'a>,
         offset: Option<BlockOffset>,
     ) -> Result<impl Stream<Item = ApiResult<Block<S>>> + use<'a, S, B>, ApiError> {
+        let quota_guard = cx
+            .get_subscription_quotas()
+            .try_acquire(cx.get_per_connection_counter(), None)
+            .map_err_into_client_error(|| "subscription limit exceeded")?;
+
         let storage = cx.get_storage::<S>();
         let subscriber = cx.get_subscriber::<B>();
         let batch_size = cx.get_subscription_config().blocks.batch_size;
@@ -64,6 +69,8 @@ where
         let mut height = resolve_height::<S>(offset, cx).await?;
 
         let blocks = try_stream! {
+            let _hold = quota_guard;
+
             // Stream existing blocks.
             debug!(height; "streaming existing blocks");
 
