@@ -374,9 +374,21 @@ type Contract @beta {
 	"""
 	state: HexEncoded!
 	"""
+	The hex-encoded serialized Zswap chain state of the contract as of the queried block, read
+	from the same contract action as `state`, so the two are always coherent.
+	"""
+	zswapState: HexEncoded! @beta
+	"""
 	The contract's maintenance authority as of the queried block.
 	"""
 	maintenanceAuthority: ContractMaintenanceAuthority! @beta
+	"""
+	The hex-encoded serialized ledger parameters in effect at the queried block (the latest
+	block when no offset was given) — the block the contract was resolved as of, not the block
+	of its latest action, so they are coherent with `state` and `zswapState` even when the
+	parameters changed after the contract's last action.
+	"""
+	ledgerParameters: HexEncoded! @beta
 	"""
 	Recent contract actions for this contract, newest first, optionally filtered by type. Use
 	the `contractActions` subscription to enumerate all actions.

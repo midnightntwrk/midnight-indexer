@@ -26,7 +26,7 @@ use crate::{
                 BridgeBalance, BridgeEvent, BridgeEventVariant, BridgePoolSummary,
                 BridgeTreasuryReason,
             },
-            contract::Contract,
+            contract::{AsOfBlock, Contract},
             contract_action::{ContractAction, ContractActionOffset},
             contract_event::{ContractEvent, ContractEventFilter as GraphQLContractEventFilter},
             directives::beta,
@@ -269,28 +269,37 @@ where
             .hex_decode()
             .map_err_into_client_error(|| "invalid address")?;
 
-        let contract_action = match offset {
+        // Decode the offset once into the block the contract is resolved as of; it drives the
+        // as-of state resolution here and, carried on the `Contract` via `with_as_of`, keeps
+        // block-dependent sub-resolvers (e.g. `ledgerParameters`) coherent with `state`.
+        let as_of = match offset {
             Some(BlockOffset::Hash(hash)) => {
                 let hash = hash
                     .hex_decode()
                     .map_err_into_client_error(|| "invalid offset")?;
 
-                storage
-                    .get_contract_action_by_address_as_of_block_hash(address, hash)
-                    .await
-                    .map_err_into_server_error(|| {
-                        format!("get contract by address {address} as of block hash {hash}")
-                    })?
+                AsOfBlock::Hash(hash)
             }
+            Some(BlockOffset::Height(height)) => AsOfBlock::Height(height),
+            None => AsOfBlock::Latest,
+        };
 
-            Some(BlockOffset::Height(height)) => storage
+        let contract_action = match as_of {
+            AsOfBlock::Hash(hash) => storage
+                .get_contract_action_by_address_as_of_block_hash(address, hash)
+                .await
+                .map_err_into_server_error(|| {
+                    format!("get contract by address {address} as of block hash {hash}")
+                })?,
+
+            AsOfBlock::Height(height) => storage
                 .get_contract_action_by_address_as_of_block_height(address, height)
                 .await
                 .map_err_into_server_error(|| {
                     format!("get contract by address {address} as of block height {height}")
                 })?,
 
-            None => storage
+            AsOfBlock::Latest => storage
                 .get_latest_contract_action_by_address(address)
                 .await
                 .map_err_into_server_error(|| {
@@ -298,7 +307,7 @@ where
                 })?,
         };
 
-        Ok(contract_action.map(Into::into))
+        Ok(contract_action.map(|action| Contract::from(action).with_as_of(as_of)))
     }
 
     /// Get DUST generation status for specific Cardano reward addresses.

@@ -24,7 +24,7 @@ use crate::{
 };
 use async_graphql::{ComplexObject, Context, Enum, SimpleObject};
 use indexer_common::domain::{
-    ContractMaintenanceAuthority as DomainContractMaintenanceAuthority,
+    BlockHash, ContractMaintenanceAuthority as DomainContractMaintenanceAuthority,
     ContractMaintenanceVerifyingKey as DomainContractMaintenanceVerifyingKey,
     SerializedContractAddress, SerializedContractState, VerifyingKeyKind as DomainVerifyingKeyKind,
     ledger::ContractState,
@@ -33,6 +33,21 @@ use std::marker::PhantomData;
 
 /// Default number of recent actions returned by `Contract.actions` when no `limit` is given.
 const DEFAULT_ACTIONS_LIMIT: u32 = 100;
+
+/// The block a `contract(address, offset)` query was resolved as of. Stored on the resolved
+/// [`Contract`] so block-dependent sub-resolvers (e.g. `ledgerParameters`) answer as of the same
+/// block the contract state was resolved at, keeping the whole selection coherent.
+#[derive(Debug, Clone, Copy)]
+pub enum AsOfBlock {
+    /// No offset was given: the latest block.
+    Latest,
+
+    /// The block with the given hash.
+    Hash(BlockHash),
+
+    /// The block with the given height.
+    Height(u32),
+}
 
 /// A contract, identified by address, resolved as of a given block (or the latest state if no
 /// offset is given). The topmost contract concept; its actions are a sub-query.
@@ -49,6 +64,11 @@ where
     /// action at or before it).
     pub state: HexEncoded,
 
+    /// The hex-encoded serialized Zswap chain state of the contract as of the queried block, read
+    /// from the same contract action as `state`, so the two are always coherent.
+    #[graphql(directive = beta::apply())]
+    pub zswap_state: HexEncoded,
+
     #[graphql(skip)]
     raw_state: SerializedContractState,
 
@@ -57,6 +77,9 @@ where
 
     #[graphql(skip)]
     raw_address: SerializedContractAddress,
+
+    #[graphql(skip)]
+    as_of: AsOfBlock,
 
     #[graphql(skip)]
     _s: PhantomData<S>,
@@ -70,11 +93,25 @@ where
         Self {
             address: action.address.hex_encode(),
             state: action.state.hex_encode(),
+            zswap_state: action.zswap_state.hex_encode(),
             raw_state: action.state,
             transaction_id: action.transaction_id,
             raw_address: action.address,
+            as_of: AsOfBlock::Latest,
             _s: PhantomData,
         }
+    }
+}
+
+impl<S> Contract<S>
+where
+    S: Storage,
+{
+    /// Sets the block this contract was resolved as of, so block-dependent sub-resolvers answer
+    /// as of the same block.
+    pub fn with_as_of(mut self, as_of: AsOfBlock) -> Self {
+        self.as_of = as_of;
+        self
     }
 }
 
@@ -109,6 +146,40 @@ where
                 .map_err_into_server_error(|| "extract contract maintenance authority")?;
 
         Ok(authority.into())
+    }
+
+    /// The hex-encoded serialized ledger parameters in effect at the queried block (the latest
+    /// block when no offset was given) — the block the contract was resolved as of, not the block
+    /// of its latest action, so they are coherent with `state` and `zswapState` even when the
+    /// parameters changed after the contract's last action.
+    #[graphql(directive = beta::apply())]
+    async fn ledger_parameters(&self, cx: &Context<'_>) -> ApiResult<HexEncoded> {
+        let block = match self.as_of {
+            AsOfBlock::Hash(hash) => cx
+                .get_block_by_hash_loader::<S>()
+                .load_one(hash)
+                .await
+                .map_err_into_server_error(|| format!("get block by hash {hash}"))?,
+
+            AsOfBlock::Height(height) => cx
+                .get_storage::<S>()
+                .get_block_by_height(height)
+                .await
+                .map_err_into_server_error(|| format!("get block by height {height}"))?,
+
+            AsOfBlock::Latest => cx
+                .get_storage::<S>()
+                .get_latest_block()
+                .await
+                .map_err_into_server_error(|| "get latest block")?,
+        };
+
+        // The contract was resolved as of this block, so the block must exist.
+        let block = block.some_or_server_error(|| {
+            format!("no block for the offset this contract was resolved at ({:?})", self.as_of)
+        })?;
+
+        Ok(block.ledger_parameters.hex_encode())
     }
 
     /// Recent contract actions for this contract, newest first, optionally filtered by type. Use
