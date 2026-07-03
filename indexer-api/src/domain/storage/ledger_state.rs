@@ -25,11 +25,12 @@ where
         &self,
     ) -> Result<Option<(ProtocolVersion, SerializedLedgerStateKey)>, sqlx::Error>;
 
-    /// Get the block id, protocol version, and ledger state key at a specific block, by hash.
+    /// Get the block id, height, protocol version, and ledger state key at a specific block,
+    /// by hash.
     async fn get_ledger_state_at(
         &self,
         block_hash: BlockHash,
-    ) -> Result<Option<(u64, ProtocolVersion, SerializedLedgerStateKey)>, sqlx::Error>;
+    ) -> Result<Option<(u64, u32, ProtocolVersion, SerializedLedgerStateKey)>, sqlx::Error>;
 }
 
 #[allow(unused_variables)]
@@ -43,7 +44,7 @@ impl LedgerStateStorage for NoopStorage {
     async fn get_ledger_state_at(
         &self,
         block_hash: BlockHash,
-    ) -> Result<Option<(u64, ProtocolVersion, SerializedLedgerStateKey)>, sqlx::Error> {
+    ) -> Result<Option<(u64, u32, ProtocolVersion, SerializedLedgerStateKey)>, sqlx::Error> {
         unimplemented!()
     }
 }

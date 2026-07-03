@@ -48,6 +48,8 @@ pub struct ApplicationConfig {
     pub caught_up_leeway: u32,
     #[serde(with = "humantime_serde", default = "gc_bound_default")]
     pub gc_bound: Duration,
+    #[serde(default = "ledger_state_retention_default")]
+    pub ledger_state_retention: NonZeroUsize,
     #[serde(with = "humantime_serde")]
     pub active_wallets_query_delay: Duration,
     #[serde(with = "humantime_serde")]
@@ -59,6 +61,10 @@ pub struct ApplicationConfig {
 
 fn gc_bound_default() -> Duration {
     Duration::from_millis(200)
+}
+
+fn ledger_state_retention_default() -> NonZeroUsize {
+    NonZeroUsize::new(1000).expect("1000 is not zero")
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -86,6 +92,7 @@ impl From<ApplicationConfig> for chain_app::Config {
             caught_up_max_distance,
             caught_up_leeway,
             gc_bound,
+            ledger_state_retention,
             ..
         } = config;
 
@@ -95,6 +102,7 @@ impl From<ApplicationConfig> for chain_app::Config {
             caught_up_max_distance,
             caught_up_leeway,
             gc_bound,
+            ledger_state_retention,
         }
     }
 }

@@ -83,7 +83,7 @@ use midnight_onchain_runtime_v3::context::BlockContext as BlockContextV3;
 use midnight_onchain_runtime_v4::context::BlockContext as BlockContextV4;
 use midnight_serialize_v1::{Deserializable, tagged_deserialize};
 use midnight_storage_core_v1::{
-    arena::{Sp, TypedArenaKey},
+    arena::{ArenaHash, Sp, TypedArenaKey},
     db::DB,
     storage::default_storage,
 };
@@ -330,6 +330,47 @@ impl LedgerState {
         key: &SerializedLedgerStateKey,
         ledger_version: LedgerVersion,
     ) -> Result<(), Error> {
+        let hash = Self::arena_root_hash(key, ledger_version)?;
+        default_storage::<v1_1::LedgerDb>().with_backend(|b| b.unpersist(&hash));
+
+        Ok(())
+    }
+
+    /// The raw arena hash bytes of a serialized ledger state key, e.g. to check membership in
+    /// [Self::persisted_root_hashes].
+    pub fn root_hash_bytes(
+        key: &SerializedLedgerStateKey,
+        ledger_version: LedgerVersion,
+    ) -> Result<Vec<u8>, Error> {
+        Self::arena_root_hash(key, ledger_version).map(|hash| hash.0.to_vec())
+    }
+
+    /// Whether the root node of a previously persisted ledger state is still present in the
+    /// ledger DB, i.e. the state is loadable and has not been garbage collected. Goes through
+    /// the ledger DB itself, which in standalone mode is separate from the main storage.
+    pub fn root_loadable(
+        key: &SerializedLedgerStateKey,
+        ledger_version: LedgerVersion,
+    ) -> Result<bool, Error> {
+        let hash = Self::arena_root_hash(key, ledger_version)?;
+        Ok(default_storage::<v1_1::LedgerDb>().with_backend(|b| b.get(&hash).is_some()))
+    }
+
+    /// The raw arena hash bytes of all currently persisted gc roots. Fetches the full root set
+    /// from the ledger DB once; bounded by the persisted history (the retention window going
+    /// forward, plus pre-existing roots until they are reclaimed).
+    pub fn persisted_root_hashes() -> HashSet<Vec<u8>> {
+        default_storage::<v1_1::LedgerDb>()
+            .with_backend(|b| b.get_roots())
+            .into_keys()
+            .map(|hash| hash.0.to_vec())
+            .collect()
+    }
+
+    fn arena_root_hash(
+        key: &SerializedLedgerStateKey,
+        ledger_version: LedgerVersion,
+    ) -> Result<ArenaHash<<v1_1::LedgerDb as DB>::Hasher>, Error> {
         match ledger_version {
             LedgerVersion::V8 => {
                 let arena_key = TypedArenaKey::<
@@ -338,10 +379,7 @@ impl LedgerState {
                 >::deserialize(&mut key.as_slice(), 0)
                 .map_err(|error| Error::Deserialize("TypedArenaKeyV8", error))?;
 
-                default_storage::<v1_1::LedgerDb>()
-                    .with_backend(|b| b.unpersist(arena_key.key.hash()));
-
-                Ok(())
+                Ok(arena_key.key.hash().clone())
             }
 
             LedgerVersion::V9 => {
@@ -351,10 +389,7 @@ impl LedgerState {
                 >::deserialize(&mut key.as_slice(), 0)
                 .map_err(|error| Error::Deserialize("TypedArenaKeyV9", error))?;
 
-                default_storage::<v1_1::LedgerDb>()
-                    .with_backend(|b| b.unpersist(arena_key.key.hash()));
-
-                Ok(())
+                Ok(arena_key.key.hash().clone())
             }
         }
     }

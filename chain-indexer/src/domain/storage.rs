@@ -12,6 +12,7 @@
 // limitations under the License.
 
 use indexer_common::domain::{ProtocolVersion, SerializedLedgerStateKey};
+use std::num::NonZeroUsize;
 
 use crate::domain::{
     Block, BlockRef, DParameter, DustRegistrationEvent, SystemParametersChange, TermsAndConditions,
@@ -38,6 +39,13 @@ where
     async fn get_highest_block(
         &self,
     ) -> Result<Option<(BlockRef, ProtocolVersion, SerializedLedgerStateKey)>, sqlx::Error>;
+
+    /// Get the protocol versions and ledger state keys of the newest `limit` blocks, ordered
+    /// from oldest to newest.
+    async fn get_newest_ledger_state_keys(
+        &self,
+        limit: NonZeroUsize,
+    ) -> Result<Vec<(ProtocolVersion, SerializedLedgerStateKey)>, sqlx::Error>;
 
     /// Get the number of stored transactions.
     async fn get_transaction_count(&self) -> Result<u64, sqlx::Error>;

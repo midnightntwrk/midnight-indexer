@@ -33,9 +33,10 @@ use log::{debug, info, warn};
 use parking_lot::RwLock;
 use serde::Deserialize;
 use std::{
-    collections::HashSet,
+    collections::{HashSet, VecDeque},
     error::Error as StdError,
     future::ready,
+    num::NonZeroUsize,
     pin::pin,
     sync::Arc,
     time::{Duration, Instant},
@@ -58,6 +59,11 @@ pub struct Config {
     /// Set to "0s" to disable garbage collection.
     #[serde(with = "humantime_serde")]
     pub gc_bound: Duration,
+
+    /// How many recent blocks' ledger state keys stay persisted as gc roots before the oldest
+    /// is unpersisted. Must comfortably exceed indexer-api's block-hash snapshot reads, e.g.
+    /// the dust generations subscription's max_snapshot_age, or those reads hit culled state.
+    pub ledger_state_retention: NonZeroUsize,
 }
 
 pub async fn run(
@@ -73,17 +79,15 @@ pub async fn run(
         caught_up_max_distance,
         caught_up_leeway,
         gc_bound,
+        ledger_state_retention,
     } = config;
 
     // Get info from highest block.
-    let (highest_block_ref, highest_protocol_version_and_ledger_state_key) = match storage
+    let highest_block_ref = storage
         .get_highest_block()
         .await
         .context("get highest block")?
-    {
-        Some((r, v, k)) => (Some(r), Some((v, k))),
-        None => (None, None),
-    };
+        .map(|(block_ref, _, _)| block_ref);
 
     let highest_block_height = highest_block_ref.map(|info| info.height);
     info!(highest_block_height:?; "starting indexing");
@@ -103,24 +107,52 @@ pub async fn run(
         contract_action_count,
     );
 
-    // Load/initialize ledger state. Track the latest persisted key so the next block's persist()
-    // can be balanced with an unpersist() of the previous one, allowing storage-core's gc-v1 to
-    // reclaim orphan nodes.
-    let (mut ledger_state, mut previous_ledger_state_key) =
-        match highest_protocol_version_and_ledger_state_key {
-            Some((protocol_version, ledger_state_key)) => {
-                let ledger_version = protocol_version.ledger_version();
-                let state = LedgerState::load(&ledger_state_key, ledger_version)
-                    .context("load ledger state")?;
-                (state, Some((ledger_state_key, ledger_version)))
-            }
+    // Load/initialize ledger state. Seed the retention window with the newest blocks' keys
+    // (oldest first, each with the ledger version it was persisted under) so a restart keeps
+    // balancing the previous run's persists instead of stranding them as permanent gc roots;
+    // per block, persist() is then balanced by an unpersist() once the key leaves the window,
+    // letting gc-v1 reclaim orphan nodes while recent snapshots stay loadable for indexer-api's
+    // block-hash reads (e.g. the dust generations subscription). Keys whose roots are no
+    // longer persisted are skipped: after a retention increase, older keys have already been
+    // unpersisted, and unpersisting them again would corrupt the root counts.
+    let newest_ledger_state_keys = storage
+        .get_newest_ledger_state_keys(ledger_state_retention)
+        .await
+        .context("get newest ledger state keys")?
+        .into_iter()
+        .map(|(protocol_version, key)| {
+            let ledger_version = protocol_version.ledger_version();
+            LedgerState::root_hash_bytes(&key, ledger_version)
+                .map(|root_hash| (key, ledger_version, root_hash))
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .context("get ledger state root hashes")?;
+    let newest_count = newest_ledger_state_keys.len();
+    let persisted_root_hashes = LedgerState::persisted_root_hashes();
+    let mut persisted_ledger_state_keys = newest_ledger_state_keys
+        .into_iter()
+        .filter(|(_, _, root_hash)| persisted_root_hashes.contains(root_hash))
+        .map(|(key, ledger_version, _)| (key, ledger_version))
+        .collect::<VecDeque<_>>();
+    info!(
+        seeded = persisted_ledger_state_keys.len(),
+        skipped_unrooted = newest_count - persisted_ledger_state_keys.len();
+        "seeded ledger state retention window"
+    );
 
-            None => {
-                let state = LedgerState::new(network_id.clone(), LedgerVersion::OLDEST)
-                    .context("create ledger state")?;
-                (state, None)
-            }
-        };
+    let mut ledger_state = match persisted_ledger_state_keys.back() {
+        Some((ledger_state_key, ledger_version)) => {
+            LedgerState::load(ledger_state_key, *ledger_version).context("load ledger state")?
+        }
+
+        None if highest_block_ref.is_some() => bail!(
+            "no persisted ledger state root found within the retention window; the ledger DB \
+             cannot be resumed"
+        ),
+
+        None => LedgerState::new(network_id.clone(), LedgerVersion::OLDEST)
+            .context("create ledger state")?,
+    };
 
     let highest_block_on_node = Arc::new(RwLock::new(None));
 
@@ -188,14 +220,18 @@ pub async fn run(
 
                 ledger_state = next_ledger_state;
 
-                // Unpersist the previous ledger state's key (if any) with the version it was
-                // persisted under (they differ at a protocol upgrade boundary). This balances the
-                // prior block's persist() and lets its arena nodes become eligible for gc.
-                if let Some((prev_key, prev_version)) = previous_ledger_state_key
-                    .replace((new_ledger_state_key, ledger_state.ledger_version()))
-                {
-                    LedgerState::unpersist(&prev_key, prev_version)
-                        .context("unpersist previous ledger state")?;
+                // Keep the newest ledger_state_retention keys persisted and unpersist the
+                // oldest beyond the window, each with the version it was persisted under
+                // (they differ at a protocol upgrade boundary). This makes aged-out states'
+                // arena nodes eligible for gc while recent snapshots stay loadable for
+                // indexer-api's block-hash reads.
+                persisted_ledger_state_keys
+                    .push_back((new_ledger_state_key, ledger_state.ledger_version()));
+                while persisted_ledger_state_keys.len() > ledger_state_retention.get() {
+                    if let Some((key, version)) = persisted_ledger_state_keys.pop_front() {
+                        LedgerState::unpersist(&key, version)
+                            .context("unpersist ledger state beyond retention window")?;
+                    }
                 }
 
                 // Run a time-bounded mark-and-sweep pass; skip when disabled.

@@ -19,7 +19,7 @@ use indexer_common::domain::{
     NetworkId, SerializedContractAddress, SerializedLedgerStateKey, TransactionHash,
     ledger::{self, LedgerParameters},
 };
-use std::ops::DerefMut;
+use std::{collections::HashSet, ops::DerefMut};
 use thiserror::Error;
 
 /// New type for ledger state from indexer_common.
@@ -73,6 +73,20 @@ impl LedgerState {
     ) -> Result<(), Error> {
         indexer_common::domain::ledger::LedgerState::unpersist(key, ledger_version)
             .map_err(Error::Unpersist)
+    }
+
+    /// The raw arena hash bytes of a serialized ledger state key, e.g. to check membership in
+    /// [Self::persisted_root_hashes].
+    pub fn root_hash_bytes(
+        key: &SerializedLedgerStateKey,
+        ledger_version: LedgerVersion,
+    ) -> Result<Vec<u8>, indexer_common::domain::ledger::Error> {
+        indexer_common::domain::ledger::LedgerState::root_hash_bytes(key, ledger_version)
+    }
+
+    /// The raw arena hash bytes of all currently persisted gc roots, fetched from the ledger DB.
+    pub fn persisted_root_hashes() -> HashSet<Vec<u8>> {
+        indexer_common::domain::ledger::LedgerState::persisted_root_hashes()
     }
 
     /// Run a time-bounded mark-and-sweep gc on the ledger DB and return the
