@@ -101,7 +101,7 @@ jobs:
       XRAY_REPORT_TESTS_MISSING_METADATA: "false"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v 6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v 7.0.0
         with:
           ref: ${{ inputs.ref || github.sha }}
 
@@ -111,7 +111,7 @@ jobs:
           node-version: 22.x
 
       - name: Restore Yarn cache
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  
         with:
           path: |
             qa/tests/.yarn/cache
@@ -121,7 +121,7 @@ jobs:
             ${{ runner.os }}-yarn-
 
       - name: Login to GHCR
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 #v4.1.0
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee #v4.2.0
         with:
           registry: ghcr.io
           username: MidnightCI
