@@ -91,21 +91,13 @@ You need access to private Midnight repos and the GHCR container registry (steps
 
 Create a **classic** PAT with scopes: `repo` (all), `read:packages`, `read:org`.
 
-#### Step 4 — [~/.netrc Setup](../../README.md#netrc-setup)
-
-```
-machine github.com
-login <YOUR_GITHUB_ID>
-password <YOUR_GITHUB_PAT>
-```
-
-#### Step 5 — [Docker Authentication](../../README.md#docker-authentication)
+#### Step 4 — [Docker Authentication](../../README.md#docker-authentication)
 
 ```bash
 echo $GITHUB_TOKEN | docker login ghcr.io -u <YOUR_GITHUB_ID> --password-stdin
 ```
 
-#### Step 6 — [GPG Setup (Signed Git Commits)](../../README.md#gpg-setup-signed-git-commits)
+#### Step 5 — [GPG Setup (Signed Git Commits)](../../README.md#gpg-setup-signed-git-commits)
 
 Generate an ed25519 key and configure Git to sign commits/tags (`commit.gpgsign = true`); add `export GPG_TTY=$(tty)` to your shell config so the passphrase prompt works.
 

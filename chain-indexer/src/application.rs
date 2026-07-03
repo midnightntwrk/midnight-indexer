@@ -26,19 +26,14 @@ use async_stream::stream;
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{Stream, StreamExt, TryStreamExt, future::ok};
 use indexer_common::domain::{
-    BlockIndexed, LedgerVersion, NetworkId, Publisher, SerializedLedgerStateKey,
-    UnshieldedUtxoIndexed,
+    BlockIndexed, LedgerVersion, NetworkId, Publisher, UnshieldedUtxoIndexed,
 };
 use log::{debug, info, warn};
 use parking_lot::RwLock;
 use serde::Deserialize;
 use std::{
-    collections::HashSet,
-    error::Error as StdError,
-    future::ready,
-    pin::pin,
-    sync::Arc,
-    time::{Duration, Instant},
+    collections::HashSet, error::Error as StdError, future::ready, pin::pin, sync::Arc,
+    time::Duration,
 };
 use tokio::{
     select,
@@ -53,11 +48,6 @@ pub struct Config {
     pub blocks_buffer: usize,
     pub caught_up_max_distance: u32,
     pub caught_up_leeway: u32,
-
-    /// Per-block time budget for the storage-core gc-v1 mark-and-sweep pass.
-    /// Set to "0s" to disable garbage collection.
-    #[serde(with = "humantime_serde")]
-    pub gc_bound: Duration,
 }
 
 pub async fn run(
@@ -72,7 +62,6 @@ pub async fn run(
         blocks_buffer,
         caught_up_max_distance,
         caught_up_leeway,
-        gc_bound,
     } = config;
 
     // Get info from highest block.
@@ -103,24 +92,16 @@ pub async fn run(
         contract_action_count,
     );
 
-    // Load/initialize ledger state. Track the latest persisted key so the next block's persist()
-    // can be balanced with an unpersist() of the previous one, allowing storage-core's gc-v1 to
-    // reclaim orphan nodes.
-    let (mut ledger_state, mut previous_ledger_state_key) =
-        match highest_protocol_version_and_ledger_state_key {
-            Some((protocol_version, ledger_state_key)) => {
-                let ledger_version = protocol_version.ledger_version();
-                let state = LedgerState::load(&ledger_state_key, ledger_version)
-                    .context("load ledger state")?;
-                (state, Some((ledger_state_key, ledger_version)))
-            }
+    // Load/initialize ledger state.
+    let mut ledger_state = match highest_protocol_version_and_ledger_state_key {
+        Some((protocol_version, ledger_state_key)) => {
+            LedgerState::load(&ledger_state_key, protocol_version.ledger_version())
+                .context("load ledger state")?
+        }
 
-            None => {
-                let state = LedgerState::new(network_id.clone(), LedgerVersion::OLDEST)
-                    .context("create ledger state")?;
-                (state, None)
-            }
-        };
+        None => LedgerState::new(network_id.clone(), LedgerVersion::OLDEST)
+            .context("create ledger state")?,
+    };
 
     let highest_block_on_node = Arc::new(RwLock::new(None));
 
@@ -169,7 +150,7 @@ pub async fn run(
             let mut parent_block_timestamp = 0;
 
             loop {
-                let (next_ledger_state, new_ledger_state_key) = get_and_index_block(
+                let next_ledger_state = get_and_index_block(
                     caught_up_max_distance,
                     caught_up_leeway,
                     &mut blocks,
@@ -187,31 +168,6 @@ pub async fn run(
                 .await?;
 
                 ledger_state = next_ledger_state;
-
-                // Unpersist the previous ledger state's key (if any) with the version it was
-                // persisted under (they differ at a protocol upgrade boundary). This balances the
-                // prior block's persist() and lets its arena nodes become eligible for gc.
-                if let Some((prev_key, prev_version)) = previous_ledger_state_key
-                    .replace((new_ledger_state_key, ledger_state.ledger_version()))
-                {
-                    LedgerState::unpersist(&prev_key, prev_version)
-                        .context("unpersist previous ledger state")?;
-                }
-
-                // Run a time-bounded mark-and-sweep pass; skip when disabled.
-                if !gc_bound.is_zero() {
-                    let started = Instant::now();
-                    let nodes_culled = LedgerState::gc(gc_bound);
-                    let elapsed = started.elapsed();
-                    metrics.record_gc(elapsed, nodes_culled);
-                    if nodes_culled > 0 {
-                        debug!(
-                            nodes_culled,
-                            elapsed:?;
-                            "gc pass culled orphan arena nodes"
-                        );
-                    }
-                }
             }
         }
     });
@@ -303,14 +259,14 @@ async fn get_and_index_block<E, N>(
     publisher: &impl Publisher,
     metrics: &Metrics,
     node: &N,
-) -> anyhow::Result<(LedgerState, SerializedLedgerStateKey)>
+) -> anyhow::Result<LedgerState>
 where
     E: StdError + Send + Sync + 'static,
     N: Node,
 {
     let block = get_next_block(blocks).await?;
 
-    let result = index_block(
+    let ledger_state = index_block(
         caught_up_max_distance,
         caught_up_leeway,
         block,
@@ -326,7 +282,7 @@ where
     )
     .await?;
 
-    Ok(result)
+    Ok(ledger_state)
 }
 
 #[trace]
@@ -358,7 +314,7 @@ async fn index_block<N>(
     publisher: &impl Publisher,
     metrics: &Metrics,
     node: &N,
-) -> anyhow::Result<(LedgerState, SerializedLedgerStateKey)>
+) -> anyhow::Result<LedgerState>
 where
     N: Node,
 {
@@ -564,7 +520,7 @@ where
         "block indexed"
     );
 
-    Ok((ledger_state, ledger_state_key))
+    Ok(ledger_state)
 }
 
 /// Fetch system parameters from the node and determine if they changed.

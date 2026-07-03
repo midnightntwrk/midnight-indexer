@@ -13,8 +13,7 @@
 
 use crate::domain::{Block, ContractAction, Transaction};
 use indexer_common::domain::ContractAttributes;
-use metrics::{Counter, Gauge, Histogram, counter, gauge, histogram};
-use std::time::Duration;
+use metrics::{Counter, Gauge, counter, gauge};
 
 pub struct Metrics {
     block_height: Counter,
@@ -24,9 +23,6 @@ pub struct Metrics {
     contract_deploy_count: Counter,
     contract_call_count: Counter,
     contract_update_count: Counter,
-    gc_run_count: Counter,
-    gc_culled_node_count: Counter,
-    gc_duration_seconds: Histogram,
 }
 
 impl Metrics {
@@ -43,9 +39,6 @@ impl Metrics {
             contract_deploy_count: counter!("indexer_contract_deploy_count"),
             contract_call_count: counter!("indexer_contract_call_count"),
             contract_update_count: counter!("indexer_contract_update_count"),
-            gc_run_count: counter!("indexer_gc_run_count"),
-            gc_culled_node_count: counter!("indexer_gc_culled_node_count"),
-            gc_duration_seconds: histogram!("indexer_gc_duration_seconds"),
         };
 
         if let Some(block_height) = block_height {
@@ -140,12 +133,5 @@ impl Metrics {
                 })
                 .count() as u64,
         );
-    }
-
-    /// Record one storage-core gc-v1 mark-and-sweep pass.
-    pub fn record_gc(&self, duration: Duration, nodes_culled: usize) {
-        self.gc_run_count.increment(1);
-        self.gc_culled_node_count.increment(nodes_culled as u64);
-        self.gc_duration_seconds.record(duration.as_secs_f64());
     }
 }
