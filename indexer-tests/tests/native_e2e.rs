@@ -170,6 +170,38 @@ struct NodeHandle {
     _node_container: ContainerAsync<GenericImage>,
 }
 
+/// Release images live on Docker Hub (midnightntwrk), pre-release builds on GHCR
+/// (ghcr.io/midnight-ntwrk). Resolve whichever registry has the node image for the latest node
+/// version, preferring a locally present image, then Docker Hub.
+#[cfg(any(feature = "cloud", feature = "standalone"))]
+fn resolve_node_image_name() -> anyhow::Result<String> {
+    let version = LATEST_NODE_VERSION.trim();
+
+    let image_exists = |image: &str| {
+        ["image", "manifest"].into_iter().any(|command| {
+            Command::new("docker")
+                .args([command, "inspect", image])
+                .output()
+                .map(|output| output.status.success())
+                .unwrap_or(false)
+        })
+    };
+
+    for name in [
+        "midnightntwrk/midnight-node",
+        "ghcr.io/midnight-ntwrk/midnight-node",
+    ] {
+        if image_exists(&format!("{name}:{version}")) {
+            return Ok(name.to_string());
+        }
+    }
+
+    anyhow::bail!(
+        "midnight-node:{version} found neither on Docker Hub (midnightntwrk) nor on GHCR \
+         (midnight-ntwrk)"
+    )
+}
+
 #[cfg(any(feature = "cloud", feature = "standalone"))]
 async fn start_node() -> anyhow::Result<NodeHandle> {
     use fs_extra::dir::{CopyOptions, copy};
@@ -215,7 +247,7 @@ async fn start_node() -> anyhow::Result<NodeHandle> {
         .to_string();
 
     let node_container =
-        GenericImage::new("midnightntwrk/midnight-node", LATEST_NODE_VERSION.trim())
+        GenericImage::new(resolve_node_image_name()?, LATEST_NODE_VERSION.trim())
             .with_wait_for(WaitFor::message_on_stderr("9944"))
             .with_mount(Mount::bind_mount(node_path, "/node"))
             .with_env_var("SHOW_CONFIG", "false")
