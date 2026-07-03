@@ -5,7 +5,6 @@ application:
   blocks_buffer: 10
   caught_up_max_distance: 10
   caught_up_leeway: 5
-  gc_bound: "200ms"
 
 infra:
   run_migrations: true
