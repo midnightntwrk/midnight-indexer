@@ -68,7 +68,7 @@ while true; do
             "id":1,
             "method":"chain_getFinalizedHead",
             "params":[]
-        }' | jq -r .result)
+        }' | jq -r .result || true)
     if [[ -z "$finalized_hash" || "$finalized_hash" == "null" ]]; then
         echo "No finalized hash"
         continue
@@ -81,7 +81,7 @@ while true; do
             \"id\":2,
             \"method\":\"chain_getHeader\",
             \"params\":[\"$finalized_hash\"]
-        }" | jq -r '.result.number')
+        }" | jq -r '.result.number' || true)
     if [[ -z "$finalized_number" || "$finalized_number" == "null" ]]; then
         echo "No finalized number"
         continue
