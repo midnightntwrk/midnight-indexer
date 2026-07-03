@@ -233,14 +233,6 @@ Create a classic PAT with:
 - `read:packages`
 - `read:org`
 
-#### ~/.netrc Setup
-
-```bash
-machine github.com
-login <YOUR_GITHUB_ID>
-password <YOUR_GITHUB_PAT>
-```
-
 #### Docker Authentication
 
 ```bash
