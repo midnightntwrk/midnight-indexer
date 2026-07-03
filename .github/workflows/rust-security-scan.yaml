@@ -8,7 +8,6 @@ name: rust-security-scan
 # Fork PR behavior:
 # - cargo-deny runs successfully (no secrets needed)
 # - SARIF uploads to GitHub Security (no secrets needed)
-# - netrc is skipped (requires secrets)
 #
 # This is acceptable because fork PRs still get security scanning via cargo-deny.
 
@@ -34,15 +33,6 @@ jobs:
         uses: taiki-e/install-action@ace6ebe54a6a0c86dfb5f7764b17f793b6925bc3 # v2.82.3
         with:
           tool: cargo-deny
-
-      # Skip for fork PRs (no secrets available)
-      - name: Add github.com credentials to netrc
-        if: github.event.pull_request.head.repo.full_name == github.repository
-        uses: extractions/netrc@c3879108aae6b4ed5c4eb60854ae04f06d2f2f68 # v3.0.0
-        with:
-          machine: github.com
-          username: MidnightCI
-          password: ${{ secrets.MIDNIGHTCI_REPO }}
 
       - name: Run cargo-deny (produce SARIF for Security tab)
         # `-f sarif` always exits 0 since findings are encoded in the SARIF, not the exit code.

@@ -70,7 +70,7 @@ jobs:
           echo "toolchain=$toolchain" | tee -a "$GITHUB_OUTPUT"
 
   check:
-    runs-on: ubuntu-latest-8-core-x64
+    runs-on: ubuntu-latest
     needs: [changes, toolchain]
     if: needs.changes.outputs.non_qa == 'true'
     steps:
@@ -125,7 +125,7 @@ jobs:
           just feature=standalone fmt-check
 
   lint:
-    runs-on: ubuntu-latest-8-core-x64
+    runs-on: ubuntu-latest
     needs: [changes, toolchain]
     if: needs.changes.outputs.non_qa == 'true'
     steps:
@@ -155,7 +155,7 @@ jobs:
           just feature=standalone lint
 
   test:
-    runs-on: ubuntu-latest-8-core-x64
+    runs-on: ubuntu-latest
     needs: [changes, toolchain]
     if: needs.changes.outputs.non_qa == 'true'
     timeout-minutes: 15
@@ -198,7 +198,7 @@ jobs:
           just feature=standalone test
 
   doc:
-    runs-on: ubuntu-latest-8-core-x64
+    runs-on: ubuntu-latest
     needs: [changes, toolchain]
     if: needs.changes.outputs.non_qa == 'true'
     steps:
