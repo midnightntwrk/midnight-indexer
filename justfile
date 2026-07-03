@@ -142,6 +142,13 @@ generate-txs:
 
 run-node node_version=latest_node_version:
     #!/usr/bin/env bash
+    # Release images live on Docker Hub (midnightntwrk), pre-release builds on GHCR
+    # (ghcr.io/midnight-ntwrk); use whichever registry has the tag.
+    node_image=midnightntwrk/midnight-node:{{node_version}}
+    if ! docker image inspect $node_image >/dev/null 2>&1 \
+        && ! docker manifest inspect $node_image >/dev/null 2>&1; then
+        node_image=ghcr.io/midnight-ntwrk/midnight-node:{{node_version}}
+    fi
     node_dir=$(mktemp -d)
     cp -r ./.node/{{node_version}}/ $node_dir
     # SIDECHAIN_BLOCK_BENEFICIARY specifies the wallet that receives block rewards and transaction fees (DUST).
@@ -153,4 +160,4 @@ run-node node_version=latest_node_version:
         -e CFG_PRESET=dev \
         -e SIDECHAIN_BLOCK_BENEFICIARY="04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e" \
         -v $node_dir:/node \
-        midnightntwrk/midnight-node:{{node_version}}
+        $node_image

@@ -16,7 +16,27 @@ if [ -z "$1" ]; then
     exit 1
 fi
 readonly node_version="$1"
-readonly toolkit_image="midnightntwrk/midnight-node-toolkit:$node_version"
+
+# Release images live on Docker Hub (midnightntwrk), pre-release builds on GHCR
+# (ghcr.io/midnight-ntwrk). Resolve whichever registry has the tag, preferring a
+# locally present image, then Docker Hub.
+resolve_image() {
+    local image="$1"
+    local candidate
+    for candidate in "midnightntwrk/$image" "ghcr.io/midnight-ntwrk/$image"; do
+        if docker image inspect "$candidate" >/dev/null 2>&1 \
+            || docker manifest inspect "$candidate" >/dev/null 2>&1; then
+            echo "$candidate"
+            return
+        fi
+    done
+    echo "Error: $image not found on Docker Hub (midnightntwrk) or GHCR (midnight-ntwrk)" >&2
+    return 1
+}
+
+toolkit_image=$(resolve_image "midnight-node-toolkit:$node_version")
+node_image=$(resolve_image "midnight-node:$node_version")
+readonly toolkit_image node_image
 readonly rng_seed="0000000000000000000000000000000000000000000000000000000000000037"
 readonly node_dir="$(pwd)/.node/$node_version"
 
@@ -36,7 +56,7 @@ docker run \
     -e SIDECHAIN_BLOCK_BENEFICIARY="04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e" \
     -e THRESHOLD=0 \
     -v $node_dir:/node \
-    midnightntwrk/midnight-node:$node_version
+    $node_image
 
 # Wait for node to be ready.
 echo "Waiting for node to be ready..."
