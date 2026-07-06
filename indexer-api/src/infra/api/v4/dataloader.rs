@@ -131,3 +131,31 @@ impl<S: Storage> Loader<u64> for ContractActionsByTransactionIdLoader<S> {
         Ok(actions)
     }
 }
+
+#[derive(Deref)]
+pub struct ContractEventsByContractActionIdLoader<S>(S);
+
+impl<S: Storage> ContractEventsByContractActionIdLoader<S> {
+    pub fn new(storage: S) -> Self {
+        Self(storage)
+    }
+}
+
+impl<S: Storage> Loader<u64> for ContractEventsByContractActionIdLoader<S> {
+    type Value = Vec<domain::ContractEventRow>;
+    type Error = Arc<sqlx::Error>;
+
+    async fn load(
+        &self,
+        keys: &[u64],
+    ) -> Result<HashMap<u64, Vec<domain::ContractEventRow>>, Arc<sqlx::Error>> {
+        let events = self
+            .get_contract_events_by_contract_action_ids(keys)
+            .await
+            .map_err(Arc::new)?
+            .into_iter()
+            .into_group_map();
+
+        Ok(events)
+    }
+}

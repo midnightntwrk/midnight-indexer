@@ -26,7 +26,7 @@ use async_stream::stream;
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{Stream, StreamExt, TryStreamExt, future::ok};
 use indexer_common::domain::{
-    BlockIndexed, LedgerVersion, NetworkId, Publisher, UnshieldedUtxoIndexed,
+    BlockIndexed, BridgeEventIndexed, LedgerVersion, NetworkId, Publisher, UnshieldedUtxoIndexed,
 };
 use log::{debug, info, warn};
 use parking_lot::RwLock;
@@ -507,6 +507,17 @@ where
             .context("publish UnshieldedUtxoIndexed event")?;
     }
 
+    // Publish BridgeEventIndexed for each c2m-bridge pallet event.
+    for event in &block.bridge_pallet_events {
+        publisher
+            .publish(&BridgeEventIndexed {
+                block_id: block.height,
+                event: event.clone(),
+            })
+            .await
+            .context("publish BridgeEventIndexed event")?;
+    }
+
     // Update metrics.
     metrics.update(&block, &transactions, node_block_height, *caught_up);
 
@@ -686,6 +697,7 @@ mod tests {
         ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
+        bridge_pallet_events: Default::default(),
     });
 
     static BLOCK_1: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -699,6 +711,7 @@ mod tests {
         ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
+        bridge_pallet_events: Default::default(),
     });
 
     static BLOCK_2: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -712,6 +725,7 @@ mod tests {
         ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
+        bridge_pallet_events: Default::default(),
     });
 
     static BLOCK_3: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -725,6 +739,7 @@ mod tests {
         ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
+        bridge_pallet_events: Default::default(),
     });
 
     const ZERO_HASH: BlockHash = ByteArray([0; 32]);

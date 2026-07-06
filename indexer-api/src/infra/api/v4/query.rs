@@ -12,13 +12,23 @@
 // limitations under the License.
 
 use crate::{
-    domain::{LedgerStateCacheError, storage::Storage},
+    domain::{
+        LedgerStateCacheError,
+        bridge::TreasuryReason,
+        storage::{Storage, bridge::BridgeEventFilter},
+    },
     infra::api::{
         ApiError, ApiResult, ContextExt, OptionExt, ResultExt,
         v4::{
             CardanoNetworkId, CardanoRewardAddress, HexEncoded,
             block::{Block, BlockOffset},
+            bridge::{
+                BridgeBalance, BridgeEvent, BridgeEventVariant, BridgePoolSummary,
+                BridgeTreasuryReason,
+            },
+            contract::Contract,
             contract_action::{ContractAction, ContractActionOffset},
+            contract_event::{ContractEvent, ContractEventFilter as GraphQLContractEventFilter},
             directives::beta,
             dust::DustGenerationStatus,
             dust_generations::DustGenerations,
@@ -35,7 +45,7 @@ use crate::{
 };
 use async_graphql::{Context, Object};
 use fastrace::trace;
-use indexer_common::domain::{LedgerVersion, ledger};
+use indexer_common::domain::{LedgerVersion, UnshieldedAddress, ledger};
 use std::marker::PhantomData;
 
 const DEFAULT_PERFORMANCE_LIMIT: i64 = 20;
@@ -243,6 +253,54 @@ where
         Ok(contract_action.map(Into::into))
     }
 
+    /// Find a contract by address, resolved as of the given block offset (or its latest state if no
+    /// offset is given). Returns null if the contract has no action at or before that block.
+    #[graphql(directive = beta::apply())]
+    #[trace(properties = { "address": "{address}", "offset": "{offset:?}" })]
+    async fn contract(
+        &self,
+        cx: &Context<'_>,
+        address: HexEncoded,
+        offset: Option<BlockOffset>,
+    ) -> ApiResult<Option<Contract<S>>> {
+        let storage = cx.get_storage::<S>();
+
+        let address = &address
+            .hex_decode()
+            .map_err_into_client_error(|| "invalid address")?;
+
+        let contract_action = match offset {
+            Some(BlockOffset::Hash(hash)) => {
+                let hash = hash
+                    .hex_decode()
+                    .map_err_into_client_error(|| "invalid offset")?;
+
+                storage
+                    .get_contract_action_by_address_as_of_block_hash(address, hash)
+                    .await
+                    .map_err_into_server_error(|| {
+                        format!("get contract by address {address} as of block hash {hash}")
+                    })?
+            }
+
+            Some(BlockOffset::Height(height)) => storage
+                .get_contract_action_by_address_as_of_block_height(address, height)
+                .await
+                .map_err_into_server_error(|| {
+                    format!("get contract by address {address} as of block height {height}")
+                })?,
+
+            None => storage
+                .get_latest_contract_action_by_address(address)
+                .await
+                .map_err_into_server_error(|| {
+                    format!("get latest contract action by address {address}")
+                })?,
+        };
+
+        Ok(contract_action.map(Into::into))
+    }
+
     /// Get DUST generation status for specific Cardano reward addresses.
     #[trace]
     async fn dust_generation_status(
@@ -368,6 +426,39 @@ where
                 error => ApiError::server("create dust generation collapsed update", error),
             })
             .map(MerkleTreeCollapsedUpdate::from)
+    }
+
+    /// Find contract events matching the filter, with optional pagination.
+    ///
+    /// Block-range bounds (`fromBlock`, `toBlock`) live on `ContractEventFilter`
+    /// for symmetry with the subscription. `limit`/`offset` are top-level args.
+    #[graphql(directive = beta::apply())]
+    #[trace(properties = { "limit": "{limit:?}", "offset": "{offset:?}" })]
+    async fn contract_events(
+        &self,
+        cx: &Context<'_>,
+        filter: GraphQLContractEventFilter,
+        limit: Option<i32>,
+        offset: Option<i32>,
+    ) -> ApiResult<Vec<ContractEvent<S>>> {
+        let storage = cx.get_storage::<S>();
+
+        let domain_filter = filter
+            .into_domain()
+            .map_err(|e| ApiError::client("invalid ContractEventFilter", e))?;
+
+        let limit = limit.map(|l| l.max(0) as u32);
+        let offset = offset.map(|o| o.max(0) as u32);
+
+        let rows = storage
+            .get_contract_events(domain_filter, limit, offset)
+            .await
+            .map_err_into_server_error(|| "get contract events")?;
+
+        rows.into_iter()
+            .map(ContractEvent::try_from)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err_into_server_error(|| "convert contract event row to GraphQL type")
     }
 
     /// Get the full history of D-parameter changes for governance auditability.
@@ -780,6 +871,205 @@ where
             .map_err_into_server_error(|| "get stake distribution")?;
 
         Ok(shares.into_iter().map(Into::into).collect())
+    }
+
+    /// List c2m-bridge pallet events with optional filters.
+    #[trace]
+    #[allow(clippy::too_many_arguments)]
+    #[graphql(directive = beta::apply())]
+    async fn bridge_events(
+        &self,
+        cx: &Context<'_>,
+        recipient: Option<HexEncoded>,
+        variant: Option<BridgeEventVariant>,
+        block_height_from: Option<u64>,
+        block_height_to: Option<u64>,
+        offset: Option<u64>,
+        limit: Option<u64>,
+    ) -> ApiResult<Vec<BridgeEvent>> {
+        let storage = cx.get_storage::<S>();
+        let recipient = recipient
+            .map(|h| h.hex_decode::<UnshieldedAddress>())
+            .transpose()
+            .map_err_into_client_error(|| "invalid recipient address")?;
+
+        let filter = BridgeEventFilter {
+            variant: variant.map(Into::into),
+            recipient,
+            block_height_from,
+            block_height_to,
+            id_from: None,
+        };
+        let events = storage
+            .get_bridge_events(
+                &filter,
+                offset.unwrap_or(0),
+                limit.unwrap_or(100).min(1_000),
+            )
+            .await
+            .map_err_into_server_error(|| "get bridge events")?;
+
+        Ok(events.into_iter().map(Into::into).collect())
+    }
+
+    /// Get the c2m-bridge balance summary (deposited, claimed, balance) for an address.
+    #[trace]
+    #[graphql(directive = beta::apply())]
+    async fn bridge_balance(
+        &self,
+        cx: &Context<'_>,
+        address: HexEncoded,
+    ) -> ApiResult<BridgeBalance> {
+        let storage = cx.get_storage::<S>();
+        let address = address
+            .hex_decode::<UnshieldedAddress>()
+            .map_err_into_client_error(|| "invalid recipient address")?;
+
+        let mut balance = storage
+            .get_bridge_balance(address)
+            .await
+            .map_err_into_server_error(|| "get bridge balance")?;
+
+        // Override `balance` with the authoritative remaining-claimable from the ledger's
+        // `bridge_receiving` map (net of fees, zero once fully claimed). `deposited - claimed` over
+        // events would instead carry the bridge fee as a residual.
+        balance.balance = match storage
+            .get_highest_ledger_state()
+            .await
+            .map_err_into_server_error(|| "get highest ledger state")?
+        {
+            Some((protocol_version, ledger_state_key)) => {
+                ledger::LedgerState::load(&ledger_state_key, protocol_version.ledger_version())
+                    .map_err_into_server_error(|| "load ledger state")?
+                    .bridge_receiving(address)
+            }
+            None => 0,
+        };
+
+        Ok(balance.into())
+    }
+
+    /// Convenience query for a recipient's deposit history. By default returns only successful
+    /// `UserTransfer` events; pass `includeUnapproved: true` to also include `UnapprovedTransfer`.
+    #[trace]
+    #[graphql(directive = beta::apply())]
+    async fn bridge_deposits(
+        &self,
+        cx: &Context<'_>,
+        recipient: HexEncoded,
+        include_unapproved: Option<bool>,
+        offset: Option<u64>,
+        limit: Option<u64>,
+    ) -> ApiResult<Vec<BridgeEvent>> {
+        let storage = cx.get_storage::<S>();
+        let recipient = recipient
+            .hex_decode::<UnshieldedAddress>()
+            .map_err_into_client_error(|| "invalid recipient address")?;
+
+        let user_filter = BridgeEventFilter {
+            variant: Some(BridgeEventVariant::UserTransfer.into()),
+            recipient: Some(recipient),
+            ..Default::default()
+        };
+        let mut events = storage
+            .get_bridge_events(
+                &user_filter,
+                offset.unwrap_or(0),
+                limit.unwrap_or(100).min(1_000),
+            )
+            .await
+            .map_err_into_server_error(|| "get bridge deposits (user)")?;
+
+        if include_unapproved.unwrap_or(false) {
+            let unapproved_filter = BridgeEventFilter {
+                variant: Some(BridgeEventVariant::UnapprovedTransfer.into()),
+                recipient: Some(recipient),
+                ..Default::default()
+            };
+            let mut unapproved = storage
+                .get_bridge_events(
+                    &unapproved_filter,
+                    offset.unwrap_or(0),
+                    limit.unwrap_or(100).min(1_000),
+                )
+                .await
+                .map_err_into_server_error(|| "get bridge deposits (unapproved)")?;
+            events.append(&mut unapproved);
+        }
+
+        Ok(events.into_iter().map(Into::into).collect())
+    }
+
+    /// List Reserve top-up events (ReserveTransfer), optionally bounded by block height.
+    #[trace]
+    #[graphql(directive = beta::apply())]
+    async fn bridge_reserve_inflows(
+        &self,
+        cx: &Context<'_>,
+        block_height_from: Option<u64>,
+        block_height_to: Option<u64>,
+        offset: Option<u64>,
+        limit: Option<u64>,
+    ) -> ApiResult<Vec<BridgeEvent>> {
+        let storage = cx.get_storage::<S>();
+        let events = storage
+            .get_bridge_reserve_inflows(
+                block_height_from,
+                block_height_to,
+                offset.unwrap_or(0),
+                limit.unwrap_or(100).min(1_000),
+            )
+            .await
+            .map_err_into_server_error(|| "get bridge reserve inflows")?;
+
+        Ok(events.into_iter().map(Into::into).collect())
+    }
+
+    /// List treasury-redirected events (Invalid, Unapproved, SubminimalFlush), optionally
+    /// filtered by reason and block range.
+    #[trace]
+    #[allow(clippy::too_many_arguments)]
+    #[graphql(directive = beta::apply())]
+    async fn bridge_treasury_inflows(
+        &self,
+        cx: &Context<'_>,
+        reason: Option<BridgeTreasuryReason>,
+        block_height_from: Option<u64>,
+        block_height_to: Option<u64>,
+        offset: Option<u64>,
+        limit: Option<u64>,
+    ) -> ApiResult<Vec<BridgeEvent>> {
+        let storage = cx.get_storage::<S>();
+        let reason: Option<TreasuryReason> = reason.map(Into::into);
+        let events = storage
+            .get_bridge_treasury_inflows(
+                reason,
+                block_height_from,
+                block_height_to,
+                offset.unwrap_or(0),
+                limit.unwrap_or(100).min(1_000),
+            )
+            .await
+            .map_err_into_server_error(|| "get bridge treasury inflows")?;
+
+        Ok(events.into_iter().map(Into::into).collect())
+    }
+
+    /// Aggregate snapshot of bridge inflows to protocol pools (Reserve and Treasury).
+    #[trace]
+    #[graphql(directive = beta::apply())]
+    async fn bridge_pool_summary(
+        &self,
+        cx: &Context<'_>,
+        at_block: Option<u64>,
+    ) -> ApiResult<BridgePoolSummary> {
+        let storage = cx.get_storage::<S>();
+        let summary = storage
+            .get_bridge_pool_summary(at_block)
+            .await
+            .map_err_into_server_error(|| "get bridge pool summary")?;
+
+        Ok(summary.into())
     }
 }
 

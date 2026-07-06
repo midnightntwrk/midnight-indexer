@@ -13,7 +13,7 @@
 
 #![cfg_attr(coverage_nightly, coverage(off))]
 
-use crate::domain::UnshieldedAddress;
+use crate::domain::{UnshieldedAddress, bridge::BridgePalletEvent};
 use derive_more::derive::From;
 use futures::{Stream, stream};
 use serde::{Deserialize, Serialize};
@@ -64,6 +64,14 @@ pub struct UnshieldedUtxoIndexed {
     pub address: UnshieldedAddress,
 }
 message!(UnshieldedUtxoIndexed);
+
+/// Emitted when a c2m-bridge pallet event (any of the 5 variants) is indexed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BridgeEventIndexed {
+    pub block_id: u64,
+    pub event: BridgePalletEvent,
+}
+message!(BridgeEventIndexed);
 
 /// A pub-sub publisher.
 #[trait_variant::make(Send)]

@@ -20,8 +20,8 @@ use futures::TryFutureExt;
 use indexer_common::{
     domain::{
         BlockHash, ByteVec, ContractAttributes, ContractBalance, LedgerEvent,
-        LedgerEventAttributes, ProtocolVersion, SerializedLedgerStateKey, TermsAndConditionsHash,
-        UnshieldedUtxo,
+        LedgerEventAttributes, LedgerEventGrouping, ProtocolVersion, SerializedLedgerStateKey,
+        TermsAndConditionsHash, UnshieldedUtxo, bridge::BridgePalletEvent,
     },
     infra::sqlx::U128BeBytes,
 };
@@ -229,6 +229,18 @@ pub enum LedgerEventVariant {
     DustInitialUtxo,
     DustGenerationDtimeUpdate,
     DustSpendProcessed,
+    // Contract event variants (per MIP-107 / CoIP-442 LogEventType enum).
+    ShieldedSpend,
+    ShieldedReceive,
+    ShieldedMint,
+    ShieldedBurn,
+    UnshieldedSpend,
+    UnshieldedReceive,
+    UnshieldedMint,
+    UnshieldedBurn,
+    Paused,
+    Unpaused,
+    Misc,
 }
 
 impl From<&LedgerEventAttributes> for LedgerEventVariant {
@@ -242,6 +254,17 @@ impl From<&LedgerEventAttributes> for LedgerEventVariant {
                 Self::DustGenerationDtimeUpdate
             }
             LedgerEventAttributes::DustSpendProcessed { .. } => Self::DustSpendProcessed,
+            LedgerEventAttributes::ContractShieldedSpend { .. } => Self::ShieldedSpend,
+            LedgerEventAttributes::ContractShieldedReceive { .. } => Self::ShieldedReceive,
+            LedgerEventAttributes::ContractShieldedMint { .. } => Self::ShieldedMint,
+            LedgerEventAttributes::ContractShieldedBurn { .. } => Self::ShieldedBurn,
+            LedgerEventAttributes::ContractUnshieldedSpend { .. } => Self::UnshieldedSpend,
+            LedgerEventAttributes::ContractUnshieldedReceive { .. } => Self::UnshieldedReceive,
+            LedgerEventAttributes::ContractUnshieldedMint { .. } => Self::UnshieldedMint,
+            LedgerEventAttributes::ContractUnshieldedBurn { .. } => Self::UnshieldedBurn,
+            LedgerEventAttributes::ContractPaused { .. } => Self::Paused,
+            LedgerEventAttributes::ContractUnpaused { .. } => Self::Unpaused,
+            LedgerEventAttributes::ContractMisc { .. } => Self::Misc,
         }
     }
 }
@@ -316,6 +339,8 @@ async fn save_block(
     let max_transaction_id = save_transactions(transactions, block_id, tx).await?;
 
     save_dust_registration_events(dust_registration_events, block_id, block.timestamp, tx).await?;
+
+    save_bridge_pallet_events(&block.bridge_pallet_events, block_id, tx).await?;
 
     Ok(max_transaction_id)
 }
@@ -436,19 +461,33 @@ async fn save_regular_transaction(
     #[cfg(feature = "standalone")]
     save_identifiers(&transaction.identifiers, transaction_id, tx).await?;
 
-    save_contract_actions(&transaction.contract_actions, transaction_id, tx).await?;
+    let contract_action_ids =
+        save_contract_actions(&transaction.contract_actions, transaction_id, tx).await?;
 
     save_created_unshielded_utxos(&transaction.created_unshielded_utxos, transaction_id, tx)
         .await?;
     save_spent_unshielded_utxos(&transaction.spent_unshielded_utxos, transaction_id, tx).await?;
 
-    save_ledger_events(&transaction.ledger_events, transaction_id, tx).await?;
+    save_ledger_events(
+        &transaction.ledger_events,
+        &transaction.contract_actions,
+        &contract_action_ids,
+        transaction_id,
+        tx,
+    )
+    .await?;
 
     save_dust_generation_info(&transaction.ledger_events, transaction_id, tx).await?;
 
     save_dust_nullifiers(&transaction.ledger_events, transaction_id, block_id, tx).await?;
 
     save_zswap_nullifiers(&transaction.ledger_events, transaction_id, block_id, tx).await?;
+
+    // Persist a Cardano-bridge claim when the regular transaction is a `ClaimRewards` with
+    // `ClaimKind::CardanoBridge` (populated by indexer-common's apply path).
+    if let Some(claim) = &transaction.bridge_claim {
+        save_bridge_claim(transaction_id, claim.recipient.as_ref(), claim.amount, tx).await?;
+    }
 
     Ok(transaction_id as u64)
 }
@@ -462,19 +501,22 @@ async fn save_system_transaction(
     save_created_unshielded_utxos(&transaction.created_unshielded_utxos, transaction_id, tx)
         .await?;
 
-    save_ledger_events(&transaction.ledger_events, transaction_id, tx).await?;
+    save_ledger_events(&transaction.ledger_events, &[], &[], transaction_id, tx).await?;
 
     save_dust_generation_info(&transaction.ledger_events, transaction_id, tx).await
 }
 
+/// Save the contract actions and their balances, returning the freshly
+/// assigned `contract_actions.id`s in insertion order so the caller can
+/// correlate contract events with the emitting `ContractCall` (ticket #1162).
 #[trace(properties = { "transaction_id": "{transaction_id}" })]
 async fn save_contract_actions(
     contract_actions: &[ContractAction],
     transaction_id: i64,
     tx: &mut SqlxTransaction,
-) -> Result<(), sqlx::Error> {
+) -> Result<Vec<i64>, sqlx::Error> {
     if contract_actions.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     let query = indoc! {"
@@ -502,12 +544,13 @@ async fn save_contract_actions(
         .fetch_all(&mut **tx)
         .await?
         .into_iter()
-        .map(|(id,)| id);
+        .map(|(id,)| id)
+        .collect::<Vec<_>>();
 
     let contract_balances = contract_actions
         .iter()
-        .zip(contract_action_ids)
-        .flat_map(|(action, action_id)| {
+        .zip(&contract_action_ids)
+        .flat_map(|(action, &action_id)| {
             action
                 .extracted_balances
                 .iter()
@@ -516,7 +559,7 @@ async fn save_contract_actions(
         .collect::<Vec<_>>();
     save_contract_balances(&contract_balances, tx).await?;
 
-    Ok(())
+    Ok(contract_action_ids)
 }
 
 #[trace(properties = { "transaction_id": "{transaction_id}" })]
@@ -666,9 +709,16 @@ async fn save_spent_unshielded_utxos(
     Ok(())
 }
 
+/// Save the ledger events, correlating contract events with the emitting
+/// `ContractCall` via `correlate_contract_action_ids` (ticket #1162).
+/// `contract_actions` and `contract_action_ids` are the actions of the same
+/// transaction with their freshly assigned ids; pass empty slices for
+/// transactions without contract actions (e.g. system transactions).
 #[trace(properties = { "transaction_id": "{transaction_id}" })]
 async fn save_ledger_events(
     ledger_events: &[LedgerEvent],
+    contract_actions: &[ContractAction],
+    contract_action_ids: &[i64],
     transaction_id: i64,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
@@ -676,29 +726,145 @@ async fn save_ledger_events(
         return Ok(());
     }
 
+    let correlated_action_ids =
+        correlate_contract_action_ids(ledger_events, contract_actions, contract_action_ids);
+
     let query = indoc! {"
         INSERT INTO ledger_events (
             transaction_id,
             variant,
             grouping,
             raw,
-            attributes
+            attributes,
+            contract_address,
+            contract_action_id
         )
     "};
 
-    QueryBuilder::new(query)
-        .push_values(ledger_events.iter(), |mut q, ledger_event| {
+    let mut qb = QueryBuilder::new(query);
+    qb.push_values(
+        ledger_events.iter().zip(&correlated_action_ids),
+        |mut q, (ledger_event, &correlated_action_id)| {
             q.push_bind(transaction_id)
                 .push_bind(LedgerEventVariant::from(&ledger_event.attributes))
                 .push_bind(ledger_event.grouping)
                 .push_bind(ledger_event.raw.as_ref())
-                .push_bind(Json(&ledger_event.attributes));
-        })
-        .build()
-        .execute(&mut **tx)
+                .push_bind(Json(&ledger_event.attributes))
+                .push_bind(
+                    ledger_event
+                        .contract_address
+                        .as_ref()
+                        .map(|a| a.as_ref().to_vec()),
+                )
+                .push_bind(
+                    correlated_action_id
+                        .or_else(|| ledger_event.contract_action_id.map(|id| id as i64)),
+                );
+        },
+    );
+    qb.push(" RETURNING id");
+
+    // SQLite + Postgres both return RETURNING rows in the order the rows
+    // were inserted (the multi-row INSERT is one statement so row order is
+    // deterministic), so we can zip ids back onto ledger_events by index.
+    let inserted_ids: Vec<(i64,)> = qb.build_query_as::<(i64,)>().fetch_all(&mut **tx).await?;
+
+    if inserted_ids.len() != ledger_events.len() {
+        return Err(sqlx::Error::Protocol(format!(
+            "save_ledger_events: expected {} RETURNING ids but got {}",
+            ledger_events.len(),
+            inserted_ids.len()
+        )));
+    }
+
+    save_contract_event_indexed_fields(ledger_events, inserted_ids.iter().map(|(id,)| *id), tx)
         .await?;
 
     Ok(())
+}
+
+/// Populate the `contract_event_indexed_fields` sidecar for any contract
+/// events in this batch. No-op for zswap/dust events. Called inside the same
+/// transaction as `save_ledger_events` with the freshly captured RETURNING ids.
+///
+/// `ids` must be in the same order as `ledger_events`; the function pairs them
+/// by index to associate each contract event with its persisted id.
+#[trace]
+async fn save_contract_event_indexed_fields<I: IntoIterator<Item = i64>>(
+    ledger_events: &[LedgerEvent],
+    ids: I,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    let pairs: Vec<(i64, Vec<(&'static str, indexer_common::domain::ByteVec)>)> = ledger_events
+        .iter()
+        .zip(ids)
+        .filter(|(e, _)| matches!(e.grouping, LedgerEventGrouping::Contract))
+        .map(|(e, id)| (id, e.indexable_contract_fields()))
+        .filter(|(_, fields)| !fields.is_empty())
+        .collect();
+
+    if pairs.is_empty() {
+        return Ok(());
+    }
+
+    // Multi-row insert across all contract events in the batch, one row per
+    // (ledger_event_id, field_name, field_value).
+    let mut qb = QueryBuilder::new(indoc! {"
+        INSERT INTO contract_event_indexed_fields (
+            ledger_event_id,
+            field_name,
+            field_value
+        )
+    "});
+    qb.push_values(
+        pairs
+            .iter()
+            .flat_map(|(id, fields)| fields.iter().map(move |f| (*id, f))),
+        |mut q, (id, (name, value))| {
+            q.push_bind(id)
+                .push_bind(*name)
+                .push_bind(value.as_ref().to_vec());
+        },
+    );
+    qb.build().execute(&mut **tx).await?;
+
+    Ok(())
+}
+
+/// Pair each ledger event with the id of the emitting `ContractCall` by
+/// matching `(contract_address, entry_point)` against the contract actions of
+/// the same transaction (ticket #1162). Only an unambiguous match is
+/// attributed: if several calls in the same transaction share address and
+/// entry point, the events stay unattributed (`NULL`) rather than risking
+/// wrong attribution; they remain reachable via the top-level `contractEvents`
+/// query. Zswap and dust events map to `None`.
+fn correlate_contract_action_ids(
+    ledger_events: &[LedgerEvent],
+    contract_actions: &[ContractAction],
+    contract_action_ids: &[i64],
+) -> Vec<Option<i64>> {
+    ledger_events
+        .iter()
+        .map(|ledger_event| {
+            let contract_address = ledger_event.contract_address.as_ref()?;
+            let entry_point = ledger_event.attributes.contract_entry_point()?;
+
+            let mut matches =
+                contract_actions
+                    .iter()
+                    .zip(contract_action_ids)
+                    .filter(|(action, _)| {
+                        matches!(
+                            &action.attributes,
+                            ContractAttributes::Call { entry_point: action_entry_point }
+                                if action_entry_point.as_bytes() == entry_point.as_ref()
+                        ) && action.address == *contract_address
+                    });
+
+            let (_, &contract_action_id) = matches.next()?;
+            matches.next().is_none().then_some(contract_action_id)
+        })
+        .collect()
 }
 
 #[trace(properties = { "transaction_id": "{transaction_id}" })]
@@ -1088,4 +1254,362 @@ async fn save_system_parameters_change(
     }
 
     Ok(())
+}
+
+/// Save a bridge claim parsed from a regular `ClaimRewardsTransaction` with
+/// `ClaimKind::CardanoBridge`.
+///
+/// Currently called only when the chain-indexer detects a CardanoBridge claim during
+/// regular-transaction parsing; that detection path is TODO until the wallet-side claim flow
+/// stabilises (see ticket #940).
+#[allow(dead_code)]
+#[trace(properties = { "transaction_id": "{transaction_id}" })]
+async fn save_bridge_claim(
+    transaction_id: i64,
+    recipient: &[u8],
+    amount: u128,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    let query = indoc! {"
+        INSERT INTO bridge_claims (transaction_id, recipient, amount)
+        VALUES ($1, $2, $3)
+    "};
+
+    sqlx::query(query)
+        .bind(transaction_id)
+        .bind(recipient)
+        .bind(U128BeBytes::from(amount))
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+#[trace(properties = { "block_id": "{block_id}" })]
+async fn save_bridge_pallet_events(
+    events: &[BridgePalletEvent],
+    block_id: i64,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    for event in events {
+        let query = indoc! {"
+            INSERT INTO bridge_pallet_events (
+                block_id,
+                transaction_id,
+                variant,
+                mc_tx_hash,
+                amount,
+                recipient,
+                midnight_tx_hash,
+                count
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        "};
+
+        let amount = event.amount().to_be_bytes().to_vec();
+        let count = match event {
+            BridgePalletEvent::SubminimalFlushTransfer { count, .. } => Some(*count as i32),
+            _ => None,
+        };
+
+        // Link to the system transaction the handler produced: its hash equals the event's
+        // `midnight_tx_hash`, saved in this same DB transaction by `save_transactions` above.
+        let link_query = indoc! {"
+            SELECT id
+            FROM transactions
+            WHERE block_id = $1 AND hash = $2
+        "};
+        let transaction_id = sqlx::query_as::<_, (i64,)>(link_query)
+            .bind(block_id)
+            .bind(event.midnight_tx_hash().as_ref())
+            .fetch_optional(&mut **tx)
+            .await?
+            .map(|(id,)| id);
+
+        sqlx::query(query)
+            .bind(block_id)
+            .bind(transaction_id)
+            .bind(event.variant())
+            .bind(event.mc_tx_hash().map(|h| h.as_ref()))
+            .bind(amount)
+            .bind(event.recipient().map(|r| r.as_bytes()))
+            .bind(event.midnight_tx_hash().as_ref())
+            .bind(count)
+            .execute(&mut **tx)
+            .await?;
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod contract_event_variant_tests {
+    use super::*;
+    use indexer_common::domain::{AddressOrContract, ByteVec};
+
+    fn bv(bytes: &[u8]) -> ByteVec {
+        ByteVec::from(bytes.to_vec())
+    }
+
+    // The From impl maps each ContractEvent attribute variant to the matching
+    // SQL LedgerEventVariant. A missing arm would fail the match exhaustively;
+    // this test pins the mapping so renames don't silently shift names.
+    #[test]
+    fn from_attributes_to_variant_covers_every_contract_event_variant() {
+        let cases: Vec<(LedgerEventAttributes, LedgerEventVariant)> = vec![
+            (
+                LedgerEventAttributes::ContractShieldedSpend {
+                    version: 1,
+                    entry_point: bv(b""),
+                    nullifier: bv(&[0; 32]),
+                },
+                LedgerEventVariant::ShieldedSpend,
+            ),
+            (
+                LedgerEventAttributes::ContractShieldedReceive {
+                    version: 1,
+                    entry_point: bv(b""),
+                    commitment: bv(&[0; 32]),
+                    ciphertext: None,
+                    receiving_contract_address: None,
+                },
+                LedgerEventVariant::ShieldedReceive,
+            ),
+            (
+                LedgerEventAttributes::ContractShieldedMint {
+                    version: 1,
+                    entry_point: bv(b""),
+                    commitment: bv(&[0; 32]),
+                    domain_sep: bv(&[0; 32]),
+                    amount: None,
+                },
+                LedgerEventVariant::ShieldedMint,
+            ),
+            (
+                LedgerEventAttributes::ContractShieldedBurn {
+                    version: 1,
+                    entry_point: bv(b""),
+                    nullifier: bv(&[0; 32]),
+                    amount: None,
+                },
+                LedgerEventVariant::ShieldedBurn,
+            ),
+            (
+                LedgerEventAttributes::ContractUnshieldedSpend {
+                    version: 1,
+                    entry_point: bv(b""),
+                    sender: AddressOrContract::User(bv(&[0; 32])),
+                    domain_sep: bv(&[0; 32]),
+                    token_type: bv(&[0; 32]),
+                    amount: "0".into(),
+                },
+                LedgerEventVariant::UnshieldedSpend,
+            ),
+            (
+                LedgerEventAttributes::ContractUnshieldedReceive {
+                    version: 1,
+                    entry_point: bv(b""),
+                    recipient: AddressOrContract::Contract(bv(&[0; 32])),
+                    domain_sep: bv(&[0; 32]),
+                    token_type: bv(&[0; 32]),
+                    amount: "0".into(),
+                },
+                LedgerEventVariant::UnshieldedReceive,
+            ),
+            (
+                LedgerEventAttributes::ContractUnshieldedMint {
+                    version: 1,
+                    entry_point: bv(b""),
+                    domain_sep: bv(&[0; 32]),
+                    token_type: bv(&[0; 32]),
+                    amount: "0".into(),
+                },
+                LedgerEventVariant::UnshieldedMint,
+            ),
+            (
+                LedgerEventAttributes::ContractUnshieldedBurn {
+                    version: 1,
+                    entry_point: bv(b""),
+                    sender: AddressOrContract::User(bv(&[0; 32])),
+                    token_type: bv(&[0; 32]),
+                    amount: "0".into(),
+                },
+                LedgerEventVariant::UnshieldedBurn,
+            ),
+            (
+                LedgerEventAttributes::ContractPaused {
+                    version: 1,
+                    entry_point: bv(b""),
+                },
+                LedgerEventVariant::Paused,
+            ),
+            (
+                LedgerEventAttributes::ContractUnpaused {
+                    version: 1,
+                    entry_point: bv(b""),
+                },
+                LedgerEventVariant::Unpaused,
+            ),
+            (
+                LedgerEventAttributes::ContractMisc {
+                    version: 1,
+                    entry_point: bv(b""),
+                    name: bv(&[0; 32]),
+                    payload: bv(&[0; 32]),
+                },
+                LedgerEventVariant::Misc,
+            ),
+        ];
+
+        for (attrs, expected) in cases {
+            let got = LedgerEventVariant::from(&attrs);
+            assert_eq!(got, expected, "wrong variant for {:?}", attrs);
+        }
+    }
+
+    // Sanity: existing zswap/dust mappings still work after the new arms.
+    #[test]
+    fn from_attributes_existing_variants_still_mapped() {
+        let zi = LedgerEventVariant::from(&LedgerEventAttributes::ZswapInput {
+            nullifier: bv(&[0; 32]),
+        });
+        let zo = LedgerEventVariant::from(&LedgerEventAttributes::ZswapOutput);
+        let pc = LedgerEventVariant::from(&LedgerEventAttributes::ParamChange);
+        let dsp = LedgerEventVariant::from(&LedgerEventAttributes::DustSpendProcessed {
+            nullifier: bv(&[0; 32]),
+            commitment: bv(&[0; 32]),
+        });
+
+        assert_eq!(zi, LedgerEventVariant::ZswapInput);
+        assert_eq!(zo, LedgerEventVariant::ZswapOutput);
+        assert_eq!(pc, LedgerEventVariant::ParamChange);
+        assert_eq!(dsp, LedgerEventVariant::DustSpendProcessed);
+    }
+}
+
+#[cfg(test)]
+mod contract_event_correlation_tests {
+    use super::*;
+    use indexer_common::domain::ByteVec;
+
+    fn bv(bytes: &[u8]) -> ByteVec {
+        ByteVec::from(bytes.to_vec())
+    }
+
+    fn call_action(address: &[u8], entry_point: &str) -> ContractAction {
+        ContractAction {
+            address: bv(address),
+            state: bv(b""),
+            zswap_state: bv(b""),
+            extracted_balances: vec![],
+            attributes: ContractAttributes::Call {
+                entry_point: entry_point.to_string(),
+            },
+        }
+    }
+
+    fn deploy_action(address: &[u8]) -> ContractAction {
+        ContractAction {
+            address: bv(address),
+            state: bv(b""),
+            zswap_state: bv(b""),
+            extracted_balances: vec![],
+            attributes: ContractAttributes::Deploy,
+        }
+    }
+
+    fn contract_event(address: &[u8], entry_point: &[u8]) -> LedgerEvent {
+        LedgerEvent::contract_event(
+            bv(b"raw"),
+            bv(address),
+            None,
+            LedgerEventAttributes::ContractShieldedSpend {
+                version: 1,
+                entry_point: bv(entry_point),
+                nullifier: bv(&[0; 32]),
+            },
+        )
+    }
+
+    #[test]
+    fn correlates_event_to_single_matching_call() {
+        let actions = vec![
+            call_action(&[0x01; 32], "foo"),
+            call_action(&[0x02; 32], "bar"),
+        ];
+        let events = vec![
+            contract_event(&[0x01; 32], b"foo"),
+            contract_event(&[0x02; 32], b"bar"),
+        ];
+
+        let correlated = correlate_contract_action_ids(&events, &actions, &[10, 20]);
+        assert_eq!(correlated, vec![Some(10), Some(20)]);
+    }
+
+    #[test]
+    fn leaves_ambiguous_match_unattributed() {
+        // Two calls to the same contract address and entry point in one
+        // transaction: attribution would be a guess, so it stays None.
+        let actions = vec![
+            call_action(&[0x01; 32], "foo"),
+            call_action(&[0x01; 32], "foo"),
+        ];
+        let events = vec![contract_event(&[0x01; 32], b"foo")];
+
+        let correlated = correlate_contract_action_ids(&events, &actions, &[10, 20]);
+        assert_eq!(correlated, vec![None]);
+    }
+
+    #[test]
+    fn same_address_different_entry_points_disambiguate() {
+        let actions = vec![
+            call_action(&[0x01; 32], "foo"),
+            call_action(&[0x01; 32], "bar"),
+        ];
+        let events = vec![
+            contract_event(&[0x01; 32], b"bar"),
+            contract_event(&[0x01; 32], b"foo"),
+        ];
+
+        let correlated = correlate_contract_action_ids(&events, &actions, &[10, 20]);
+        assert_eq!(correlated, vec![Some(20), Some(10)]);
+    }
+
+    #[test]
+    fn ignores_deploy_actions_and_unmatched_addresses() {
+        let actions = vec![deploy_action(&[0x01; 32])];
+        let events = vec![
+            contract_event(&[0x01; 32], b"foo"),
+            contract_event(&[0x03; 32], b"foo"),
+        ];
+
+        let correlated = correlate_contract_action_ids(&events, &actions, &[10]);
+        assert_eq!(correlated, vec![None, None]);
+    }
+
+    #[test]
+    fn zswap_and_dust_events_stay_unattributed() {
+        let actions = vec![call_action(&[0x01; 32], "foo")];
+        let events = vec![
+            LedgerEvent {
+                grouping: LedgerEventGrouping::Zswap,
+                raw: bv(b"raw"),
+                attributes: LedgerEventAttributes::ZswapInput {
+                    nullifier: bv(&[0; 32]),
+                },
+                contract_action_id: None,
+                contract_address: None,
+            },
+            LedgerEvent {
+                grouping: LedgerEventGrouping::Dust,
+                raw: bv(b"raw"),
+                attributes: LedgerEventAttributes::ParamChange,
+                contract_action_id: None,
+                contract_address: None,
+            },
+        ];
+
+        let correlated = correlate_contract_action_ids(&events, &actions, &[10]);
+        assert_eq!(correlated, vec![None, None]);
+    }
 }

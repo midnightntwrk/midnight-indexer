@@ -153,6 +153,9 @@ pub async fn make_block_details(
                 _ => {}
             },
 
+            // The c2m-bridge pallet does not exist in node 1.0.0 metadata.
+            // Decoding for `Event::C2MBridge` lives in `runtimes/v2_0_0.rs`,
+            // where node 2.0.0-alpha.1 (PR #1386 et al.) added the pallet.
             _ => {}
         }
     }
@@ -166,6 +169,7 @@ pub async fn make_block_details(
         timestamp,
         transactions,
         dust_registration_events,
+        bridge_pallet_events: vec![],
     })
 }
 

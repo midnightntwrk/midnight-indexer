@@ -21,7 +21,8 @@ use crate::{
         progress_cache::{ProgressCache, ProgressCacheConfig},
         quota::{PerConnectionCounter, QuotaConfig, SubscriptionQuotas},
         v4::dataloader::{
-            BlockByHashLoader, ContractActionsByTransactionIdLoader, TransactionByIdLoader,
+            BlockByHashLoader, ContractActionsByTransactionIdLoader,
+            ContractEventsByContractActionIdLoader, TransactionByIdLoader,
             TransactionsByBlockIdLoader,
         },
     },
@@ -156,6 +157,7 @@ pub struct Config {
 pub struct SubscriptionConfig {
     blocks: BlocksSubscriptionConfig,
     contract_actions: ContractActionsSubscriptionConfig,
+    contract_events: ContractEventsSubscriptionConfig,
     pub dust_generations: DustGenerationsSubscriptionConfig,
     dust_ledger_events: DustLedgerEventsSubscriptionConfig,
     pub dust_nullifier_transactions: DustNullifierTransactionsSubscriptionConfig,
@@ -173,6 +175,11 @@ pub struct BlocksSubscriptionConfig {
 
 #[derive(Debug, Clone, Copy, Deserialize)]
 pub struct ContractActionsSubscriptionConfig {
+    batch_size: NonZeroU32,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct ContractEventsSubscriptionConfig {
     batch_size: NonZeroU32,
 }
 
@@ -395,6 +402,12 @@ trait ContextExt {
     where
         S: Storage;
 
+    fn get_contract_events_by_contract_action_id_loader<S>(
+        &self,
+    ) -> &DataLoader<ContractEventsByContractActionIdLoader<S>>
+    where
+        S: Storage;
+
     fn get_subscriber<B>(&self) -> &B
     where
         B: Subscriber;
@@ -457,6 +470,16 @@ impl ContextExt for Context<'_> {
     {
         self.data::<DataLoader<ContractActionsByTransactionIdLoader<S>>>()
             .expect("ContractActionsByTransactionIdLoader is stored in Context")
+    }
+
+    fn get_contract_events_by_contract_action_id_loader<S>(
+        &self,
+    ) -> &DataLoader<ContractEventsByContractActionIdLoader<S>>
+    where
+        S: Storage,
+    {
+        self.data::<DataLoader<ContractEventsByContractActionIdLoader<S>>>()
+            .expect("ContractEventsByContractActionIdLoader is stored in Context")
     }
 
     fn get_subscriber<B>(&self) -> &B

@@ -15,7 +15,7 @@ use crate::domain::DustRegistrationEvent;
 use indexer_common::domain::{
     BlockAuthor, BlockHash, ByteVec, ProtocolVersion, SerializedDustCommitmentMerkleTreeRoot,
     SerializedDustGenerationMerkleTreeRoot, SerializedLedgerParameters,
-    SerializedZswapMerkleTreeRoot,
+    SerializedZswapMerkleTreeRoot, bridge::BridgePalletEvent,
 };
 use std::fmt::Debug;
 
@@ -32,6 +32,10 @@ pub struct Block {
     // TODO: Remove Option once support for Node < 0.22 is dropped!
     pub ledger_state_root: Option<ByteVec>,
     pub dust_registration_events: Vec<DustRegistrationEvent>,
+    /// c2m-bridge pallet events (5 variants, see indexer-common::domain::bridge).
+    /// Populated once the runtime metadata for `c-to-m-subminimal-transfers-accumulation`
+    /// branch is regenerated; until then, always empty.
+    pub bridge_pallet_events: Vec<BridgePalletEvent>,
 
     // These fields are set after applying all transactions of this block to the ledger state.
     pub ledger_parameters: SerializedLedgerParameters,

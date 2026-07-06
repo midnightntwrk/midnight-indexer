@@ -22,6 +22,7 @@ use futures::TryStreamExt;
 use indexer_common::domain::{
     ByteVec, DustPublicKey, SerializedContractAddress, SerializedContractState,
     TermsAndConditionsHash,
+    bridge::{BridgePalletEvent, BridgeRecipient},
 };
 use itertools::Itertools;
 use parity_scale_codec::Decode;
@@ -34,6 +35,7 @@ pub async fn make_block_details(
     use super::runtime_2_0_0::{
         Call, Event,
         runtime_types::{
+            pallet_c2m_bridge::pallet::Event as C2MBridgeEvent,
             pallet_cnight_observation::pallet::Event as CnightObservationEvent,
             pallet_midnight::pallet::Call::send_mn_transaction,
             pallet_midnight_system::pallet::{
@@ -89,6 +91,7 @@ pub async fn make_block_details(
 
     let mut dust_registration_events = vec![];
     let mut system_transactions_from_events = vec![];
+    let mut bridge_pallet_events = vec![];
 
     let events = block
         .events()
@@ -153,6 +156,80 @@ pub async fn make_block_details(
                 _ => {}
             },
 
+            // c2m-bridge pallet events (node 2.0.0-alpha.1 + introduced this pallet
+            // via PR #1386 et al.). Pallet ships inert; events only fire after
+            // governance enables it (set MainChainScripts + data checkpoint).
+            //
+            // Matching shape (see indexer-common::domain::bridge::BridgePalletEvent):
+            //   UserTransfer            { mc_tx_hash, amount, recipient, midnight_tx_hash }
+            //   ReserveTransfer         { mc_tx_hash, amount, midnight_tx_hash }
+            //   InvalidTransfer         { mc_tx_hash, amount, midnight_tx_hash }
+            //   UnapprovedTransfer      { mc_tx_hash, amount, recipient, midnight_tx_hash }
+            //   SubminimalFlushTransfer { amount, count, midnight_tx_hash }
+            Event::C2MBridge(bridge_event) => match bridge_event {
+                C2MBridgeEvent::UserTransfer {
+                    mc_tx_hash,
+                    amount,
+                    recipient,
+                    midnight_tx_hash,
+                } => {
+                    let recipient = BridgeRecipient::new(recipient.0.0)?;
+                    bridge_pallet_events.push(BridgePalletEvent::UserTransfer {
+                        mc_tx_hash: mc_tx_hash.0.into(),
+                        amount,
+                        recipient,
+                        midnight_tx_hash: midnight_tx_hash.into(),
+                    });
+                }
+                C2MBridgeEvent::ReserveTransfer {
+                    mc_tx_hash,
+                    amount,
+                    midnight_tx_hash,
+                } => {
+                    bridge_pallet_events.push(BridgePalletEvent::ReserveTransfer {
+                        mc_tx_hash: mc_tx_hash.0.into(),
+                        amount,
+                        midnight_tx_hash: midnight_tx_hash.into(),
+                    });
+                }
+                C2MBridgeEvent::InvalidTransfer {
+                    mc_tx_hash,
+                    amount,
+                    midnight_tx_hash,
+                } => {
+                    bridge_pallet_events.push(BridgePalletEvent::InvalidTransfer {
+                        mc_tx_hash: mc_tx_hash.0.into(),
+                        amount,
+                        midnight_tx_hash: midnight_tx_hash.into(),
+                    });
+                }
+                C2MBridgeEvent::UnapprovedTransfer {
+                    mc_tx_hash,
+                    amount,
+                    recipient,
+                    midnight_tx_hash,
+                } => {
+                    let recipient = BridgeRecipient::new(recipient.0.0)?;
+                    bridge_pallet_events.push(BridgePalletEvent::UnapprovedTransfer {
+                        mc_tx_hash: mc_tx_hash.0.into(),
+                        amount,
+                        recipient,
+                        midnight_tx_hash: midnight_tx_hash.into(),
+                    });
+                }
+                C2MBridgeEvent::SubminimalFlushTransfer {
+                    amount,
+                    count,
+                    midnight_tx_hash,
+                } => {
+                    bridge_pallet_events.push(BridgePalletEvent::SubminimalFlushTransfer {
+                        amount,
+                        count,
+                        midnight_tx_hash: midnight_tx_hash.into(),
+                    });
+                }
+            },
+
             _ => {}
         }
     }
@@ -166,6 +243,7 @@ pub async fn make_block_details(
         timestamp,
         transactions,
         dust_registration_events,
+        bridge_pallet_events,
     })
 }
 
