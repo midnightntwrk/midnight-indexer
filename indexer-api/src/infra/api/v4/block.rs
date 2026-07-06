@@ -14,7 +14,7 @@
 use crate::{
     domain::{self, storage::Storage},
     infra::api::{
-        ApiResult, ContextExt, ResultExt,
+        ApiResult, ContextExt, OptionExt, ResultExt,
         v4::{
             HexEncodable, HexEncoded,
             directives::beta,
@@ -25,7 +25,7 @@ use crate::{
 };
 use async_graphql::{ComplexObject, Context, OneofObject, SimpleObject};
 use derive_more::Debug;
-use indexer_common::domain::BlockHash;
+use indexer_common::domain::{BlockHash, SerializedContractAddress};
 use std::marker::PhantomData;
 
 /// A block with its relevant data.
@@ -78,6 +78,9 @@ where
 
     #[graphql(skip)]
     id: u64,
+
+    #[graphql(skip)]
+    raw_hash: BlockHash,
 
     #[graphql(skip)]
     parent_hash: BlockHash,
@@ -141,6 +144,54 @@ where
             terms_and_conditions,
         })
     }
+
+    /// The zswap commitment tree filtered to the given contract address, resolved from this
+    /// block's ledger state; null if the contract does not exist at this block. Hex-encoded.
+    /// For building transactions, compose with `ledgerParameters` and `contract { state }` in
+    /// one request, anchored to the same block; use the latest block, older trees age out of
+    /// the ledger's root window.
+    #[graphql(directive = beta::apply())]
+    async fn contract_zswap_state(
+        &self,
+        cx: &Context<'_>,
+        address: HexEncoded,
+    ) -> ApiResult<Option<HexEncoded>> {
+        let storage = cx.get_storage::<S>();
+
+        let address = &address
+            .hex_decode::<SerializedContractAddress>()
+            .map_err_into_client_error(|| "invalid address")?;
+
+        // Null when the contract does not exist as of this block.
+        let contract_action = storage
+            .get_contract_action_by_address_as_of_block_hash(address, self.raw_hash)
+            .await
+            .map_err_into_server_error(|| {
+                format!(
+                    "get contract action for address {address} as of block {}",
+                    self.hash
+                )
+            })?;
+        if contract_action.is_none() {
+            return Ok(None);
+        }
+
+        let (_, protocol_version, ledger_state_key) = storage
+            .get_ledger_state_at(self.raw_hash)
+            .await
+            .map_err_into_server_error(|| format!("get ledger state at block {}", self.hash))?
+            .some_or_server_error(|| format!("no ledger state for block {}", self.hash))?;
+
+        let ledger_state =
+            domain::LedgerState::load(&ledger_state_key, protocol_version.ledger_version())
+                .map_err_into_server_error(|| "load ledger state")?;
+
+        let zswap_state = ledger_state
+            .extract_contract_zswap_state(address)
+            .map_err_into_server_error(|| format!("extract zswap state for contract {address}"))?;
+
+        Ok(Some(zswap_state.hex_encode()))
+    }
 }
 
 impl<S> From<domain::Block> for Block<S>
@@ -181,6 +232,7 @@ where
             dust_generation_merkle_tree_root: dust_generation_merkle_tree_root
                 .map(|root| root.hex_encode()),
             id,
+            raw_hash: hash,
             parent_hash,
             _s: PhantomData,
         }
