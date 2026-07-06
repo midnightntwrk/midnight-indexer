@@ -42,10 +42,10 @@ anyhow                      = { version = "1.0" }
 assert_matches              = { version = "1.5" }
 async-graphql               = { version = "7.2" }
 async-graphql-axum          = { version = "7.2" }
-async-nats                  = { version = "0.47" }
+async-nats                  = { version = "0.49" }
 async-stream                = { version = "0.3" }
 axum                        = { version = "0.8" }
-bech32                      = { version = "0.11" }
+bech32                      = { version = "0.12" }
 bip32                       = { version = "0.5" }
 blake2                      = { version = "0.10" }
 blockfrost                  = { version = "1.2" }
@@ -63,15 +63,16 @@ fastrace-axum               = { version = "0.2" }
 fastrace-opentelemetry      = { version = "0.18" }
 fastrace-tracing            = { version = "0.1" }
 figment                     = { version = "0.10" }
+flate2                      = { version = "1.1" }
 fs_extra                    = { version = "1.3" }
 futures                     = { version = "0.3" }
 graphql_client              = { version = "0.16" }
 http                        = { version = "1.4" }
 humantime-serde             = { version = "1.1" }
 indoc                       = { version = "2.0" }
-itertools                   = { version = "0.14" }
+itertools                   = { version = "0.15" }
 log                         = { version = "0.4" }
-logforth                    = { version = "0.29" }
+logforth                    = { version = "0.30" }
 metrics                     = { version = "0.24" }
 metrics-exporter-prometheus = { version = "0.18", default-features = false }
 moka                        = { version = "0.12", features = [ "future" ] }
@@ -100,7 +101,7 @@ tokio-tungstenite           = { version = "0.29" }
 tracing                     = { version = "0.1" }
 tracing-subscriber          = { version = "0.3" }
 tower                       = { version = "0.5" }
-tower-http                  = { version = "0.6" }
+tower-http                  = { version = "0.7" }
 trait-variant               = { version = "0.1" }
 uuid                        = { version = "1.23", features = [ "serde" ] }
 walkdir                     = { version = "2.5" }
