@@ -18,6 +18,7 @@ use crate::{
         v4::{
             CardanoNetworkId, CardanoRewardAddress, HexEncoded,
             block::{Block, BlockOffset},
+            contract::Contract,
             contract_action::{ContractAction, ContractActionOffset},
             directives::beta,
             dust::DustGenerationStatus,
@@ -89,6 +90,74 @@ where
         };
 
         Ok(block.map(Into::into))
+    }
+
+    /// Get the contract with the given address.
+    ///
+    /// If `offset` is provided, the contract's `state` reflects the latest contract action at
+    /// or before that block; otherwise it reflects the latest available state.
+    ///
+    /// This field is only available for contracts whose latest state was indexed under the
+    /// current ledger version.
+    #[trace(properties = { "address": "{address}" })]
+    async fn contract(
+        &self,
+        cx: &Context<'_>,
+        address: HexEncoded,
+        offset: Option<BlockOffset>,
+    ) -> ApiResult<Option<Contract<S>>> {
+        let storage = cx.get_storage::<S>();
+
+        // Decode and validate the address.
+        let address_bytes = address
+            .hex_decode()
+            .map_err_into_client_error(|| "invalid contract address")?;
+
+        // Determine the block height to query.
+        let block_height = match offset {
+            Some(BlockOffset::Hash(hash)) => {
+                let hash_bytes = hash
+                    .hex_decode()
+                    .map_err_into_client_error(|| "invalid block hash")?;
+
+                // Use the batch block lookup — get a single block by hash.
+                let blocks = storage
+                    .get_blocks_by_hashes(&[hash_bytes])
+                    .await
+                    .map_err_into_server_error(|| "get block by hash for contract")?;
+
+                let block = blocks
+                    .into_iter()
+                    .next()
+                    .some_or_server_error(|| "block not found for the given hash")?;
+
+                block.height
+            }
+            Some(BlockOffset::Height(height)) => height,
+            None => {
+                // No offset: use the latest block height.
+                storage
+                    .get_latest_block()
+                    .await
+                    .map_err_into_server_error(|| "get latest block for contract")?
+                    .map(|b| b.height)
+                    .unwrap_or(u32::MAX)
+            }
+        };
+
+        // Get the contract action as of the block height.
+        let contract_action = storage
+            .get_contract_action_as_of_block_height(&address_bytes, block_height)
+            .await
+            .map_err_into_server_error(|| {
+                format!(
+                    "get contract action as of block {} for {}",
+                    block_height,
+                    const_hex::encode(&address_bytes)
+                )
+            })?;
+
+        Ok(contract_action.map(|ca| Contract::new(ca, block_height)))
     }
 
     /// Get a Merkle tree collapsed update for the given zswap state index range.

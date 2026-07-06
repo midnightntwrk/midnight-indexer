@@ -167,6 +167,73 @@ type ContractBalance {
 }
 
 """
+A committee member's verifying key in a contract's maintenance authority.
+"""
+type ContractMaintenanceVerifyingKey {
+	"""
+	The kind of the verifying key (Schnorr or ECDSA).
+	"""
+	kind: ContractMaintenanceVerifyingKeyKind!
+	"""
+	The serialized verifying key bytes, hex-encoded.
+	"""
+	key: HexEncoded!
+}
+
+"""
+Kind of a contract maintenance verifying key.
+"""
+enum ContractMaintenanceVerifyingKeyKind {
+	"""Schnorr signing key."""
+	Schnorr
+	"""ECDSA signing key."""
+	Ecdsa
+}
+
+"""
+The maintenance authority of a contract.
+"""
+type ContractMaintenanceAuthority {
+	"""
+	The committee members' verifying keys.
+	"""
+	committee: [ContractMaintenanceVerifyingKey!]!
+	"""
+	The threshold for the multisig.
+	"""
+	threshold: Int!
+	"""
+	The counter for the multisig.
+	"""
+	counter: Int!
+}
+
+"""
+The contract as the topmost concept, with point-in-time state, maintenance authority,
+and a bounded recent-actions sub-query.
+"""
+type Contract {
+	"""
+	The contract address.
+	"""
+	address: HexEncoded!
+	"""
+	The serialized contract state as of the queried block offset.
+	This is the `state` blob of the latest contract action at or before the offset.
+	"""
+	state: HexEncoded! @beta
+	"""
+	The maintenance authority of the contract, derived by deserializing the `state` blob.
+	"""
+	maintenanceAuthority: ContractMaintenanceAuthority @beta
+	"""
+	Recent contract actions for this contract, ordered by action ID descending.
+	Use `limit` to bound the number of results (default 20, max 100).
+	"""
+	actions(limit: Int): [ContractAction!]! @beta
+}
+
+"""
 A contract call.
 """
 type ContractCall implements ContractAction {
@@ -717,6 +784,12 @@ type Query {
 	Find a block for the given optional offset; if not present, the latest block is returned.
 	"""
 	block(offset: BlockOffset): Block
+	"""
+	Get the contract with the given address. If `offset` is provided, the contract's `state`
+	reflects the latest contract action at or before that block; otherwise it reflects the
+	latest available state.
+	"""
+	contract(address: HexEncoded!, offset: BlockOffset): Contract
 	"""
 	Get a Merkle tree collapsed update for the given zswap state index range.
 	"""

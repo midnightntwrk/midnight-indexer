@@ -19,9 +19,41 @@ use fastrace::trace;
 use midnight_coin_structure_v2::coin::TokenType as MidnightTokenType;
 use midnight_coin_structure_v3::coin::TokenType as MidnightTokenTypeV9;
 use midnight_onchain_runtime_v3::state::ContractState as ContractStateV3;
-use midnight_onchain_runtime_v4::state::ContractState as ContractStateV4;
+use midnight_onchain_runtime_v4::state::{
+    ContractMaintenanceVerifyingKey, ContractState as ContractStateV4,
+};
 use midnight_serialize_v1::tagged_deserialize;
 use midnight_storage_core_v1::DefaultDB;
+use serde::{Deserialize, Serialize};
+
+/// Kind of a contract maintenance verifying key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum VerifyingKeyKind {
+    /// Schnorr signing key (32-byte compressed key).
+    Schnorr,
+    /// ECDSA signing key (33-byte compressed key).
+    Ecdsa,
+}
+
+/// A committee member's verifying key in a contract's maintenance authority.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommitteeMember {
+    /// The serialized verifying key bytes.
+    pub verifying_key: Vec<u8>,
+    /// The kind of the verifying key (Schnorr or ECDSA).
+    pub kind: VerifyingKeyKind,
+}
+
+/// The maintenance authority of a contract.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MaintenanceAuthority {
+    /// The committee members' verifying keys.
+    pub committee: Vec<CommitteeMember>,
+    /// The threshold for the multisig.
+    pub threshold: u32,
+    /// The counter for the multisig.
+    pub counter: u32,
+}
 
 /// Facade for `ContractState` from `midnight_ledger` across supported (protocol) versions.
 #[derive(Debug, Clone)]
@@ -51,6 +83,52 @@ impl ContractState {
         };
 
         Ok(contract_state)
+    }
+
+    /// Get the maintenance authority for this contract, if available.
+    ///
+    /// V3 contract state does not have a maintenance authority field.
+    /// V4 contract state has a `maintenance_authority` field.
+    pub fn maintenance_authority(&self) -> Option<MaintenanceAuthority> {
+        match self {
+            Self::V3(_) => None,
+            Self::V4(contract_state) => {
+                let authority = &contract_state.maintenance_authority;
+                let committee = authority
+                    .committee
+                    .iter()
+                    .map(|vk: &ContractMaintenanceVerifyingKey| match vk {
+                        ContractMaintenanceVerifyingKey::Schnorr(schnorr_vk) => {
+                            let mut bytes = Vec::new();
+                            // VerifyingKey implements midnight_serialize_v1::Serializable
+                            midnight_serialize_v1::Serializable::serialize(
+                                schnorr_vk,
+                                &mut bytes,
+                            )
+                            .expect("Schnorr verifying key is serializable");
+                            CommitteeMember {
+                                verifying_key: bytes,
+                                kind: VerifyingKeyKind::Schnorr,
+                            }
+                        }
+                        ContractMaintenanceVerifyingKey::ECDSA(ecdsa_vk) => {
+                            let mut bytes = Vec::new();
+                            midnight_serialize_v1::Serializable::serialize(ecdsa_vk, &mut bytes)
+                                .expect("ECDSA verifying key is serializable");
+                            CommitteeMember {
+                                verifying_key: bytes,
+                                kind: VerifyingKeyKind::Ecdsa,
+                            }
+                        }
+                    })
+                    .collect();
+                Some(MaintenanceAuthority {
+                    committee,
+                    threshold: authority.threshold,
+                    counter: authority.counter,
+                })
+            }
+        }
     }
 
     /// Get the token balances for this contract.

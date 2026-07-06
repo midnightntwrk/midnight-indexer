@@ -14,7 +14,8 @@
 use crate::domain::{ContractAction, ContractBalance, storage::NoopStorage};
 use futures::{Stream, stream};
 use indexer_common::domain::{
-    BlockHash, SerializedContractAddress, SerializedTransactionIdentifier, TransactionHash,
+    BlockHash, ContractAttributes, SerializedContractAddress, SerializedTransactionIdentifier,
+    TransactionHash,
 };
 use std::num::NonZeroU32;
 
@@ -96,6 +97,25 @@ where
         &self,
         block_height: u32,
     ) -> Result<Option<u64>, sqlx::Error>;
+
+    /// Get the latest contract action for the given address at or before the given block height.
+    ///
+    /// This is used to resolve the `Contract.state` field as of a pinned block offset.
+    async fn get_contract_action_as_of_block_height(
+        &self,
+        address: &SerializedContractAddress,
+        height: u32,
+    ) -> Result<Option<ContractAction>, sqlx::Error>;
+
+    /// Get recent contract actions for the given address, ordered by action ID descending.
+    ///
+    /// Optionally filter by action type. Limited to at most `limit` results.
+    async fn get_recent_contract_actions_by_address(
+        &self,
+        address: &SerializedContractAddress,
+        action_type: Option<ContractAttributes>,
+        limit: u32,
+    ) -> Result<Vec<ContractAction>, sqlx::Error>;
 }
 
 #[allow(unused_variables)]
@@ -180,6 +200,23 @@ impl ContractActionStorage for NoopStorage {
         &self,
         block_height: u32,
     ) -> Result<Option<u64>, sqlx::Error> {
+        unimplemented!()
+    }
+
+    async fn get_contract_action_as_of_block_height(
+        &self,
+        address: &SerializedContractAddress,
+        height: u32,
+    ) -> Result<Option<ContractAction>, sqlx::Error> {
+        unimplemented!()
+    }
+
+    async fn get_recent_contract_actions_by_address(
+        &self,
+        address: &SerializedContractAddress,
+        action_type: Option<ContractAttributes>,
+        limit: u32,
+    ) -> Result<Vec<ContractAction>, sqlx::Error> {
         unimplemented!()
     }
 }

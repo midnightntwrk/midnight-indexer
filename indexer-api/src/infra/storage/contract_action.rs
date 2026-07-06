@@ -327,6 +327,132 @@ impl ContractActionStorage for Storage {
 
         Ok(id.map(|(id,)| id as u64))
     }
+
+    #[trace(properties = { "address": "{address}", "height": "{height}" })]
+    async fn get_contract_action_as_of_block_height(
+        &self,
+        address: &SerializedContractAddress,
+        height: u32,
+    ) -> Result<Option<ContractAction>, sqlx::Error> {
+        // Get the latest contract action for the given address in any block at or before
+        // the given height. Mirrors the logic in PR #1271 `asOfBlockOffset`.
+        let query = indoc! {"
+            SELECT
+                contract_actions.id,
+                address,
+                state,
+                attributes,
+                zswap_state,
+                transaction_id
+            FROM contract_actions
+            INNER JOIN transactions ON transactions.id = transaction_id
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            WHERE contract_actions.address = $1
+            AND blocks.height <= $2
+            ORDER BY contract_actions.id DESC
+            LIMIT 1
+        "};
+
+        sqlx::query_as(query)
+            .bind(address)
+            .bind(height as i64)
+            .fetch_optional(&*self.pool)
+            .await
+    }
+
+    #[trace(properties = { "address": "{address}", "limit": "{limit}" })]
+    async fn get_recent_contract_actions_by_address(
+        &self,
+        address: &SerializedContractAddress,
+        action_type: Option<ContractAttributes>,
+        limit: u32,
+    ) -> Result<Vec<ContractAction>, sqlx::Error> {
+        match action_type {
+            Some(ContractAttributes::Deploy) => {
+                let query = indoc! {"
+                    SELECT
+                        id,
+                        address,
+                        state,
+                        attributes,
+                        zswap_state,
+                        transaction_id
+                    FROM contract_actions
+                    WHERE address = $1
+                    AND json_extract(attributes, '$.Deploy') IS NOT NULL
+                    ORDER BY id DESC
+                    LIMIT $2
+                "};
+                sqlx::query_as::<_, ContractAction>(query)
+                    .bind(address)
+                    .bind(limit as i64)
+                    .fetch_all(&*self.pool)
+                    .await
+            }
+            Some(ContractAttributes::Call { .. }) => {
+                let query = indoc! {"
+                    SELECT
+                        id,
+                        address,
+                        state,
+                        attributes,
+                        zswap_state,
+                        transaction_id
+                    FROM contract_actions
+                    WHERE address = $1
+                    AND json_extract(attributes, '$.Call') IS NOT NULL
+                    ORDER BY id DESC
+                    LIMIT $2
+                "};
+                sqlx::query_as::<_, ContractAction>(query)
+                    .bind(address)
+                    .bind(limit as i64)
+                    .fetch_all(&*self.pool)
+                    .await
+            }
+            Some(ContractAttributes::Update) => {
+                let query = indoc! {"
+                    SELECT
+                        id,
+                        address,
+                        state,
+                        attributes,
+                        zswap_state,
+                        transaction_id
+                    FROM contract_actions
+                    WHERE address = $1
+                    AND json_extract(attributes, '$.Update') IS NOT NULL
+                    ORDER BY id DESC
+                    LIMIT $2
+                "};
+                sqlx::query_as::<_, ContractAction>(query)
+                    .bind(address)
+                    .bind(limit as i64)
+                    .fetch_all(&*self.pool)
+                    .await
+            }
+            None => {
+                let query = indoc! {"
+                    SELECT
+                        id,
+                        address,
+                        state,
+                        attributes,
+                        zswap_state,
+                        transaction_id
+                    FROM contract_actions
+                    WHERE address = $1
+                    ORDER BY id DESC
+                    LIMIT $2
+                "};
+                sqlx::query_as::<_, ContractAction>(query)
+                    .bind(address)
+                    .bind(limit as i64)
+                    .fetch_all(&*self.pool)
+                    .await
+            }
+        }
+    }
 }
 
 impl Storage {
