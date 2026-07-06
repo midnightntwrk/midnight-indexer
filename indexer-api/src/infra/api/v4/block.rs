@@ -25,7 +25,7 @@ use crate::{
 };
 use async_graphql::{ComplexObject, Context, OneofObject, SimpleObject};
 use derive_more::Debug;
-use indexer_common::domain::{BlockHash, SerializedContractAddress};
+use indexer_common::domain::BlockHash;
 use std::marker::PhantomData;
 
 /// A block with its relevant data.
@@ -159,11 +159,11 @@ where
         let storage = cx.get_storage::<S>();
 
         let address = &address
-            .hex_decode::<SerializedContractAddress>()
+            .hex_decode()
             .map_err_into_client_error(|| "invalid address")?;
 
         // Null when the contract does not exist as of this block.
-        let contract_action = storage
+        if storage
             .get_contract_action_by_address_as_of_block_hash(address, self.raw_hash)
             .await
             .map_err_into_server_error(|| {
@@ -171,8 +171,9 @@ where
                     "get contract action for address {address} as of block {}",
                     self.hash
                 )
-            })?;
-        if contract_action.is_none() {
+            })?
+            .is_none()
+        {
             return Ok(None);
         }
 
