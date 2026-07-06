@@ -64,7 +64,7 @@ use tokio::{
     signal::unix::{SignalKind, signal},
 };
 use tower::ServiceBuilder;
-use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer};
+use tower_http::{compression::CompressionLayer, cors::CorsLayer, limit::RequestBodyLimitLayer};
 
 /// Attention: This could change if the used libraries change!
 /// See https://docs.rs/http-body-util/0.1.2/src/http_body_util/limited.rs.html#93.
@@ -299,6 +299,7 @@ where
                 .and_then(transform_lentgh_limit_exceeded),
         )
         .layer(CorsLayer::permissive())
+        .layer(CompressionLayer::new())
 }
 
 // Returns 200 when reachable. If the runtime is parked (e.g. storage-core deadlock during
