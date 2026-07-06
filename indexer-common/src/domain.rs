@@ -195,6 +195,8 @@ pub enum TransactionVariant {
 pub struct ContractAction {
     pub address: SerializedContractAddress,
     pub state: SerializedContractState,
+    /// The serialized zswap state for this contract action.
+    pub zswap_state: SerializedZswapState,
     pub attributes: ContractAttributes,
 }
 

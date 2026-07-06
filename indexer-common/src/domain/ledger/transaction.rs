@@ -14,7 +14,8 @@
 use crate::{
     domain::{
         ContractAction, ContractAttributes, LedgerVersion, SerializedContractAddress,
-        SerializedContractState, SerializedTransactionIdentifier, TransactionHash, ViewingKey,
+        SerializedContractState, SerializedTransactionIdentifier,
+        TransactionHash, ViewingKey,
         ledger::{Error, SerializableExt, TransactionV8, TransactionV9},
     },
     infra::ledger_db::v1_1,
@@ -130,6 +131,7 @@ impl Transaction {
                                     Ok::<_, Error>(ContractAction {
                                         address,
                                         state,
+                                        zswap_state: crate::domain::bytes::ByteVec(Vec::new()),
                                         attributes: ContractAttributes::Deploy,
                                     })
                                 }
@@ -150,6 +152,7 @@ impl Transaction {
                                     Ok(ContractAction {
                                         address,
                                         state,
+                                        zswap_state: crate::domain::bytes::ByteVec(Vec::new()),
                                         attributes: ContractAttributes::Call { entry_point },
                                     })
                                 }
@@ -165,6 +168,7 @@ impl Transaction {
                                     Ok(ContractAction {
                                         address,
                                         state,
+                                        zswap_state: crate::domain::bytes::ByteVec(Vec::new()),
                                         attributes: ContractAttributes::Update,
                                     })
                                 }
@@ -195,6 +199,7 @@ impl Transaction {
                                     Ok::<_, Error>(ContractAction {
                                         address,
                                         state,
+                                        zswap_state: crate::domain::bytes::ByteVec(Vec::new()),
                                         attributes: ContractAttributes::Deploy,
                                     })
                                 }
@@ -215,6 +220,7 @@ impl Transaction {
                                     Ok(ContractAction {
                                         address,
                                         state,
+                                        zswap_state: crate::domain::bytes::ByteVec(Vec::new()),
                                         attributes: ContractAttributes::Call { entry_point },
                                     })
                                 }
@@ -230,6 +236,7 @@ impl Transaction {
                                     Ok(ContractAction {
                                         address,
                                         state,
+                                        zswap_state: crate::domain::bytes::ByteVec(Vec::new()),
                                         attributes: ContractAttributes::Update,
                                     })
                                 }

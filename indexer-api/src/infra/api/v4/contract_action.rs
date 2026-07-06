@@ -58,10 +58,9 @@ where
             id,
             address,
             state,
-            attributes,
             zswap_state,
+            attributes,
             transaction_id,
-            ..
         } = action;
 
         match attributes {
