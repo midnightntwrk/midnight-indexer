@@ -247,7 +247,7 @@ async fn start_node() -> anyhow::Result<NodeHandle> {
         .to_string();
 
     let node_container =
-        GenericImage::new(resolve_node_image_name()?, LATEST_NODE_VERSION.trim())
+        GenericImage::new(resolve_node_image_name()?, LATEST_NODE_VERSION.trim().to_string())
             .with_wait_for(WaitFor::message_on_stderr("9944"))
             .with_mount(Mount::bind_mount(node_path, "/node"))
             .with_env_var("SHOW_CONFIG", "false")
