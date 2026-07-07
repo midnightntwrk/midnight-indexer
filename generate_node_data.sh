@@ -175,23 +175,113 @@ docker run \
     --contract-address $(cat /tmp/contract_address.mn) \
     --new-authority-seed 1000000000000000000000000000000000000000000000000000000000000001
 
-# TODO(#1163): emit standard contract events so the e2e chain exercises the `contractEvents`
-# query + subscription (test_contract_event_query / test_contract_events_subscription in
-# indexer-tests/src/e2e.rs).
-#
-# The toolkit (2.0.0-rc.3) IS capable of this: `generate-txs contract-custom` builds txs from custom
-# contract intents (--compiled-contract-dir + --intent-file), so the dependency is the compiled emit
-# contract + intent artifacts from the stagenet events setup (Giuseppe / Vanessa / Oscar), NOT the
-# toolkit version. The built-in `contract-simple` may also emit on some call-key — the contract-events
-# e2e is the probe: if it passes after `just update-node`, contract-simple already emits; if it fails
-# with "expected at least one contract event in the test chain", add the emit via contract-custom
-# below (mount the compiled-contract dir and fill in the intent file):
-#
-# docker run --rm --network host -v toolkit_out:/out -v <HOST_CONTRACT_DIR>:/contract $toolkit_image \
-#     generate-txs contract-custom \
-#     --compiled-contract-dir /contract \
-#     --intent-file /contract/<EMIT_INTENT_FILE> \
-#     --rng-seed $rng_seed
+# Emit a standard contract event so the e2e chain exercises the `contractEvents` query and
+# subscription (#1163; test_contract_event_query / test_contract_events_subscription in
+# indexer-tests/src/e2e.rs). The emit contract source lives in indexer-tests/emit-contract; it is
+# compiled with the compactc bundled in the toolkit image and driven through the toolkit's
+# generate-intent / send-intent custom-contract pipeline (see util/toolkit README in midnight-node).
+readonly emit_work=$(mktemp -d)
+cp indexer-tests/emit-contract/emitcounter.compact indexer-tests/emit-contract/contract.config.ts "$emit_work"
+chmod -R a+rX "$emit_work"
+
+# Compile the emit contract with the bundled compactc (runs as root via the shell entrypoint so it
+# can write into the bind mount).
+docker run \
+    --rm \
+    -v "$emit_work":/toolkit-js/contract-emit \
+    --entrypoint sh \
+    $toolkit_image \
+    -c 'cd /toolkit-js/contract-emit && /compact-home/compactc emitcounter.compact managed/emitcounter'
+
+readonly emit_coin_public=$(docker run --rm $toolkit_image show-address \
+    --network undeployed \
+    --seed 0000000000000000000000000000000000000000000000000000000000000001 \
+    --coin-public | tail -1)
+
+# Deploy the emit contract: intent -> proven tx file -> send.
+docker run \
+    --rm \
+    --network host \
+    -v "$emit_work":/toolkit-js/contract-emit \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    generate-intent deploy \
+    -c /toolkit-js/contract-emit/contract.config.ts \
+    --toolkit-js-path /toolkit-js \
+    --coin-public "$emit_coin_public" \
+    --output-intent /out/emit_deploy.bin \
+    --output-private-state /out/emit_private_state.json \
+    --output-zswap-state /out/emit_zswap.json \
+    0
+docker run \
+    --rm \
+    --network host \
+    -v "$emit_work":/toolkit-js/contract-emit \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    send-intent \
+    --intent-file /out/emit_deploy.bin \
+    --compiled-contract-dir /toolkit-js/contract-emit/managed/emitcounter \
+    --dest-file /out/emit_deploy_tx.mn
+docker run \
+    --rm \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    contract-address --src-file /out/emit_deploy_tx.mn > /tmp/emit_contract_address.mn
+docker run \
+    --rm \
+    --network host \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    generate-txs --src-file /out/emit_deploy_tx.mn --dest-url ws://127.0.0.1:9944 send
+
+# Wait for the deploy to be finalized before calling the emit circuit.
+sleep 15
+docker run \
+    --rm \
+    --network host \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    contract-state \
+    --contract-address $(cat /tmp/emit_contract_address.mn) \
+    --dest-file /out/emit_onchain_state.mn
+
+# Call the emit_unpaused circuit: intent -> proven tx file -> send.
+docker run \
+    --rm \
+    --network host \
+    -v "$emit_work":/toolkit-js/contract-emit \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    generate-intent circuit \
+    -c /toolkit-js/contract-emit/contract.config.ts \
+    --toolkit-js-path /toolkit-js \
+    --contract-address $(cat /tmp/emit_contract_address.mn) \
+    --coin-public "$emit_coin_public" \
+    --input-onchain-state /out/emit_onchain_state.mn \
+    --input-private-state /out/emit_private_state.json \
+    --output-intent /out/emit_call.bin \
+    --output-private-state /out/emit_ps2.json \
+    --output-zswap-state /out/emit_zswap2.json \
+    emit_unpaused
+docker run \
+    --rm \
+    --network host \
+    -v "$emit_work":/toolkit-js/contract-emit \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    send-intent \
+    --intent-file /out/emit_call.bin \
+    --compiled-contract-dir /toolkit-js/contract-emit/managed/emitcounter \
+    --dest-file /out/emit_call_tx.mn
+docker run \
+    --rm \
+    --network host \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    generate-txs --src-file /out/emit_call_tx.mn --dest-url ws://127.0.0.1:9944 send
+
+rm -rf "$emit_work"
 
 # Wait for enough blocks to be finalized so that the pre-populated chain data
 # contains sufficient blocks for e2e tests (MAX_HEIGHT = 32 in e2e.rs).
