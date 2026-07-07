@@ -27,7 +27,7 @@ use midnight_onchain_runtime_v4::state::{
     ContractState as ContractStateV4,
 };
 use midnight_serialize_v1::tagged_deserialize;
-use midnight_storage_core_v1::{DefaultDB, arena::Sp};
+use midnight_storage_core_v1::DefaultDB;
 
 /// Facade for `ContractState` from `midnight_ledger` across supported (protocol) versions.
 #[derive(Debug, Clone)]
@@ -67,9 +67,10 @@ impl ContractState {
                     .balance
                     .iter()
                     .filter_map(|entry| {
-                        let (token_type_sp, amount_sp) = Sp::into_inner(entry)?;
-                        let token_type = Sp::into_inner(token_type_sp)?;
-                        let amount = Sp::into_inner(amount_sp)?;
+                        // Read via deref: `Sp::into_inner` returns `None` for lazy or shared
+                        // entries, silently dropping all balances.
+                        let (token_type, amount) = &*entry;
+                        let (token_type, amount) = (**token_type, **amount);
 
                         (amount > 0).then_some((token_type, amount))
                     })
@@ -102,9 +103,10 @@ impl ContractState {
                     .balance
                     .iter()
                     .filter_map(|entry| {
-                        let (token_type_sp, amount_sp) = Sp::into_inner(entry)?;
-                        let token_type = Sp::into_inner(token_type_sp)?;
-                        let amount = Sp::into_inner(amount_sp)?;
+                        // Read via deref: `Sp::into_inner` returns `None` for lazy or shared
+                        // entries, silently dropping all balances.
+                        let (token_type, amount) = &*entry;
+                        let (token_type, amount) = (**token_type, **amount);
 
                         (amount > 0).then_some((token_type, amount))
                     })
@@ -188,4 +190,65 @@ impl ContractState {
             }
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::domain::{
+        ByteArray, LedgerVersion, TokenType,
+        ledger::{ContractState, TaggedSerializableExt},
+    };
+    use midnight_base_crypto_v1::hash::HashOutput;
+    use midnight_coin_structure_v2::coin::{TokenType as MidnightTokenType, UnshieldedTokenType};
+    use midnight_coin_structure_v3::coin::{
+        TokenType as MidnightTokenTypeV9, UnshieldedTokenType as UnshieldedTokenTypeV9,
+    };
+    use midnight_onchain_runtime_v3::state::ContractState as ContractStateV3;
+    use midnight_onchain_runtime_v4::state::ContractState as ContractStateV4;
+    use midnight_storage_core_v1::DefaultDB;
+
+    #[test]
+    fn test_balances_v8() {
+        let mut contract_state = ContractStateV3::<DefaultDB>::default();
+        contract_state.balance = contract_state.balance.insert(
+            MidnightTokenType::Unshielded(UnshieldedTokenType(HashOutput(TOKEN_TYPE.0))),
+            AMOUNT,
+        );
+        let contract_state = contract_state
+            .tagged_serialize()
+            .expect("contract state can be serialized");
+
+        let balances = ContractState::deserialize(contract_state, LedgerVersion::V8)
+            .expect("contract state can be deserialized")
+            .balances()
+            .expect("balances can be extracted");
+
+        assert_eq!(balances.len(), 1);
+        assert_eq!(balances[0].token_type, TOKEN_TYPE);
+        assert_eq!(balances[0].amount, AMOUNT);
+    }
+
+    #[test]
+    fn test_balances_v9() {
+        let mut contract_state = ContractStateV4::<DefaultDB>::default();
+        contract_state.balance = contract_state.balance.insert(
+            MidnightTokenTypeV9::Unshielded(UnshieldedTokenTypeV9(HashOutput(TOKEN_TYPE.0))),
+            AMOUNT,
+        );
+        let contract_state = contract_state
+            .tagged_serialize()
+            .expect("contract state can be serialized");
+
+        let balances = ContractState::deserialize(contract_state, LedgerVersion::V9)
+            .expect("contract state can be deserialized")
+            .balances()
+            .expect("balances can be extracted");
+
+        assert_eq!(balances.len(), 1);
+        assert_eq!(balances[0].token_type, TOKEN_TYPE);
+        assert_eq!(balances[0].amount, AMOUNT);
+    }
+
+    const TOKEN_TYPE: TokenType = ByteArray([7; 32]);
+    const AMOUNT: u128 = 1_000_000;
 }
