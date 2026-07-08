@@ -190,7 +190,7 @@ jobs:
 
   doc:
     runs-on: ubuntu-latest
-    needs: [changes, toolchain]
+    needs: [changes]
     if: needs.changes.outputs.non_qa == 'true'
     steps:
       - name: Checkout repository
@@ -200,7 +200,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           components: rust-docs
-          toolchain: ${{needs.toolchain.outputs.toolchain}}
+          toolchain: ${{needs.changes.outputs.toolchain}}
 
       - name: Install just
         uses: taiki-e/install-action@ace6ebe54a6a0c86dfb5f7764b17f793b6925bc3 # v2.82.3
