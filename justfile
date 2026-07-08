@@ -4,7 +4,6 @@ set shell := ["bash", "-uc"]
 feature := "cloud"
 packages := "indexer-common chain-indexer wallet-indexer indexer-api spo-indexer indexer-standalone indexer-tests"
 rust_version := `grep channel rust-toolchain.toml | sed -r 's/channel = "(.*)"/\1/'`
-nightly := "nightly-2026-06-09"
 latest_node_version := `tail -n 1 NODE_VERSIONS`
 
 check:
@@ -50,13 +49,14 @@ test:
         echo "schema-v4.graphql has changes!"; exit 1; \
     fi
 
+# `doc_cfg` (feature badges) is unstable; RUSTC_BOOTSTRAP=1 lets the pinned stable toolchain accept it.
 doc:
-    RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +{{nightly}} doc -p indexer-common --no-deps --features {{feature}}
-    RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +{{nightly}} doc -p chain-indexer  --no-deps --features {{feature}}
-    RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +{{nightly}} doc -p wallet-indexer --no-deps --features {{feature}}
-    RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +{{nightly}} doc -p indexer-api    --no-deps --features {{feature}}
+    RUSTC_BOOTSTRAP=1 RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo doc -p indexer-common --no-deps --features {{feature}}
+    RUSTC_BOOTSTRAP=1 RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo doc -p chain-indexer  --no-deps --features {{feature}}
+    RUSTC_BOOTSTRAP=1 RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo doc -p wallet-indexer --no-deps --features {{feature}}
+    RUSTC_BOOTSTRAP=1 RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo doc -p indexer-api    --no-deps --features {{feature}}
     if [ "{{feature}}" = "standalone" ]; then \
-        RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +{{nightly}} doc -p indexer-standalone --no-deps --features standalone; \
+        RUSTC_BOOTSTRAP=1 RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo doc -p indexer-standalone --no-deps --features standalone; \
     fi
 
 bench:
@@ -69,7 +69,7 @@ all-all:
     just feature=standalone all
 
 coverage:
-    ./coverage.sh {{nightly}}
+    ./coverage.sh
 
 generate-indexer-api-schema:
     cargo run -p indexer-api --features {{feature}} --bin indexer-api-cli print-api-schema-v4 > \
