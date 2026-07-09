@@ -1,6 +1,6 @@
 -- Cardano-to-Midnight bridge events (PM-15404).
 --
--- See the matching postgres/004_bridge_events.sql for full context. SQLite
+-- See the matching postgres/005_bridge_events.sql for full context. SQLite
 -- has no ENUM type, so `variant` is a TEXT column with a CHECK constraint;
 -- partial indexes use `WHERE` clauses.
 

@@ -591,7 +591,7 @@ where
     for event in &block.bridge_pallet_events {
         publisher
             .publish(&BridgeEventIndexed {
-                block_id: block.height,
+                block_height: block.height,
                 event: event.clone(),
             })
             .await

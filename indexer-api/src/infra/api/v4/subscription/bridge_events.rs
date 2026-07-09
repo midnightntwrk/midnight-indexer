@@ -30,7 +30,7 @@ use async_stream::try_stream;
 use futures::{Stream, TryStreamExt, stream};
 use indexer_common::domain::{
     BridgeEventIndexed, Subscriber, UnshieldedAddress, UnshieldedUtxoIndexed,
-    bridge::{BridgePalletEvent, BridgePalletEventVariant},
+    bridge::BridgePalletEvent,
 };
 use std::{future::ready, marker::PhantomData, pin::pin};
 
@@ -46,10 +46,10 @@ pub struct BridgePoolUpdate {
 }
 
 /// Synthesise a `domain_bridge::BridgeEvent` from a pub-sub message so the subscription can emit
-/// the same `BridgeEvent` interface used elsewhere. The `id`/`block_height`/`transaction_id`
-/// fields are zero-valued when sourced from pub-sub since the message carries the pallet-event
-/// payload but not the persisted-row identifiers; consumers needing them should read from the
-/// live tail of `bridgeEvents` instead.
+/// the same `BridgeEvent` interface used elsewhere. The `id` and `transaction_id` fields are
+/// zero-valued/absent when sourced from pub-sub since the message carries the pallet-event
+/// payload and block height but not the persisted-row identifiers; consumers needing them should
+/// read from the live tail of `bridgeEvents` instead.
 fn synthesise_event(msg: BridgeEventIndexed) -> domain_bridge::BridgeEvent {
     let variant = msg.event.variant();
     let mc_tx_hash = msg.event.mc_tx_hash().cloned();
@@ -60,10 +60,9 @@ fn synthesise_event(msg: BridgeEventIndexed) -> domain_bridge::BridgeEvent {
         BridgePalletEvent::SubminimalFlushTransfer { count, .. } => Some(count),
         _ => None,
     };
-    let _ = BridgePalletEventVariant::UserTransfer;
     domain_bridge::BridgeEvent {
         id: 0,
-        block_height: msg.block_id,
+        block_height: msg.block_height,
         transaction_id: None,
         variant,
         mc_tx_hash,
