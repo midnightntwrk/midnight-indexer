@@ -811,7 +811,7 @@ where
             .map_err_into_client_error(|| "invalid recipient address")?;
 
         let filter = BridgeEventFilter {
-            variant: variant.map(Into::into),
+            variants: variant.map(Into::into).into_iter().collect(),
             recipient,
             block_height_from,
             block_height_to,
@@ -883,36 +883,23 @@ where
             .hex_decode::<UnshieldedAddress>()
             .map_err_into_client_error(|| "invalid recipient address")?;
 
-        let user_filter = BridgeEventFilter {
-            variant: Some(BridgeEventVariant::UserTransfer.into()),
+        let mut variants = vec![BridgeEventVariant::UserTransfer.into()];
+        if include_unapproved.unwrap_or(false) {
+            variants.push(BridgeEventVariant::UnapprovedTransfer.into());
+        }
+        let filter = BridgeEventFilter {
+            variants,
             recipient: Some(recipient),
             ..Default::default()
         };
-        let mut events = storage
+        let events = storage
             .get_bridge_events(
-                &user_filter,
+                &filter,
                 offset.unwrap_or(0),
                 limit.unwrap_or(100).min(1_000),
             )
             .await
-            .map_err_into_server_error(|| "get bridge deposits (user)")?;
-
-        if include_unapproved.unwrap_or(false) {
-            let unapproved_filter = BridgeEventFilter {
-                variant: Some(BridgeEventVariant::UnapprovedTransfer.into()),
-                recipient: Some(recipient),
-                ..Default::default()
-            };
-            let mut unapproved = storage
-                .get_bridge_events(
-                    &unapproved_filter,
-                    offset.unwrap_or(0),
-                    limit.unwrap_or(100).min(1_000),
-                )
-                .await
-                .map_err_into_server_error(|| "get bridge deposits (unapproved)")?;
-            events.append(&mut unapproved);
-        }
+            .map_err_into_server_error(|| "get bridge deposits")?;
 
         Ok(events.into_iter().map(Into::into).collect())
     }

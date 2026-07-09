@@ -119,7 +119,7 @@ where
 
             loop {
                 let filter = BridgeEventFilter {
-                    variant: variant_pallet,
+                    variants: variant_pallet.into_iter().collect(),
                     recipient,
                     block_height_from: None,
                     block_height_to: None,
@@ -156,7 +156,7 @@ where
                 .map_err_into_server_error(|| "subscribe BridgeEventIndexed")?
             {
                 let filter = BridgeEventFilter {
-                    variant: variant_pallet,
+                    variants: variant_pallet.into_iter().collect(),
                     recipient,
                     block_height_from: None,
                     block_height_to: None,

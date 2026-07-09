@@ -17,10 +17,11 @@ use crate::domain::{
 };
 use indexer_common::domain::{UnshieldedAddress, bridge::BridgePalletEventVariant};
 
-/// Filters for `get_bridge_events`. All fields combined with AND.
+/// Filters for `get_bridge_events`. All fields combined with AND; empty `variants` matches all
+/// variants.
 #[derive(Debug, Default, Clone)]
 pub struct BridgeEventFilter {
-    pub variant: Option<BridgePalletEventVariant>,
+    pub variants: Vec<BridgePalletEventVariant>,
     pub recipient: Option<UnshieldedAddress>,
     pub block_height_from: Option<u64>,
     pub block_height_to: Option<u64>,
