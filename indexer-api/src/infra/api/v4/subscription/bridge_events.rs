@@ -27,9 +27,9 @@ use crate::{
 };
 use async_graphql::{Context, SimpleObject, Subscription};
 use async_stream::try_stream;
-use futures::{Stream, TryStreamExt};
+use futures::{Stream, TryStreamExt, stream};
 use indexer_common::domain::{
-    BridgeEventIndexed, Subscriber, UnshieldedAddress,
+    BridgeEventIndexed, Subscriber, UnshieldedAddress, UnshieldedUtxoIndexed,
     bridge::{BridgePalletEvent, BridgePalletEventVariant},
 };
 use std::{future::ready, marker::PhantomData, pin::pin};
@@ -224,7 +224,9 @@ where
     }
 
     /// Subscribe to a recipient's bridge balance. Emits the current balance on subscribe and
-    /// re-emits whenever a relevant bridge event indexes.
+    /// re-emits whenever a bridge event for the recipient indexes or the recipient's unshielded
+    /// UTXOs change (a claim emits no bridge pallet event, but it creates unshielded UTXOs for
+    /// the recipient).
     #[graphql(directive = beta::apply())]
     async fn bridge_balance<'a>(
         &self,
@@ -261,8 +263,11 @@ where
             };
             yield BridgeBalance::from(initial);
 
-            // Re-emit on each relevant pub-sub event.
-            let live = subscriber
+            // Re-emit on each relevant pub-sub event. Bridge pallet events cover the deposit
+            // side; a claim is a regular `ClaimRewards` transaction that emits no pallet event,
+            // so also wake on unshielded UTXO activity for the address (a claim creates
+            // unshielded UTXOs for the recipient).
+            let deposits = subscriber
                 .subscribe::<BridgeEventIndexed>()
                 .try_filter(move |evt| {
                     let matches = evt
@@ -271,10 +276,16 @@ where
                         .map(|r| r.as_bytes() == address.as_ref())
                         .unwrap_or(false);
                     ready(matches)
-                });
+                })
+                .map_ok(|_| ());
+            let claims = subscriber
+                .subscribe::<UnshieldedUtxoIndexed>()
+                .try_filter(move |utxo| ready(utxo.address == address))
+                .map_ok(|_| ());
+            let live = stream::select(deposits, claims);
             let mut live = pin!(live);
             while let Some(_msg) = live.try_next().await
-                .map_err_into_server_error(|| "subscribe BridgeEventIndexed")?
+                .map_err_into_server_error(|| "subscribe bridge balance updates")?
             {
                 let mut updated = storage
                     .get_bridge_balance(address)

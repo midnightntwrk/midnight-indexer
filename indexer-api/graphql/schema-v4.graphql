@@ -1422,7 +1422,9 @@ type Subscription {
 	bridgePoolUpdates: BridgePoolUpdate! @beta
 	"""
 	Subscribe to a recipient's bridge balance. Emits the current balance on subscribe and
-	re-emits whenever a relevant bridge event indexes.
+	re-emits whenever a bridge event for the recipient indexes or the recipient's unshielded
+	UTXOs change (a claim emits no bridge pallet event, but it creates unshielded UTXOs for
+	the recipient).
 	"""
 	bridgeBalance(address: HexEncoded!): BridgeBalance! @beta
 	"""
