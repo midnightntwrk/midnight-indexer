@@ -1128,12 +1128,8 @@ async fn save_system_parameters_change(
 }
 
 /// Save a bridge claim parsed from a regular `ClaimRewardsTransaction` with
-/// `ClaimKind::CardanoBridge`.
-///
-/// Currently called only when the chain-indexer detects a CardanoBridge claim during
-/// regular-transaction parsing; that detection path is TODO until the wallet-side claim flow
-/// stabilises (see ticket #940).
-#[allow(dead_code)]
+/// `ClaimKind::CardanoBridge`, as populated on the transaction by the indexer-common apply path
+/// and persisted from `save_regular_transaction`.
 #[trace(properties = { "transaction_id": "{transaction_id}" })]
 async fn save_bridge_claim(
     transaction_id: i64,

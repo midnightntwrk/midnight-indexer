@@ -94,9 +94,14 @@ fn push_filter<'a>(builder: &mut QueryBuilder<'a, Db>, filter: &'a BridgeEventFi
         }
     };
 
-    if let Some(variant) = filter.variant {
+    if !filter.variants.is_empty() {
         push_clause(builder, &mut started);
-        builder.push("bpe.variant = ").push_bind(variant);
+        builder.push("bpe.variant IN (");
+        let mut variants = builder.separated(", ");
+        for variant in filter.variants.iter().copied() {
+            variants.push_bind(variant);
+        }
+        builder.push(")");
     }
     if let Some(recipient) = &filter.recipient {
         push_clause(builder, &mut started);
@@ -195,7 +200,7 @@ impl BridgeStorage for Storage {
         limit: u64,
     ) -> Result<Vec<BridgeEvent>, sqlx::Error> {
         let filter = BridgeEventFilter {
-            variant: Some(BridgePalletEventVariant::ReserveTransfer),
+            variants: vec![BridgePalletEventVariant::ReserveTransfer],
             block_height_from,
             block_height_to,
             ..Default::default()

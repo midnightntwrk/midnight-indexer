@@ -66,7 +66,7 @@ message!(UnshieldedUtxoIndexed);
 /// Emitted when a c2m-bridge pallet event (any of the 5 variants) is indexed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BridgeEventIndexed {
-    pub block_id: u64,
+    pub block_height: u64,
     pub event: BridgePalletEvent,
 }
 message!(BridgeEventIndexed);
