@@ -164,16 +164,15 @@ where
             .map_err_into_client_error(|| "invalid address")?;
 
         // Null when the contract does not exist as of this block.
-        if storage
-            .get_contract_action_by_address_as_of_block_hash(address, self.raw_hash)
+        if !storage
+            .contract_action_exists_by_address_as_of_block_hash(address, self.raw_hash)
             .await
             .map_err_into_server_error(|| {
                 format!(
-                    "get contract action for address {address} as of block {}",
+                    "check contract existence for address {address} as of block {}",
                     self.hash
                 )
             })?
-            .is_none()
         {
             return Ok(None);
         }
