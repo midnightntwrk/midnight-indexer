@@ -173,7 +173,5 @@ async fn reached_to_block<S: Storage>(storage: &S, to_block: Option<u32>) -> Api
         .get_latest_block()
         .await
         .map_err_into_server_error(|| "get latest block to evaluate toBlock terminator")?;
-    Ok(latest
-        .map(|b| b.height as u64 >= to_block as u64)
-        .unwrap_or(false))
+    Ok(latest.map(|b| b.height >= to_block).unwrap_or(false))
 }
