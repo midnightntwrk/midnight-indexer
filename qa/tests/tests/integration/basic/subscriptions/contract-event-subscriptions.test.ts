@@ -116,32 +116,39 @@ describe('contract event subscription', () => {
       ctx.task!.meta.custom = { labels: ['Subscription', 'ContractEvents', 'Negative'] };
       if (!surfacePresent) return ctx.skip?.(true, 'contract events surface not present');
 
-      const settled = await new Promise<{ error: string | null; eventCount: number }>((resolve) => {
-        let eventCount = 0;
-        const timeout = setTimeout(() => {
-          subscription.unsubscribe();
-          resolve({ error: null, eventCount });
-        }, 10_000);
+      const settled = await new Promise<{ error: string | null; eventCount: number }>(
+        (resolve, reject) => {
+          let eventCount = 0;
+          const timeout = setTimeout(() => {
+            subscription.unsubscribe();
+            // Validation errors are immediate; a 10s silence is a real problem,
+            // so fail loudly with a timeout message rather than resolving
+            // `error: null` and tripping the assertion with a misleading value.
+            reject(
+              new Error('Timed out after 10s waiting for the empty-address subscription to error'),
+            );
+          }, 10_000);
 
-        const subscription = wsClient.subscribeToContractEvents(
-          {
-            next: () => {
-              eventCount++;
+          const subscription = wsClient.subscribeToContractEvents(
+            {
+              next: () => {
+                eventCount++;
+              },
+              error: (error) => {
+                clearTimeout(timeout);
+                subscription.unsubscribe();
+                resolve({ error: extractSubscriptionErrorMessage(error), eventCount });
+              },
+              complete: () => {
+                clearTimeout(timeout);
+                resolve({ error: null, eventCount });
+              },
             },
-            error: (error) => {
-              clearTimeout(timeout);
-              subscription.unsubscribe();
-              resolve({ error: extractSubscriptionErrorMessage(error), eventCount });
-            },
-            complete: () => {
-              clearTimeout(timeout);
-              resolve({ error: null, eventCount });
-            },
-          },
-          { contractAddress: '' },
-          0,
-        );
-      });
+            { contractAddress: '' },
+            0,
+          );
+        },
+      );
 
       expect(settled.error).not.toBeNull();
       expect(settled.eventCount).toBe(0);
@@ -183,7 +190,11 @@ describe('contract event subscription', () => {
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
           subscription.unsubscribe();
-          resolve();
+          reject(
+            new Error(
+              `Timed out after 20s waiting for a streamed contract event for ${contractAddress}`,
+            ),
+          );
         }, 20_000);
 
         const subscription = wsClient.subscribeToContractEvents(
@@ -191,6 +202,16 @@ describe('contract event subscription', () => {
             next: (payload) => {
               const event = payload.data?.contractEvents;
               if (event) received.push(event);
+              // Resolve as soon as an event streams, rather than waiting for the
+              // `toBlock` terminator: the terminator's timing is exercised by the
+              // idle-address test, and depending on it here would turn a healthy
+              // stream into a flaky empty result whenever `complete` lands slower
+              // than the timeout. Late in-flight events are validated too.
+              if (received.length > 0) {
+                clearTimeout(timeout);
+                subscription.unsubscribe();
+                resolve();
+              }
             },
             error: (error) => {
               clearTimeout(timeout);
