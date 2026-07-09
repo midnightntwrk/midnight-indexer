@@ -29,6 +29,7 @@ use indoc::indoc;
 use log::debug;
 use serde::{Deserialize, Serialize};
 use sqlx::{QueryBuilder, Type, types::Json};
+use std::num::NonZeroUsize;
 
 #[cfg(feature = "cloud")]
 /// Sqlx transaction for Postgres.
@@ -120,6 +121,34 @@ impl domain::storage::Storage for Storage {
                 Ok((block_ref, protocol_version, key))
             })
             .transpose()
+    }
+
+    #[trace]
+    async fn get_newest_ledger_state_keys(
+        &self,
+        limit: NonZeroUsize,
+    ) -> Result<Vec<(ProtocolVersion, SerializedLedgerStateKey)>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT protocol_version, ledger_state_key
+            FROM blocks
+            ORDER BY height DESC
+            LIMIT $1
+        "};
+
+        let mut keys = sqlx::query_as::<_, (i64, SerializedLedgerStateKey)>(query)
+            .bind(limit.get() as i64)
+            .fetch_all(&*self.pool)
+            .await?
+            .into_iter()
+            .map(|(protocol_version, key)| {
+                let protocol_version = ProtocolVersion::try_from(protocol_version)
+                    .map_err(|error| sqlx::Error::Decode(error.into()))?;
+                Ok((protocol_version, key))
+            })
+            .collect::<Result<Vec<_>, sqlx::Error>>()?;
+        keys.reverse();
+
+        Ok(keys)
     }
 
     #[trace]

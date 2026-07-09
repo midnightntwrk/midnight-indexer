@@ -11,8 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg_attr(coverage_nightly, coverage(off))]
-
 pub mod block;
 pub mod bridge;
 pub mod contract_action;

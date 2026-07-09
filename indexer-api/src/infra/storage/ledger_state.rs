@@ -40,23 +40,25 @@ impl LedgerStateStorage for Storage {
     async fn get_ledger_state_at(
         &self,
         block_hash: BlockHash,
-    ) -> Result<Option<(u64, ProtocolVersion, SerializedLedgerStateKey)>, sqlx::Error> {
+    ) -> Result<Option<(u64, u32, ProtocolVersion, SerializedLedgerStateKey)>, sqlx::Error> {
         let query = indoc! {"
-            SELECT id, protocol_version, ledger_state_key
+            SELECT id, height, protocol_version, ledger_state_key
             FROM blocks
             WHERE hash = $1
         "};
 
-        sqlx::query_as::<_, (i64, i64, SerializedLedgerStateKey)>(query)
+        sqlx::query_as::<_, (i64, i64, i64, SerializedLedgerStateKey)>(query)
             .bind(block_hash.as_ref())
             .fetch_optional(&*self.pool)
             .await?
-            .map(|(block_id, protocol_version, key)| {
+            .map(|(block_id, height, protocol_version, key)| {
                 let block_id =
                     u64::try_from(block_id).map_err(|error| sqlx::Error::Decode(error.into()))?;
+                let height =
+                    u32::try_from(height).map_err(|error| sqlx::Error::Decode(error.into()))?;
                 let protocol_version = ProtocolVersion::try_from(protocol_version)
                     .map_err(|error| sqlx::Error::Decode(error.into()))?;
-                Ok((block_id, protocol_version, key))
+                Ok((block_id, height, protocol_version, key))
             })
             .transpose()
     }

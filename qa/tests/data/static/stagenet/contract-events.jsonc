@@ -1,0 +1,14 @@
+// Contracts known to have emitted public contract events (MIP-0002) on the
+// stagenet chain, for the contract-event integration tests
+// (getEventEmittingContracts). Each contract has an Unpaused and a Misc event
+// persisted; the addresses are permanent on stagenet.
+[
+  {
+    "contract-address": "d97d7ac8f51b0f32ed809ba486ddca3ef010de9b4a74cb1b9bc8d0414f8bad2b",
+    "event-types": ["UNPAUSED", "MISC"]
+  },
+  {
+    "contract-address": "239db5fc5c62f1b375cf833d21aff95c6bc43adbc36317d74d938437689fffbb",
+    "event-types": ["UNPAUSED", "MISC"]
+  }
+]
