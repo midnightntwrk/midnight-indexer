@@ -13,21 +13,21 @@
 
 //! Subscription resolver for `contractEvents` (ticket #1161).
 //!
-//! Starting cursor: either the `id` argument (resume from a previous event)
-//! OR `filter.fromBlock` (start from the first event in that block); if both
-//! are set, indexer uses the LATER cursor. Pattern follows `dustLedgerEvents`
-//! / `zswapLedgerEvents` for the id-cursor path.
+//! Starting cursor: either the `id` argument (resume from a previous event) or
+//! `filter.fromBlock` (start from the first event in that block); if both are set, the
+//! effective cursor is the later of the two. Pattern follows `dustLedgerEvents` /
+//! `zswapLedgerEvents` for the id-cursor path.
 //!
-//! `filter.toBlock`, if set, terminates the stream once the chain reaches
-//! that block, matching the bounded-subscription pattern used by
-//! `dust_nullifier_transactions` / `shielded_nullifier_transactions`.
+//! `filter.toBlock`, if set, completes the stream once the chain has reached that block,
+//! matching the bounded-subscription pattern of `dust_nullifier_transactions` /
+//! `shielded_nullifier_transactions`.
 
 use crate::{
     domain::{ContractEventRow, storage::Storage},
     infra::api::{
         ApiError, ApiResult, ContextExt, ResultExt,
         v4::{
-            contract_event::{ContractEvent, ContractEventFilter as GraphQLContractEventFilter},
+            contract_event::{ContractEvent, ContractEventFilter},
             directives::beta,
         },
     },
@@ -60,76 +60,77 @@ where
     S: Storage,
     B: Subscriber,
 {
-    /// Subscribe to contract events matching the given filter, returning
-    /// events in monotonic `id` order.
+    /// Subscribe to contract events matching the given filter, starting at the given event ID
+    /// (inclusive) and returning events in monotonic ID order; completes once the chain has
+    /// reached `filter.toBlock` if that is set.
     #[graphql(directive = beta::apply())]
     async fn contract_events<'a>(
         &self,
         cx: &'a Context<'a>,
-        filter: GraphQLContractEventFilter,
+        filter: ContractEventFilter,
         id: Option<u64>,
-    ) -> impl Stream<Item = ApiResult<ContractEvent<S>>> {
+    ) -> Result<impl Stream<Item = ApiResult<ContractEvent<S>>> + use<'a, S, B>, ApiError> {
+        let filter = filter
+            .into_domain()
+            .map_err(|error| ApiError::client("invalid contract event filter", error))?;
+
+        let id = id.unwrap_or(0);
+        // Event IDs are i64 in the database; reject IDs beyond that range up front instead of
+        // letting the SQL bind wrap negative and replay the full history.
+        i64::try_from(id).map_err_into_client_error(|| "id out of range")?;
+
+        let quota_guard = cx
+            .get_subscription_quotas()
+            .try_acquire(cx.get_per_connection_counter(), None)
+            .map_err_into_client_error(|| "subscription limit exceeded")?;
+
         let storage = cx.get_storage::<S>();
         let subscriber = cx.get_subscriber::<B>();
         let batch_size = cx.get_subscription_config().contract_events.batch_size;
-        let quotas = cx.get_subscription_quotas();
-        let per_connection_counter = cx.get_per_connection_counter();
         let block_indexed_stream = subscriber.subscribe::<BlockIndexed>();
 
-        try_stream! {
-            let _quota_guard = quotas
-                .try_acquire(per_connection_counter, None)
-                .map_err_into_client_error(|| "subscription limit exceeded")?;
+        // Bounded subscription: when `filter.toBlock` is set, evaluate the terminator BEFORE
+        // each drain — the drain's DB snapshot then covers everything the check saw, so events
+        // committed between snapshot and check cannot be lost — and complete after the final
+        // drain.
+        let to_block = filter.to_block;
 
-            let domain_filter = filter
-                .into_domain()
-                .map_err(|e| ApiError::client("invalid ContractEventFilter", e))?;
+        let contract_events = try_stream! {
+            let _hold = quota_guard;
+            let mut id = id;
 
-            // Starting cursor: explicit `id` arg only. `filter.fromBlock` is
-            // applied via the storage layer's WHERE clause (`blocks.height >=
-            // from_block`), so we don't need to translate it to an id here.
-            // If both are set, the WHERE clause + id cursor combine — the
-            // effective cursor is "id >= id_arg AND blocks.height >=
-            // from_block", which is exactly the "later of the two" semantics
-            // requested in v0.7.
-            let mut id = id.unwrap_or(0);
-
-            // Bounded-subscription terminator: if filter.toBlock is set, we
-            // stop once the chain's latest block height crosses it. The check
-            // happens after each backfill drain and each live-tail tick.
-            let to_block = domain_filter.to_block;
-
+            // Stream existing contract events.
+            let last_round = reached_to_block(storage, to_block).await?;
             debug!(id; "streaming existing contract events");
-            let rows = storage
-                .get_contract_events_after_id(domain_filter.clone(), id, batch_size)
-                .await;
+            let rows = storage.get_contract_events_from_id(&filter, id, batch_size).await;
             let mut rows = pin!(rows);
             while let Some(row) = get_next_row(&mut rows)
                 .await
                 .map_err_into_server_error(|| format!("get next contract event at id {id}"))?
             {
-                id = row.id + 1;
+                let event_id = row.id;
+                id = event_id + 1;
                 yield ContractEvent::try_from(row).map_err_into_server_error(|| {
-                    format!("unexpected contract event row at id {id}")
+                    format!("unexpected contract event row at id {event_id}")
                 })?;
             }
-
-            if reached_to_block(storage, to_block).await? {
-                debug!(to_block:?; "contractEvents subscription terminated at toBlock");
+            if last_round {
+                debug!(to_block:?; "contractEvents subscription completed at toBlock");
                 return;
             }
 
+            // Stream live contract events.
             debug!(id; "streaming live contract events");
             let mut block_indexed_stream = pin!(block_indexed_stream);
-            while block_indexed_stream
+            while let Some(BlockIndexed { height, .. }) = block_indexed_stream
                 .try_next()
                 .await
                 .map_err_into_server_error(|| "get next BlockIndexed event")?
-                .is_some()
             {
-                let rows = storage
-                    .get_contract_events_after_id(domain_filter.clone(), id, batch_size)
-                    .await;
+                let last_round =
+                    to_block.is_some_and(|to_block| height >= u64::from(to_block));
+
+                let rows = storage.get_contract_events_from_id(&filter, id, batch_size).await;
                 let mut rows = pin!(rows);
                 while let Some(row) = get_next_row(&mut rows)
                     .await
@@ -137,20 +138,23 @@ where
                         format!("get next contract event at id {id}")
                     })?
                 {
-                    id = row.id + 1;
+                    let event_id = row.id;
+                    id = event_id + 1;
                     yield ContractEvent::try_from(row).map_err_into_server_error(|| {
-                        format!("unexpected contract event row at id {id}")
+                        format!("unexpected contract event row at id {event_id}")
                     })?;
                 }
 
-                if reached_to_block(storage, to_block).await? {
-                    debug!(to_block:?; "contractEvents subscription terminated at toBlock");
+                if last_round {
+                    debug!(to_block:?; "contractEvents subscription completed at toBlock");
                     return;
                 }
             }
 
-            warn!("contract-events stream: BlockIndexed channel ended unexpectedly");
-        }
+            warn!("stream of BlockIndexed events completed unexpectedly");
+        };
+
+        Ok(contract_events)
     }
 }
 
@@ -165,13 +169,17 @@ async fn get_next_row<E>(
         .await
 }
 
+/// Whether the chain has already reached `to_block`; used before the initial drain so the
+/// bounded subscription can complete after it.
 async fn reached_to_block<S: Storage>(storage: &S, to_block: Option<u32>) -> ApiResult<bool> {
     let Some(to_block) = to_block else {
         return Ok(false);
     };
+
     let latest = storage
         .get_latest_block()
         .await
         .map_err_into_server_error(|| "get latest block to evaluate toBlock terminator")?;
-    Ok(latest.map(|b| b.height >= to_block).unwrap_or(false))
+
+    Ok(latest.is_some_and(|block| block.height >= to_block))
 }
