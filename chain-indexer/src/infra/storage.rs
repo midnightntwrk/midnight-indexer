@@ -775,7 +775,7 @@ async fn save_ledger_events(
                     ledger_event
                         .contract_address
                         .as_ref()
-                        .map(|a| a.as_ref().to_vec()),
+                        .map(|address| address.as_ref()),
                 )
                 .push_bind(
                     correlated_action_id
@@ -788,11 +788,11 @@ async fn save_ledger_events(
     // SQLite + Postgres both return RETURNING rows in the order the rows
     // were inserted (the multi-row INSERT is one statement so row order is
     // deterministic), so we can zip ids back onto ledger_events by index.
-    let inserted_ids: Vec<(i64,)> = qb.build_query_as::<(i64,)>().fetch_all(&mut **tx).await?;
+    let inserted_ids = qb.build_query_as::<(i64,)>().fetch_all(&mut **tx).await?;
 
     if inserted_ids.len() != ledger_events.len() {
         return Err(sqlx::Error::Protocol(format!(
-            "save_ledger_events: expected {} RETURNING ids but got {}",
+            "save_ledger_events: expected {} RETURNING ids, was {}",
             ledger_events.len(),
             inserted_ids.len()
         )));
@@ -816,13 +816,13 @@ async fn save_contract_event_indexed_fields<I: IntoIterator<Item = i64>>(
     ids: I,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
-    let pairs: Vec<(i64, Vec<(&'static str, indexer_common::domain::ByteVec)>)> = ledger_events
+    let pairs = ledger_events
         .iter()
         .zip(ids)
-        .filter(|(e, _)| matches!(e.grouping, LedgerEventGrouping::Contract))
-        .map(|(e, id)| (id, e.indexable_contract_fields()))
+        .filter(|(ledger_event, _)| matches!(ledger_event.grouping, LedgerEventGrouping::Contract))
+        .map(|(ledger_event, id)| (id, ledger_event.indexable_contract_fields()))
         .filter(|(_, fields)| !fields.is_empty())
-        .collect();
+        .collect::<Vec<_>>();
 
     if pairs.is_empty() {
         return Ok(());
@@ -840,11 +840,9 @@ async fn save_contract_event_indexed_fields<I: IntoIterator<Item = i64>>(
     qb.push_values(
         pairs
             .iter()
-            .flat_map(|(id, fields)| fields.iter().map(move |f| (*id, f))),
+            .flat_map(|(id, fields)| fields.iter().map(move |field| (*id, field))),
         |mut q, (id, (name, value))| {
-            q.push_bind(id)
-                .push_bind(*name)
-                .push_bind(value.as_ref().to_vec());
+            q.push_bind(id).push_bind(*name).push_bind(value.as_ref());
         },
     );
     qb.build().execute(&mut **tx).await?;

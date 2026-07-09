@@ -111,7 +111,7 @@ const OUTPUT_INDEX_ZERO: u32 = 0;
 /// (32) + `amount` (16) = 145; Burn has no `domain_sep`, so `65 + 32 + 16 = 113`. `UnshieldedMint`
 /// has a `domain_sep` in place of the address (`32 + 32 + 16 = 80`).
 const SHIELDED_SPEND_SIZE: usize = 32;
-const SHIELDED_RECEIVE_SIZE: usize = 578; // 32 + (1 + 32) + (1 + 512).
+const SHIELDED_RECEIVE_SIZE: usize = 578; // 32 + (1 + 512) + (1 + 32).
 const SHIELDED_MINT_SIZE: usize = 81; // 32 + 32 + (1 + 16).
 const SHIELDED_BURN_SIZE: usize = 49; // 32 + (1 + 16).
 const UNSHIELDED_SPEND_SIZE: usize = 145; // (1 + 32 + 32) + 32 + 32 + 16.
@@ -1561,9 +1561,10 @@ where
     // stripping. Set so that an emission whose only-trailing-zero stripping
     // is the final value field still decodes correctly, while an emission
     // with a missing (truncated) leading field falls back. Crucial for the
-    // UnshieldedSpend / UnshieldedReceive spec/Compact divergence: spec is
-    // 113 bytes, Compact issue-377 is 81 bytes; min 97 (=113-16, only the
-    // u128 amount fully stripped) rejects 81-byte emissions cleanly.
+    // UnshieldedSpend / UnshieldedReceive layouts: the spec size is 145
+    // bytes; min 129 (= 145 - 16, only the u128 amount fully stripped)
+    // rejects superseded shorter layouts (e.g. the pre-domainSep 113-byte
+    // emissions) cleanly.
     match item.event_type {
         LogEventType::ShieldedSpend => {
             // nullifier is a 32-byte hash; require all 32 bytes.
@@ -1805,9 +1806,9 @@ where
 /// - multi-atom `AlignedValue` (Compact's `serialize<T, n>` produces a single atom for the flat
 ///   byte payload)
 /// - atom longer than `max` (oversize — wrong event type or unexpected layout)
-/// - atom shorter than `min` (undersize — likely a different event-struct layout, e.g. spec/Compact
-///   divergence on UnshieldedSpend/Receive where Compact issue-377 emits 81 bytes vs the spec's
-///   113-byte layout)
+/// - atom shorter than `min` (undersize — likely a different event-struct layout, e.g. a
+///   superseded pre-domainSep UnshieldedSpend/Receive emission shorter than the spec's 145-byte
+///   layout)
 ///
 /// `min` is the per-event minimum atom-byte length after maximum trailing-zero
 /// stripping of the last variable-width field. `max` is the canonical full

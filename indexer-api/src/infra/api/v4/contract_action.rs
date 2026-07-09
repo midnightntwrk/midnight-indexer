@@ -243,8 +243,7 @@ where
     /// Contract events emitted by this contract call.
     ///
     /// Only `ContractCall` exposes this field — `ContractDeploy` and
-    /// `ContractUpdate` don't execute circuits with the `log()` expression.
-    /// Per Andrzej's 12 May design call (#feat-public-events).
+    /// `ContractUpdate` don't execute circuits with the `emit` expression.
     ///
     /// Events are attributed to a call by matching contract address and entry
     /// point within the transaction; if several calls in one transaction share
