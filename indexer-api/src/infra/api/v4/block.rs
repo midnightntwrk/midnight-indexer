@@ -148,8 +148,9 @@ where
     /// The zswap commitment tree filtered to the given contract address, resolved from this
     /// block's ledger state; null if the contract does not exist at this block. Hex-encoded.
     /// For building transactions, compose with `ledgerParameters` and `contract { state }` in
-    /// one request, anchored to the same block; use the latest block, older trees age out of
-    /// the ledger's root window.
+    /// one request, anchored to the same block; use the latest block: older trees age out of
+    /// the ledger's root window, and blocks beyond the chain-indexer's ledger state retention
+    /// window no longer have a loadable ledger state and yield an error.
     #[graphql(directive = beta::apply())]
     async fn contract_zswap_state(
         &self,
@@ -177,11 +178,22 @@ where
             return Ok(None);
         }
 
-        let (_, protocol_version, ledger_state_key) = storage
+        let (_, _, protocol_version, ledger_state_key) = storage
             .get_ledger_state_at(self.raw_hash)
             .await
             .map_err_into_server_error(|| format!("get ledger state at block {}", self.hash))?
             .some_or_server_error(|| format!("no ledger state for block {}", self.hash))?;
+
+        // Verify the root node is still in the ledger DB before loading: loading culled state
+        // panics inside storage-core rather than returning an error, so this check is what
+        // turns a block beyond the chain-indexer's ledger_state_retention into a clean client
+        // error.
+        domain::LedgerState::root_loadable(&ledger_state_key, protocol_version.ledger_version())
+            .map_err_into_server_error(|| "check ledger state availability")?
+            .then_some(())
+            .some_or_client_error(
+                || "ledger state for this block is no longer available, query a more recent block",
+            )?;
 
         let ledger_state =
             domain::LedgerState::load(&ledger_state_key, protocol_version.ledger_version())

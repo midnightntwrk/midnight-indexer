@@ -91,8 +91,9 @@ type Block {
 	The zswap commitment tree filtered to the given contract address, resolved from this
 	block's ledger state; null if the contract does not exist at this block. Hex-encoded.
 	For building transactions, compose with `ledgerParameters` and `contract { state }` in
-	one request, anchored to the same block; use the latest block, older trees age out of
-	the ledger's root window.
+	one request, anchored to the same block; use the latest block: older trees age out of
+	the ledger's root window, and blocks beyond the chain-indexer's ledger state retention
+	window no longer have a loadable ledger state and yield an error.
 	"""
 	contractZswapState(address: HexEncoded!): HexEncoded @beta
 }
