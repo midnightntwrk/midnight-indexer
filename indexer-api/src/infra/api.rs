@@ -63,7 +63,7 @@ use tokio::{
     signal::unix::{SignalKind, signal},
 };
 use tower::ServiceBuilder;
-use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer};
+use tower_http::{compression::CompressionLayer, cors::CorsLayer, limit::RequestBodyLimitLayer};
 
 /// Attention: This could change if the used libraries change!
 /// See https://docs.rs/http-body-util/0.1.2/src/http_body_util/limited.rs.html#93.
@@ -179,6 +179,16 @@ pub struct ContractActionsSubscriptionConfig {
 #[derive(Debug, Clone, Copy, Deserialize)]
 pub struct DustGenerationsSubscriptionConfig {
     pub batch_size: NonZeroU32,
+
+    /// Maximum age in blocks of the snapshot `block_hash`; older ones are rejected with a
+    /// re-subscribe hint. Must stay well below chain-indexer's ledger_state_retention, which
+    /// bounds how long a block's ledger state remains loadable.
+    #[serde(default = "max_snapshot_age_default")]
+    pub max_snapshot_age: u32,
+}
+
+fn max_snapshot_age_default() -> u32 {
+    500
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -292,6 +302,7 @@ where
                 .and_then(transform_lentgh_limit_exceeded),
         )
         .layer(CorsLayer::permissive())
+        .layer(CompressionLayer::new())
 }
 
 // Returns 200 when reachable. If the runtime is parked (e.g. storage-core deadlock during

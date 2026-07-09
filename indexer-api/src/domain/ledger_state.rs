@@ -201,6 +201,15 @@ impl LedgerState {
         indexer_common::domain::ledger::LedgerState::load(key, ledger_version).map(Into::into)
     }
 
+    /// Whether the root node of a previously persisted ledger state is still present in the
+    /// ledger DB, i.e. the state is loadable and has not been garbage collected.
+    pub fn root_loadable(
+        key: &SerializedLedgerStateKey,
+        ledger_version: LedgerVersion,
+    ) -> Result<bool, indexer_common::domain::ledger::Error> {
+        indexer_common::domain::ledger::LedgerState::root_loadable(key, ledger_version)
+    }
+
     /// Create a zswap state Merkle tree collapsed update.
     pub fn make_zswap_collapsed_update(
         &self,

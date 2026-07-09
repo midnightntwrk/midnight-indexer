@@ -21,7 +21,7 @@ midnight-coin-structure_v2   = { workspace = true }
 midnight-ledger_v8           = { workspace = true }
 midnight-onchain-runtime_v3  = { workspace = true }
 midnight-serialize_v1        = { workspace = true }
-midnight-storage-core_v1     = { workspace = true, features = [ "layout-v2" ] }
+midnight-storage-core_v1     = { workspace = true, features = [ "layout-v2", "gc-v1" ] }
 midnight-transient-crypto_v2 = { workspace = true }
 midnight-zswap_v8            = { workspace = true }
 # ledger v9 rc (base-crypto, serialize and storage-core stay unified across v8
@@ -86,6 +86,3 @@ standalone = [ "sqlx/sqlite" ]
 name              = "ledger_transaction"
 harness           = false
 required-features = [ "standalone" ]
-
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = [ 'cfg(coverage_nightly)' ] }

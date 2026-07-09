@@ -16,7 +16,7 @@ use crate::{
     infra::pub_sub::nats::Config,
 };
 use async_nats::{Client, ConnectOptions, Event};
-use log::{debug, warn};
+use log::{info, warn};
 use secrecy::ExposeSecret;
 use thiserror::Error;
 
@@ -40,7 +40,7 @@ impl NatsPublisher {
             .max_reconnects(max_reconnects)
             .event_callback(|event| async {
                 match event {
-                    Event::Connected => debug!("NATS client connected"),
+                    Event::Connected => info!("NATS client connected"),
                     Event::Disconnected => warn!("NATS client disconnected"),
                     Event::LameDuckMode => warn!("NATS client in lame duck mode"),
                     Event::Draining => warn!("NATS client draining"),

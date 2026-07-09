@@ -12,9 +12,9 @@
 // limitations under the License.
 
 use crate::{
-    domain::{LedgerStateCache, dust::DustGenerationDtimeUpdateEntry, storage::Storage},
+    domain::{LedgerState, dust::DustGenerationDtimeUpdateEntry, storage::Storage},
     infra::api::{
-        ApiResult, ContextExt, ResultExt,
+        ApiResult, ContextExt, OptionExt, ResultExt,
         v4::{
             HexEncodable, HexEncoded, directives::beta, dust::DustAddress,
             merkle_tree_collapsed_update::MerkleTreeCollapsedUpdate,
@@ -24,8 +24,7 @@ use crate::{
 use async_graphql::{Context, SimpleObject, Subscription, Union};
 use async_stream::try_stream;
 use futures::{Stream, TryStreamExt};
-use indexer_common::domain::{BlockIndexed, Subscriber};
-use log::{debug, warn};
+use indexer_common::domain::{ProtocolVersion, Subscriber};
 use std::{marker::PhantomData, pin::pin};
 
 /// An event of the dust generations subscription.
@@ -118,26 +117,28 @@ where
     S: Storage,
     B: Subscriber,
 {
-    /// Subscribe to dust generation entries for a dust address in `[start_index, end_index]`
-    /// inclusive. `dustGenerationEndIndex` is exclusive, pass `dustGenerationEndIndex - 1`.
-    /// Entries interleaved with collapsed Merkle tree updates and owned-entry dtime updates.
+    /// Subscribe to a dust address's generations as a consistent snapshot at `block_hash`. The
+    /// wallet's owned generation entries, interleaved with collapsed Merkle tree updates for the
+    /// non-owned gaps, are served at that block's state (deterministic, independent of the tip).
+    /// The dtime updates for the wallet's own generations in `(dtime_cutoff_height, block_hash]`
+    /// are issued first, as a clean delta for the generations set rather than the tree (pass `0`
+    /// to replay all). The subscription completes once emitted; re-subscribe at a newer
+    /// `block_hash` to advance.
     #[graphql(directive = beta::apply())]
     async fn dust_generations<'a>(
         &self,
         cx: &'a Context<'a>,
         dust_address: DustAddress,
-        start_index: u64,
-        end_index: u64,
+        block_hash: HexEncoded,
+        dtime_cutoff_height: u64,
     ) -> impl Stream<Item = ApiResult<DustGenerationsEvent>> {
         let storage = cx.get_storage::<S>();
-        let subscriber = cx.get_subscriber::<B>();
-        let ledger_state_cache = cx.get_ledger_state_cache();
-        let batch_size = cx.get_subscription_config().dust_generations.batch_size;
+        let dust_generations_config = cx.get_subscription_config().dust_generations;
+        let batch_size = dust_generations_config.batch_size;
+        let max_snapshot_age = dust_generations_config.max_snapshot_age;
         let network_id = cx.get_network_id();
         let quotas = cx.get_subscription_quotas();
         let per_connection_counter = cx.get_per_connection_counter();
-
-        let block_indexed_stream = subscriber.subscribe::<BlockIndexed>();
 
         try_stream! {
             let _quota_guard = quotas
@@ -147,28 +148,80 @@ where
             let dust_address_bytes = dust_address
                 .try_into_domain(network_id)
                 .map_err_into_client_error(|| "invalid bech32m dust address")?;
-            let mut cursor = start_index;
 
-            // Fall back to 0 (= replay all dtime updates for this address) when
-            // the wallet has no entry below `start_index`. The dtime SQL filters
-            // by owner and per-stream event-id cursor, so cutoff = 0 is safe.
-            let dtime_cutoff_block_id = storage
-                .get_dust_generation_dtime_cutoff_block_id(&dust_address_bytes, start_index)
+            let block_hash = block_hash
+                .hex_decode()
+                .map_err_into_client_error(|| "invalid block hash")?;
+
+            // Pin the whole snapshot to one block: load the ledger state at `block_hash` so the
+            // generation tree (and every collapsed update built from it) reflects the state as of
+            // that block. This is what makes the response deterministic and free of tip-drift.
+            let (snapshot_block_id, snapshot_height, protocol_version, ledger_state_key) = storage
+                .get_ledger_state_at(block_hash)
                 .await
-                .map_err_into_server_error(|| "get dtime cutoff block id")?
-                .unwrap_or(0);
+                .map_err_into_server_error(|| "get ledger state at block")?
+                .some_or_client_error(|| "unknown block hash")?;
 
-            // Single dtime cursor across initial backfill and live tail. It
-            // advances past every emitted DustGenerationDtimeUpdateItem so
-            // subsequent block-driven polls don't re-emit.
-            let mut dtime_after_event_id = 0u64;
+            // The chain-indexer only keeps the ledger states of the most recent
+            // ledger_state_retention blocks loadable (older ones are garbage collected), so
+            // reject stale snapshots up front with a re-subscribe hint instead of failing
+            // mid-stream on culled state.
+            let latest_height = storage
+                .get_latest_block()
+                .await
+                .map_err_into_server_error(|| "get latest block")?
+                .map(|block| block.height)
+                .unwrap_or_default();
+            (latest_height.saturating_sub(snapshot_height) <= max_snapshot_age)
+                .then_some(())
+                .some_or_client_error(|| {
+                    "block hash is older than the snapshot freshness window, re-subscribe with \
+                     a more recent block hash"
+                })?;
 
-            debug!(cutoff = dtime_cutoff_block_id; "replaying dtime updates after cutoff");
+            // Verify the root node is still in the ledger DB before loading: loading culled
+            // state panics inside storage-core rather than returning an error, so this check is
+            // what turns a gc'd snapshot (possible when max_snapshot_age is misconfigured to
+            // exceed the chain-indexer's ledger_state_retention) into a clean client error.
+            LedgerState::root_loadable(&ledger_state_key, protocol_version.ledger_version())
+                .map_err_into_server_error(|| "check ledger state availability")?
+                .then_some(())
+                .some_or_client_error(|| {
+                    "ledger state for this block is no longer available, re-subscribe with \
+                     a more recent block hash"
+                })?;
+
+            let ledger_state =
+                LedgerState::load(&ledger_state_key, protocol_version.ledger_version())
+                    .map_err_into_server_error(|| "load ledger state at block")?;
+
+            // Exclusive end of the generation tree at this block.
+            let end_index = ledger_state.dust_generations_first_free();
+            let last_index = end_index.saturating_sub(1);
+
+            // 1. dtime delta: the wallet's own generations spent in `(cutoff, block_hash]`. Map the
+            //    cutoff height to the internal block id; `snapshot_block_id` bounds the delta at
+            //    `block_hash` so the response is deterministic (independent of the current tip).
+            //    `0` means "from the start" (no prior sync).
+            let cutoff_block_id = if dtime_cutoff_height == 0 {
+                0
+            } else {
+                let height = u32::try_from(dtime_cutoff_height)
+                    .map_err_into_client_error(|| "dtime_cutoff_height out of range")?;
+                storage
+                    .get_block_by_height(height)
+                    .await
+                    .map_err_into_server_error(|| "get block by height for dtime cutoff")?
+                    .map(|block| block.id)
+                    .unwrap_or(0)
+            };
+
             let updates = storage
                 .get_dust_generation_dtime_updates(
                     &dust_address_bytes,
-                    dtime_cutoff_block_id,
-                    dtime_after_event_id,
+                    cutoff_block_id,
+                    snapshot_block_id,
+                    0,
                     batch_size,
                 )
                 .await;
@@ -178,16 +231,14 @@ where
                 .await
                 .map_err_into_server_error(|| "get next dtime update")?
             {
-                dtime_after_event_id = update.ledger_event_id;
-                yield DustGenerationsEvent::DustGenerationDtimeUpdateItem(
-                    dtime_update_item(update),
-                );
+                yield DustGenerationsEvent::DustGenerationDtimeUpdateItem(dtime_update_item(update));
             }
 
-            debug!(start_index, end_index; "streaming existing dust generation entries");
-
+            // 2. The wallet's owned generation entries up to the block, interleaved with collapsed
+            //    Merkle tree updates (pinned to the block) filling the non-owned gaps.
+            let mut cursor = 0u64;
             let entries = storage
-                .get_dust_generation_entries(&dust_address_bytes, cursor, end_index, batch_size)
+                .get_dust_generation_entries(&dust_address_bytes, 0, last_index, batch_size)
                 .await;
             let mut entries = pin!(entries);
             while let Some(entry) = entries
@@ -196,11 +247,11 @@ where
                 .map_err_into_server_error(|| "get next dust generation entry")?
             {
                 let collapsed_merkle_tree = make_collapsed_update(
+                    &ledger_state,
                     cursor,
                     entry.generation_mt_index,
-                    storage,
-                    ledger_state_cache,
-                ).await?;
+                    protocol_version,
+                )?;
 
                 cursor = entry.generation_mt_index + 1;
 
@@ -218,232 +269,57 @@ where
                 });
             }
 
-            // Terminate on chain progress, not the subscriber's `cursor`,
-            // which only crosses `end_index` when the wallet owns an
-            // entry there.
-            let chain_first_free = storage
-                .get_dust_generations_chain_first_free()
-                .await
-                .map_err_into_server_error(|| "get dust generations chain first free")?;
-            if chain_first_free > end_index {
-                // Re-drain to catch entries committed in the window between
-                // the backfill drain ending and the chain-progress read.
-                let entries = storage
-                    .get_dust_generation_entries(&dust_address_bytes, cursor, end_index, batch_size)
-                    .await;
-                let mut entries = pin!(entries);
-                while let Some(entry) = entries
-                    .try_next()
-                    .await
-                    .map_err_into_server_error(|| "get next dust generation entry")?
-                {
-                    let collapsed_merkle_tree = make_collapsed_update(
-                        cursor,
-                        entry.generation_mt_index,
-                        storage,
-                        ledger_state_cache,
-                    ).await?;
-
-                    cursor = entry.generation_mt_index + 1;
-
-                    yield DustGenerationsEvent::DustGenerationsItem(DustGenerationsItem {
-                        commitment_mt_index: entry.commitment_mt_index,
-                        generation_mt_index: entry.generation_mt_index,
-                        owner: entry.owner.hex_encode(),
-                        value: entry.value.to_string(),
-                        initial_value: entry.initial_value.to_string(),
-                        backing_night: entry.backing_night.hex_encode(),
-                        ctime: entry.ctime,
-                        transaction_id: entry.transaction_id,
-                        transaction_hash: entry.transaction_hash.hex_encode(),
-                        collapsed_merkle_tree,
-                    });
-                }
-
-                let final_update = make_final_collapsed_update(
-                    cursor, end_index, storage, ledger_state_cache,
-                ).await?;
-
-                yield DustGenerationsEvent::DustGenerationsProgress(DustGenerationsProgress {
-                    highest_index: end_index,
-                    collapsed_merkle_tree: final_update,
-                });
-
-                return;
-            }
-
-            debug!(cursor; "streaming live dust generation entries");
-            let mut block_indexed_stream = pin!(block_indexed_stream);
-            while block_indexed_stream
-                .try_next()
-                .await
-                .map_err_into_server_error(|| "get next BlockIndexed event")?
-                .is_some()
-            {
-                let entries = storage
-                    .get_dust_generation_entries(&dust_address_bytes, cursor, end_index, batch_size)
-                    .await;
-                let mut entries = pin!(entries);
-                while let Some(entry) = entries
-                    .try_next()
-                    .await
-                    .map_err_into_server_error(|| "get next dust generation entry")?
-                {
-                    let collapsed_merkle_tree = make_collapsed_update(
-                        cursor,
-                        entry.generation_mt_index,
-                        storage,
-                        ledger_state_cache,
-                    ).await?;
-
-                    cursor = entry.generation_mt_index + 1;
-
-                    yield DustGenerationsEvent::DustGenerationsItem(DustGenerationsItem {
-                        commitment_mt_index: entry.commitment_mt_index,
-                        generation_mt_index: entry.generation_mt_index,
-                        owner: entry.owner.hex_encode(),
-                        value: entry.value.to_string(),
-                        initial_value: entry.initial_value.to_string(),
-                        backing_night: entry.backing_night.hex_encode(),
-                        ctime: entry.ctime,
-                        transaction_id: entry.transaction_id,
-                        transaction_hash: entry.transaction_hash.hex_encode(),
-                        collapsed_merkle_tree,
-                    });
-                }
-
-                // Drain any new dtime updates for entries the subscriber
-                // owns. Reuses the same cutoff (initial entry-block anchor)
-                // and the running event cursor so we don't re-emit.
-                let updates = storage
-                    .get_dust_generation_dtime_updates(
-                        &dust_address_bytes,
-                        dtime_cutoff_block_id,
-                        dtime_after_event_id,
-                        batch_size,
-                    )
-                    .await;
-                let mut updates = pin!(updates);
-                while let Some(update) = updates
-                    .try_next()
-                    .await
-                    .map_err_into_server_error(|| "get next dtime update")?
-                {
-                    dtime_after_event_id = update.ledger_event_id;
-                    yield DustGenerationsEvent::DustGenerationDtimeUpdateItem(
-                        dtime_update_item(update),
-                    );
-                }
-
-                let chain_first_free = storage
-                    .get_dust_generations_chain_first_free()
-                    .await
-                    .map_err_into_server_error(|| "get dust generations chain first free")?;
-                if chain_first_free > end_index {
-                    // Re-drain to catch entries committed in the window between
-                    // the live-tail drain ending and the chain-progress read.
-                    let entries = storage
-                        .get_dust_generation_entries(&dust_address_bytes, cursor, end_index, batch_size)
-                        .await;
-                    let mut entries = pin!(entries);
-                    while let Some(entry) = entries
-                        .try_next()
-                        .await
-                        .map_err_into_server_error(|| "get next dust generation entry")?
-                    {
-                        let collapsed_merkle_tree = make_collapsed_update(
-                            cursor,
-                            entry.generation_mt_index,
-                            storage,
-                            ledger_state_cache,
-                        ).await?;
-
-                        cursor = entry.generation_mt_index + 1;
-
-                        yield DustGenerationsEvent::DustGenerationsItem(DustGenerationsItem {
-                            commitment_mt_index: entry.commitment_mt_index,
-                            generation_mt_index: entry.generation_mt_index,
-                            owner: entry.owner.hex_encode(),
-                            value: entry.value.to_string(),
-                            initial_value: entry.initial_value.to_string(),
-                            backing_night: entry.backing_night.hex_encode(),
-                            ctime: entry.ctime,
-                            transaction_id: entry.transaction_id,
-                            transaction_hash: entry.transaction_hash.hex_encode(),
-                            collapsed_merkle_tree,
-                        });
-                    }
-
-                    let final_update = make_final_collapsed_update(
-                        cursor, end_index, storage, ledger_state_cache,
-                    ).await?;
-
-                    yield DustGenerationsEvent::DustGenerationsProgress(DustGenerationsProgress {
-                        highest_index: end_index,
-                        collapsed_merkle_tree: final_update,
-                    });
-
-                    return;
-                }
-            }
-
-            warn!("stream of BlockIndexed events completed unexpectedly");
+            // 3. Final collapsed update covering the remaining range, then complete the snapshot.
+            //    An empty generation tree (no leaves) has no final segment.
+            let final_update = if end_index == 0 {
+                None
+            } else {
+                make_final_collapsed_update(&ledger_state, cursor, last_index, protocol_version)?
+            };
+            yield DustGenerationsEvent::DustGenerationsProgress(DustGenerationsProgress {
+                highest_index: last_index,
+                collapsed_merkle_tree: final_update,
+            });
         }
     }
 }
 
-/// Compute a collapsed Merkle tree update to fill the gap between cursor and entry's index.
-async fn make_collapsed_update<S: Storage>(
+/// Compute a collapsed Merkle tree update to fill the gap between `cursor` and `entry_index`,
+/// built from the block-pinned ledger state.
+fn make_collapsed_update(
+    ledger_state: &LedgerState,
     cursor: u64,
     entry_index: u64,
-    storage: &S,
-    ledger_state_cache: &LedgerStateCache,
+    protocol_version: ProtocolVersion,
 ) -> ApiResult<Option<MerkleTreeCollapsedUpdate>> {
     if cursor >= entry_index || entry_index == 0 {
         return Ok(None);
     }
 
-    let block = storage
-        .get_latest_block()
-        .await
-        .map_err_into_server_error(|| "get latest block for collapsed update")?;
-
-    let Some(block) = block else {
-        return Ok(None);
-    };
-
-    let update = ledger_state_cache
-        .dust_generations_collapsed_update(cursor, entry_index - 1, storage, block.protocol_version)
-        .await
+    let update = ledger_state
+        .dust_generations_collapsed_update(cursor, entry_index - 1, protocol_version)
         .map_err_into_server_error(|| "create dust generations collapsed update")?;
 
     Ok(Some(update.into()))
 }
 
-/// Compute the final collapsed Merkle tree update covering the remaining range.
-async fn make_final_collapsed_update<S: Storage>(
+/// Compute the final collapsed Merkle tree update covering the remaining range, built from the
+/// block-pinned ledger state.
+fn make_final_collapsed_update(
+    ledger_state: &LedgerState,
     cursor: u64,
     end_index: u64,
-    storage: &S,
-    ledger_state_cache: &LedgerStateCache,
+    protocol_version: ProtocolVersion,
 ) -> ApiResult<Option<MerkleTreeCollapsedUpdate>> {
-    let block = storage
-        .get_latest_block()
-        .await
-        .map_err_into_server_error(|| "get latest block for final collapsed update")?;
-
-    let Some(block) = block else {
+    if cursor > end_index {
         return Ok(None);
-    };
-
-    let update = ledger_state_cache
-        .dust_generations_collapsed_update(cursor, end_index, storage, block.protocol_version)
-        .await;
-
-    match update {
-        Ok(update) => Ok(Some(update.into())),
-        Err(_) => Ok(None),
     }
+
+    let update = ledger_state
+        .dust_generations_collapsed_update(cursor, end_index, protocol_version)
+        .map_err_into_server_error(|| "create final dust generations collapsed update")?;
+
+    Ok(Some(update.into()))
 }
 
 /// Convert a domain dtime update entry into the GraphQL item.
