@@ -274,7 +274,7 @@ pub struct LedgerEvent {
     /// (`LedgerEventGrouping::Contract`); `None` for zswap/dust events. Mapped
     /// onto the indexed `ledger_events.contract_address` column for fast
     /// filtering on the `contractEvents` query/subscription surface.
-    pub contract_address: Option<ByteVec>,
+    pub contract_address: Option<SerializedContractAddress>,
 }
 
 impl LedgerEvent {
@@ -376,25 +376,12 @@ impl LedgerEvent {
     /// callers that already know the id (e.g. future upstream attribution).
     pub fn contract_event(
         raw: SerializedLedgerEvent,
-        contract_address: ByteVec,
+        contract_address: SerializedContractAddress,
         contract_action_id: Option<u64>,
         attributes: LedgerEventAttributes,
     ) -> Self {
         debug_assert!(
-            matches!(
-                attributes,
-                LedgerEventAttributes::ContractShieldedSpend { .. }
-                    | LedgerEventAttributes::ContractShieldedReceive { .. }
-                    | LedgerEventAttributes::ContractShieldedMint { .. }
-                    | LedgerEventAttributes::ContractShieldedBurn { .. }
-                    | LedgerEventAttributes::ContractUnshieldedSpend { .. }
-                    | LedgerEventAttributes::ContractUnshieldedReceive { .. }
-                    | LedgerEventAttributes::ContractUnshieldedMint { .. }
-                    | LedgerEventAttributes::ContractUnshieldedBurn { .. }
-                    | LedgerEventAttributes::ContractPaused { .. }
-                    | LedgerEventAttributes::ContractUnpaused { .. }
-                    | LedgerEventAttributes::ContractMisc { .. }
-            ),
+            attributes.contract_entry_point().is_some(),
             "contract_event() called with non-contract attributes"
         );
         Self {
@@ -412,23 +399,24 @@ impl LedgerEvent {
     /// non-contract events and for `Paused`/`Unpaused`/`Misc` (no indexable
     /// fields per the design).
     pub fn indexable_contract_fields(&self) -> Vec<(&'static str, ByteVec)> {
-        use LedgerEventAttributes::*;
         match &self.attributes {
-            ContractShieldedSpend { nullifier, .. } => {
+            LedgerEventAttributes::ContractShieldedSpend { nullifier, .. } => {
                 vec![("nullifier", nullifier.clone())]
             }
-            ContractShieldedReceive {
+
+            LedgerEventAttributes::ContractShieldedReceive {
                 commitment,
                 ciphertext,
                 ..
             } => {
-                let mut out = vec![("commitment", commitment.clone())];
-                if let Some(c) = ciphertext {
-                    out.push(("ciphertext", c.clone()));
+                let mut fields = vec![("commitment", commitment.clone())];
+                if let Some(ciphertext) = ciphertext {
+                    fields.push(("ciphertext", ciphertext.clone()));
                 }
-                out
+                fields
             }
-            ContractShieldedMint {
+
+            LedgerEventAttributes::ContractShieldedMint {
                 commitment,
                 domain_sep,
                 ..
@@ -436,30 +424,34 @@ impl LedgerEvent {
                 ("commitment", commitment.clone()),
                 ("domainSep", domain_sep.clone()),
             ],
-            ContractShieldedBurn { nullifier, .. } => {
+
+            LedgerEventAttributes::ContractShieldedBurn { nullifier, .. } => {
                 vec![("nullifier", nullifier.clone())]
             }
-            ContractUnshieldedSpend {
+
+            LedgerEventAttributes::ContractUnshieldedSpend {
                 sender,
                 domain_sep,
                 token_type,
                 ..
             } => vec![
-                ("sender", sender.as_bytes()),
+                ("sender", sender.to_bytes()),
                 ("domainSep", domain_sep.clone()),
                 ("tokenType", token_type.clone()),
             ],
-            ContractUnshieldedReceive {
+
+            LedgerEventAttributes::ContractUnshieldedReceive {
                 recipient,
                 domain_sep,
                 token_type,
                 ..
             } => vec![
-                ("recipient", recipient.as_bytes()),
+                ("recipient", recipient.to_bytes()),
                 ("domainSep", domain_sep.clone()),
                 ("tokenType", token_type.clone()),
             ],
-            ContractUnshieldedMint {
+
+            LedgerEventAttributes::ContractUnshieldedMint {
                 domain_sep,
                 token_type,
                 ..
@@ -467,33 +459,47 @@ impl LedgerEvent {
                 ("domainSep", domain_sep.clone()),
                 ("tokenType", token_type.clone()),
             ],
-            ContractUnshieldedBurn {
+
+            LedgerEventAttributes::ContractUnshieldedBurn {
                 sender, token_type, ..
             } => vec![
-                ("sender", sender.as_bytes()),
+                ("sender", sender.to_bytes()),
                 ("tokenType", token_type.clone()),
             ],
-            ContractPaused { .. }
-            | ContractUnpaused { .. }
-            | ContractMisc { .. }
-            | ZswapInput { .. }
-            | ZswapOutput
-            | ParamChange
-            | DustInitialUtxo { .. }
-            | DustGenerationDtimeUpdate { .. }
-            | DustSpendProcessed { .. } => vec![],
+
+            LedgerEventAttributes::ContractPaused { .. }
+            | LedgerEventAttributes::ContractUnpaused { .. }
+            | LedgerEventAttributes::ContractMisc { .. }
+            | LedgerEventAttributes::ZswapInput { .. }
+            | LedgerEventAttributes::ZswapOutput
+            | LedgerEventAttributes::ParamChange
+            | LedgerEventAttributes::DustInitialUtxo { .. }
+            | LedgerEventAttributes::DustGenerationDtimeUpdate { .. }
+            | LedgerEventAttributes::DustSpendProcessed { .. } => vec![],
         }
     }
 }
+
+/// Every field name `LedgerEvent::indexable_contract_fields` can emit; the closed set of valid
+/// `fieldName` values for the contract events field-prefix filter.
+pub const INDEXABLE_CONTRACT_FIELD_NAMES: [&str; 7] = [
+    "nullifier",
+    "commitment",
+    "ciphertext",
+    "domainSep",
+    "tokenType",
+    "sender",
+    "recipient",
+];
 
 impl AddressOrContract {
     /// Flat byte representation for sidecar storage (32 bytes). Indexer
     /// filters by the raw bytes regardless of whether the address is a user
     /// or contract; the `kind` discriminator is in the JSONB payload only.
-    pub fn as_bytes(&self) -> ByteVec {
+    fn to_bytes(&self) -> ByteVec {
         match self {
-            AddressOrContract::User(b) => b.clone(),
-            AddressOrContract::Contract(b) => b.clone(),
+            Self::User(bytes) => bytes.clone(),
+            Self::Contract(bytes) => bytes.clone(),
         }
     }
 }
@@ -503,26 +509,25 @@ impl LedgerEventAttributes {
     /// for zswap and dust events. Used by the chain-indexer to correlate
     /// contract events with the emitting `ContractCall` (ticket #1162).
     pub fn contract_entry_point(&self) -> Option<&ByteVec> {
-        use LedgerEventAttributes::*;
         match self {
-            ContractShieldedSpend { entry_point, .. }
-            | ContractShieldedReceive { entry_point, .. }
-            | ContractShieldedMint { entry_point, .. }
-            | ContractShieldedBurn { entry_point, .. }
-            | ContractUnshieldedSpend { entry_point, .. }
-            | ContractUnshieldedReceive { entry_point, .. }
-            | ContractUnshieldedMint { entry_point, .. }
-            | ContractUnshieldedBurn { entry_point, .. }
-            | ContractPaused { entry_point, .. }
-            | ContractUnpaused { entry_point, .. }
-            | ContractMisc { entry_point, .. } => Some(entry_point),
+            Self::ContractShieldedSpend { entry_point, .. }
+            | Self::ContractShieldedReceive { entry_point, .. }
+            | Self::ContractShieldedMint { entry_point, .. }
+            | Self::ContractShieldedBurn { entry_point, .. }
+            | Self::ContractUnshieldedSpend { entry_point, .. }
+            | Self::ContractUnshieldedReceive { entry_point, .. }
+            | Self::ContractUnshieldedMint { entry_point, .. }
+            | Self::ContractUnshieldedBurn { entry_point, .. }
+            | Self::ContractPaused { entry_point, .. }
+            | Self::ContractUnpaused { entry_point, .. }
+            | Self::ContractMisc { entry_point, .. } => Some(entry_point),
 
-            ZswapInput { .. }
-            | ZswapOutput
-            | ParamChange
-            | DustInitialUtxo { .. }
-            | DustGenerationDtimeUpdate { .. }
-            | DustSpendProcessed { .. } => None,
+            Self::ZswapInput { .. }
+            | Self::ZswapOutput
+            | Self::ParamChange
+            | Self::DustInitialUtxo { .. }
+            | Self::DustGenerationDtimeUpdate { .. }
+            | Self::DustSpendProcessed { .. } => None,
         }
     }
 }
@@ -889,11 +894,34 @@ mod contract_event_tests {
     }
 
     #[test]
-    fn address_or_contract_as_bytes_returns_inner() {
+    fn address_or_contract_to_bytes_returns_inner() {
         let user = AddressOrContract::User(bv(&[0xab; 32]));
         let contract = AddressOrContract::Contract(bv(&[0xcd; 32]));
-        assert_eq!(user.as_bytes().as_ref(), &[0xab; 32]);
-        assert_eq!(contract.as_bytes().as_ref(), &[0xcd; 32]);
+        assert_eq!(user.to_bytes().as_ref(), &[0xab; 32]);
+        assert_eq!(contract.to_bytes().as_ref(), &[0xcd; 32]);
+    }
+
+    #[test]
+    fn indexable_contract_field_names_cover_every_emitted_field() {
+        let all_attrs = [
+            shielded_spend_attrs(),
+            shielded_receive_attrs(),
+            shielded_mint_attrs(),
+            shielded_burn_attrs(),
+            unshielded_spend_attrs(),
+            unshielded_receive_attrs(),
+            unshielded_mint_attrs(),
+            unshielded_burn_attrs(),
+            paused_attrs(),
+            unpaused_attrs(),
+            misc_attrs(),
+        ];
+        for attrs in all_attrs {
+            let event = LedgerEvent::contract_event(bv(b"raw"), bv(&[0x01; 32]), None, attrs);
+            for (name, _) in event.indexable_contract_fields() {
+                assert!(INDEXABLE_CONTRACT_FIELD_NAMES.contains(&name));
+            }
+        }
     }
 
     #[test]

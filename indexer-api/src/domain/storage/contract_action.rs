@@ -58,6 +58,14 @@ where
         hash: BlockHash,
     ) -> Result<Option<ContractAction>, sqlx::Error>;
 
+    /// Whether any contract action exists for the given address as of (in any block at or before)
+    /// the block with the given hash.
+    async fn contract_action_exists_by_address_as_of_block_hash(
+        &self,
+        address: &SerializedContractAddress,
+        hash: BlockHash,
+    ) -> Result<bool, sqlx::Error>;
+
     /// Get the contract action giving the address's state as of (the latest action in any block at
     /// or before) the given block height.
     async fn get_contract_action_by_address_as_of_block_height(
@@ -170,6 +178,14 @@ impl ContractActionStorage for NoopStorage {
         address: &SerializedContractAddress,
         hash: BlockHash,
     ) -> Result<Option<ContractAction>, sqlx::Error> {
+        unimplemented!()
+    }
+
+    async fn contract_action_exists_by_address_as_of_block_hash(
+        &self,
+        address: &SerializedContractAddress,
+        hash: BlockHash,
+    ) -> Result<bool, sqlx::Error> {
         unimplemented!()
     }
 

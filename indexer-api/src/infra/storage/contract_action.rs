@@ -178,6 +178,32 @@ impl ContractActionStorage for Storage {
             .await
     }
 
+    #[trace(properties = { "address": "{address}", "hash": "{hash}" })]
+    async fn contract_action_exists_by_address_as_of_block_hash(
+        &self,
+        address: &SerializedContractAddress,
+        hash: BlockHash,
+    ) -> Result<bool, sqlx::Error> {
+        // Existence-only variant of the "as of" lookup above: avoids fetching the state and
+        // zswap state blobs when only presence matters.
+        let query = indoc! {"
+            SELECT 1
+            FROM contract_actions
+            INNER JOIN transactions ON transactions.id = transaction_id
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            WHERE address = $1
+            AND blocks.height <= (SELECT height FROM blocks WHERE hash = $2)
+            LIMIT 1
+        "};
+
+        sqlx::query(query)
+            .bind(address.as_ref())
+            .bind(hash.as_ref())
+            .fetch_optional(&*self.pool)
+            .await
+            .map(|row| row.is_some())
+    }
+
     #[trace(properties = { "address": "{address}", "block_height": "{block_height}" })]
     async fn get_contract_action_by_address_as_of_block_height(
         &self,

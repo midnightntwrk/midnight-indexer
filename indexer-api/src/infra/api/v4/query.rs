@@ -20,7 +20,7 @@ use crate::{
             block::{Block, BlockOffset},
             contract::Contract,
             contract_action::{ContractAction, ContractActionOffset},
-            contract_event::{ContractEvent, ContractEventFilter as GraphQLContractEventFilter},
+            contract_event::{ContractEvent, ContractEventFilter},
             directives::beta,
             dust::DustGenerationStatus,
             dust_generations::DustGenerations,
@@ -420,7 +420,8 @@ where
             .map(MerkleTreeCollapsedUpdate::from)
     }
 
-    /// Find contract events matching the filter, with optional pagination.
+    /// Find contract events matching the filter, ordered by ID; `limit` defaults to 100 and is
+    /// capped at 500, `offset` defaults to 0.
     ///
     /// Block-range bounds (`fromBlock`, `toBlock`) live on `ContractEventFilter`
     /// for symmetry with the subscription. `limit`/`offset` are top-level args.
@@ -429,21 +430,21 @@ where
     async fn contract_events(
         &self,
         cx: &Context<'_>,
-        filter: GraphQLContractEventFilter,
+        filter: ContractEventFilter,
         limit: Option<i32>,
         offset: Option<i32>,
     ) -> ApiResult<Vec<ContractEvent<S>>> {
         let storage = cx.get_storage::<S>();
 
-        let domain_filter = filter
+        let filter = filter
             .into_domain()
-            .map_err(|e| ApiError::client("invalid ContractEventFilter", e))?;
+            .map_err(|error| ApiError::client("invalid contract event filter", error))?;
 
-        let limit = limit.map(|l| l.max(0) as u32);
-        let offset = offset.map(|o| o.max(0) as u32);
+        let limit = limit.unwrap_or(100).clamp(1, 500) as u32;
+        let offset = offset.unwrap_or(0).max(0) as u32;
 
         let rows = storage
-            .get_contract_events(domain_filter, limit, offset)
+            .get_contract_events(&filter, limit, offset)
             .await
             .map_err_into_server_error(|| "get contract events")?;
 

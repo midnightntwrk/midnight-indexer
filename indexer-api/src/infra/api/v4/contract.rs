@@ -32,7 +32,10 @@ use indexer_common::domain::{
 use std::marker::PhantomData;
 
 /// Default number of recent actions returned by `Contract.actions` when no `limit` is given.
-const DEFAULT_ACTIONS_LIMIT: u32 = 100;
+const DEFAULT_ACTIONS_LIMIT: i32 = 100;
+
+/// Maximum number of recent actions returned by `Contract.actions`.
+const MAX_ACTIONS_LIMIT: i32 = 500;
 
 /// A contract, identified by address, resolved as of a given block (or the latest state if no
 /// offset is given). The topmost contract concept; its actions are a sub-query.
@@ -111,8 +114,9 @@ where
         Ok(authority.into())
     }
 
-    /// Recent contract actions for this contract, newest first, optionally filtered by type. Use
-    /// the `contractActions` subscription to enumerate all actions.
+    /// Recent contract actions for this contract, newest first, optionally filtered by type;
+    /// `limit` defaults to 100 and is capped at 500. Use the `contractActions` subscription to
+    /// enumerate all actions.
     #[graphql(directive = beta::apply())]
     async fn actions(
         &self,
@@ -123,8 +127,8 @@ where
         let storage = cx.get_storage::<S>();
 
         let limit = limit
-            .map(|limit| limit.max(0) as u32)
-            .unwrap_or(DEFAULT_ACTIONS_LIMIT);
+            .unwrap_or(DEFAULT_ACTIONS_LIMIT)
+            .clamp(1, MAX_ACTIONS_LIMIT) as u32;
         let variant = r#type.map(ContractActionType::variant_name);
 
         let actions = storage
