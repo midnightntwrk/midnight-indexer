@@ -186,6 +186,16 @@ pub struct ContractEventsSubscriptionConfig {
 #[derive(Debug, Clone, Copy, Deserialize)]
 pub struct DustGenerationsSubscriptionConfig {
     pub batch_size: NonZeroU32,
+
+    /// Maximum age in blocks of the snapshot `block_hash`; older ones are rejected with a
+    /// re-subscribe hint. Must stay well below chain-indexer's ledger_state_retention, which
+    /// bounds how long a block's ledger state remains loadable.
+    #[serde(default = "max_snapshot_age_default")]
+    pub max_snapshot_age: u32,
+}
+
+fn max_snapshot_age_default() -> u32 {
+    500
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
