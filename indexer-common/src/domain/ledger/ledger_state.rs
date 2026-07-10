@@ -88,10 +88,10 @@ use midnight_storage_core_v1::{
     storage::default_storage,
 };
 use midnight_transient_crypto_v2::merkle_tree::{
-    MerkleTreeCollapsedUpdate, MerkleTreeDigest, TreeInsertionPath,
+    MerkleTree as MerkleTreeV8, MerkleTreeCollapsedUpdate, MerkleTreeDigest, TreeInsertionPath,
 };
 use midnight_transient_crypto_v3::merkle_tree::{
-    MerkleTreeCollapsedUpdate as MerkleTreeCollapsedUpdateV9,
+    MerkleTree as MerkleTreeV9, MerkleTreeCollapsedUpdate as MerkleTreeCollapsedUpdateV9,
     MerkleTreeDigest as MerkleTreeDigestV9, TreeInsertionPath as TreeInsertionPathV9,
 };
 use midnight_zswap_v8::ledger::State as ZswapStateV8;
@@ -747,6 +747,52 @@ impl LedgerState {
                 .expect("dust generation merkle tree root should exist")
                 .serialize()
                 .map_err(|error| Error::Serialize("DustGenerationMerkleTreeRoot", error)),
+        }
+    }
+
+    /// Reconstruct the dust generation Merkle tree root from a collapsed update that covers the
+    /// whole tree (`[0, first_free - 1]`), as a wallet does: apply the update to a blank tree,
+    /// rehash, and take the root. The result is serialized identically to
+    /// [`LedgerState::dust_generation_merkle_tree_root`], so a wallet rebuilding its tree from the
+    /// block-hash dust generations sync (#1283) can assert it matches the authoritative block root.
+    ///
+    /// `collapsed_update` is the tagged-serialized `MerkleTreeCollapsedUpdate` served on the
+    /// `dustGenerations` subscription. The aux type is irrelevant to the root, so a unit-aux tree
+    /// is used for reconstruction.
+    pub fn dust_generation_root_from_collapsed_update(
+        collapsed_update: &[u8],
+        ledger_version: LedgerVersion,
+    ) -> Result<ByteVec, Error> {
+        // Matches midnight-ledger's `DUST_GENERATION_TREE_DEPTH`.
+        const DUST_GENERATION_TREE_DEPTH: u8 = 32;
+
+        match ledger_version {
+            LedgerVersion::V8 => {
+                let update =
+                    tagged_deserialize::<MerkleTreeCollapsedUpdate>(&mut &*collapsed_update)
+                        .map_err(|error| Error::Deserialize("MerkleTreeCollapsedUpdate", error))?;
+                MerkleTreeV8::<()>::blank(DUST_GENERATION_TREE_DEPTH)
+                    .apply_collapsed_update(&update)
+                    .map_err(|error| Error::InvalidUpdate(error.into()))?
+                    .rehash()
+                    .root()
+                    .expect("dust generation merkle tree root should exist")
+                    .serialize()
+                    .map_err(|error| Error::Serialize("DustGenerationMerkleTreeRoot", error))
+            }
+            LedgerVersion::V9 => {
+                let update =
+                    tagged_deserialize::<MerkleTreeCollapsedUpdateV9>(&mut &*collapsed_update)
+                        .map_err(|error| Error::Deserialize("MerkleTreeCollapsedUpdate", error))?;
+                MerkleTreeV9::<()>::blank(DUST_GENERATION_TREE_DEPTH)
+                    .apply_collapsed_update(&update)
+                    .map_err(|error| Error::InvalidUpdate(error.into()))?
+                    .rehash()
+                    .root()
+                    .expect("dust generation merkle tree root should exist")
+                    .serialize()
+                    .map_err(|error| Error::Serialize("DustGenerationMerkleTreeRoot", error))
+            }
         }
     }
 
@@ -2043,5 +2089,54 @@ mod tests {
         assert_eq!(normalized.block_usage, half);
         assert_eq!(normalized.bytes_written, half);
         assert_eq!(normalized.bytes_churned, half);
+    }
+
+    /// Issue #1283, acceptance criterion #1: a wallet that applies the full collapsed update the
+    /// `dustGenerations` subscription serves rebuilds a generation tree whose root matches the
+    /// authoritative block root. This exercises the exact production primitives — the collapsed
+    /// update is built like [`LedgerState::dust_generations_collapsed_update`] and the expected
+    /// root like [`LedgerState::dust_generation_merkle_tree_root`] — so no chain is needed.
+    #[test]
+    fn dust_generation_root_from_collapsed_update_matches_tree_root() {
+        use crate::domain::ledger::{SerializableExt, TaggedSerializableExt};
+        use midnight_base_crypto_v1::hash::HashOutput;
+        use midnight_transient_crypto_v3::merkle_tree::{MerkleTree, MerkleTreeCollapsedUpdate};
+
+        // Matches midnight-ledger's DUST_GENERATION_TREE_DEPTH.
+        const DEPTH: u8 = 32;
+
+        for leaf_count in [1u64, 3, 8] {
+            let tree = (0..leaf_count).fold(MerkleTree::<()>::blank(DEPTH), |tree, i| {
+                tree.try_update_hash(i, HashOutput([(i + 1) as u8; 32]), ())
+                    .expect("insert leaf")
+            });
+            let last_index = leaf_count - 1;
+
+            // Authoritative root, exactly as `dust_generation_merkle_tree_root` computes it.
+            let expected_root = tree
+                .rehash()
+                .root()
+                .expect("root exists")
+                .serialize()
+                .expect("serialize root");
+
+            // The full collapsed update, exactly as `dust_generations_collapsed_update` produces it.
+            let collapsed_update = MerkleTreeCollapsedUpdate::new(&tree.rehash(), 0, last_index)
+                .expect("build collapsed update")
+                .tagged_serialize()
+                .expect("serialize collapsed update");
+
+            // Wallet-side reconstruction from that single update.
+            let reconstructed = LedgerState::dust_generation_root_from_collapsed_update(
+                &collapsed_update,
+                LedgerVersion::V9,
+            )
+            .expect("reconstruct root");
+
+            assert_eq!(
+                reconstructed, expected_root,
+                "reconstructed root must match the tree root for {leaf_count} leaves"
+            );
+        }
     }
 }

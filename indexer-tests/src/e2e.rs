@@ -15,14 +15,15 @@
 
 use crate::{
     e2e::graphql::{
-        BlockQuery, BlockSubscription, ConnectMutation, ContractActionQuery,
+        BlockDustRootQuery, BlockQuery, BlockSubscription, ConnectMutation, ContractActionQuery,
         ContractActionSubscription, DParameterHistoryQuery, DisconnectMutation,
         DustCommitmentMerkleTreeUpdateQuery, DustGenerationMerkleTreeUpdateQuery,
         DustGenerationStatusQuery, DustGenerationsQuery, DustGenerationsSubscription,
         DustLedgerEventsSubscription, DustNullifierTransactionsSubscription,
         ShieldedNullifierTransactionsSubscription, ShieldedTransactionsSubscription,
         TermsAndConditionsHistoryQuery, TransactionsQuery, UnshieldedTransactionsSubscription,
-        ZswapLedgerEventsSubscription, ZswapMerkleTreeCollapsedUpdateQuery, block_query,
+        ZswapLedgerEventsSubscription, ZswapMerkleTreeCollapsedUpdateQuery, block_dust_root_query,
+        block_query,
         block_subscription::{
             self, BlockSubscriptionBlocks, BlockSubscriptionBlocksTransactions,
             BlockSubscriptionBlocksTransactionsContractActions,
@@ -51,7 +52,7 @@ use indexer_api::infra::api::v4::{
     AddressType, HexEncodable, HexEncoded, dust::DustAddress, encode_address,
     viewing_key::ViewingKey,
 };
-use indexer_common::domain::NetworkId;
+use indexer_common::domain::{ByteVec, LedgerVersion, NetworkId, ledger::LedgerState};
 use itertools::Itertools;
 use reqwest::Client;
 use serde::Serialize;
@@ -1073,8 +1074,10 @@ async fn test_dust_ledger_events_subscription(
 /// all-zero dust address (owns no generations), so the stream is a single
 /// `DustGenerationsProgress` whose final `collapsedMerkleTree` covers the whole
 /// generation tree at the pinned block, making the response a pure function of
-/// the block. Asserts determinism at a fixed block, per-block pinning, and
-/// rejection of an unknown block hash.
+/// the block. Asserts determinism at a fixed block, per-block pinning, that the
+/// tree rebuilt from the served collapsed update matches the block's
+/// `dustGenerationMerkleTreeRoot` (acceptance criterion #1), and rejection of an
+/// unknown block hash.
 async fn test_dust_generations_subscription(
     api_client: &Client,
     api_url: &str,
@@ -1085,10 +1088,10 @@ async fn test_dust_generations_subscription(
 
     // Pin to the tip (fresh, ledger state loadable); its parent is a second,
     // distinct pinned block for the per-block-pinning check.
-    let latest = send_query::<BlockQuery>(
+    let latest = send_query::<BlockDustRootQuery>(
         api_client,
         api_url,
-        block_query::Variables { block_offset: None },
+        block_dust_root_query::Variables { block_offset: None },
     )
     .await?
     .block
@@ -1161,6 +1164,39 @@ async fn test_dust_generations_subscription(
         .get("highestIndex")
         .and_then(|v| v.as_i64())
         .expect("progress carries highestIndex");
+
+    // Root match (acceptance criterion #1): rebuild the generation tree from the
+    // full collapsed update the snapshot served and assert its root equals the
+    // block's authoritative `dustGenerationMerkleTreeRoot`. The dev chain seeds
+    // dust generations at genesis, so the tip's tree is non-empty and the final
+    // progress carries a collapsed update.
+    let update: HexEncoded = serde_json::from_value(
+        first
+            .get("collapsedMerkleTree")
+            .and_then(|c| c.get("update"))
+            .cloned()
+            .expect("non-empty generation tree carries a collapsed update"),
+    )
+    .expect("collapsed update is a HexEncoded string");
+    let update_bytes = update
+        .hex_decode::<ByteVec>()
+        .expect("hex-decode collapsed update");
+    // The e2e node runs protocol V2_0 (ledger V9).
+    let rebuilt_root = LedgerState::dust_generation_root_from_collapsed_update(
+        update_bytes.as_ref(),
+        LedgerVersion::V9,
+    )
+    .expect("rebuild dust generation root");
+    let block_root = latest
+        .dust_generation_merkle_tree_root
+        .as_ref()
+        .expect("tip block carries a dust generation merkle tree root")
+        .hex_decode::<ByteVec>()
+        .expect("hex-decode block root");
+    assert_eq!(
+        rebuilt_root, block_root,
+        "tree rebuilt from the collapsed update must match the block's dust generation root"
+    );
 
     // Per-block pinning: the parent snapshot cannot be ahead of the tip's.
     let parent = snapshot(ws_api_url, DustAddress(dust_address.clone()), parent_hash).await?;
@@ -1433,6 +1469,14 @@ mod graphql {
         response_derives = "Debug, Clone, Serialize"
     )]
     pub struct BlockQuery;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v4.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct BlockDustRootQuery;
 
     #[derive(GraphQLQuery)]
     #[graphql(
