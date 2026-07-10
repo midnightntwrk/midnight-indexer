@@ -751,6 +751,10 @@ function updateContractDataFile(
 const GRAPHQL_MAX_ATTEMPTS = 3;
 const GRAPHQL_RETRY_DELAY_MS = 1_000;
 
+// Page size for the contract-events harvest; events are fetched page by page
+// until a short page signals the end of the contract's history.
+const CONTRACT_EVENTS_PAGE_SIZE = 100;
+
 /**
  * Sends a GraphQL POST request and returns the parsed body.
  *
@@ -844,49 +848,64 @@ async function isContractEventsSupported(graphqlUrl: string): Promise<boolean> {
 /**
  * Queries the indexer for the contract events emitted by a single contract
  * address and returns the distinct event types (ContractEventType enum
- * values). Only called once the contract-events surface is known to be
- * present, so GraphQL errors and transport failures are real failures here:
- * they are retried and then thrown, never treated as "no events".
+ * values). The events are fetched with limit/offset pagination until a short
+ * page, so a contract with a long history contributes its full set of event
+ * types rather than the first page only. Only called once the contract-events
+ * surface is known to be present, so GraphQL errors and transport failures
+ * are real failures here: they are retried and then thrown, never treated as
+ * "no events".
  *
  * @param graphqlUrl - The indexer GraphQL HTTP endpoint
  * @param address - The contract address to query events for
  * @returns Distinct event types emitted by the contract
- * @throws TestDataHandlerError when the query keeps failing
+ * @throws TestDataHandlerError when a page query keeps failing
  */
 async function fetchContractEventTypes(
   graphqlUrl: string,
   address: string,
 ): Promise<string[]> {
-  const query = `query ContractEventsForAddress($ADDRESS: HexEncoded!) {
-    contractEvents(filter: { contractAddress: $ADDRESS }, limit: 100) {
+  const query = `query ContractEventsForAddress($ADDRESS: HexEncoded!, $LIMIT: Int, $OFFSET: Int) {
+    contractEvents(filter: { contractAddress: $ADDRESS }, limit: $LIMIT, offset: $OFFSET) {
       __typename
     }
   }`;
 
-  const events = await withRetries(async () => {
-    const body = await postGraphQL<{
-      contractEvents?: { __typename: string }[];
-    }>(graphqlUrl, query, { ADDRESS: address });
+  const eventTypes: Set<string> = new Set();
 
-    if (body.errors || !body.data?.contractEvents) {
-      throw new Error(body.errors?.[0]?.message ?? "no data in response");
+  for (let offset = 0; ; offset += CONTRACT_EVENTS_PAGE_SIZE) {
+    const page = await withRetries(async () => {
+      const body = await postGraphQL<{
+        contractEvents?: { __typename: string }[];
+      }>(graphqlUrl, query, {
+        ADDRESS: address,
+        LIMIT: CONTRACT_EVENTS_PAGE_SIZE,
+        OFFSET: offset,
+      });
+
+      if (body.errors || !body.data?.contractEvents) {
+        throw new Error(body.errors?.[0]?.message ?? "no data in response");
+      }
+
+      return body.data.contractEvents;
+    }, `contractEvents query for ${address} (offset ${offset})`);
+
+    for (const event of page) {
+      const eventType = EVENT_TYPENAME_TO_EVENT_TYPE[event.__typename];
+      if (!eventType) {
+        console.warn(
+          `[WARN ] - Unknown contract event typename "${event.__typename}" ` +
+            `for ${address}; add it to EVENT_TYPENAME_TO_EVENT_TYPE`,
+        );
+      }
+      eventTypes.add(eventType ?? event.__typename);
     }
 
-    return body.data.contractEvents;
-  }, `contractEvents query for ${address}`);
-
-  const eventTypes = events.map((event) => {
-    const eventType = EVENT_TYPENAME_TO_EVENT_TYPE[event.__typename];
-    if (!eventType) {
-      console.warn(
-        `[WARN ] - Unknown contract event typename "${event.__typename}" ` +
-          `for ${address}; add it to EVENT_TYPENAME_TO_EVENT_TYPE`,
-      );
+    if (page.length < CONTRACT_EVENTS_PAGE_SIZE) {
+      break;
     }
-    return eventType ?? event.__typename;
-  });
+  }
 
-  return [...new Set(eventTypes)];
+  return [...eventTypes];
 }
 
 /**
