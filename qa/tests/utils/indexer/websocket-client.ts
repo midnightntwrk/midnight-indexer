@@ -28,8 +28,11 @@ import type {
   ShieldedTransactionsEvent,
   UnshieldedTransactionEvent,
   ContractAction,
+  ContractEvent,
+  ContractEventFilter,
   GraphQLResponse,
 } from './indexer-types';
+import { CONTRACT_EVENTS_SUBSCRIPTION } from './graphql/contract-event-queries';
 import {
   BLOCKS_SUBSCRIPTION_FROM_BLOCK_BY_OFFSET,
   BLOCKS_SUBSCRIPTION_FROM_LATEST_BLOCK,
@@ -79,6 +82,10 @@ export type ShieldedNullifierTransactionSubscriptionResponse = GraphQLResponse<{
 
 export type ZswapLedgerEventSubscriptionResponse = GraphQLResponse<{
   zswapLedgerEvents: ZswapLedgerEvent;
+}>;
+
+export type ContractEventSubscriptionResponse = GraphQLResponse<{
+  contractEvents: ContractEvent;
 }>;
 
 /**
@@ -431,6 +438,60 @@ export class IndexerWsClient {
       const stopMessage: GraphQLStopMessage = { id, type: 'stop' };
       this.getWs().send(JSON.stringify(stopMessage));
       this.handlersMap.delete(id);
+    };
+  }
+
+  /**
+   * Subscribes to public contract events matching a filter.
+   *
+   * The stream starts from the later of `id` (event-id resumption cursor) and
+   * `filter.fromBlock`; if `filter.toBlock` is set the stream terminates once the
+   * chain reaches that block (the server sends a `complete` message).
+   *
+   * @param handlers - Object containing callback functions for subscription events
+   * @param filter - The contract event filter (contractAddress is required)
+   * @param id - Optional event-id resumption cursor
+   * @param queryOverride - Optional custom GraphQL subscription. If provided, the
+   *                        caller is responsible for matching the variables
+   *
+   * @returns An object with subscription ID and unsubscribe function
+   */
+  subscribeToContractEvents(
+    handlers: SubscriptionHandlers<ContractEventSubscriptionResponse>,
+    filter: ContractEventFilter,
+    id?: number,
+    queryOverride?: string,
+  ): { unsubscribe: () => void; id: string } {
+    const subscriptionId = this.getNextId();
+
+    const query = queryOverride ?? CONTRACT_EVENTS_SUBSCRIPTION;
+    const variables: Record<string, unknown> = {
+      FILTER: filter,
+      ...(id !== undefined && { ID: id }),
+    };
+
+    log.debug(`Contract events subscription query:\n${query}`);
+    log.debug(`Contract events subscription variables:\n${JSON.stringify(variables, null, 2)}`);
+
+    const payload: GraphQLStartMessage = {
+      id: subscriptionId,
+      type: 'start',
+      payload: {
+        query,
+        variables,
+      },
+    };
+
+    this.handlersMap.set(subscriptionId, handlers as SubscriptionHandlers<unknown>);
+    this.getWs().send(JSON.stringify(payload));
+
+    return {
+      id: subscriptionId,
+      unsubscribe: () => {
+        const stopMessage: GraphQLStopMessage = { id: subscriptionId, type: 'stop' };
+        this.getWs().send(JSON.stringify(stopMessage));
+        this.handlersMap.delete(subscriptionId);
+      },
     };
   }
 

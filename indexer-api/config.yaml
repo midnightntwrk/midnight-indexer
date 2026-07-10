@@ -31,6 +31,9 @@ infra:
         batch_size: 20
       dust_generations:
         batch_size: 20
+        # Snapshots older than this many blocks are rejected; keep well below
+        # chain-indexer's ledger_state_retention.
+        max_snapshot_age: 500
       dust_ledger_events:
         batch_size: 20
       dust_nullifier_transactions:
