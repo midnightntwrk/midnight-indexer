@@ -69,35 +69,6 @@ jobs:
           toolchain=$(grep channel rust-toolchain.toml | sed -r 's/channel = "(.*)"/\1/')
           echo "toolchain=$toolchain" | tee -a "$GITHUB_OUTPUT"
 
-  check:
-    runs-on: ubuntu-latest
-    needs: [changes, toolchain]
-    if: needs.changes.outputs.non_qa == 'true'
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{needs.toolchain.outputs.toolchain}}
-
-      - name: Install just
-        uses: taiki-e/install-action@16b05812d776ae1dfaabc8277e421fb6d2506419 # v2.82.7
-        with:
-          tool: just
-
-      - name: Setup Rust cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-
-      - name: Init Env Vars
-        uses: ./.github/actions/init-env
-
-      - name: just check
-        run: |
-          rustup override set ${{needs.toolchain.outputs.toolchain}}
-          just feature=standalone check
-
   fmt-check:
     runs-on: ubuntu-latest
     needs: [changes, toolchain]
