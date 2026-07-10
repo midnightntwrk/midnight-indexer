@@ -764,9 +764,22 @@ subscription DustGenerationsSubscription(
         __typename
         ... on DustGenerationsItem {
             generationMtIndex
+            owner
+            collapsedMerkleTree {
+                startIndex
+                endIndex
+                update
+                protocolVersion
+            }
         }
         ... on DustGenerationsProgress {
             highestIndex
+            collapsedMerkleTree {
+                startIndex
+                endIndex
+                update
+                protocolVersion
+            }
         }
         ... on DustGenerationDtimeUpdateItem {
             generationMtIndex

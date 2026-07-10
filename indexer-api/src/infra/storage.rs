@@ -24,6 +24,9 @@ mod transaction;
 mod unshielded;
 mod wallet;
 
+#[cfg(all(test, feature = "cloud"))]
+mod block_hash_dust_sync_tests;
+
 use crate::domain;
 use chacha20poly1305::ChaCha20Poly1305;
 

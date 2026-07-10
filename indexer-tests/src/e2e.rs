@@ -147,7 +147,7 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_dust_ledger_events_subscription(&indexer_data, &ws_api_url)
         .await
         .context("test dust ledger events subscription")?;
-    test_dust_generations_subscription(&indexer_data, &ws_api_url)
+    test_dust_generations_subscription(&api_client, &api_url, &ws_api_url)
         .await
         .context("test dust generations subscription")?;
     test_shielded_nullifier_transactions_subscription(&ws_api_url)
@@ -1068,51 +1068,119 @@ async fn test_dust_ledger_events_subscription(
     Ok(())
 }
 
-/// Test the dustGenerations subscription with a fresh dust address. Uses
-/// `start_index > end_index` so the resolver's `cursor > end_index` check
-/// fires on first pass (cursor starts at start_index, no entries to advance
-/// it), yielding a single final `DustGenerationsProgress` event and closing.
-/// Verifies wire-format compatibility for all three union variants and the
-/// completion-event shape on the empty case.
+/// Test the re-scoped `dustGenerations` subscription (issue #1283): a
+/// consistent, tip-independent snapshot pinned to `blockHash`. Uses the
+/// all-zero dust address (owns no generations), so the stream is a single
+/// `DustGenerationsProgress` whose final `collapsedMerkleTree` covers the whole
+/// generation tree at the pinned block, making the response a pure function of
+/// the block. Asserts determinism at a fixed block, per-block pinning, and
+/// rejection of an unknown block hash.
 async fn test_dust_generations_subscription(
-    indexer_data: &IndexerData,
+    api_client: &Client,
+    api_url: &str,
     ws_api_url: &str,
 ) -> anyhow::Result<()> {
     let network_id: NetworkId = "undeployed".try_into().unwrap();
-    let dust_address = DustAddress(encode_address([0u8; 32], AddressType::Dust, &network_id));
-    let block_hash = indexer_data
-        .blocks
-        .last()
-        .expect("there is at least one indexed block")
+    let dust_address = encode_address([0u8; 32], AddressType::Dust, &network_id);
+
+    // Pin to the tip (fresh, ledger state loadable); its parent is a second,
+    // distinct pinned block for the per-block-pinning check.
+    let latest = send_query::<BlockQuery>(
+        api_client,
+        api_url,
+        block_query::Variables { block_offset: None },
+    )
+    .await?
+    .block
+    .expect("there is a latest block");
+    let latest_hash = latest.hash.to_owned();
+    let parent_hash = latest
+        .parent
+        .as_ref()
+        .expect("the tip has a parent")
         .hash
         .to_owned();
-    let variables = dust_generations_subscription::Variables {
-        dust_address,
-        block_hash,
-        dtime_cutoff_height: 0,
-    };
-    let events = graphql_ws_client::subscribe::<DustGenerationsSubscription>(ws_api_url, variables)
-        .await
-        .context("subscribe to dust generations")?
-        .map_ok(|data| data.dust_generations.to_json_value())
-        .take(1)
-        .take_until(sleep(Duration::from_secs(5)))
-        .try_collect::<Vec<_>>()
-        .await
-        .context("collect dust generations events from subscription")?;
 
+    // Collect the snapshot. For the all-zero address there are no owned entries
+    // or dtime updates, so the resolver emits exactly one event (the final
+    // `DustGenerationsProgress`); `take(1)` grabs it and drops the connection.
+    // We cannot collect to `Complete` because this WS client does not terminate
+    // the stream on the server's completion message. The timeout only guards
+    // against a hang (e.g. a block whose ledger state never loads).
+    async fn snapshot(
+        ws_api_url: &str,
+        dust_address: DustAddress,
+        block_hash: HexEncoded,
+    ) -> anyhow::Result<serde_json::Value> {
+        let variables = dust_generations_subscription::Variables {
+            dust_address,
+            block_hash,
+            dtime_cutoff_height: 0,
+        };
+        let stream =
+            graphql_ws_client::subscribe::<DustGenerationsSubscription>(ws_api_url, variables)
+                .await
+                .context("subscribe to dust generations")?
+                .map_ok(|data| data.dust_generations.to_json_value())
+                .take(1);
+        let events = tokio::time::timeout(Duration::from_secs(10), stream.try_collect::<Vec<_>>())
+            .await
+            .context("dust generations subscription did not complete in time")?
+            .context("collect dust generations events from subscription")?;
+        events
+            .into_iter()
+            .next()
+            .context("dust generations subscription yielded no event")
+    }
+
+    // Determinism (acceptance criterion #2): two reads at the same block,
+    // including the collapsed-tree `update` blob, must be identical.
+    let first = snapshot(
+        ws_api_url,
+        DustAddress(dust_address.clone()),
+        latest_hash.clone(),
+    )
+    .await?;
+    let second = snapshot(
+        ws_api_url,
+        DustAddress(dust_address.clone()),
+        latest_hash.clone(),
+    )
+    .await?;
     assert_eq!(
-        events.len(),
-        1,
-        "expected exactly one DustGenerationsProgress event"
+        first, second,
+        "dustGenerations at a fixed block must be deterministic"
     );
 
-    let event = &events[0];
     assert_eq!(
-        event.get("__typename").and_then(|v| v.as_str()),
+        first.get("__typename").and_then(|v| v.as_str()),
         Some("DustGenerationsProgress"),
-        "expected DustGenerationsProgress for an address with no owned generations, got: {event:?}"
+        "snapshot completes with a DustGenerationsProgress event, got: {first:?}"
     );
+    let latest_highest = first
+        .get("highestIndex")
+        .and_then(|v| v.as_i64())
+        .expect("progress carries highestIndex");
+
+    // Per-block pinning: the parent snapshot cannot be ahead of the tip's.
+    let parent = snapshot(ws_api_url, DustAddress(dust_address.clone()), parent_hash).await?;
+    let parent_highest = parent
+        .get("highestIndex")
+        .and_then(|v| v.as_i64())
+        .expect("parent progress carries highestIndex");
+    assert!(
+        parent_highest <= latest_highest,
+        "generation tree grows monotonically by block: parent {parent_highest} > tip \
+         {latest_highest}"
+    );
+
+    let unknown = snapshot(
+        ws_api_url,
+        DustAddress(dust_address),
+        [42u8; 32].hex_encode(),
+    )
+    .await;
+    assert!(unknown.is_err(), "an unknown block hash must be rejected");
 
     Ok(())
 }
