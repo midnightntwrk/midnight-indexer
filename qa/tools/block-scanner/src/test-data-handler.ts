@@ -841,7 +841,15 @@ async function isContractEventsSupported(graphqlUrl: string): Promise<boolean> {
       graphqlUrl,
       `query { __type(name: "ContractEvent") { name } }`,
     );
-    return body.data?.__type?.name === "ContractEvent";
+
+    // An HTTP 200 carrying GraphQL errors (or no data at all) is an unhealthy
+    // response, not evidence of absence — only a healthy introspection answer
+    // may decide between supported and unsupported.
+    if (body.errors || body.data === undefined) {
+      throw new Error(body.errors?.[0]?.message ?? "no data in probe response");
+    }
+
+    return body.data.__type?.name === "ContractEvent";
   }, "contract events surface probe");
 }
 
