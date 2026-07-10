@@ -15,15 +15,16 @@
 
 use crate::{
     e2e::graphql::{
-        BlockQuery, BlockSubscription, ConnectMutation, ContractActionQuery,
-        ContractActionSubscription, ContractEventQuery, ContractEventSubscription,
-        DParameterHistoryQuery, DisconnectMutation, DustCommitmentMerkleTreeUpdateQuery,
-        DustGenerationMerkleTreeUpdateQuery, DustGenerationStatusQuery, DustGenerationsQuery,
-        DustGenerationsSubscription, DustLedgerEventsSubscription,
-        DustNullifierTransactionsSubscription, ShieldedNullifierTransactionsSubscription,
-        ShieldedTransactionsSubscription, TermsAndConditionsHistoryQuery, TransactionsQuery,
-        UnshieldedTransactionsSubscription, ZswapLedgerEventsSubscription,
-        ZswapMerkleTreeCollapsedUpdateQuery, block_query,
+        BlockContractZswapStateQuery, BlockQuery, BlockSubscription, ConnectMutation,
+        ContractActionQuery, ContractActionSubscription, ContractEventQuery,
+        ContractEventSubscription, DParameterHistoryQuery, DisconnectMutation,
+        DustCommitmentMerkleTreeUpdateQuery, DustGenerationMerkleTreeUpdateQuery,
+        DustGenerationStatusQuery, DustGenerationsQuery, DustGenerationsSubscription,
+        DustLedgerEventsSubscription, DustNullifierTransactionsSubscription, ExecutionInputsQuery,
+        ShieldedNullifierTransactionsSubscription, ShieldedTransactionsSubscription,
+        TermsAndConditionsHistoryQuery, TransactionsQuery, UnshieldedTransactionsSubscription,
+        ZswapLedgerEventsSubscription, ZswapMerkleTreeCollapsedUpdateQuery,
+        block_contract_zswap_state_query, block_query,
         block_subscription::{
             self, BlockSubscriptionBlocks, BlockSubscriptionBlocksTransactions,
             BlockSubscriptionBlocksTransactionsContractActions,
@@ -40,9 +41,9 @@ use crate::{
         contract_event_subscription, disconnect_mutation, dust_commitment_merkle_tree_update_query,
         dust_generation_merkle_tree_update_query, dust_generation_status_query,
         dust_generations_query, dust_generations_subscription, dust_ledger_events_subscription,
-        dust_nullifier_transactions_subscription, shielded_nullifier_transactions_subscription,
-        shielded_transactions_subscription, transactions_query,
-        unshielded_transactions_subscription, zswap_ledger_events_subscription,
+        dust_nullifier_transactions_subscription, execution_inputs_query,
+        shielded_nullifier_transactions_subscription, shielded_transactions_subscription,
+        transactions_query, unshielded_transactions_subscription, zswap_ledger_events_subscription,
         zswap_merkle_tree_collapsed_update_query,
     },
     graphql_ws_client,
@@ -63,7 +64,7 @@ use std::{future::ready, time::Duration};
 use tokio::time::sleep;
 use unshielded_transactions_subscription::UnshieldedTransactionsSubscriptionUnshieldedTransactions as UnshieldedTransactions;
 
-const MAX_HEIGHT: usize = 32;
+const MAX_HEIGHT: usize = 72;
 
 /// Run comprehensive e2e tests for the Indexer. It is expected that the Indexer is set up with all
 /// needed dependencies, e.g. a Node, and its API is exposed securely (https and wss) or insecurely
@@ -136,6 +137,9 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_zswap_merkle_tree_collapsed_update_query(&indexer_data, &api_client, &api_url)
         .await
         .context("test zswap Merkle tree collapsed update query")?;
+    test_contract_zswap_state_query(&indexer_data, &api_client, &api_url)
+        .await
+        .context("test contract zswap state query")?;
 
     // Test subscriptions (the block subscription has already been tested above).
     test_contract_actions_subscription(&indexer_data, &ws_api_url)
@@ -855,6 +859,231 @@ async fn test_zswap_merkle_tree_collapsed_update_query(
     let response =
         send_query::<ZswapMerkleTreeCollapsedUpdateQuery>(api_client, api_url, variables).await;
     assert!(response.is_err());
+
+    Ok(())
+}
+
+/// Test the block.contractZswapState(address) query.
+///
+/// The chain fixture (generate_node_data.sh) deploys a `zswap-holder` contract and then calls
+/// `selfMint(1000)`, placing a real shielded coin in the contract's zswap tree.  The test
+/// asserts point-in-time semantics: empty state at the deploy block, null before the deploy,
+/// changed state after selfMint, and the same empty state as-of the pre-mint block.  It also
+/// exercises the CCC "execution inputs" composed read (block.hash + ledgerParameters +
+/// contractZswapState + contract.state in one request) and strict block-hash pinning.
+async fn test_contract_zswap_state_query(
+    indexer_data: &IndexerData,
+    api_client: &Client,
+    api_url: &str,
+) -> anyhow::Result<()> {
+    // Locate the selfMint ContractCall in the indexed fixture data.
+    let selfmint = indexer_data
+        .contract_actions
+        .iter()
+        .find(|ca| {
+            matches!(
+                &ca.on,
+                block_subscription::BlockSubscriptionBlocksTransactionsContractActionsOn::ContractCall(c)
+                    if c.entry_point == "selfMint"
+            )
+        })
+        .with_context(|| {
+            format!(
+                "selfMint ContractCall not found in the first {MAX_HEIGHT} blocks collected by \
+                 IndexerData — the zswap-holder deploy/selfMint must land within that window. If \
+                 the fixture drifted, regenerate it (generate_node_data.sh) and/or raise MAX_HEIGHT."
+            )
+        })?;
+
+    let zswap_address = selfmint.address.clone();
+    let selfmint_height = selfmint.transaction.block.height;
+    // Sanity: everything we assert on must be inside the collected 0..=MAX_HEIGHT window.
+    assert!(
+        selfmint_height <= MAX_HEIGHT as i64,
+        "selfMint at height {selfmint_height} is outside the collected window (MAX_HEIGHT = {MAX_HEIGHT})"
+    );
+
+    // Find the corresponding deploy action for the same address.
+    let deploy = indexer_data
+        .contract_actions
+        .iter()
+        .find(|ca| {
+            ca.address == zswap_address
+                && matches!(
+                    &ca.on,
+                    block_subscription::BlockSubscriptionBlocksTransactionsContractActionsOn::ContractDeploy
+                )
+        })
+        .context("zswap-holder ContractDeploy not found in fixture")?;
+
+    let deploy_height = deploy.transaction.block.height;
+    // A block before the deploy where the contract did not yet exist.
+    let pre_deploy_height = deploy_height - 1;
+    // A block after deploy but before selfMint (deploy block itself is safe to use as pre-mint).
+    let pre_mint_height = selfmint_height - 1;
+
+    // --- After deploy: contractZswapState must be present (non-null). ---
+    let empty_state = {
+        let vars = block_contract_zswap_state_query::Variables {
+            address: zswap_address.clone(),
+            block_offset: Some(block_contract_zswap_state_query::BlockOffset::Height(
+                deploy_height,
+            )),
+        };
+        send_query::<BlockContractZswapStateQuery>(api_client, api_url, vars)
+            .await?
+            .block
+            .context("deploy block returned null")?
+            .contract_zswap_state
+            .context("contractZswapState was null at deploy block — expected empty-but-present")?
+    };
+    assert!(
+        !empty_state.as_ref().is_empty(),
+        "empty state hex must be non-empty"
+    );
+
+    // --- Before deploy: contractZswapState must be null. ---
+    {
+        let vars = block_contract_zswap_state_query::Variables {
+            address: zswap_address.clone(),
+            block_offset: Some(block_contract_zswap_state_query::BlockOffset::Height(
+                pre_deploy_height,
+            )),
+        };
+        let state = send_query::<BlockContractZswapStateQuery>(api_client, api_url, vars)
+            .await?
+            .block
+            .context("pre-deploy block returned null")?
+            .contract_zswap_state;
+        assert!(
+            state.is_none(),
+            "contractZswapState should be null before deploy (height {pre_deploy_height}), got a value"
+        );
+    }
+
+    // --- Unknown address: contractZswapState must be null. ---
+    {
+        let vars = block_contract_zswap_state_query::Variables {
+            address: [0xde_u8; 32].hex_encode(),
+            block_offset: Some(block_contract_zswap_state_query::BlockOffset::Height(
+                selfmint_height,
+            )),
+        };
+        let state = send_query::<BlockContractZswapStateQuery>(api_client, api_url, vars)
+            .await?
+            .block
+            .context("block returned null for unknown-address query")?
+            .contract_zswap_state;
+        assert!(
+            state.is_none(),
+            "contractZswapState should be null for an unknown address"
+        );
+    }
+
+    // --- After selfMint: contractZswapState must differ from the empty deploy state. ---
+    let minted_state = {
+        let vars = block_contract_zswap_state_query::Variables {
+            address: zswap_address.clone(),
+            block_offset: Some(block_contract_zswap_state_query::BlockOffset::Height(
+                selfmint_height,
+            )),
+        };
+        send_query::<BlockContractZswapStateQuery>(api_client, api_url, vars)
+            .await?
+            .block
+            .context("selfMint block returned null")?
+            .contract_zswap_state
+            .context("contractZswapState was null after selfMint")?
+    };
+    assert_ne!(
+        minted_state, empty_state,
+        "contractZswapState must change after selfMint mints a coin to the contract"
+    );
+
+    // --- Point-in-time: as-of the pre-mint block the state must equal the empty deploy state. ---
+    {
+        let vars = block_contract_zswap_state_query::Variables {
+            address: zswap_address.clone(),
+            block_offset: Some(block_contract_zswap_state_query::BlockOffset::Height(
+                pre_mint_height,
+            )),
+        };
+        let as_of_pre_mint = send_query::<BlockContractZswapStateQuery>(api_client, api_url, vars)
+            .await?
+            .block
+            .context("pre-mint block returned null")?
+            .contract_zswap_state
+            .context("contractZswapState was null as-of pre-mint block")?;
+        assert_eq!(
+            as_of_pre_mint, empty_state,
+            "as-of pre-mint block {pre_mint_height}: expected empty deploy state"
+        );
+        assert_ne!(
+            as_of_pre_mint, minted_state,
+            "as-of pre-mint block {pre_mint_height}: must not equal the post-mint state"
+        );
+    }
+
+    // --- CCC execution inputs: composed read at the selfMint block. ---
+    let latest = {
+        let vars = execution_inputs_query::Variables {
+            address: zswap_address.clone(),
+            block_offset: Some(execution_inputs_query::BlockOffset::Height(selfmint_height)),
+        };
+        send_query::<ExecutionInputsQuery>(api_client, api_url, vars).await?
+    };
+    let latest_block = latest.block.context("execution-inputs: block was null")?;
+    let latest_contract = latest
+        .contract
+        .context("execution-inputs: contract was null")?;
+    assert!(
+        !latest_block.hash.as_ref().is_empty(),
+        "execution-inputs: block.hash missing"
+    );
+    assert!(
+        !latest_block.ledger_parameters.as_ref().is_empty(),
+        "execution-inputs: ledgerParameters missing"
+    );
+    assert!(
+        !latest_contract.state.as_ref().is_empty(),
+        "execution-inputs: contract.state missing"
+    );
+    assert_eq!(
+        latest_block.contract_zswap_state.as_ref(),
+        Some(&minted_state),
+        "execution-inputs: contractZswapState did not match the post-mint state"
+    );
+
+    // --- Strict hash-pinning: anchor both block and contract to the same hash. ---
+    {
+        let pinned_hash = latest_block.hash.clone();
+        let vars = execution_inputs_query::Variables {
+            address: zswap_address.clone(),
+            block_offset: Some(execution_inputs_query::BlockOffset::Hash(
+                pinned_hash.clone(),
+            )),
+        };
+        let pinned = send_query::<ExecutionInputsQuery>(api_client, api_url, vars).await?;
+        let pinned_block = pinned
+            .block
+            .context("execution-inputs pinned: block(hash) was null")?;
+        let pinned_contract = pinned
+            .contract
+            .context("execution-inputs pinned: contract(hash) was null")?;
+        assert_eq!(
+            pinned_block.hash, pinned_hash,
+            "execution-inputs pinned: block.hash did not match the requested offset"
+        );
+        assert_eq!(
+            pinned_block.contract_zswap_state.as_ref(),
+            Some(&minted_state),
+            "execution-inputs pinned: contractZswapState did not match"
+        );
+        assert_eq!(
+            pinned_contract.state, latest_contract.state,
+            "execution-inputs pinned: contract.state did not match"
+        );
+    }
 
     Ok(())
 }
@@ -1688,4 +1917,20 @@ mod graphql {
         response_derives = "Debug, Clone, Serialize"
     )]
     pub struct TermsAndConditionsHistoryQuery;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v4.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct BlockContractZswapStateQuery;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v4.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct ExecutionInputsQuery;
 }
