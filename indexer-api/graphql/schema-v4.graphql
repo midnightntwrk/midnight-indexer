@@ -78,6 +78,215 @@ input BlockOffset @oneOf {
 	height: Int
 }
 
+"""
+Per-address bridge balance.
+"""
+type BridgeBalance @beta {
+	"""
+	Sum of UserTransfer amounts for this address, gross/pre-fee (16-byte big-endian u128).
+	"""
+	deposited: HexEncoded!
+	"""
+	Sum of bridge claim amounts for this address, net/post-fee (16-byte big-endian u128).
+	"""
+	claimed: HexEncoded!
+	"""
+	Remaining claimable, read from the ledger's `bridge_receiving` map (net, zero once fully
+	claimed). 16-byte big-endian u128.
+	"""
+	balance: HexEncoded!
+}
+
+"""
+A claim of bridged NIGHT: a regular `ClaimRewards` transaction whose `ClaimKind` is
+`CardanoBridge`. Structurally a regular transaction, surfaced as its own type so consumers can
+tell it apart and read the bridged `recipient` and `amount` directly.
+"""
+type BridgeClaimTransaction implements Transaction @beta {
+	"""
+	The transaction ID.
+	"""
+	id: Int!
+	"""
+	The hex-encoded transaction hash.
+	"""
+	hash: HexEncoded!
+	"""
+	The protocol version.
+	"""
+	protocolVersion: Int!
+	"""
+	The hex-encoded serialized transaction content.
+	"""
+	raw: HexEncoded!
+	"""
+	The Midnight address the bridged NIGHT is claimed to.
+	"""
+	recipient: HexEncoded!
+	"""
+	The claimed amount as 16-byte big-endian u128.
+	"""
+	amount: HexEncoded!
+	"""
+	The block for this transaction.
+	"""
+	block: Block!
+	"""
+	The contract actions for this transaction.
+	"""
+	contractActions: [ContractAction!]!
+	"""
+	Unshielded UTXOs created by this transaction.
+	"""
+	unshieldedCreatedOutputs: [UnshieldedUtxo!]!
+	"""
+	Unshielded UTXOs spent (consumed) by this transaction.
+	"""
+	unshieldedSpentOutputs: [UnshieldedUtxo!]!
+	"""
+	Zswap ledger events of this transaction.
+	"""
+	zswapLedgerEvents: [ZswapLedgerEvent!]!
+	"""
+	Dust ledger events of this transaction.
+	"""
+	dustLedgerEvents: [DustLedgerEvent!]!
+}
+
+"""
+Polymorphic c2m-bridge event. Each concrete variant exposes its own additional fields.
+"""
+interface BridgeEvent {
+	id: Int!
+	blockHeight: Int!
+	midnightTxHash: HexEncoded!
+}
+
+"""
+GraphQL discriminator for bridge events.
+"""
+enum BridgeEventVariant {
+	USER_TRANSFER
+	RESERVE_TRANSFER
+	INVALID_TRANSFER
+	UNAPPROVED_TRANSFER
+	SUBMINIMAL_FLUSH_TRANSFER
+}
+
+"""
+Malformed bridge metadata. NIGHT redirected to treasury.
+"""
+type BridgeInvalidTransfer implements BridgeEvent @beta {
+	id: Int!
+	blockHeight: Int!
+	midnightTxHash: HexEncoded!
+	cardanoTxHash: HexEncoded!
+	amount: HexEncoded!
+}
+
+"""
+Aggregate bridge inflows snapshot.
+"""
+type BridgePoolSummary @beta {
+	"""
+	Cumulative ReserveTransfer amount (16-byte big-endian u128).
+	"""
+	reserveTotal: HexEncoded!
+	treasuryByReason: [BridgeTreasuryAggregate!]!
+	"""
+	Sum of `count` from SubminimalFlushTransfer events.
+	"""
+	subminimumTxCount: Int!
+	lastEventBlockHeight: Int
+}
+
+"""
+Pair of latest bridge event and refreshed pool summary, emitted by `bridgePoolUpdates`.
+"""
+type BridgePoolUpdate @beta {
+	"""
+	The triggering event, or None for the initial snapshot on subscribe.
+	"""
+	newEvent: BridgeEvent
+	pool: BridgePoolSummary!
+}
+
+"""
+Reserve top-up. NIGHT credited to the protocol Reserve pool.
+"""
+type BridgeReserveTransfer implements BridgeEvent @beta {
+	id: Int!
+	blockHeight: Int!
+	midnightTxHash: HexEncoded!
+	cardanoTxHash: HexEncoded!
+	amount: HexEncoded!
+}
+
+"""
+Aggregated subminimum transfers flushed to treasury.
+"""
+type BridgeSubminimalFlushTransfer implements BridgeEvent @beta {
+	id: Int!
+	blockHeight: Int!
+	midnightTxHash: HexEncoded!
+	amount: HexEncoded!
+	"""
+	Number of subminimum Cardano txs aggregated into this flush.
+	"""
+	count: Int!
+}
+
+"""
+Treasury inflow aggregate by reason.
+"""
+type BridgeTreasuryAggregate @beta {
+	reason: BridgeTreasuryReason!
+	"""
+	Cumulative amount (16-byte big-endian u128).
+	"""
+	total: HexEncoded!
+	count: Int!
+}
+
+"""
+GraphQL discriminator for treasury redirection reasons.
+"""
+enum BridgeTreasuryReason {
+	INVALID
+	UNAPPROVED
+	SUBMINIMAL_FLUSH
+}
+
+"""
+User deposit not in `ApprovedTransactions` at observation time. NIGHT redirected to treasury.
+"""
+type BridgeUnapprovedTransfer implements BridgeEvent @beta {
+	id: Int!
+	blockHeight: Int!
+	midnightTxHash: HexEncoded!
+	cardanoTxHash: HexEncoded!
+	amount: HexEncoded!
+	"""
+	The recipient parsed from metadata (would have received NIGHT if approved).
+	"""
+	recipient: HexEncoded!
+}
+
+"""
+Approved user deposit. NIGHT credited to `recipient`.
+"""
+type BridgeUserTransfer implements BridgeEvent @beta {
+	id: Int!
+	blockHeight: Int!
+	midnightTxHash: HexEncoded!
+	cardanoTxHash: HexEncoded!
+	"""
+	Amount as 8-byte big-endian u64 NIGHT (in stars).
+	"""
+	amount: HexEncoded!
+	recipient: HexEncoded!
+}
+
 scalar CardanoRewardAddress
 
 """
@@ -834,6 +1043,32 @@ type Query {
 	Get stake distribution with search and ordering.
 	"""
 	stakeDistribution(limit: Int, offset: Int, search: String, orderByStakeDesc: Boolean): [StakeShare!]!
+	"""
+	List c2m-bridge events with optional filters.
+	"""
+	bridgeEvents(recipient: HexEncoded, variant: BridgeEventVariant, blockHeightFrom: Int, blockHeightTo: Int, offset: Int, limit: Int): [BridgeEvent!]! @beta
+	"""
+	Get the c2m-bridge balance summary (deposited, claimed, balance) for an address.
+	"""
+	bridgeBalance(address: HexEncoded!): BridgeBalance! @beta
+	"""
+	Convenience query for a recipient's deposit history. By default returns only successful
+	`UserTransfer` events; pass `includeUnapproved: true` to also include `UnapprovedTransfer`.
+	"""
+	bridgeDeposits(recipient: HexEncoded!, includeUnapproved: Boolean, offset: Int, limit: Int): [BridgeEvent!]! @beta
+	"""
+	List Reserve top-up events (ReserveTransfer), optionally bounded by block height.
+	"""
+	bridgeReserveInflows(blockHeightFrom: Int, blockHeightTo: Int, offset: Int, limit: Int): [BridgeEvent!]! @beta
+	"""
+	List treasury-redirected events (Invalid, Unapproved, SubminimalFlush), optionally
+	filtered by reason and block range.
+	"""
+	bridgeTreasuryInflows(reason: BridgeTreasuryReason, blockHeightFrom: Int, blockHeightTo: Int, offset: Int, limit: Int): [BridgeEvent!]! @beta
+	"""
+	Aggregate snapshot of bridge inflows to protocol pools (Reserve and Treasury).
+	"""
+	bridgePoolSummary(atBlock: Int): BridgePoolSummary! @beta
 }
 
 """
@@ -1172,6 +1407,26 @@ type Subscription {
 	omitted.
 	"""
 	blocks(offset: BlockOffset): Block!
+	"""
+	Subscribe to c2m-bridge events.
+	
+	Backfills events with id > `from` then live-tails new events. Filters apply across both
+	phases.
+	"""
+	bridgeEvents(from: Int, recipient: HexEncoded, variant: BridgeEventVariant): BridgeEvent! @beta
+	"""
+	Subscribe to bridge pool updates. Emits a snapshot of the pool summary alongside each
+	pool-affecting event (Reserve, Invalid, Unapproved, SubminimalFlush). Useful for
+	observability dashboards.
+	"""
+	bridgePoolUpdates: BridgePoolUpdate! @beta
+	"""
+	Subscribe to a recipient's bridge balance. Emits the current balance on subscribe and
+	re-emits whenever a bridge event for the recipient indexes or the recipient's unshielded
+	UTXOs change (a claim emits no bridge event, but it creates unshielded UTXOs for
+	the recipient).
+	"""
+	bridgeBalance(address: HexEncoded!): BridgeBalance! @beta
 	"""
 	Subscribe to contract actions with the given address starting at the given offset or at the
 	latest block if the offset is omitted.

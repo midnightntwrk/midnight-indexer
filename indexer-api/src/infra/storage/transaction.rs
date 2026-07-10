@@ -13,7 +13,7 @@
 
 use crate::{
     domain::{
-        RegularTransaction, SystemTransaction, Transaction,
+        RegularTransaction, SystemTransaction, Transaction, bridge::BridgeClaim,
         storage::transaction::TransactionStorage,
     },
     infra::storage::Storage,
@@ -25,13 +25,78 @@ use indexer_common::{
     domain::{
         SerializedTransactionIdentifier, TransactionHash, TransactionVariant, UnshieldedAddress,
     },
+    infra::sqlx::U128BeBytes,
     stream::flatten_chunks,
 };
 use indoc::indoc;
-use sqlx::{FromRow, Row, types::Uuid};
 #[cfg(feature = "standalone")]
-use sqlx::{QueryBuilder, Sqlite};
-use std::num::NonZeroU32;
+use sqlx::Sqlite;
+use sqlx::{FromRow, QueryBuilder, Row, types::Uuid};
+use std::{collections::HashMap, num::NonZeroU32};
+
+#[cfg(feature = "cloud")]
+type Db = sqlx::Postgres;
+#[cfg(feature = "standalone")]
+type Db = sqlx::Sqlite;
+
+/// Build a `BridgeClaim` from a `bridge_claims` row selecting `recipient` and `amount`.
+fn make_bridge_claim(row: &<Db as sqlx::Database>::Row) -> Result<BridgeClaim, sqlx::Error> {
+    let recipient = row.try_get::<Vec<u8>, _>("recipient")?;
+    let amount = row.try_get::<U128BeBytes, _>("amount")?;
+    Ok(BridgeClaim {
+        recipient: UnshieldedAddress::try_from(recipient)
+            .map_err(|error| sqlx::Error::Decode(Box::new(error)))?,
+        amount: amount.into(),
+    })
+}
+
+impl Storage {
+    /// Attach bridge-claim payloads to any regular transactions that are CardanoBridge claims, by
+    /// looking them up in `bridge_claims` in a single batched query. Non-claim transactions are
+    /// left untouched. Used by the `Vec`-returning read paths.
+    async fn attach_bridge_claims<'a>(
+        &self,
+        transactions: impl IntoIterator<Item = &'a mut Transaction>,
+    ) -> Result<(), sqlx::Error> {
+        let regulars = transactions
+            .into_iter()
+            .filter_map(|transaction| match transaction {
+                Transaction::Regular(regular) => Some(regular),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if regulars.is_empty() {
+            return Ok(());
+        }
+
+        let mut builder = QueryBuilder::<Db>::new(
+            "SELECT transaction_id, recipient, amount FROM bridge_claims WHERE transaction_id IN (",
+        );
+        let mut separated = builder.separated(", ");
+        for regular in regulars.iter() {
+            separated.push_bind(regular.id as i64);
+        }
+        builder.push(")");
+
+        let claims = builder
+            .build()
+            .fetch_all(&*self.pool)
+            .await?
+            .iter()
+            .map(|row| {
+                let transaction_id = row.try_get::<i64, _>("transaction_id")? as u64;
+                Ok((transaction_id, make_bridge_claim(row)?))
+            })
+            .collect::<Result<HashMap<_, _>, sqlx::Error>>()?;
+
+        for regular in regulars {
+            let id = regular.id;
+            regular.bridge_claim = claims.get(&id).cloned().map(Box::new);
+        }
+
+        Ok(())
+    }
+}
 
 impl TransactionStorage for Storage {
     #[trace(properties = { "ids": "{ids:?}" })]
@@ -95,7 +160,7 @@ impl TransactionStorage for Storage {
         let ids = ids.iter().map(|id| *id as i64).collect::<Vec<_>>();
 
         #[cfg(feature = "cloud")]
-        let transactions = sqlx::query(query)
+        let mut transactions = sqlx::query(query)
             .bind(ids)
             .fetch(&*self.pool)
             .map_ok(make_transaction)
@@ -173,6 +238,8 @@ impl TransactionStorage for Storage {
             }
         }
 
+        self.attach_bridge_claims(transactions.iter_mut()).await?;
+
         Ok(transactions)
     }
 
@@ -183,7 +250,10 @@ impl TransactionStorage for Storage {
         if ids.is_empty() {
             return Ok(vec![]);
         }
-        self.fetch_transactions_by_block_ids(ids).await
+        let mut transactions = self.fetch_transactions_by_block_ids(ids).await?;
+        self.attach_bridge_claims(transactions.iter_mut().map(|(_, transaction)| transaction))
+            .await?;
+        Ok(transactions)
     }
 
     #[trace(properties = { "hash": "{hash}" })]
@@ -312,6 +382,8 @@ impl TransactionStorage for Storage {
             }
         }
 
+        self.attach_bridge_claims(transactions.iter_mut()).await?;
+
         Ok(transactions)
     }
 
@@ -392,6 +464,8 @@ impl TransactionStorage for Storage {
                     get_identifiers_for_transaction(transaction.id, &self.pool).await?;
             }
         }
+
+        self.attach_bridge_claims(transactions.iter_mut()).await?;
 
         Ok(transactions)
     }
@@ -760,6 +834,8 @@ impl Storage {
                     get_identifiers_for_transaction(transaction.id, &self.pool).await?;
             }
         }
+
+        self.attach_bridge_claims(transactions.iter_mut()).await?;
 
         Ok(transactions)
     }

@@ -12,6 +12,7 @@
 // limitations under the License.
 
 pub mod block;
+pub mod bridge;
 pub mod contract_action;
 pub mod dust;
 pub mod dust_generations;
@@ -25,8 +26,8 @@ pub mod unshielded;
 pub mod wallet;
 
 use crate::domain::storage::{
-    block::BlockStorage, contract_action::ContractActionStorage, dust::DustStorage,
-    dust_generations::DustGenerationsStorage, ledger_events::LedgerEventStorage,
+    block::BlockStorage, bridge::BridgeStorage, contract_action::ContractActionStorage,
+    dust::DustStorage, dust_generations::DustGenerationsStorage, ledger_events::LedgerEventStorage,
     ledger_state::LedgerStateStorage, shielded_nullifiers::ShieldedNullifiersStorage,
     spo::SpoStorage, system_parameters::SystemParametersStorage, transaction::TransactionStorage,
     unshielded::UnshieldedUtxoStorage, wallet::WalletStorage,
@@ -37,6 +38,7 @@ use crate::domain::storage::{
 pub trait Storage
 where
     Self: BlockStorage
+        + BridgeStorage
         + ContractActionStorage
         + DustStorage
         + DustGenerationsStorage
