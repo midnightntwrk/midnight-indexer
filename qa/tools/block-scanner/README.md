@@ -104,7 +104,7 @@ The scanner creates:
   - `blocks.jsonc` — genesis/latest and up to 100 recent block hashes
   - `transactions.jsonc` — regular and system transaction hashes/identifiers
   - `contract-actions.jsonc` — contracts having both a deploy and a call, with per-action block references
-  - `contract-events.jsonc` — contracts that emitted public contract events (MIP-0002), with the distinct event types each emitted. The contract addresses discovered in the scan are enriched via the indexer's `contractEvents` query; on environments whose indexer predates that query, the file is left untouched so a curated fixture is not destroyed. Because contract addresses do not survive a chain reset, re-running `bun run generate:data` after a reset refreshes this file (and the others) to the live chain.
+  - `contract-events.jsonc` — contracts that emitted public contract events (MIP-0002), with the distinct event types each emitted. The contract addresses discovered in the scan are enriched via the indexer's `contractEvents` query; a schema probe decides support, so on environments whose indexer predates that query the file is left untouched (a curated fixture is not destroyed), while transient query failures are retried and then fail the run rather than being mistaken for missing support. Because contract addresses do not survive a chain reset, re-running `bun run generate:data` after a reset refreshes this file (and the others) to the live chain.
 
 ## Troubleshooting
 

@@ -747,68 +747,146 @@ function updateContractDataFile(
   }
 }
 
+// Retry policy for the GraphQL requests issued during data generation
+const GRAPHQL_MAX_ATTEMPTS = 3;
+const GRAPHQL_RETRY_DELAY_MS = 1_000;
+
+/**
+ * Sends a GraphQL POST request and returns the parsed body.
+ *
+ * @param graphqlUrl - The indexer GraphQL HTTP endpoint
+ * @param query - The GraphQL document to send
+ * @param variables - Optional variables for the document
+ * @returns The parsed GraphQL response body
+ * @throws on transport errors, timeouts, and non-2xx responses
+ */
+async function postGraphQL<T>(
+  graphqlUrl: string,
+  query: string,
+  variables?: Record<string, unknown>,
+): Promise<{ data?: T; errors?: { message: string }[] }> {
+  const response = await fetch(graphqlUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, variables }),
+    signal: AbortSignal.timeout(10_000),
+  });
+
+  if (!response.ok) {
+    throw new Error(`GraphQL request got HTTP ${response.status}`);
+  }
+
+  return (await response.json()) as {
+    data?: T;
+    errors?: { message: string }[];
+  };
+}
+
+/**
+ * Runs an async operation with retries and throws once the attempts are
+ * exhausted, so a persistent failure surfaces instead of degrading silently.
+ *
+ * @param operation - The operation to run
+ * @param label - Label used in warnings and the final error
+ * @returns The operation's result
+ * @throws TestDataHandlerError when all attempts fail
+ */
+async function withRetries<T>(
+  operation: () => Promise<T>,
+  label: string,
+): Promise<T> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= GRAPHQL_MAX_ATTEMPTS; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      console.warn(
+        `[WARN ] - ${label} failed (attempt ${attempt}/${GRAPHQL_MAX_ATTEMPTS}): ${String(error)}`,
+      );
+      if (attempt < GRAPHQL_MAX_ATTEMPTS) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, GRAPHQL_RETRY_DELAY_MS),
+        );
+      }
+    }
+  }
+
+  throw new TestDataHandlerError(
+    `${label} failed after ${GRAPHQL_MAX_ATTEMPTS} attempts`,
+    { originalError: lastError },
+  );
+}
+
+/**
+ * Probes whether the deployed indexer exposes the public contract-events
+ * surface, mirroring qa/tests utils/indexer/contract-events-support.ts: a
+ * healthy schema response that lacks the ContractEvent type returns false,
+ * while a probe that cannot get a healthy answer is retried and then throws —
+ * a transient blip must not be indistinguishable from "feature absent", or a
+ * stale fixture would silently survive a refresh.
+ *
+ * @param graphqlUrl - The indexer GraphQL HTTP endpoint
+ * @returns true when the ContractEvent type is present in the schema
+ * @throws if the surface cannot be determined after retries
+ */
+async function isContractEventsSupported(graphqlUrl: string): Promise<boolean> {
+  return withRetries(async () => {
+    const body = await postGraphQL<{ __type: { name: string } | null }>(
+      graphqlUrl,
+      `query { __type(name: "ContractEvent") { name } }`,
+    );
+    return body.data?.__type?.name === "ContractEvent";
+  }, "contract events surface probe");
+}
+
 /**
  * Queries the indexer for the contract events emitted by a single contract
  * address and returns the distinct event types (ContractEventType enum
- * values), or null when the query fails (e.g. the deployed indexer predates
- * the contractEvents query).
+ * values). Only called once the contract-events surface is known to be
+ * present, so GraphQL errors and transport failures are real failures here:
+ * they are retried and then thrown, never treated as "no events".
  *
  * @param graphqlUrl - The indexer GraphQL HTTP endpoint
  * @param address - The contract address to query events for
- * @returns Distinct event types, or null if the query is unsupported/failed
+ * @returns Distinct event types emitted by the contract
+ * @throws TestDataHandlerError when the query keeps failing
  */
 async function fetchContractEventTypes(
   graphqlUrl: string,
   address: string,
-): Promise<string[] | null> {
+): Promise<string[]> {
   const query = `query ContractEventsForAddress($ADDRESS: HexEncoded!) {
     contractEvents(filter: { contractAddress: $ADDRESS }, limit: 100) {
       __typename
     }
   }`;
 
-  try {
-    const response = await fetch(graphqlUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query, variables: { ADDRESS: address } }),
-      signal: AbortSignal.timeout(10_000),
-    });
-
-    const body = (await response.json()) as {
-      data?: { contractEvents?: { __typename: string }[] };
-      errors?: { message: string }[];
-    };
+  const events = await withRetries(async () => {
+    const body = await postGraphQL<{
+      contractEvents?: { __typename: string }[];
+    }>(graphqlUrl, query, { ADDRESS: address });
 
     if (body.errors || !body.data?.contractEvents) {
-      // Validation errors here mean the deployed schema has no contractEvents
-      // query (pre contract-events indexer); anything else is equally
-      // non-actionable for data generation, so both degrade to "unsupported".
-      console.info(
-        `[INFO ] - contractEvents query not usable for ${address}: ` +
-          `${body.errors?.[0]?.message ?? "no data in response"}`,
-      );
-      return null;
+      throw new Error(body.errors?.[0]?.message ?? "no data in response");
     }
 
-    const eventTypes = body.data.contractEvents.map((event) => {
-      const eventType = EVENT_TYPENAME_TO_EVENT_TYPE[event.__typename];
-      if (!eventType) {
-        console.warn(
-          `[WARN ] - Unknown contract event typename "${event.__typename}" ` +
-            `for ${address}; add it to EVENT_TYPENAME_TO_EVENT_TYPE`,
-        );
-      }
-      return eventType ?? event.__typename;
-    });
+    return body.data.contractEvents;
+  }, `contractEvents query for ${address}`);
 
-    return [...new Set(eventTypes)];
-  } catch (error) {
-    console.warn(
-      `[WARN ] - contractEvents query failed for ${address}: ${String(error)}`,
-    );
-    return null;
-  }
+  const eventTypes = events.map((event) => {
+    const eventType = EVENT_TYPENAME_TO_EVENT_TYPE[event.__typename];
+    if (!eventType) {
+      console.warn(
+        `[WARN ] - Unknown contract event typename "${event.__typename}" ` +
+          `for ${address}; add it to EVENT_TYPENAME_TO_EVENT_TYPE`,
+      );
+    }
+    return eventType ?? event.__typename;
+  });
+
+  return [...new Set(eventTypes)];
 }
 
 /**
@@ -819,9 +897,11 @@ async function fetchContractEventTypes(
  * persisted event is listed together with the distinct event types it
  * emitted. Contracts without events are omitted.
  *
- * When the deployed indexer does not support the contractEvents query (the
- * first probe returns null), the file is left untouched so an existing
- * curated fixture is not destroyed.
+ * When the deployed indexer does not support the contract-events surface
+ * (determined by an explicit schema probe), the file is left untouched so an
+ * existing curated fixture is not destroyed. Transient query failures are
+ * retried and then fail the generation run instead of being mistaken for
+ * missing support — a stale fixture must not silently survive a refresh.
  *
  * @param destinationPath - Path to the test data folder
  * @param sourceBlockData - The data containing the scanned blocks
@@ -858,22 +938,23 @@ async function updateContractEventsDataFile(
     }
 
     const graphqlUrl = `${INDEXER_HTTP_URL}/api/${INDEXER_API_VERSION}/graphql`;
+
+    if (!(await isContractEventsSupported(graphqlUrl))) {
+      console.info(
+        "[INFO ] - contract-events surface not present on this environment; " +
+          "leaving any existing contract events data file untouched",
+      );
+      return;
+    }
+
     console.info(
       `[INFO ] - Querying contract events for ${addresses.size} contract(s)`,
     );
 
     const contractsWithEvents: ContractWithEvents[] = [];
-    let unsupported = false;
 
     for (const address of addresses) {
       const eventTypes = await fetchContractEventTypes(graphqlUrl, address);
-
-      if (eventTypes === null) {
-        // First failure decides: if the query is unsupported on this
-        // environment, probing the remaining addresses is pointless.
-        unsupported = true;
-        break;
-      }
 
       if (eventTypes.length > 0) {
         contractsWithEvents.push({
@@ -881,14 +962,6 @@ async function updateContractEventsDataFile(
           "event-types": eventTypes,
         });
       }
-    }
-
-    if (unsupported) {
-      console.info(
-        "[INFO ] - contractEvents query unsupported on this environment; " +
-          "leaving any existing contract events data file untouched",
-      );
-      return;
     }
 
     if (contractsWithEvents.length === 0) {
