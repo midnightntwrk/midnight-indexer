@@ -859,6 +859,7 @@ async function isContractEventsSupported(graphqlUrl: string): Promise<boolean> {
  * @param address - The contract address to query events for
  * @returns Distinct event types emitted by the contract
  * @throws TestDataHandlerError when a page query keeps failing
+ * @throws ValidationError on a typename missing from EVENT_TYPENAME_TO_EVENT_TYPE
  */
 async function fetchContractEventTypes(
   graphqlUrl: string,
@@ -892,12 +893,16 @@ async function fetchContractEventTypes(
     for (const event of page) {
       const eventType = EVENT_TYPENAME_TO_EVENT_TYPE[event.__typename];
       if (!eventType) {
-        console.warn(
-          `[WARN ] - Unknown contract event typename "${event.__typename}" ` +
-            `for ${address}; add it to EVENT_TYPENAME_TO_EVENT_TYPE`,
+        // Fail closed: writing a raw typename would put a non-enum value into
+        // a fixture whose consumers only understand ContractEventType values.
+        throw new ValidationError(
+          `Unknown contract event typename "${event.__typename}" for ` +
+            `${address}; add it to EVENT_TYPENAME_TO_EVENT_TYPE before ` +
+            `regenerating contract-events data`,
+          { address, typename: event.__typename },
         );
       }
-      eventTypes.add(eventType ?? event.__typename);
+      eventTypes.add(eventType);
     }
 
     if (page.length < CONTRACT_EVENTS_PAGE_SIZE) {
