@@ -25,10 +25,10 @@
 //!   this bounding is the storage foundation of the subscription's
 //!   determinism guarantee (issue #1283 acceptance criterion #2).
 //!
-//! These do NOT verify the cryptographic root match against
-//! `dustGenerationMerkleTreeRoot` (acceptance criterion #1) — that needs a
-//! real ledger state and belongs in an e2e test with dust-generating
-//! fixtures. See the investigation notes on #1283.
+//! The cryptographic root match against `dustGenerationMerkleTreeRoot`
+//! (acceptance criterion #1) is covered separately — by the unit test in
+//! `indexer-common` (`dust_generation_root_from_collapsed_update_matches_tree_root`)
+//! and end-to-end in `indexer-tests`.
 //!
 //! NOTE: cloud (PostgreSQL) only. The `get_dust_generation_dtime_updates`
 //! query has a separate SQLite implementation (`json_extract`/`unhex`/`iif`
@@ -231,35 +231,27 @@ async fn insert_dtime_event(
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn get_ledger_state_at_returns_the_row_for_a_known_hash() -> Result<(), Box<dyn StdError>> {
+async fn get_ledger_state_at_resolves_by_hash() -> Result<(), Box<dyn StdError>> {
     let (_container, pool, storage) = setup().await?;
 
     let hash_a = [0xa1u8; 32];
-    let hash_b = [0xb2u8; 32];
     let key_a = b"ledger-state-key-a";
     let block_a = insert_block(&pool, 1, &hash_a, key_a).await?;
-    insert_block(&pool, 2, &hash_b, b"ledger-state-key-b").await?;
+    insert_block(&pool, 2, &[0xb2u8; 32], b"ledger-state-key-b").await?;
 
-    let result = storage.get_ledger_state_at(ByteArray(hash_a)).await?;
-
-    let (block_id, height, protocol_version, ledger_state_key) =
-        result.expect("known block hash resolves to a row");
+    // Known hash resolves to that block's row.
+    let (block_id, height, protocol_version, ledger_state_key) = storage
+        .get_ledger_state_at(ByteArray(hash_a))
+        .await?
+        .expect("known block hash resolves to a row");
     assert_eq!(block_id, block_a as u64);
     assert_eq!(height, 1);
     assert_eq!(protocol_version, ProtocolVersion::V2_0(2_000_000));
     assert_eq!(ledger_state_key.0, key_a);
 
-    Ok(())
-}
-
-#[tokio::test]
-async fn get_ledger_state_at_returns_none_for_an_unknown_hash() -> Result<(), Box<dyn StdError>> {
-    let (_container, pool, storage) = setup().await?;
-    insert_block(&pool, 1, &[0xa1u8; 32], b"key").await?;
-
-    // This drives the "unknown block hash" client error in the resolver.
-    let result = storage.get_ledger_state_at(ByteArray([0xffu8; 32])).await?;
-    assert!(result.is_none(), "unknown block hash must resolve to None");
+    // Unknown hash resolves to None (drives the resolver's "unknown block hash" client error).
+    let unknown = storage.get_ledger_state_at(ByteArray([0xffu8; 32])).await?;
+    assert!(unknown.is_none(), "unknown block hash must resolve to None");
 
     Ok(())
 }
@@ -278,17 +270,20 @@ async fn get_dust_generation_entries_orders_filters_and_skips_legacy_rows()
     let block = insert_block(&pool, 1, &[0x01u8; 32], b"key").await?;
     let tx = insert_transaction(&pool, block, &[0x11u8; 32]).await?;
 
-    // Owner A at generation indices 0, 2, 5 (deliberately out of insert order).
+    // Owner A at generation indices 0, 2, 5, 7 (deliberately out of insert order).
     insert_generation_info(&pool, &owner_a, &[10u8; 32], 100, Some(5), None, tx).await?;
     insert_generation_info(&pool, &owner_a, &[11u8; 32], 100, Some(0), None, tx).await?;
     insert_generation_info(&pool, &owner_a, &[12u8; 32], 100, Some(2), None, tx).await?;
+    insert_generation_info(&pool, &owner_a, &[14u8; 32], 100, Some(7), None, tx).await?;
     // Owner B — must be excluded.
     insert_generation_info(&pool, &owner_b, &[20u8; 32], 100, Some(1), None, tx).await?;
     // Legacy row for owner A with NULL generation_index — must be skipped.
     insert_generation_info(&pool, &owner_a, &[13u8; 32], 100, None, None, tx).await?;
 
+    // Batch size 2 forces the internal cursor loop to page multiple times.
+    let batch = NonZeroU32::new(2).unwrap();
     let entries: Vec<_> = storage
-        .get_dust_generation_entries(&owner_a, 0, 5, BATCH)
+        .get_dust_generation_entries(&owner_a, 0, 7, batch)
         .await
         .try_collect()
         .await?;
@@ -296,14 +291,14 @@ async fn get_dust_generation_entries_orders_filters_and_skips_legacy_rows()
     let indices: Vec<u64> = entries.iter().map(|e| e.generation_mt_index).collect();
     assert_eq!(
         indices,
-        vec![0, 2, 5],
-        "owner A entries, ordered, legacy skipped"
+        vec![0, 2, 5, 7],
+        "owner A entries, ordered across batch boundaries, B excluded, legacy skipped"
     );
     assert!(entries.iter().all(|e| e.owner.0 == owner_a));
 
     // Sub-range [2, 4] selects only index 2.
     let sub: Vec<_> = storage
-        .get_dust_generation_entries(&owner_a, 2, 4, BATCH)
+        .get_dust_generation_entries(&owner_a, 2, 4, batch)
         .await
         .try_collect()
         .await?;
@@ -312,36 +307,6 @@ async fn get_dust_generation_entries_orders_filters_and_skips_legacy_rows()
             .map(|e| e.generation_mt_index)
             .collect::<Vec<_>>(),
         vec![2]
-    );
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn get_dust_generation_entries_paginates_across_batches() -> Result<(), Box<dyn StdError>> {
-    let (_container, pool, storage) = setup().await?;
-
-    let owner = [1u8; 32];
-    let block = insert_block(&pool, 1, &[0x01u8; 32], b"key").await?;
-    let tx = insert_transaction(&pool, block, &[0x11u8; 32]).await?;
-    for i in 0..5i64 {
-        insert_generation_info(&pool, &owner, &[i as u8; 32], 100, Some(i), None, tx).await?;
-    }
-
-    // Batch size 2 forces the internal loop to page three times.
-    let batch = NonZeroU32::new(2).unwrap();
-    let entries: Vec<_> = storage
-        .get_dust_generation_entries(&owner, 0, 4, batch)
-        .await
-        .try_collect()
-        .await?;
-    assert_eq!(
-        entries
-            .iter()
-            .map(|e| e.generation_mt_index)
-            .collect::<Vec<_>>(),
-        vec![0, 1, 2, 3, 4],
-        "all entries returned in order across batch boundaries"
     );
 
     Ok(())
@@ -357,7 +322,8 @@ async fn get_dust_generation_dtime_updates_bounds_by_cutoff_and_upper_block()
     let (_container, pool, storage) = setup().await?;
 
     let owner = [1u8; 32];
-    // Three blocks, each with one dtime update for owner A.
+    let other_owner = [2u8; 32];
+    // Three blocks, each with one dtime update for `owner`.
     let mut block_ids = Vec::new();
     for h in 1..=3i64 {
         let block = insert_block(&pool, h, &[h as u8; 32], b"key").await?;
@@ -368,8 +334,22 @@ async fn get_dust_generation_dtime_updates_bounds_by_cutoff_and_upper_block()
         insert_dtime_event(&pool, tx, night, (h * 1000) as u64, &[0xaa, h as u8]).await?;
         block_ids.push(block);
     }
+    // A different owner's update in block 2 — must never be returned for `owner`.
+    let other_night = [0x99u8; 32];
+    let tx2 = insert_transaction(&pool, block_ids[1], &[0x22u8; 32]).await?;
+    insert_generation_info(
+        &pool,
+        &other_owner,
+        &other_night,
+        100,
+        Some(9),
+        Some(2000),
+        tx2,
+    )
+    .await?;
+    insert_dtime_event(&pool, tx2, other_night, 2000, &[0xbb]).await?;
 
-    // Bound to (block 1, block 2]: only block 2's update survives.
+    // Bound to (block 1, block 2]: only block 2's own update survives (other owner excluded).
     let updates: Vec<_> = storage
         .get_dust_generation_dtime_updates(
             &owner,
@@ -382,7 +362,12 @@ async fn get_dust_generation_dtime_updates_bounds_by_cutoff_and_upper_block()
         .try_collect()
         .await?;
 
-    assert_eq!(updates.len(), 1, "exactly one update in (block 1, block 2]");
+    assert_eq!(
+        updates.len(),
+        1,
+        "exactly one owned update in (block 1, block 2]"
+    );
+    assert_eq!(updates[0].owner.0, owner);
     assert_eq!(updates[0].generation_mt_index, 1);
     assert_eq!(
         updates[0].new_dtime, 2000,
@@ -394,7 +379,7 @@ async fn get_dust_generation_dtime_updates_bounds_by_cutoff_and_upper_block()
         "tree_insertion_path recovered from attributes"
     );
 
-    // cutoff 0, upper = block 3 → all three, ordered by ledger event id.
+    // cutoff 0, upper = block 3 → all three owned updates, ordered by ledger event id.
     let all: Vec<_> = storage
         .get_dust_generation_dtime_updates(&owner, 0, block_ids[2] as u64, 0, BATCH)
         .await
@@ -404,37 +389,9 @@ async fn get_dust_generation_dtime_updates_bounds_by_cutoff_and_upper_block()
         all.iter()
             .map(|u| u.generation_mt_index)
             .collect::<Vec<_>>(),
-        vec![0, 1, 2]
+        vec![0, 1, 2],
+        "only the owner's updates, no other-owner leakage"
     );
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn get_dust_generation_dtime_updates_filters_by_owner() -> Result<(), Box<dyn StdError>> {
-    let (_container, pool, storage) = setup().await?;
-
-    let owner_a = [1u8; 32];
-    let owner_b = [2u8; 32];
-    let block = insert_block(&pool, 1, &[0x01u8; 32], b"key").await?;
-    let tx = insert_transaction(&pool, block, &[0x11u8; 32]).await?;
-
-    let night_a = [0x30u8; 32];
-    let night_b = [0x31u8; 32];
-    insert_generation_info(&pool, &owner_a, &night_a, 100, Some(0), Some(1000), tx).await?;
-    insert_generation_info(&pool, &owner_b, &night_b, 100, Some(1), Some(2000), tx).await?;
-    insert_dtime_event(&pool, tx, night_a, 1000, &[0xaa]).await?;
-    insert_dtime_event(&pool, tx, night_b, 2000, &[0xbb]).await?;
-
-    let updates: Vec<_> = storage
-        .get_dust_generation_dtime_updates(&owner_a, 0, block as u64, 0, BATCH)
-        .await
-        .try_collect()
-        .await?;
-
-    assert_eq!(updates.len(), 1, "only owner A's dtime update is returned");
-    assert_eq!(updates[0].owner.0, owner_a);
-    assert_eq!(updates[0].new_dtime, 1000);
 
     Ok(())
 }

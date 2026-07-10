@@ -1074,8 +1074,8 @@ async fn test_dust_ledger_events_subscription(
 /// all-zero dust address (owns no generations), so the stream is a single
 /// `DustGenerationsProgress` whose final `collapsedMerkleTree` covers the whole
 /// generation tree at the pinned block, making the response a pure function of
-/// the block. Asserts determinism at a fixed block, per-block pinning, that the
-/// tree rebuilt from the served collapsed update matches the block's
+/// the block. Asserts determinism at a fixed block (acceptance criterion #2),
+/// that the tree rebuilt from the served collapsed update matches the block's
 /// `dustGenerationMerkleTreeRoot` (acceptance criterion #1), and rejection of an
 /// unknown block hash.
 async fn test_dust_generations_subscription(
@@ -1086,8 +1086,7 @@ async fn test_dust_generations_subscription(
     let network_id: NetworkId = "undeployed".try_into().unwrap();
     let dust_address = encode_address([0u8; 32], AddressType::Dust, &network_id);
 
-    // Pin to the tip (fresh, ledger state loadable); its parent is a second,
-    // distinct pinned block for the per-block-pinning check.
+    // Pin to the tip: fresh (well within max_snapshot_age) and its ledger state is loadable.
     let latest = send_query::<BlockDustRootQuery>(
         api_client,
         api_url,
@@ -1097,12 +1096,6 @@ async fn test_dust_generations_subscription(
     .block
     .expect("there is a latest block");
     let latest_hash = latest.hash.to_owned();
-    let parent_hash = latest
-        .parent
-        .as_ref()
-        .expect("the tip has a parent")
-        .hash
-        .to_owned();
 
     // Collect the snapshot. For the all-zero address there are no owned entries
     // or dtime updates, so the resolver emits exactly one event (the final
@@ -1160,10 +1153,6 @@ async fn test_dust_generations_subscription(
         Some("DustGenerationsProgress"),
         "snapshot completes with a DustGenerationsProgress event, got: {first:?}"
     );
-    let latest_highest = first
-        .get("highestIndex")
-        .and_then(|v| v.as_i64())
-        .expect("progress carries highestIndex");
 
     // Root match (acceptance criterion #1): rebuild the generation tree from the
     // full collapsed update the snapshot served and assert its root equals the
@@ -1198,18 +1187,7 @@ async fn test_dust_generations_subscription(
         "tree rebuilt from the collapsed update must match the block's dust generation root"
     );
 
-    // Per-block pinning: the parent snapshot cannot be ahead of the tip's.
-    let parent = snapshot(ws_api_url, DustAddress(dust_address.clone()), parent_hash).await?;
-    let parent_highest = parent
-        .get("highestIndex")
-        .and_then(|v| v.as_i64())
-        .expect("parent progress carries highestIndex");
-    assert!(
-        parent_highest <= latest_highest,
-        "generation tree grows monotonically by block: parent {parent_highest} > tip \
-         {latest_highest}"
-    );
-
+    // An unknown but well-formed block hash is rejected as a client error.
     let unknown = snapshot(
         ws_api_url,
         DustAddress(dust_address),

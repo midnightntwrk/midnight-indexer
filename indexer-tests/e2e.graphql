@@ -182,11 +182,6 @@ query BlockQuery($block_offset: BlockOffset) {
 query BlockDustRootQuery($block_offset: BlockOffset) {
     block(offset: $block_offset) {
         hash
-        height
-        protocolVersion
-        parent {
-            hash
-        }
         dustGenerationMerkleTreeRoot
     }
 }
