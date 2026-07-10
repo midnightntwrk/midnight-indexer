@@ -14,7 +14,7 @@ infra:
     dbname: "indexer"
     user: "indexer"
     max_connections: 25
-    idle_timeout: "1m"
+    idle_timeout: "15s"
     max_lifetime: "5m"
 
   ledger_db:

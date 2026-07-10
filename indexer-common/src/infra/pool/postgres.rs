@@ -71,6 +71,13 @@ impl PostgresPool {
 
         let inner = PgPoolOptions::new()
             .max_connections(max_connections)
+            // Validate a pooled connection before handing it out and, if it is dead, discard it and
+            // open a fresh one. Necessary since rustls 0.23 (sqlx 0.9) turns a connection the server
+            // closed without a TLS `close_notify` into a hard error rather than tolerating it.
+            .test_before_acquire(true)
+            // Fail fast instead of blocking on the 30s default: a caught error is retried by the
+            // caller, so a brief unavailability should not stall the whole indexing cycle.
+            .acquire_timeout(Duration::from_secs(10))
             .idle_timeout(Some(idle_timeout))
             .max_lifetime(max_lifetime)
             .connect_with(connect_options)

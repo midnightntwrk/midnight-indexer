@@ -183,8 +183,19 @@ fn active_wallet_ids(
 ) -> impl Stream<Item = Result<Uuid, sqlx::Error>> + '_ {
     try_stream! {
         loop {
-            // Query the current active wallet IDs.
-            let wallet_ids = storage.active_wallet_ids(active_wallets_ttl).await?;
+            // Query the current active wallet IDs. A transient database error here must not end the
+            // stream (which would kill the indexer): log it and retry after the usual delay.
+            let wallet_ids = match storage.active_wallet_ids(active_wallets_ttl).await {
+                Ok(wallet_ids) => wallet_ids,
+                Err(error) => {
+                    warn!(
+                        error:% = format!("{error:#}");
+                        "failed to query active wallet IDs; retrying"
+                    );
+                    sleep(active_wallets_query_delay).await;
+                    continue;
+                }
+            };
 
             if wallet_ids.is_empty() {
                 sleep(active_wallets_query_delay).await;
