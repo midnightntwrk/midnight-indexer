@@ -53,7 +53,7 @@ export default defineConfig({
     ...(maxWorkers !== undefined ? { maxWorkers } : {}),
     // Root-level reporters for all projects
     reporters: [
-      'verbose',
+      'tree',
       new XRayJsonReporter(),
       new CustomJUnitReporter(),
       [
