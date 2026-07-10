@@ -37,12 +37,25 @@ resolve_image() {
 toolkit_image=$(resolve_image "midnight-node-toolkit:$node_version")
 node_image=$(resolve_image "midnight-node:$node_version")
 readonly toolkit_image node_image
+
+# Remove a directory that may contain root-owned files. The contract compile step runs the
+# toolkit's compactc/zkir as root (they cannot write their caches as a non-root uid), so the
+# `managed/` output it leaves in a work dir is root-owned and a plain host `rm -rf` (as the
+# invoking user) fails with EPERM, aborting the script under `set -e`. Delete via a throwaway
+# root container instead of chowning host files.
+rm_root_dir() {
+    local dir="$1"
+    docker run --rm -v "$(dirname "$dir")":/parent --entrypoint sh "$toolkit_image" \
+        -c "rm -rf /parent/$(basename "$dir")"
+}
 readonly rng_seed="0000000000000000000000000000000000000000000000000000000000000037"
 readonly node_dir="$(pwd)/.node/$node_version"
 
-# Set up fresh node data directory.
+# Set up fresh node data directory. The node container runs as root and writes root-owned
+# data here, so a prior (or partial) run leaves files the invoking user cannot delete; remove
+# via a root container.
 if [ -d $node_dir ]; then
-    rm -r $node_dir;
+    rm_root_dir "$node_dir"
 fi
 mkdir -p $node_dir
 
@@ -182,7 +195,9 @@ docker run \
 # generate-intent / send-intent custom-contract pipeline (see util/toolkit README in midnight-node).
 readonly emit_work=$(mktemp -d)
 cp indexer-tests/emit-contract/emitcounter.compact indexer-tests/emit-contract/contract.config.ts "$emit_work"
-chmod -R a+rX "$emit_work"
+# World-writable so the toolkit-js config loader (runs as appuser via the entrypoint's
+# `runuser`, not root) can write the transpiled contract.config.js into the bind mount.
+chmod -R a+rwX "$emit_work"
 
 # Compile the emit contract with the bundled compactc (runs as root via the shell entrypoint so it
 # can write into the bind mount).
@@ -281,11 +296,112 @@ docker run \
     $toolkit_image \
     generate-txs --src-file /out/emit_call_tx.mn --dest-url ws://127.0.0.1:9944 send
 
-rm -rf "$emit_work"
+rm_root_dir "$emit_work"
 
-# Wait for enough blocks to be finalized so that the pre-populated chain data
-# contains sufficient blocks for e2e tests (MAX_HEIGHT = 32 in e2e.rs).
-readonly min_finalized_height=40
+# Deploy the zswap-holder contract and call selfMint so the e2e chain has data for the
+# contractZswapState query (test_contract_zswap_state_query in indexer-tests/src/e2e.rs, #1253).
+# The deploy gives an empty-but-present zswap state; selfMint(1000) mints a real shielded coin
+# to the contract, changing the tree so point-in-time assertions can compare before vs after.
+readonly zswap_work=$(mktemp -d)
+cp indexer-tests/query-swap/zswap-holder.compact indexer-tests/query-swap/contract.config.ts "$zswap_work"
+# World-writable so the toolkit-js config loader (appuser, see emit-contract note above)
+# can write the transpiled contract.config.js into the bind mount.
+chmod -R a+rwX "$zswap_work"
+
+docker run \
+    --rm \
+    -v "$zswap_work":/toolkit-js/contract-zswap \
+    --entrypoint sh \
+    $toolkit_image \
+    -c 'cd /toolkit-js/contract-zswap && /compact-home/compactc zswap-holder.compact managed/zswap-holder'
+
+docker run \
+    --rm \
+    --network host \
+    -v "$zswap_work":/toolkit-js/contract-zswap \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    generate-intent deploy \
+    -c /toolkit-js/contract-zswap/contract.config.ts \
+    --toolkit-js-path /toolkit-js \
+    --coin-public "$emit_coin_public" \
+    --output-intent /out/zswap_deploy.bin \
+    --output-private-state /out/zswap_private_state.json \
+    --output-zswap-state /out/zswap_zswap.json
+docker run \
+    --rm \
+    --network host \
+    -v "$zswap_work":/toolkit-js/contract-zswap \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    send-intent \
+    --intent-file /out/zswap_deploy.bin \
+    --compiled-contract-dir /toolkit-js/contract-zswap/managed/zswap-holder \
+    --dest-file /out/zswap_deploy_tx.mn
+docker run \
+    --rm \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    contract-address --src-file /out/zswap_deploy_tx.mn > /tmp/zswap_holder_address.mn
+docker run \
+    --rm \
+    --network host \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    generate-txs --src-file /out/zswap_deploy_tx.mn --dest-url ws://127.0.0.1:9944 send
+
+sleep 15
+docker run \
+    --rm \
+    --network host \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    contract-state \
+    --contract-address $(cat /tmp/zswap_holder_address.mn) \
+    --dest-file /out/zswap_onchain_state.mn
+
+docker run \
+    --rm \
+    --network host \
+    -v "$zswap_work":/toolkit-js/contract-zswap \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    generate-intent circuit \
+    -c /toolkit-js/contract-zswap/contract.config.ts \
+    --toolkit-js-path /toolkit-js \
+    --contract-address $(cat /tmp/zswap_holder_address.mn) \
+    --coin-public "$emit_coin_public" \
+    --input-onchain-state /out/zswap_onchain_state.mn \
+    --input-private-state /out/zswap_private_state.json \
+    --output-intent /out/zswap_call.bin \
+    --output-private-state /out/zswap_ps2.json \
+    --output-zswap-state /out/zswap_zswap2.json \
+    selfMint 1000
+docker run \
+    --rm \
+    --network host \
+    -v "$zswap_work":/toolkit-js/contract-zswap \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    send-intent \
+    --intent-file /out/zswap_call.bin \
+    --compiled-contract-dir /toolkit-js/contract-zswap/managed/zswap-holder \
+    --zswap-state-file /out/zswap_zswap2.json \
+    --dest-file /out/zswap_call_tx.mn
+docker run \
+    --rm \
+    --network host \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    generate-txs --src-file /out/zswap_call_tx.mn --dest-url ws://127.0.0.1:9944 send
+
+rm_root_dir "$zswap_work"
+
+# Wait for enough blocks to be finalized so that the pre-populated chain data contains sufficient
+# blocks for e2e tests. The store/emit/zswap contracts (deploy + circuit call, each gated on a
+# ~15s finalization wait) span up to ~block 65, and the e2e tests collect blocks 0..=MAX_HEIGHT
+# (= 72 in e2e.rs), so the chain must finalize comfortably past that with leeway.
+readonly min_finalized_height=85
 echo "Waiting for finalized height >= $min_finalized_height..."
 timeout=360
 start_time=$(date +%s)
