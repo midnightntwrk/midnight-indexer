@@ -58,6 +58,10 @@ rm_root_dir() {
 wait_for_contract_state() {
     local address="$1" dest="$2"
     local timeout=120 start
+    # `dest` lives in the persistent `toolkit_out` volume, so a leftover file from a prior run (or
+    # CI retry) would otherwise satisfy the non-empty check below before this deploy has landed,
+    # capturing stale state. Delete it up front so the check can only pass on this run's output.
+    docker run --rm -v toolkit_out:/out --entrypoint sh $toolkit_image -c "rm -f '$dest'"
     start=$(date +%s)
     while true; do
         docker run --rm --network host -v toolkit_out:/out $toolkit_image \
