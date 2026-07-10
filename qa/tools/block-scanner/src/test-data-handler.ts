@@ -953,14 +953,6 @@ async function updateContractEventsDataFile(
       }
     }
 
-    if (addresses.size === 0) {
-      console.info(
-        "[INFO ] - No contract addresses found in the scanned blocks; " +
-          "skipping contract events data file",
-      );
-      return;
-    }
-
     const graphqlUrl = `${INDEXER_HTTP_URL}/api/${INDEXER_API_VERSION}/graphql`;
 
     if (!(await isContractEventsSupported(graphqlUrl))) {
@@ -971,27 +963,38 @@ async function updateContractEventsDataFile(
       return;
     }
 
-    console.info(
-      `[INFO ] - Querying contract events for ${addresses.size} contract(s)`,
-    );
-
+    // On a supported environment the fixture must reflect the scanned chain
+    // even when nothing was found — an empty file is a valid refresh, while
+    // skipping the write would let a stale fixture from a previous chain
+    // state (e.g. before a reset) survive.
     const contractsWithEvents: ContractWithEvents[] = [];
 
-    for (const address of addresses) {
-      const eventTypes = await fetchContractEventTypes(graphqlUrl, address);
-
-      if (eventTypes.length > 0) {
-        contractsWithEvents.push({
-          "contract-address": address,
-          "event-types": eventTypes,
-        });
-      }
-    }
-
-    if (contractsWithEvents.length === 0) {
+    if (addresses.size === 0) {
       console.info(
-        "[INFO ] - No contracts with emitted events found on this chain",
+        "[INFO ] - No contract addresses found in the scanned blocks; " +
+          "writing an empty contract events data file",
       );
+    } else {
+      console.info(
+        `[INFO ] - Querying contract events for ${addresses.size} contract(s)`,
+      );
+
+      for (const address of addresses) {
+        const eventTypes = await fetchContractEventTypes(graphqlUrl, address);
+
+        if (eventTypes.length > 0) {
+          contractsWithEvents.push({
+            "contract-address": address,
+            "event-types": eventTypes,
+          });
+        }
+      }
+
+      if (contractsWithEvents.length === 0) {
+        console.info(
+          "[INFO ] - No contracts with emitted events found on this chain",
+        );
+      }
     }
 
     // Ensure the target directory exists
