@@ -36,7 +36,6 @@ mod tests {
     };
     use anyhow::Context;
     use futures::{StreamExt, TryStreamExt};
-    use sqlx::postgres::PgSslMode;
     use std::time::Duration;
     use testcontainers::{ImageExt, runners::AsyncRunner};
     use testcontainers_modules::postgres::Postgres as PostgresImage;
@@ -58,13 +57,13 @@ mod tests {
             .await
             .context("get Postgres port")?;
 
-        let pool = PostgresPool::new(postgres::Config {
+        let pool = PostgresPool::new_without_tls(postgres::Config {
             host: "localhost".into(),
             port,
             dbname: "indexer".into(),
             user: "indexer".into(),
             password: env!("APP__INFRA__STORAGE__PASSWORD").into(),
-            sslmode: PgSslMode::Prefer,
+            ssl_root_cert: None,
             max_connections: 5,
             idle_timeout: Duration::from_secs(60),
             max_lifetime: Duration::from_secs(60),

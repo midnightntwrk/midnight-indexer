@@ -398,7 +398,6 @@ mod tests {
         #[cfg(feature = "cloud")]
         let _postgres_container = {
             use crate::infra::{ledger_db, migrations, pool::postgres::PostgresPool};
-            use sqlx::postgres::PgSslMode;
             use std::time::Duration;
             use testcontainers::{ImageExt, runners::AsyncRunner};
             use testcontainers_modules::postgres::Postgres;
@@ -422,13 +421,15 @@ mod tests {
                 dbname: "indexer".to_string(),
                 user: "indexer".to_string(),
                 password: env!("APP__INFRA__STORAGE__PASSWORD").into(),
-                sslmode: PgSslMode::Prefer,
+                ssl_root_cert: None,
                 max_connections: 10,
                 idle_timeout: Duration::from_secs(60),
                 max_lifetime: Duration::from_secs(5 * 60),
             };
 
-            let pool = PostgresPool::new(config).await.context("create pool")?;
+            let pool = PostgresPool::new_without_tls(config)
+                .await
+                .context("create pool")?;
             migrations::postgres::run(&pool)
                 .await
                 .context("run migrations")?;

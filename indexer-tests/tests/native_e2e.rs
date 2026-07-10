@@ -241,11 +241,27 @@ async fn start_postgres() -> anyhow::Result<(ContainerAsync<Postgres>, u16)> {
     use Postgres;
     use testcontainers::{ImageExt, runners::AsyncRunner};
 
+    // The indexer binaries require TLS (PgSslMode::Require), so the test Postgres must serve it.
+    // Generate a throwaway self-signed cert at startup and enable ssl. `Require` does not validate
+    // the certificate, so self-signed is sufficient and no client cert is needed. The outer
+    // entrypoint passes our `sh -c` through verbatim (arg[0] != "postgres"); we then re-exec the
+    // entrypoint with "postgres" so initdb and the POSTGRES_* env are still honoured.
+    const SSL_ENTRYPOINT: &str = "apk add --no-cache openssl >/dev/null 2>&1 && \
+        openssl req -new -x509 -days 365 -nodes -subj /CN=localhost \
+            -keyout /var/lib/postgresql/server.key -out /var/lib/postgresql/server.crt && \
+        chown postgres:postgres /var/lib/postgresql/server.key /var/lib/postgresql/server.crt && \
+        chmod 600 /var/lib/postgresql/server.key && \
+        exec docker-entrypoint.sh postgres \
+            -c ssl=on \
+            -c ssl_cert_file=/var/lib/postgresql/server.crt \
+            -c ssl_key_file=/var/lib/postgresql/server.key";
+
     let postgres_container = Postgres::default()
         .with_db_name("indexer")
         .with_user("indexer")
         .with_password(env!("APP__INFRA__STORAGE__PASSWORD"))
         .with_tag("17.1-alpine")
+        .with_cmd(["sh", "-c", SSL_ENTRYPOINT])
         .start()
         .await
         .context("start Postgres container")?;

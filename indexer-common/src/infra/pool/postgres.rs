@@ -12,10 +12,9 @@
 // limitations under the License.
 
 use derive_more::Into;
-use log::debug;
+use log::{debug, warn};
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
-use serde_with::{DisplayFromStr, serde_as};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions, PgSslMode};
 use std::{ops::Deref, time::Duration};
 use thiserror::Error;
@@ -29,26 +28,46 @@ pub struct PostgresPool(sqlx::PgPool);
 
 impl PostgresPool {
     /// Try to create a new [PostgresPool] with the given config.
+    ///
+    /// TLS is mandatory (matching midnight-node): [PgSslMode::VerifyFull] when a `ssl_root_cert`
+    /// is configured, otherwise [PgSslMode::Require] (encrypted, but the server certificate is not
+    /// validated). TLS is never disabled — a deployed binary always encrypts its database
+    /// connection. Tests against a non-TLS Postgres use [PostgresPool::new_without_tls].
     pub async fn new(config: Config) -> Result<Self, Error> {
+        let ssl_mode = ssl_mode(config.ssl_root_cert.as_deref());
+        Self::connect(config, ssl_mode).await
+    }
+
+    /// Create a pool with TLS disabled. Test-only: unreachable from shipped configuration (a
+    /// deployed binary always calls [PostgresPool::new] with mandatory TLS). Exists so tests can
+    /// connect to a local Postgres that does not serve TLS.
+    pub async fn new_without_tls(config: Config) -> Result<Self, Error> {
+        Self::connect(config, PgSslMode::Disable).await
+    }
+
+    async fn connect(config: Config, ssl_mode: PgSslMode) -> Result<Self, Error> {
         let Config {
             host,
             port,
             dbname,
             user,
             password,
-            sslmode,
+            ssl_root_cert,
             max_connections,
             idle_timeout,
             max_lifetime,
         } = config;
 
-        let connect_options = PgConnectOptions::new()
+        let mut connect_options = PgConnectOptions::new()
             .host(&host)
             .database(&dbname)
             .username(&user)
             .password(password.expose_secret())
             .port(port)
-            .ssl_mode(sslmode);
+            .ssl_mode(ssl_mode);
+        if let Some(ssl_root_cert) = ssl_root_cert {
+            connect_options = connect_options.ssl_root_cert(ssl_root_cert);
+        }
 
         let inner = PgPoolOptions::new()
             .max_connections(max_connections)
@@ -60,6 +79,20 @@ impl PostgresPool {
         debug!(pool:?; "created pool");
 
         Ok(pool)
+    }
+}
+
+/// Select the mandatory TLS mode. Never returns [PgSslMode::Disable].
+fn ssl_mode(ssl_root_cert: Option<&str>) -> PgSslMode {
+    match ssl_root_cert {
+        Some(_) => PgSslMode::VerifyFull,
+        None => {
+            warn!(
+                "no ssl_root_cert configured: using PgSslMode::Require (encrypted but no \
+                 certificate validation); set ssl_root_cert for full MITM protection"
+            );
+            PgSslMode::Require
+        }
     }
 }
 
@@ -77,7 +110,6 @@ impl Deref for PostgresPool {
 pub struct Error(#[from] sqlx::Error);
 
 /// Configuration for [PostgresPool].
-#[serde_as]
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub host: String,
@@ -90,8 +122,12 @@ pub struct Config {
 
     pub password: SecretString,
 
-    #[serde_as(as = "DisplayFromStr")]
-    pub sslmode: PgSslMode,
+    /// Path to a PEM root certificate. When set, the database connection uses
+    /// [PgSslMode::VerifyFull] (full certificate validation); when absent, [PgSslMode::Require]
+    /// (encrypted, no validation). TLS is always required — there is no way to disable it via
+    /// configuration.
+    #[serde(default)]
+    pub ssl_root_cert: Option<String>,
 
     pub max_connections: u32,
 
@@ -104,12 +140,24 @@ pub struct Config {
 
 #[cfg(test)]
 mod tests {
-    use crate::infra::pool::postgres::{Config, PostgresPool};
+    use crate::infra::pool::postgres::{Config, PostgresPool, ssl_mode};
     use anyhow::Context;
     use sqlx::postgres::PgSslMode;
     use std::{error::Error as StdError, time::Duration};
     use testcontainers::{ImageExt, runners::AsyncRunner};
     use testcontainers_modules::postgres::Postgres;
+
+    #[test]
+    fn ssl_mode_requires_tls_and_is_never_disabled() {
+        assert!(matches!(ssl_mode(None), PgSslMode::Require));
+        assert!(matches!(
+            ssl_mode(Some("/path/to/ca.pem")),
+            PgSslMode::VerifyFull
+        ));
+        for cert in [None, Some("/path/to/ca.pem")] {
+            assert!(!matches!(ssl_mode(cert), PgSslMode::Disable));
+        }
+    }
 
     #[tokio::test]
     async fn test_pool() -> Result<(), Box<dyn StdError>> {
@@ -132,13 +180,14 @@ mod tests {
             dbname: "indexer".to_string(),
             user: "indexer".to_string(),
             password: env!("APP__INFRA__STORAGE__PASSWORD").into(),
-            sslmode: PgSslMode::Prefer,
+            ssl_root_cert: None,
             max_connections: 10,
             idle_timeout: Duration::from_secs(60),
             max_lifetime: Duration::from_secs(5 * 60),
         };
 
-        let pool = PostgresPool::new(config).await;
+        // The test container does not serve TLS, so use the TLS-disabled test constructor.
+        let pool = PostgresPool::new_without_tls(config).await;
         assert!(pool.is_ok());
         let pool = pool.unwrap();
 

@@ -141,6 +141,21 @@ services:
       POSTGRES_USER: "indexer"
       POSTGRES_DB: "indexer"
       POSTGRES_PASSWORD: $APP__INFRA__STORAGE__PASSWORD
+    # The indexer components require TLS (PgSslMode::Require). Serve a throwaway self-signed cert so
+    # local `just run-*` can connect; `Require` does not validate it. Not for production use.
+    command:
+      - "sh"
+      - "-c"
+      - |
+        apk add --no-cache openssl >/dev/null 2>&1 && \
+        openssl req -new -x509 -days 365 -nodes -subj /CN=localhost \
+          -keyout /var/lib/postgresql/server.key -out /var/lib/postgresql/server.crt && \
+        chown postgres:postgres /var/lib/postgresql/server.key /var/lib/postgresql/server.crt && \
+        chmod 600 /var/lib/postgresql/server.key && \
+        exec docker-entrypoint.sh postgres \
+          -c ssl=on \
+          -c ssl_cert_file=/var/lib/postgresql/server.crt \
+          -c ssl_key_file=/var/lib/postgresql/server.key
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U indexer"]
       interval: "3s"
