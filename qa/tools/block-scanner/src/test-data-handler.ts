@@ -274,10 +274,18 @@ export async function updateTestDataFiles(
     // Read source block data file
     const sourceBlockData = readFileContent(sourceBlockDataFile);
 
+    // Harvest the contract-events data (the only step with remote I/O)
+    // BEFORE any file is written: a probe or query failure then aborts the
+    // refresh with the previous snapshot fully intact, instead of leaving a
+    // mix of refreshed and stale files behind.
+    const contractsWithEvents = await harvestContractEvents(sourceBlockData);
+
     updateBlockDataFile(folderPath, sourceBlockData);
     updateTransactionDataFile(folderPath, sourceBlockData);
     updateContractDataFile(folderPath, sourceBlockData);
-    await updateContractEventsDataFile(folderPath, sourceBlockData);
+    if (contractsWithEvents !== null) {
+      writeContractEventsDataFile(folderPath, contractsWithEvents);
+    }
 
     console.info("[INFO ] - All test data files updated successfully");
   } catch (error) {
@@ -922,26 +930,27 @@ async function fetchContractEventTypes(
 }
 
 /**
- * Updates the contract events data file
+ * Harvests the contract-events data from the indexer without touching any
+ * file: the contract addresses discovered in the scanned blocks are enriched
+ * via the contractEvents query, and every contract with at least one
+ * persisted event is returned with the distinct event types it emitted.
  *
- * The contract addresses discovered in the scanned blocks are enriched via
- * the indexer's contractEvents query: every contract with at least one
- * persisted event is listed together with the distinct event types it
- * emitted. Contracts without events are omitted.
+ * Returns null when the deployed indexer does not support the
+ * contract-events surface (determined by an explicit schema probe), so the
+ * caller leaves an existing curated fixture untouched. Transient query
+ * failures are retried and then fail the generation run instead of being
+ * mistaken for missing support — a stale fixture must not silently survive a
+ * refresh. Because this is the only remote-I/O step of the refresh, the
+ * caller runs it before writing any file, keeping the previous snapshot
+ * fully intact when the harvest fails.
  *
- * When the deployed indexer does not support the contract-events surface
- * (determined by an explicit schema probe), the file is left untouched so an
- * existing curated fixture is not destroyed. Transient query failures are
- * retried and then fail the generation run instead of being mistaken for
- * missing support — a stale fixture must not silently survive a refresh.
- *
- * @param destinationPath - Path to the test data folder
  * @param sourceBlockData - The data containing the scanned blocks
+ * @returns The contracts with their emitted event types, or null when the
+ *          contract-events surface is not present
  */
-async function updateContractEventsDataFile(
-  destinationPath: string,
+async function harvestContractEvents(
   sourceBlockData: string,
-): Promise<void> {
+): Promise<ContractWithEvents[] | null> {
   try {
     // Parse blocks and collect the distinct contract addresses seen on chain
     const blocks: Block[] = parseBlockData(sourceBlockData);
@@ -968,7 +977,7 @@ async function updateContractEventsDataFile(
         "[INFO ] - contract-events surface not present on this environment; " +
           "leaving any existing contract events data file untouched",
       );
-      return;
+      return null;
     }
 
     // On a supported environment the fixture must reflect the scanned chain
@@ -982,29 +991,52 @@ async function updateContractEventsDataFile(
         "[INFO ] - No contract addresses found in the scanned blocks; " +
           "writing an empty contract events data file",
       );
-    } else {
-      console.info(
-        `[INFO ] - Querying contract events for ${addresses.size} contract(s)`,
-      );
+      return contractsWithEvents;
+    }
 
-      for (const address of addresses) {
-        const eventTypes = await fetchContractEventTypes(graphqlUrl, address);
+    console.info(
+      `[INFO ] - Querying contract events for ${addresses.size} contract(s)`,
+    );
 
-        if (eventTypes.length > 0) {
-          contractsWithEvents.push({
-            "contract-address": address,
-            "event-types": eventTypes,
-          });
-        }
-      }
+    for (const address of addresses) {
+      const eventTypes = await fetchContractEventTypes(graphqlUrl, address);
 
-      if (contractsWithEvents.length === 0) {
-        console.info(
-          "[INFO ] - No contracts with emitted events found on this chain",
-        );
+      if (eventTypes.length > 0) {
+        contractsWithEvents.push({
+          "contract-address": address,
+          "event-types": eventTypes,
+        });
       }
     }
 
+    if (contractsWithEvents.length === 0) {
+      console.info(
+        "[INFO ] - No contracts with emitted events found on this chain",
+      );
+    }
+
+    return contractsWithEvents;
+  } catch (error) {
+    if (error instanceof TestDataHandlerError) {
+      throw error;
+    }
+    throw new TestDataHandlerError("Failed to harvest contract events data", {
+      originalError: error,
+    });
+  }
+}
+
+/**
+ * Writes the harvested contract-events data to the contract events data file.
+ *
+ * @param destinationPath - Path to the test data folder
+ * @param contractsWithEvents - The harvested contracts with their event types
+ */
+function writeContractEventsDataFile(
+  destinationPath: string,
+  contractsWithEvents: ContractWithEvents[],
+): void {
+  try {
     // Ensure the target directory exists
     const targetDir: string = ensureTargetDirectory(destinationPath);
 
