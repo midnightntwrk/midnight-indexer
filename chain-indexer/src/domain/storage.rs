@@ -18,15 +18,28 @@ use crate::domain::{
     Transaction,
 };
 
+/// A database transaction, owned by the caller so that block persistence and the pub-sub
+/// notification can share one atomic unit of work (the notification is delivered iff it commits).
+pub type SqlxTransaction<D> = sqlx::Transaction<'static, D>;
+
 /// Storage abstraction.
 #[trait_variant::make(Send)]
 pub trait Storage
 where
     Self: Clone + Send + Sync + 'static,
 {
-    /// Save the given block with parameters and return the max regular transaction ID.
+    /// The backing database (Postgres for cloud, SQLite for standalone).
+    type Database: sqlx::Database;
+
+    /// Begin a database transaction. The caller drives `save_block`, stages the pub-sub
+    /// notification on it, then commits — so the notification is bound to the same transaction.
+    async fn begin(&self) -> Result<SqlxTransaction<Self::Database>, sqlx::Error>;
+
+    /// Save the given block with parameters into `tx` and return the max regular transaction ID.
+    /// Does not commit; the caller commits after staging notifications.
     async fn save_block(
         &mut self,
+        tx: &mut SqlxTransaction<Self::Database>,
         block: &Block,
         transactions: &[Transaction],
         dust_registration_events: &[DustRegistrationEvent],

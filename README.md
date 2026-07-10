@@ -1,7 +1,8 @@
 # Midnight Indexer
 
 The Midnight Indexer (midnight-indexer) is a set of components designed to optimize the flow of blockchain data from a Midnight Node to end-user applications. It retrieves the history of blocks, processes them, stores indexed data efficiently, and provides a GraphQL API for queries and subscriptions. This Rust-based implementation is the next-generation iteration of the previous Scala-based indexer, offering improved performance, modularity, and ease of deployment.
-```
+
+```text
                                 ┌─────────────────┐
                                 │                 │
                                 │                 │
@@ -95,7 +96,8 @@ For the full set of configuration options see [config.yaml](indexer-standalone/c
 
 ### Cloud Mode
 
-The Chain Indexer, Indexer API, Wallet Indexer and SPO Indexer can be run as separate executables, interacting with a PostgreSQL database and a NATS messaging system. Running PostgreSQL and NATS is out of scope of this document. The respective Docker images are:
+The Chain Indexer, Indexer API, Wallet Indexer and SPO Indexer can be run as separate executables, interacting with a shared PostgreSQL database. Running PostgreSQL is out of scope of this document. The respective Docker images are:
+
 - [`chain-indexer`](https://hub.docker.com/r/midnightntwrk/chain-indexer)
 - [`indexer-api`](https://hub.docker.com/r/midnightntwrk/indexer-api)
 - [`wallet-indexer`](https://hub.docker.com/r/midnightntwrk/wallet-indexer)
@@ -110,8 +112,6 @@ The Chain Indexer, Indexer API, Wallet Indexer and SPO Indexer can be run as sep
 | APP__INFRA__STORAGE__PORT | PostgreSQL port | `5432` |
 | APP__INFRA__STORAGE__DBNAME | PostgreSQL database name | `indexer` |
 | APP__INFRA__STORAGE__USER | PostgreSQL database user | `indexer` |
-| APP__INFRA__PUB_SUB__URL | NATS URL | `localhost:4222` |
-| APP__INFRA__PUB_SUB__USERNAME | NATS username | `indexer` |
 | APP__INFRA__NODE__URL | WebSocket Endpoint of Midnight Node | `ws://localhost:9944` |
 
 For the full set of configuration options see [config.yaml](chain-indexer/config.yaml).
@@ -125,8 +125,6 @@ For the full set of configuration options see [config.yaml](chain-indexer/config
 | APP__INFRA__STORAGE__PORT | PostgreSQL port | `5432` |
 | APP__INFRA__STORAGE__DBNAME | PostgreSQL database name | `indexer` |
 | APP__INFRA__STORAGE__USER | PostgreSQL database user | `indexer` |
-| APP__INFRA__PUB_SUB__URL | NATS URL | `localhost:4222` |
-| APP__INFRA__PUB_SUB__USERNAME | NATS username | `indexer` |
 | APP__INFRA__API__PORT | Port of the GraphQL API | `8088` |
 | APP__INFRA__SECRET | Hex-encoded 32-byte secret to encrypt stored sensitive data | - |
 
@@ -141,13 +139,12 @@ For the full set of configuration options see [config.yaml](indexer-api/config.y
 | APP__INFRA__STORAGE__PORT | PostgreSQL port | `5432` |
 | APP__INFRA__STORAGE__DBNAME | PostgreSQL database name | `indexer` |
 | APP__INFRA__STORAGE__USER | PostgreSQL database user | `indexer` |
-| APP__INFRA__PUB_SUB__URL | NATS URL | `localhost:4222` |
-| APP__INFRA__PUB_SUB__USERNAME | NATS username | `indexer` |
 | APP__INFRA__SECRET | Hex-encoded 32-byte secret to encrypt stored sensitive data | - |
 
 For the full set of configuration options see [config.yaml](wallet-indexer/config.yaml).
 
 #### `spo-indexer` Configuration
+
 | Env Var | Meaning | Default |
 |---|---|---|
 | APP__APPLICATION__NETWORK_ID | Network ID | `undeployed` |
@@ -168,7 +165,7 @@ For development, you can use Docker Compose or run components manually:
 
 #### Using Docker Compose
 
-A `docker-compose.yaml` file is provided that defines services for the Indexer components as well as for dependencies like `postgres`, `nats`, and `node`. The latter are particularly interesting when running Indexer components "manually".
+A `docker-compose.yaml` file is provided that defines services for the Indexer components as well as for dependencies like `postgres` and `node`. The latter are particularly interesting when running Indexer components "manually".
 
 #### Manual Startup
 
@@ -199,7 +196,6 @@ It is recommended to provide these environment variables via a `~/.midnight-inde
 
 ```bash
 export APP__INFRA__STORAGE__PASSWORD=postgres
-export APP__INFRA__PUB_SUB__PASSWORD=nats
 export APP__INFRA__SECRET=303132333435363738393031323334353637383930313233343536373839303132
 # export APP__INFRA__NODE__BLOCKFROST_ID=<your-blockfrost-api-key>  # required for spo-indexer (cloud mode)
 # export APP__INFRA__SPO_NODE__BLOCKFROST_ID=<your-blockfrost-api-key>  # required for indexer-standalone (any non-empty value works if not testing SPO features)
@@ -246,7 +242,8 @@ All contributors are required to **cryptographically sign their Git commits** us
 
 #### Step 0: Prerequisites (once)
 
-**macOS**
+##### macOS
+
 ```bash
 brew install gnupg pinentry-mac
 # Optional: ensure macOS uses GUI pinentry for passphrase prompts
@@ -254,17 +251,20 @@ echo "pinentry-program $(which pinentry-mac)" > ~/.gnupg/gpg-agent.conf
 killall gpg-agent || true
 ```
 
-**Linux (Ubuntu/Debian)**
+##### Linux (Ubuntu/Debian)
+
 ```bash
 sudo apt-get update && sudo apt-get install -y gnupg pinentry-curses
 # pinentry-curses gives a passphrase prompt in the terminal
 # On desktops, you can install pinentry-gtk2 instead
 ```
+
 #### Step 1: Generate a GPG key (ed25519)
 
 ```bash
 gpg --quick-generate-key "Your Name <you@example.com>" ed25519 sign 2y
 ```
+
 - Replace **Your name** and **<you@example.com>** with the one you use for Git.
 - `sign` limits the key’s usage to signing (good hygiene).
 - `2y` sets the key to expire in 2 years (you can renew later).
@@ -300,13 +300,15 @@ git config --global tag.gpgsign true
 
 This ensures the pinentry prompt works in your terminal.
 
-**macOS (zsh default)**
+##### macOS (zsh default)
+
 ```bash
 echo 'export GPG_TTY=$(tty)' >> ~/.zshrc
 source ~/.zshrc
 ```
 
-**Linux (bash)**
+##### Linux (bash)
+
 ```bash
 echo 'export GPG_TTY=$(tty)' >> ~/.bashrc
 source ~/.bashrc
@@ -315,6 +317,7 @@ source ~/.bashrc
 #### Step 4: Upload your public key to your Git host (GitHub/GitLab)
 
 Export your public key:
+
 ```bash
 gpg --armor --export ABCDEF1234567890
 ```
@@ -326,6 +329,7 @@ Copy the entire block including:
 ...
 -----END PGP PUBLIC KEY BLOCK-----
 ```
+
 Then upload it to your Git host:
 
 **GitHub**: Settings → SSH and GPG keys → “New GPG key”

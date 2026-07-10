@@ -20,12 +20,14 @@ just all-all        # run all for both cloud and standalone features
 ```
 
 Run a single test (use `--` to pass nextest filters):
+
 ```bash
 cargo nextest run -p indexer-common --features cloud <test_name>
 cargo nextest run -p chain-indexer --features cloud --test-threads 1
 ```
 
 Run components locally (starts Docker dependencies automatically):
+
 ```bash
 just run-chain-indexer
 just run-wallet-indexer
@@ -34,6 +36,7 @@ just run-indexer-standalone   # SQLite-based, no Docker dependencies
 ```
 
 Regenerate the committed GraphQL schema after API changes:
+
 ```bash
 just generate-indexer-api-schema
 ```
@@ -41,9 +44,9 @@ just generate-indexer-api-schema
 ## Environment Setup
 
 Copy required secrets into `~/.midnight-indexer.envrc` or `.envrc.local` (sourced by `.envrc`):
+
 ```bash
 export APP__INFRA__STORAGE__PASSWORD=postgres
-export APP__INFRA__PUB_SUB__PASSWORD=nats
 export APP__INFRA__SECRET=...
 ```
 
@@ -57,7 +60,7 @@ Two mutually exclusive Cargo features control the entire deployment topology at 
 
 | Feature | Database | Pub/Sub | Use Case |
 |---|---|---|---|
-| `cloud` | PostgreSQL | NATS | Separate microservice containers |
+| `cloud` | PostgreSQL | PostgreSQL LISTEN/NOTIFY | Separate microservice containers |
 | `standalone` | SQLite | In-memory broadcast channels | Single binary |
 
 Always pass `--features cloud` or `--features standalone` — there is no default feature.
@@ -68,7 +71,7 @@ Each crate is structured in three layers:
 
 - **`domain/`** — Pure Rust types and traits, no I/O. Pub/sub message types, storage traits, and business logic live here.
 - **`application.rs`** — Orchestrates the indexing loop using domain traits; no direct infra dependencies.
-- **`infra/`** — Feature-gated implementations of domain traits (e.g., `NatsPublisher` vs `InMemPublisher`, `PostgresPool` vs `SqlitePool`).
+- **`infra/`** — Feature-gated implementations of domain traits (e.g., `PgPublisher` vs `InMemPublisher`, `PostgresPool` vs `SqlitePool`).
 
 The `indexer-common` crate owns all shared domain types, DB pool abstractions, migrations, pub/sub traits, and crypto utilities used by the other crates.
 
@@ -76,7 +79,7 @@ The `indexer-common` crate owns all shared domain types, DB pool abstractions, m
 
 Components communicate via strongly-typed messages (`BlockIndexed`, `WalletIndexed`, `UnshieldedUtxoIndexed`) defined in `indexer-common/src/domain/pub_sub.rs`. Each message type carries a `const TOPIC: Topic`.
 
-- **cloud**: NATS subjects (`pub-sub.<topic>`), JSON serialization, reconnection with retry/throttle
+- **cloud**: Postgres LISTEN/NOTIFY channels (`pg_notify`), JSON payloads, transactional delivery (notification fired iff the writing transaction commits)
 - **standalone**: `tokio::sync::broadcast` channels (capacity 42), background drain tasks to prevent lag errors
 
 ### Database Migrations
@@ -86,6 +89,7 @@ SQL migrations live in `indexer-common/migrations/{postgres,sqlite,sqlite-ledger
 ### GraphQL API
 
 `indexer-api` exposes three operation types via async-graphql + axum:
+
 - **Queries** — point-in-time reads (blocks, transactions, contract actions, wallets)
 - **Mutations** — wallet session management (connect, extend, remove)
 - **Subscriptions** — real-time WebSocket streams for new blocks, contract actions, and wallet events
@@ -95,7 +99,7 @@ The committed schema file `indexer-api/graphql/schema-v4.graphql` is checked by 
 ### Testing
 
 - **Unit tests**: `#[tokio::test]` inline in modules
-- **Integration tests**: Use testcontainers to spin up real PostgreSQL/NATS instances; live in the relevant crate's `src/` alongside the code under test
+- **Integration tests**: Use testcontainers to spin up real PostgreSQL instances; live in the relevant crate's `src/` alongside the code under test
 - **E2E tests**: `indexer-tests/` crate — starts all components as child processes against a running node, exercises GraphQL queries and subscriptions end-to-end
 
 The `indexer-standalone` crate is excluded from `nextest` (it is only built as an artifact for e2e tests).

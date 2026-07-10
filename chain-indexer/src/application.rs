@@ -50,13 +50,17 @@ pub struct Config {
     pub caught_up_leeway: u32,
 }
 
-pub async fn run(
+pub async fn run<S, P>(
     config: Config,
     node: impl Node,
-    mut storage: impl Storage,
-    publisher: impl Publisher,
+    mut storage: S,
+    publisher: P,
     mut sigterm: Signal,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<()>
+where
+    S: Storage,
+    P: Publisher<Database = S::Database>,
+{
     let Config {
         network_id,
         blocks_buffer,
@@ -246,7 +250,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 #[trace]
-async fn get_and_index_block<E, N>(
+async fn get_and_index_block<E, N, S, P>(
     caught_up_max_distance: u32,
     caught_up_leeway: u32,
     blocks: &mut (impl Stream<Item = Result<node::Block, E>> + Unpin),
@@ -255,14 +259,16 @@ async fn get_and_index_block<E, N>(
     highest_block_on_node: &Arc<RwLock<Option<BlockRef>>>,
     caught_up: &mut bool,
     parent_block_timestamp: &mut u64,
-    storage: &mut impl Storage,
-    publisher: &impl Publisher,
+    storage: &mut S,
+    publisher: &P,
     metrics: &Metrics,
     node: &N,
 ) -> anyhow::Result<LedgerState>
 where
     E: StdError + Send + Sync + 'static,
     N: Node,
+    S: Storage,
+    P: Publisher<Database = S::Database>,
 {
     let block = get_next_block(blocks).await?;
 
@@ -301,7 +307,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 #[trace]
-async fn index_block<N>(
+async fn index_block<N, S, P>(
     caught_up_max_distance: u32,
     caught_up_leeway: u32,
     block: node::Block,
@@ -310,13 +316,15 @@ async fn index_block<N>(
     highest_block_on_node: &Arc<RwLock<Option<BlockRef>>>,
     caught_up: &mut bool,
     parent_block_timestamp: &mut u64,
-    storage: &mut impl Storage,
-    publisher: &impl Publisher,
+    storage: &mut S,
+    publisher: &P,
     metrics: &Metrics,
     node: &N,
 ) -> anyhow::Result<LedgerState>
 where
     N: Node,
+    S: Storage,
+    P: Publisher<Database = S::Database>,
 {
     // The try_into on the next line serializes the zswap merkle tree root, but the domain type is
     // needed below to compare against the zswap merkle tree root in the ledger state.
@@ -463,9 +471,15 @@ where
         .await
         .context("determine system parameters change")?;
 
-    // Save the block with its related data and system parameters atomically.
+    // Save the block with its related data and system parameters, and stage the pub-sub
+    // notifications, all in one transaction. The notifications are bound to this transaction and
+    // are delivered iff it commits (Postgres `NOTIFY` is transactional; the in-memory backend
+    // defers delivery to `deliver` below).
+    let mut tx = storage.begin().await.context("begin transaction")?;
+
     let max_transaction_id = storage
         .save_block(
+            &mut tx,
             &block,
             &transactions,
             &block.dust_registration_events,
@@ -475,17 +489,24 @@ where
         .await
         .context("save block")?;
 
-    // Publish BlockIndexed.
-    publisher
-        .publish(&BlockIndexed {
-            height: block.height,
-            max_transaction_id,
-            caught_up: *caught_up,
-        })
-        .await
-        .context("publish BlockIndexed event")?;
+    let mut pending = Vec::new();
 
-    // Publish UnshieldedUtxoIndexed events for affected addresses.
+    // Stage BlockIndexed.
+    pending.push(
+        publisher
+            .stage(
+                &mut tx,
+                &BlockIndexed {
+                    height: block.height,
+                    max_transaction_id,
+                    caught_up: *caught_up,
+                },
+            )
+            .await
+            .context("stage BlockIndexed event")?,
+    );
+
+    // Stage UnshieldedUtxoIndexed events for affected addresses.
     let addresses = transactions
         .iter()
         .flat_map(|transaction| match transaction {
@@ -501,10 +522,23 @@ where
         .map(|utxo| utxo.owner)
         .collect::<HashSet<_>>();
     for address in addresses {
+        pending.push(
+            publisher
+                .stage(&mut tx, &UnshieldedUtxoIndexed { address })
+                .await
+                .context("stage UnshieldedUtxoIndexed event")?,
+        );
+    }
+
+    tx.commit().await.context("commit transaction")?;
+
+    // Deliver notifications now that the transaction has committed (a no-op for Postgres, which
+    // delivers on commit itself).
+    for pending in pending {
         publisher
-            .publish(&UnshieldedUtxoIndexed { address })
+            .deliver(pending)
             .await
-            .context("publish UnshieldedUtxoIndexed event")?;
+            .context("deliver pub-sub notification")?;
     }
 
     // Update metrics.

@@ -62,31 +62,38 @@ impl Storage {
 }
 
 impl domain::storage::Storage for Storage {
+    #[cfg(feature = "cloud")]
+    type Database = sqlx::Postgres;
+
+    #[cfg(feature = "standalone")]
+    type Database = sqlx::Sqlite;
+
     #[trace]
+    async fn begin(&self) -> Result<SqlxTransaction, sqlx::Error> {
+        self.pool.begin().await
+    }
+
     async fn save_block(
         &mut self,
+        tx: &mut SqlxTransaction,
         block: &Block,
         transactions: &[Transaction],
         dust_registration_events: &[DustRegistrationEvent],
         ledger_state_key: &SerializedLedgerStateKey,
         system_parameters_change: Option<&SystemParametersChange>,
     ) -> Result<Option<u64>, sqlx::Error> {
-        let mut tx = self.pool.begin().await?;
-
         let max_transaction_id = save_block(
             block,
             transactions,
             dust_registration_events,
             ledger_state_key,
-            &mut tx,
+            tx,
         )
         .await?;
 
         if let Some(change) = system_parameters_change {
-            save_system_parameters_change(change, &mut tx).await?;
+            save_system_parameters_change(change, tx).await?;
         }
-
-        tx.commit().await?;
 
         Ok(max_transaction_id)
     }

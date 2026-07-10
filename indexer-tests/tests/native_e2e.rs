@@ -58,18 +58,17 @@ static TARGET_DIR: LazyLock<String> = LazyLock::new(|| {
 });
 
 /// Setup for e2e testing using workspace executables built by cargo. Sets up the Indexer with the
-/// "cloud" architecture, i.e. as three separate processes and also PostgreSQL and NATS as Docker
-/// containers. This is intended to be executed locally (`just test`) as well as on CI. This setup
-/// is also intended to be used for test coverage measurements using `cargo llvm-cov`.
+/// "cloud" architecture, i.e. as three separate processes and PostgreSQL as a Docker container.
+/// Pub-sub uses Postgres `LISTEN`/`NOTIFY`, so no separate message broker is needed. This is
+/// intended to be executed locally (`just test`) as well as on CI. This setup is also intended to
+/// be used for test coverage measurements using `cargo llvm-cov`.
 #[cfg(feature = "cloud")]
 #[tokio::test]
 async fn main() -> anyhow::Result<()> {
-    // Start PostgreSQL and NATS.
+    // Start PostgreSQL.
     let (_postgres_container, postgres_port) = start_postgres().await?;
     println!("PostgreSQL started");
-    let (_nats_container, nats_url) = start_nats().await?;
-    println!("NATS started");
-    // Give PostgreSQL and NATS some headstart.
+    // Give PostgreSQL some headstart.
     sleep(Duration::from_millis(3_000)).await;
 
     // Start node.
@@ -77,11 +76,11 @@ async fn main() -> anyhow::Result<()> {
     println!("Node started");
 
     // Start Indexer components.
-    let mut chain_indexer = start_chain_indexer(postgres_port, &nats_url, &node_handle.node_url)?;
+    let mut chain_indexer = start_chain_indexer(postgres_port, &node_handle.node_url)?;
     println!("Chain Indexer started");
-    let mut wallet_indexer = start_wallet_indexer(postgres_port, &nats_url).await?;
+    let mut wallet_indexer = start_wallet_indexer(postgres_port).await?;
     println!("Wallet Indexer started");
-    let (mut indexer_api, api_port) = start_indexer_api(postgres_port, &nats_url).await?;
+    let (mut indexer_api, api_port) = start_indexer_api(postgres_port).await?;
     println!("Indexer API started");
 
     // Terminate Chain Indexer, then start it again.
@@ -91,7 +90,7 @@ async fn main() -> anyhow::Result<()> {
     chain_indexer
         .wait()
         .context("wait for Chain Indexer termination")?;
-    chain_indexer = start_chain_indexer(postgres_port, &nats_url, &node_handle.node_url)?;
+    chain_indexer = start_chain_indexer(postgres_port, &node_handle.node_url)?;
     println!("Indexer API started again");
 
     // Wait for Indexer API to become ready.
@@ -260,48 +259,7 @@ async fn start_postgres() -> anyhow::Result<(ContainerAsync<Postgres>, u16)> {
 }
 
 #[cfg(feature = "cloud")]
-async fn start_nats() -> anyhow::Result<(ContainerAsync<GenericImage>, String)> {
-    use testcontainers::{ImageExt, core::WaitFor, runners::AsyncRunner};
-
-    let nats_container = GenericImage::new("nats", "2.12.3")
-        .with_wait_for(WaitFor::message_on_stderr("Server is ready"))
-        .with_cmd([
-            "--user",
-            "indexer",
-            "--pass",
-            env!("APP__INFRA__PUB_SUB__PASSWORD"),
-            "-js",
-        ])
-        .start()
-        .await
-        .context("start NATS container")?;
-
-    // In spite of the above "WaitFor" NATS stubbornly rejects connections.
-    let start = Instant::now();
-    while reqwest::get("localhost:8222/healthz")
-        .await
-        .and_then(|r| r.error_for_status())
-        .is_err()
-        && Instant::now() - start < Duration::from_millis(1_500)
-    {
-        sleep(Duration::from_millis(100)).await;
-    }
-
-    let nats_port = nats_container
-        .get_host_port_ipv4(4222)
-        .await
-        .context("get NATS port")?;
-    let nats_url = format!("localhost:{nats_port}");
-
-    Ok((nats_container, nats_url))
-}
-
-#[cfg(feature = "cloud")]
-fn start_chain_indexer(
-    postgres_port: u16,
-    nats_url: &str,
-    node_url: &str,
-) -> anyhow::Result<Child> {
+fn start_chain_indexer(postgres_port: u16, node_url: &str) -> anyhow::Result<Child> {
     Command::new(format!("{}/debug/chain-indexer", &*TARGET_DIR))
         .env(
             "RUST_LOG",
@@ -312,7 +270,6 @@ fn start_chain_indexer(
             format!("{}/chain-indexer/config.yaml", &*WS_DIR),
         )
         .env("APP__INFRA__NODE__URL", node_url)
-        .env("APP__INFRA__PUB_SUB__URL", nats_url)
         .env("APP__INFRA__STORAGE__PORT", postgres_port.to_string())
         .env("APP__TELEMETRY__TRACING__ENABLED", "true")
         .spawn()
@@ -320,7 +277,7 @@ fn start_chain_indexer(
 }
 
 #[cfg(feature = "cloud")]
-async fn start_wallet_indexer(postgres_port: u16, nats_url: &str) -> anyhow::Result<Child> {
+async fn start_wallet_indexer(postgres_port: u16) -> anyhow::Result<Child> {
     Command::new(format!("{}/debug/wallet-indexer", &*TARGET_DIR))
         .env(
             "RUST_LOG",
@@ -330,7 +287,6 @@ async fn start_wallet_indexer(postgres_port: u16, nats_url: &str) -> anyhow::Res
             "CONFIG_FILE",
             format!("{}/wallet-indexer/config.yaml", &*WS_DIR),
         )
-        .env("APP__INFRA__PUB_SUB__URL", nats_url)
         .env("APP__INFRA__STORAGE__PORT", postgres_port.to_string())
         .env("APP__TELEMETRY__TRACING__ENABLED", "true")
         .spawn()
@@ -338,7 +294,7 @@ async fn start_wallet_indexer(postgres_port: u16, nats_url: &str) -> anyhow::Res
 }
 
 #[cfg(feature = "cloud")]
-async fn start_indexer_api(postgres_port: u16, nats_url: &str) -> anyhow::Result<(Child, u16)> {
+async fn start_indexer_api(postgres_port: u16) -> anyhow::Result<(Child, u16)> {
     let api_port = find_free_port()?;
 
     Command::new(format!("{}/debug/indexer-api", &*TARGET_DIR))
@@ -352,7 +308,6 @@ async fn start_indexer_api(postgres_port: u16, nats_url: &str) -> anyhow::Result
         )
         .env("APP__INFRA__API__PORT", api_port.to_string())
         .env("APP__INFRA__API__MAX_COMPLEXITY", "600")
-        .env("APP__INFRA__PUB_SUB__URL", nats_url)
         .env("APP__INFRA__STORAGE__PORT", postgres_port.to_string())
         .env("APP__TELEMETRY__TRACING__ENABLED", "true")
         .spawn()

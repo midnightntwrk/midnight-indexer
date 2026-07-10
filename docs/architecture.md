@@ -6,10 +6,10 @@ and the parts that aren't obvious from the component list.
 
 ## Data flow
 
-```
+```text
 node ──subxt──▶ chain-indexer ──writes──▶ DB ◀─reads/writes─▶ indexer-api ──GraphQL──▶ clients / wallets
                      │                    ▲
-                     └──event (IDs)──▶ NATS ──▶ wallet-indexer ──writes relevant txs──┘
+                     └──event (IDs)──pg_notify──▶ wallet-indexer ──writes relevant txs──┘
 ```
 
 - **chain-indexer** is the **single writer**. It subscribes to the node over subxt (a
@@ -31,25 +31,27 @@ node ──subxt──▶ chain-indexer ──writes──▶ DB ◀─reads/wri
   relevant transactions.
 - **spo-indexer** indexes stake-pool data via Blockfrost.
 
-## NATS is a signal bus, not a data bus
+## The pub-sub layer is a signal bus, not a data bus
 
-NATS carries **small event messages - IDs only** (block ID, transaction ID, wallet); the data
-itself stays in the DB. So the queue stays light regardless of chain size. Ledger state used to
-live in NATS and was **moved to the DB** (more reliable across abrupt restarts) - NATS remains for
-messaging only.
+The pub-sub layer carries **small event messages - IDs only** (block ID, transaction ID, wallet);
+the data itself stays in the DB. So the queue stays light regardless of chain size. In the cloud
+deployment this is implemented with **Postgres LISTEN/NOTIFY** (`pg_notify`): notifications are
+fired inside the same DB transaction as the write, so they are delivered if and only if the
+transaction commits. There is no separate message broker to run or replicate - the pub-sub travels
+over the same Postgres connection the indexer already depends on.
 
-Deployed clusters run a **NATS quorum of 3** and typically **2 wallet-indexer** replicas for
-redundancy, alongside the single chain-indexer and the HPA'd indexer-api.
+Deployed clusters typically run **2 wallet-indexer** replicas for redundancy, alongside the single
+chain-indexer and the HPA'd indexer-api.
 
 ## Run modes
 
 - **cloud** - the four services (chain-indexer, indexer-api, wallet-indexer, spo-indexer) +
-  PostgreSQL + NATS, as separate images. This is what runs in Kubernetes.
-- **standalone** - one `indexer-standalone` binary with SQLite and an **in-memory** pub/sub in
-  place of NATS. For local dev / single-operator use.
+  PostgreSQL, as separate images. This is what runs in Kubernetes.
+- **standalone** - one `indexer-standalone` binary with SQLite and an **in-memory** pub/sub (tokio
+  broadcast channels) in place of Postgres LISTEN/NOTIFY. For local dev / single-operator use.
 
-The messaging seam is `indexer-common`'s `pub_sub` (NATS for cloud, in-memory channels for
-standalone); the SQL migrations also live in `indexer-common/migrations`.
+The messaging seam is `indexer-common`'s `pub_sub` (Postgres LISTEN/NOTIFY for cloud, in-memory
+channels for standalone); the SQL migrations also live in `indexer-common/migrations`.
 
 ## See also
 

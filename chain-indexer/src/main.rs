@@ -76,7 +76,6 @@ fn run() -> anyhow::Result<()> {
         run_migrations,
         storage_config,
         ledger_db_config,
-        pub_sub_config,
         node_config,
     } = infra_config;
 
@@ -109,9 +108,7 @@ fn run() -> anyhow::Result<()> {
 
         ledger_db::init(ledger_db_config, pool);
 
-        let publisher = pub_sub::nats::publisher::NatsPublisher::new(pub_sub_config)
-            .await
-            .context("create NatsPublisher")?;
+        let publisher = pub_sub::pg::publisher::PgPublisher;
 
         application::run(application_config, node, storage, publisher, sigterm).await
     });

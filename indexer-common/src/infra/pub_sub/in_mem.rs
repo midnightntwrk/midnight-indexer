@@ -87,6 +87,7 @@ fn spawn_drain(name: &'static str, mut receiver: Receiver<Value>) {
 
 #[cfg(test)]
 mod tests {
+    use crate::infra::pool::sqlite::{self, SqlitePool};
     use crate::{
         domain::{BlockIndexed, Publisher, Subscriber, WalletIndexed},
         infra::pub_sub::in_mem::InMemPubSub,
@@ -97,9 +98,16 @@ mod tests {
     use tokio::time::sleep;
     use uuid::Uuid;
 
+    /// An in-memory SQLite transaction. [InMemPublisher::stage] ignores it, so it need not be
+    /// committed; it exists only to satisfy the [Publisher] signature.
+    async fn dummy_tx(pool: &SqlitePool) -> sqlx::Transaction<'static, sqlx::Sqlite> {
+        pool.begin().await.expect("begin dummy transaction")
+    }
+
     #[tokio::test]
     async fn test_publish_subscribe() -> Result<(), Box<dyn StdError>> {
         let pub_sub = InMemPubSub::default();
+        let pool = SqlitePool::new(sqlite::Config::default()).await?;
         sleep(Duration::from_millis(50)).await; //testing if IN_MEM_PUB_SUB doesn't get dropped
 
         let block_indexed = BlockIndexed {
@@ -107,9 +115,9 @@ mod tests {
             max_transaction_id: None,
             caught_up: false,
         };
-        let publish_block_res = pub_sub.publisher().publish(&block_indexed).await;
-
-        assert!(publish_block_res.is_ok());
+        let mut tx = dummy_tx(&pool).await;
+        let pending = pub_sub.publisher().stage(&mut tx, &block_indexed).await?;
+        assert!(pub_sub.publisher().deliver(pending).await.is_ok());
 
         let subscriber = pub_sub.subscriber();
         let mut messages = subscriber.subscribe::<WalletIndexed>();
@@ -117,7 +125,8 @@ mod tests {
         let wallet_indexed = WalletIndexed {
             wallet_id: Uuid::nil(),
         };
-        pub_sub.publisher().publish(&wallet_indexed).await?;
+        let pending = pub_sub.publisher().stage(&mut tx, &wallet_indexed).await?;
+        pub_sub.publisher().deliver(pending).await?;
 
         let message = messages.next().await;
         assert_matches!(message, Some(Ok(message)) if message == wallet_indexed);
@@ -139,29 +148,39 @@ mod tests {
     async fn test_drain_survives_lag() -> Result<(), Box<dyn StdError>> {
         let pub_sub = InMemPubSub::default();
         let publisher = pub_sub.publisher();
+        let pool = SqlitePool::new(sqlite::Config::default()).await?;
+        let mut tx = dummy_tx(&pool).await;
 
         for height in 0..1000 {
-            publisher
-                .publish(&BlockIndexed {
-                    height,
-                    max_transaction_id: None,
-                    caught_up: false,
-                })
+            let pending = publisher
+                .stage(
+                    &mut tx,
+                    &BlockIndexed {
+                        height,
+                        max_transaction_id: None,
+                        caught_up: false,
+                    },
+                )
                 .await?;
+            publisher.deliver(pending).await?;
         }
 
         // Let the drain task observe the lag.
         sleep(Duration::from_millis(50)).await;
 
-        // If the drain task broke on lag, this publish would fail with
+        // If the drain task broke on lag, this deliver would fail with
         // `SendError` because no receivers remain.
-        publisher
-            .publish(&BlockIndexed {
-                height: 9999,
-                max_transaction_id: None,
-                caught_up: false,
-            })
+        let pending = publisher
+            .stage(
+                &mut tx,
+                &BlockIndexed {
+                    height: 9999,
+                    max_transaction_id: None,
+                    caught_up: false,
+                },
+            )
             .await?;
+        publisher.deliver(pending).await?;
 
         Ok(())
     }

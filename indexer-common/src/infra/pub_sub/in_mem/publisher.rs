@@ -31,15 +31,29 @@ impl InMemPublisher {
 }
 
 impl Publisher for InMemPublisher {
+    type Database = sqlx::Sqlite;
+    type Pending = (Topic, Value);
     type Error = PublisherError;
 
-    async fn publish<T>(&self, message: &T) -> Result<(), Self::Error>
+    /// Capture the message for delivery in [Publisher::deliver]. The transaction is ignored: an
+    /// in-memory broadcast cannot join a SQLite commit, so delivery is deferred to after the
+    /// caller commits (see [Publisher::deliver]) to preserve "delivered iff committed".
+    async fn stage<T>(
+        &self,
+        _tx: &mut sqlx::Transaction<'static, sqlx::Sqlite>,
+        message: &T,
+    ) -> Result<Self::Pending, Self::Error>
     where
         T: Message + Send + Sync,
     {
         let value = serde_json::to_value(message)?;
+        Ok((T::TOPIC, value))
+    }
 
-        match T::TOPIC {
+    async fn deliver(&self, pending: Self::Pending) -> Result<(), Self::Error> {
+        let (topic, value) = pending;
+
+        match topic {
             Topic("BlockIndexed") => {
                 self.0.block_indexed_sender.send(value)?;
             }
@@ -53,7 +67,7 @@ impl Publisher for InMemPublisher {
             }
 
             // This must not happen; if it happens, we forgot to add an arm for the topic above!
-            _ => panic!("unexpected topic {:?}", T::TOPIC),
+            _ => panic!("unexpected topic {topic:?}"),
         }
 
         Ok(())

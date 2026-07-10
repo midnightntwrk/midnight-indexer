@@ -66,7 +66,6 @@ async fn run() -> anyhow::Result<()> {
         run_migrations,
         storage_config,
         ledger_db_config,
-        pub_sub_config,
         secret,
     } = infra_config;
 
@@ -87,14 +86,10 @@ async fn run() -> anyhow::Result<()> {
     let cipher = make_cipher(secret).context("make cipher")?;
     let storage = infra::storage::Storage::new(cipher, pool.clone());
 
-    ledger_db::init(ledger_db_config, pool);
+    let publisher = pub_sub::pg::publisher::PgPublisher;
+    let subscriber = pub_sub::pg::subscriber::PgSubscriber::new(pool.clone());
 
-    let publisher = pub_sub::nats::publisher::NatsPublisher::new(pub_sub_config.clone())
-        .await
-        .context("create NatsPublisher")?;
-    let subscriber = pub_sub::nats::subscriber::NatsSubscriber::new(pub_sub_config)
-        .await
-        .context("create NatsSubscriber")?;
+    ledger_db::init(ledger_db_config, pool);
 
     // Run indexing.
     application::run(application_config, storage, publisher, subscriber, sigterm).await

@@ -5,7 +5,7 @@ Maintainer and contributor guides. For local setup see the top-level
 
 ## Architecture & testing
 
-- [Architecture](./architecture.md) - the data flow, NATS's role, and run modes.
+- [Architecture](./architecture.md) - the data flow, the pub-sub layer's role, and run modes.
 - [Testing & node consistency](./testing.md) - the runtime root-match guard and the
   test layers.
 

@@ -71,7 +71,6 @@ fn run() -> anyhow::Result<()> {
         run_migrations,
         storage_config,
         ledger_db_config,
-        pub_sub_config,
         api_config,
         secret,
     } = infra_config;
@@ -98,9 +97,9 @@ fn run() -> anyhow::Result<()> {
         let cipher = make_cipher(secret).context("make cipher")?;
         let storage = infra::storage::Storage::new(cipher, pool.clone());
 
-        ledger_db::init(ledger_db_config, pool);
+        let subscriber = pub_sub::pg::subscriber::PgSubscriber::new(pool.clone());
 
-        let subscriber = pub_sub::nats::subscriber::NatsSubscriber::new(pub_sub_config).await?;
+        ledger_db::init(ledger_db_config, pool);
 
         let api = AxumApi::new(api_config, storage, subscriber.clone());
 

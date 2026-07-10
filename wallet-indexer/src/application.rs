@@ -46,13 +46,18 @@ pub struct Config {
     pub concurrency_limit: NonZeroUsize,
 }
 
-pub async fn run(
+pub async fn run<S, P, B>(
     config: Config,
-    storage: impl Storage,
-    publisher: impl Publisher,
-    subscriber: impl Subscriber,
+    storage: S,
+    publisher: P,
+    subscriber: B,
     mut sigterm: Signal,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<()>
+where
+    S: Storage,
+    P: Publisher<Database = S::Database>,
+    B: Subscriber,
+{
     let Config {
         active_wallets_query_delay,
         active_wallets_ttl,
@@ -205,13 +210,17 @@ fn active_wallet_ids(
 }
 
 #[trace(properties = { "wallet_id": "{wallet_id}" })]
-async fn index_wallet(
+async fn index_wallet<S, P>(
     wallet_id: Uuid,
     transaction_batch_size: NonZeroUsize,
     max_transaction_id: Arc<AtomicU64>,
-    publisher: &mut impl Publisher,
-    storage: &mut impl Storage,
-) -> anyhow::Result<()> {
+    publisher: &mut P,
+    storage: &mut S,
+) -> anyhow::Result<()>
+where
+    S: Storage,
+    P: Publisher<Database = S::Database>,
+{
     let tx = storage
         .acquire_lock(wallet_id)
         .await
@@ -270,15 +279,26 @@ async fn index_wallet(
                 format!("save backward relevant transactions for wallet ID {wallet_id}")
             })?;
 
+        // Stage the notification within the transaction so it is delivered iff the commit succeeds.
+        let pending = if !relevant_transactions.is_empty() {
+            Some(
+                publisher
+                    .stage(&mut tx, &WalletIndexed { wallet_id })
+                    .await
+                    .with_context(|| {
+                        format!("stage WalletIndexed event for wallet ID {wallet_id}")
+                    })?,
+            )
+        } else {
+            None
+        };
+
         tx.commit().await.context("commit database transaction")?;
 
-        if !relevant_transactions.is_empty() {
-            publisher
-                .publish(&WalletIndexed { wallet_id })
-                .await
-                .with_context(|| {
-                    format!("publish WalletIndexed event for wallet ID {wallet_id}")
-                })?;
+        if let Some(pending) = pending {
+            publisher.deliver(pending).await.with_context(|| {
+                format!("deliver WalletIndexed event for wallet ID {wallet_id}")
+            })?;
         }
 
         debug!(
@@ -328,15 +348,26 @@ async fn index_wallet(
             .await
             .with_context(|| format!("save relevant transactions for wallet ID {wallet_id}"))?;
 
+        // Stage the notification within the transaction so it is delivered iff the commit succeeds.
+        let pending = if !relevant_transactions.is_empty() {
+            Some(
+                publisher
+                    .stage(&mut tx, &WalletIndexed { wallet_id })
+                    .await
+                    .with_context(|| {
+                        format!("stage WalletIndexed event for wallet ID {wallet_id}")
+                    })?,
+            )
+        } else {
+            None
+        };
+
         tx.commit().await.context("commit database transaction")?;
 
-        if !relevant_transactions.is_empty() {
-            publisher
-                .publish(&WalletIndexed { wallet_id })
-                .await
-                .with_context(|| {
-                    format!("publish WalletIndexed event for wallet ID {wallet_id}")
-                })?;
+        if let Some(pending) = pending {
+            publisher.deliver(pending).await.with_context(|| {
+                format!("deliver WalletIndexed event for wallet ID {wallet_id}")
+            })?;
         }
 
         debug!(

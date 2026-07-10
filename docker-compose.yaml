@@ -23,8 +23,6 @@ services:
     depends_on:
       postgres:
         condition: "service_healthy"
-      nats:
-        condition: "service_started"
     image: "${IMAGE_REGISTRY:-midnightntwrk}/chain-indexer:${INDEXER_TAG:-latest}"
     restart: "no"
     environment:
@@ -32,8 +30,6 @@ services:
       APP__INFRA__NODE__URL: "ws://node:9944"
       APP__INFRA__STORAGE__HOST: "postgres"
       APP__INFRA__STORAGE__PASSWORD: $APP__INFRA__STORAGE__PASSWORD
-      APP__INFRA__PUB_SUB__URL: "nats:4222"
-      APP__INFRA__PUB_SUB__PASSWORD: $APP__INFRA__PUB_SUB__PASSWORD
     healthcheck:
       test: ["CMD-SHELL", "cat /var/run/chain-indexer/running"]
       start_interval: "2s"
@@ -48,8 +44,6 @@ services:
     depends_on:
       postgres:
         condition: "service_healthy"
-      nats:
-        condition: "service_started"
     image: "${IMAGE_REGISTRY:-midnightntwrk}/wallet-indexer:${INDEXER_TAG:-latest}"
     restart: "no"
     environment:
@@ -57,8 +51,6 @@ services:
       APP__INFRA__SECRET: $APP__INFRA__SECRET
       APP__INFRA__STORAGE__HOST: "postgres"
       APP__INFRA__STORAGE__PASSWORD: $APP__INFRA__STORAGE__PASSWORD
-      APP__INFRA__PUB_SUB__URL: "nats:4222"
-      APP__INFRA__PUB_SUB__PASSWORD: $APP__INFRA__PUB_SUB__PASSWORD
     healthcheck:
       test: ["CMD-SHELL", "cat /var/run/wallet-indexer/running"]
       start_interval: "2s"
@@ -96,8 +88,6 @@ services:
     depends_on:
       postgres:
         condition: "service_healthy"
-      nats:
-        condition: "service_started"
     image: "${IMAGE_REGISTRY:-midnightntwrk}/indexer-api:${INDEXER_TAG:-latest}"
     restart: "no"
     ports:
@@ -107,8 +97,6 @@ services:
       APP__INFRA__SECRET: $APP__INFRA__SECRET
       APP__INFRA__STORAGE__HOST: "postgres"
       APP__INFRA__STORAGE__PASSWORD: $APP__INFRA__STORAGE__PASSWORD
-      APP__INFRA__PUB_SUB__URL: "nats:4222"
-      APP__INFRA__PUB_SUB__PASSWORD: $APP__INFRA__PUB_SUB__PASSWORD
     healthcheck:
       test: ["CMD-SHELL", "cat /var/run/indexer-api/running"]
       start_interval: "2s"
@@ -158,20 +146,6 @@ services:
       interval: "3s"
       timeout: "2s"
       retries: 20
-    security_opt:
-      - no-new-privileges:true
-
-  nats:
-    profiles:
-      - cloud
-    image: "nats:2.12.3"
-    restart: "always"
-    command:
-      ["--user", "indexer", "--pass", $APP__INFRA__PUB_SUB__PASSWORD, "-js"]
-    ports:
-      - "4222:4222"
-    volumes:
-      - "./target/data/nats:/tmp/nats"
     security_opt:
       - no-new-privileges:true
 

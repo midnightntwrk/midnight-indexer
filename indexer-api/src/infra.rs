@@ -28,9 +28,6 @@ pub struct Config {
     #[serde(rename = "ledger_db")]
     pub ledger_db_config: indexer_common::infra::ledger_db::Config,
 
-    #[serde(rename = "pub_sub")]
-    pub pub_sub_config: indexer_common::infra::pub_sub::nats::Config,
-
     #[serde(rename = "api")]
     pub api_config: api::Config,
 

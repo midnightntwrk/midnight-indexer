@@ -62,7 +62,7 @@ Where this is not possible, a copy of the Apache 2.0 or the repository's top-lev
 Process docs under [`docs/`](docs/README.md) for releasing and keeping the
 indexer in step with the node and ledger:
 
-* [Architecture](docs/architecture.md) - data flow, NATS's role, and run modes.
+* [Architecture](docs/architecture.md) - data flow, the pub-sub layer's role, and run modes.
 * [Creating a release](docs/releasing.md) - versioning, changelog, tagging, image publish.
 * [Testing & node consistency](docs/testing.md) - the runtime root-match guard and the test layers.
 * [Upgrading the node version](docs/updating-node-version.md) - `NODE_VERSIONS`, metadata, runtime modules.

@@ -33,7 +33,7 @@ that the zswap/state-root match guards each block.
 - Starts a **real `midnightntwrk/midnight-node` container** (version = last line of
   `NODE_VERSIONS`, currently `2.0.0-rc.3`) whose chain DB is **pre-seeded from fixed data in
   `.node/<version>/`** (bind-mounted, `CFG_PRESET=dev`) so it replays a known, deterministic
-  chain, plus postgres + nats via testcontainers, and runs the **actual** chain-indexer /
+  chain, plus postgres via testcontainers, and runs the **actual** chain-indexer /
   wallet-indexer / indexer-api binaries (cloud) or `indexer-standalone` + SQLite (standalone).
   It SIGTERMs and restarts chain-indexer once to exercise reconnect.
 - `indexer-tests/src/e2e.rs` then runs the assertions. It **collects the blocks subscription

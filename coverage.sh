@@ -5,7 +5,7 @@ set -eo pipefail
 # Required by the native_e2e tests: the passwords at compile time (env!), the secret at
 # runtime by the spawned indexer-api. See README "Testing" for details; values are arbitrary
 # except APP__INFRA__SECRET which must be hex-encoded 32 bytes.
-for var in APP__INFRA__STORAGE__PASSWORD APP__INFRA__PUB_SUB__PASSWORD APP__INFRA__SECRET; do
+for var in APP__INFRA__STORAGE__PASSWORD APP__INFRA__SECRET; do
     if [ -z "${!var}" ]; then
         echo "Error: $var is not set." >&2
         echo "Fix: export it, e.g. in ~/.midnight-indexer.envrc or .envrc.local (see README \"Testing\")." >&2
@@ -25,6 +25,7 @@ cloud_tests=$(cargo test -p indexer-tests --test native_e2e --features cloud --n
 standalone_tests=$(cargo test -p indexer-tests --test native_e2e --features standalone --no-run --message-format=json | jq -r 'select(.profile.test == true and .target.name == "native_e2e") | .executable')
 
 # Then setup for coverage instrumentation and build the executables which are spawned in the tests.
+# shellcheck source=/dev/null  # dynamic env from `cargo llvm-cov show-env`; nothing to statically follow
 source <(cargo llvm-cov show-env --export-prefix)
 cargo build -p chain-indexer      --features cloud
 cargo build -p wallet-indexer     --features cloud

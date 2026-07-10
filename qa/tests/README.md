@@ -79,7 +79,6 @@ Define the build/runtime secrets (sourced via `~/.midnight-indexer.envrc` or `./
 
 ```bash
 export APP__INFRA__STORAGE__PASSWORD=postgres
-export APP__INFRA__PUB_SUB__PASSWORD=nats
 export APP__INFRA__SECRET=303132333435363738393031323334353637383930313233343536373839303132  # hex-encoded 32-byte value
 ```
 
@@ -117,14 +116,14 @@ Each project can be run independently or together. E2E tests include a cache war
 
 ## 🚀 Getting Started
 
-### 1) From **qa/tests**, ensure dependencies are installed:
+### 1) From **qa/tests**, ensure dependencies are installed
 
 ```bash
 cd qa/tests
 yarn install --immutable
 ```
 
-### 2) Move to the **repo root**:
+### 2) Move to the **repo root**
 
 ```bash
 cd ../..   # move up to the repo root
@@ -468,7 +467,7 @@ TARGET_ENV=preprod INDEXER_API_VERSION=v3 yarn test:integration
 
 ---
 
-## 🛠️ Future Developments, Improvements & Test Ideas
+## 🛠 Future Developments, Improvements & Test Ideas
 
 - **Contract actions**: Expand test coverage to include missing contract actions.
 

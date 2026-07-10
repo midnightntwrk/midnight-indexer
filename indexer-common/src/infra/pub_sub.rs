@@ -16,4 +16,4 @@
 pub mod in_mem;
 #[cfg_attr(docsrs, doc(cfg(feature = "cloud")))]
 #[cfg(feature = "cloud")]
-pub mod nats;
+pub mod pg;

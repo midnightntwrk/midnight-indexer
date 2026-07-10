@@ -64,18 +64,40 @@ pub struct UnshieldedUtxoIndexed {
 message!(UnshieldedUtxoIndexed);
 
 /// A pub-sub publisher.
+///
+/// Notifications are *transactional*: a message staged via [Publisher::stage] within a database
+/// transaction is delivered if and only if that transaction commits. For Postgres this issues
+/// `pg_notify` on the transaction's connection — Postgres holds the notification until `COMMIT`
+/// and discards it on rollback — so [Publisher::deliver] is a no-op. For the in-memory backend
+/// [Publisher::stage] merely captures the message and [Publisher::deliver] broadcasts it after the
+/// caller has committed. Either way: delivered iff committed.
 #[trait_variant::make(Send)]
 pub trait Publisher
 where
     Self: Clone + Send + Sync + 'static,
 {
-    /// Error type for the [Publisher::publish] method.
+    /// The database whose transactions notifications are bound to.
+    type Database: sqlx::Database;
+
+    /// A notification staged for delivery once the transaction commits.
+    type Pending: Send + 'static;
+
+    /// Error type for the [Publisher::stage] and [Publisher::deliver] methods.
     type Error: StdError + Send + Sync + 'static;
 
-    /// Publish the given message.
-    async fn publish<T>(&self, message: &T) -> Result<(), Self::Error>
+    /// Stage `message` for delivery, bound to `tx`. The notification is delivered only if `tx` is
+    /// subsequently committed by the caller.
+    async fn stage<T>(
+        &self,
+        tx: &mut sqlx::Transaction<'static, Self::Database>,
+        message: &T,
+    ) -> Result<Self::Pending, Self::Error>
     where
         T: Message + Send + Sync;
+
+    /// Deliver a notification staged for a transaction that has now committed. A no-op for backends
+    /// that deliver on commit themselves (e.g. Postgres `NOTIFY`).
+    async fn deliver(&self, pending: Self::Pending) -> Result<(), Self::Error>;
 }
 
 /// A pub-sub subscriber.
