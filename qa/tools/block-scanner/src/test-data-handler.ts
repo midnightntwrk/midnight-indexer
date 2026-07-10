@@ -16,7 +16,7 @@
 import fs from "fs";
 import path from "path";
 import * as commentJson from "comment-json";
-import { TARGET_ENV } from "./env.js";
+import { TARGET_ENV, INDEXER_HTTP_URL, INDEXER_API_VERSION } from "./env.js";
 import { Transaction } from "./indexer-types.js";
 
 // ============================================================================
@@ -170,6 +170,38 @@ interface ContractActionsMap {
   [address: string]: ContractActionEntry[];
 }
 
+/**
+ * Structure for a contract with the event types it emitted
+ */
+interface ContractWithEvents {
+  "contract-address": string;
+  "event-types": string[];
+}
+
+/**
+ * Structure for contract-events.jsonc file (array of contracts)
+ */
+type ContractEventsDataFile = ContractWithEvents[];
+
+/**
+ * Maps the concrete ContractEvent GraphQL typenames to the
+ * ContractEventType enum values used by the test fixtures and the
+ * contractEvents(filter: { eventTypes: ... }) argument.
+ */
+const EVENT_TYPENAME_TO_EVENT_TYPE: Record<string, string> = {
+  ShieldedSpendEvent: "SHIELDED_SPEND",
+  ShieldedReceiveEvent: "SHIELDED_RECEIVE",
+  ShieldedMintEvent: "SHIELDED_MINT",
+  ShieldedBurnEvent: "SHIELDED_BURN",
+  UnshieldedSpendEvent: "UNSHIELDED_SPEND",
+  UnshieldedReceiveEvent: "UNSHIELDED_RECEIVE",
+  UnshieldedMintEvent: "UNSHIELDED_MINT",
+  UnshieldedBurnEvent: "UNSHIELDED_BURN",
+  PausedEvent: "PAUSED",
+  UnpausedEvent: "UNPAUSED",
+  MiscContractEvent: "MISC",
+};
+
 // ============================================================================
 // Validation Functions
 // ============================================================================
@@ -220,10 +252,10 @@ function validateNonEmptyArray<T>(array: T[], arrayName: string): void {
  * @param folderPath - Path to the test data folder
  * @param dataFile - Path to the data file containing blocks
  */
-export function updateTestDataFiles(
+export async function updateTestDataFiles(
   folderPath: string,
   sourceBlockDataFile: string,
-): void {
+): Promise<void> {
   try {
     // Validate input parameters
     if (!folderPath || typeof folderPath !== "string") {
@@ -245,6 +277,7 @@ export function updateTestDataFiles(
     updateBlockDataFile(folderPath, sourceBlockData);
     updateTransactionDataFile(folderPath, sourceBlockData);
     updateContractDataFile(folderPath, sourceBlockData);
+    await updateContractEventsDataFile(folderPath, sourceBlockData);
 
     console.info("[INFO ] - All test data files updated successfully");
   } catch (error) {
@@ -709,6 +742,192 @@ function updateContractDataFile(
     }
     throw new TestDataHandlerError(
       "Failed to update contract actions data file",
+      { destinationPath, originalError: error },
+    );
+  }
+}
+
+/**
+ * Queries the indexer for the contract events emitted by a single contract
+ * address and returns the distinct event types (ContractEventType enum
+ * values), or null when the query fails (e.g. the deployed indexer predates
+ * the contractEvents query).
+ *
+ * @param graphqlUrl - The indexer GraphQL HTTP endpoint
+ * @param address - The contract address to query events for
+ * @returns Distinct event types, or null if the query is unsupported/failed
+ */
+async function fetchContractEventTypes(
+  graphqlUrl: string,
+  address: string,
+): Promise<string[] | null> {
+  const query = `query ContractEventsForAddress($ADDRESS: HexEncoded!) {
+    contractEvents(filter: { contractAddress: $ADDRESS }, limit: 100) {
+      __typename
+    }
+  }`;
+
+  try {
+    const response = await fetch(graphqlUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, variables: { ADDRESS: address } }),
+      signal: AbortSignal.timeout(10_000),
+    });
+
+    const body = (await response.json()) as {
+      data?: { contractEvents?: { __typename: string }[] };
+      errors?: { message: string }[];
+    };
+
+    if (body.errors || !body.data?.contractEvents) {
+      // Validation errors here mean the deployed schema has no contractEvents
+      // query (pre contract-events indexer); anything else is equally
+      // non-actionable for data generation, so both degrade to "unsupported".
+      console.info(
+        `[INFO ] - contractEvents query not usable for ${address}: ` +
+          `${body.errors?.[0]?.message ?? "no data in response"}`,
+      );
+      return null;
+    }
+
+    const eventTypes = body.data.contractEvents.map((event) => {
+      const eventType = EVENT_TYPENAME_TO_EVENT_TYPE[event.__typename];
+      if (!eventType) {
+        console.warn(
+          `[WARN ] - Unknown contract event typename "${event.__typename}" ` +
+            `for ${address}; add it to EVENT_TYPENAME_TO_EVENT_TYPE`,
+        );
+      }
+      return eventType ?? event.__typename;
+    });
+
+    return [...new Set(eventTypes)];
+  } catch (error) {
+    console.warn(
+      `[WARN ] - contractEvents query failed for ${address}: ${String(error)}`,
+    );
+    return null;
+  }
+}
+
+/**
+ * Updates the contract events data file
+ *
+ * The contract addresses discovered in the scanned blocks are enriched via
+ * the indexer's contractEvents query: every contract with at least one
+ * persisted event is listed together with the distinct event types it
+ * emitted. Contracts without events are omitted.
+ *
+ * When the deployed indexer does not support the contractEvents query (the
+ * first probe returns null), the file is left untouched so an existing
+ * curated fixture is not destroyed.
+ *
+ * @param destinationPath - Path to the test data folder
+ * @param sourceBlockData - The data containing the scanned blocks
+ */
+async function updateContractEventsDataFile(
+  destinationPath: string,
+  sourceBlockData: string,
+): Promise<void> {
+  try {
+    // Parse blocks and collect the distinct contract addresses seen on chain
+    const blocks: Block[] = parseBlockData(sourceBlockData);
+    validateNonEmptyArray(blocks, "Blocks array");
+
+    const addresses: Set<string> = new Set();
+    for (const block of blocks) {
+      for (const transaction of block.transactions) {
+        if (
+          transaction.__typename === "RegularTransaction" &&
+          transaction.contractActions
+        ) {
+          for (const contractAction of transaction.contractActions) {
+            addresses.add(contractAction.address);
+          }
+        }
+      }
+    }
+
+    if (addresses.size === 0) {
+      console.info(
+        "[INFO ] - No contract addresses found in the scanned blocks; " +
+          "skipping contract events data file",
+      );
+      return;
+    }
+
+    const graphqlUrl = `${INDEXER_HTTP_URL}/api/${INDEXER_API_VERSION}/graphql`;
+    console.info(
+      `[INFO ] - Querying contract events for ${addresses.size} contract(s)`,
+    );
+
+    const contractsWithEvents: ContractWithEvents[] = [];
+    let unsupported = false;
+
+    for (const address of addresses) {
+      const eventTypes = await fetchContractEventTypes(graphqlUrl, address);
+
+      if (eventTypes === null) {
+        // First failure decides: if the query is unsupported on this
+        // environment, probing the remaining addresses is pointless.
+        unsupported = true;
+        break;
+      }
+
+      if (eventTypes.length > 0) {
+        contractsWithEvents.push({
+          "contract-address": address,
+          "event-types": eventTypes,
+        });
+      }
+    }
+
+    if (unsupported) {
+      console.info(
+        "[INFO ] - contractEvents query unsupported on this environment; " +
+          "leaving any existing contract events data file untouched",
+      );
+      return;
+    }
+
+    if (contractsWithEvents.length === 0) {
+      console.info(
+        "[INFO ] - No contracts with emitted events found on this chain",
+      );
+    }
+
+    // Ensure the target directory exists
+    const targetDir: string = ensureTargetDirectory(destinationPath);
+
+    // Build file paths
+    const targetFileName = `contract-events.jsonc`;
+    const { targetFilePath, templateFilePath } = buildFilePaths(
+      targetDir,
+      targetFileName,
+    );
+
+    // Load template and populate with data to preserve comments
+    const templateArray: ContractEventsDataFile =
+      loadTemplateFile<ContractEventsDataFile>(templateFilePath);
+
+    templateArray.length = 0;
+    if (contractsWithEvents.length > 0) {
+      templateArray.push(...contractsWithEvents);
+    }
+
+    // Write the data to the target folder
+    writeJsonFile<ContractEventsDataFile>(
+      targetFilePath,
+      templateArray,
+      `Contract events data file updated: ${destinationPath}/${TARGET_ENV}/contract-events.jsonc`,
+    );
+  } catch (error) {
+    if (error instanceof TestDataHandlerError) {
+      throw error;
+    }
+    throw new TestDataHandlerError(
+      "Failed to update contract events data file",
       { destinationPath, originalError: error },
     );
   }
