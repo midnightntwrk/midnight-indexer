@@ -13,25 +13,25 @@
 
 //! Domain types for the c2m-bridge GraphQL API.
 //!
-//! These mirror the persisted shape of `bridge_pallet_events` and `bridge_claims` rather
+//! These mirror the persisted shape of `bridge_events` and `bridge_claims` rather
 //! than the on-chain pallet event structure. The raw pallet event types live in
 //! `indexer_common::domain::bridge`.
 
 use indexer_common::domain::{
     UnshieldedAddress,
-    bridge::{BridgePalletEventVariant, BridgeRecipient, McTxHash, MidnightTxHash},
+    bridge::{BridgeRecipient, McTxHash, MidnightTxHash},
 };
 
 /// Event variant discriminator. Re-exported here for convenience in storage queries.
-pub use indexer_common::domain::bridge::BridgePalletEventVariant as BridgeEventVariant;
+pub use indexer_common::domain::bridge::BridgeEventVariant;
 
-/// A persisted c2m-bridge pallet event row, enriched with block context.
+/// A persisted c2m-bridge event row, enriched with block context.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeEvent {
     pub id: u64,
     pub block_height: u64,
     pub transaction_id: Option<u64>,
-    pub variant: BridgePalletEventVariant,
+    pub variant: BridgeEventVariant,
     pub mc_tx_hash: Option<McTxHash>,
     pub amount: u64,
     pub recipient: Option<BridgeRecipient>,
@@ -64,7 +64,7 @@ pub struct BridgeBalance {
 /// A row of treasury inflow aggregated by reason.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BridgeTreasuryAggregate {
-    pub reason: BridgePalletEventVariant,
+    pub reason: BridgeEventVariant,
     pub total: u128,
     pub count: u64,
 }
@@ -87,11 +87,11 @@ pub enum TreasuryReason {
 }
 
 impl TreasuryReason {
-    pub fn as_variant(&self) -> BridgePalletEventVariant {
+    pub fn as_variant(&self) -> BridgeEventVariant {
         match self {
-            Self::Invalid => BridgePalletEventVariant::InvalidTransfer,
-            Self::Unapproved => BridgePalletEventVariant::UnapprovedTransfer,
-            Self::SubminimalFlush => BridgePalletEventVariant::SubminimalFlushTransfer,
+            Self::Invalid => BridgeEventVariant::InvalidTransfer,
+            Self::Unapproved => BridgeEventVariant::UnapprovedTransfer,
+            Self::SubminimalFlush => BridgeEventVariant::SubminimalFlushTransfer,
         }
     }
 }

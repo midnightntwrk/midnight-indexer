@@ -52,13 +52,13 @@ pub enum BridgeRecipientError {
     TooLong { max: usize, actual: usize },
 }
 
-/// Discriminator for the c2m-bridge pallet event variants.
+/// Discriminator for the c2m-bridge event variants.
 ///
-/// Persisted as a Postgres ENUM (`BRIDGE_PALLET_EVENT_VARIANT`) and as a SQLite TEXT CHECK column
+/// Persisted as a Postgres ENUM (`PROTOCOL_BRIDGE_EVENT_VARIANT`) and as a SQLite TEXT CHECK column
 /// to enable indexed filtering by variant without unpacking the per-variant payload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type)]
-#[sqlx(type_name = "BRIDGE_PALLET_EVENT_VARIANT", rename_all = "PascalCase")]
-pub enum BridgePalletEventVariant {
+#[sqlx(type_name = "PROTOCOL_BRIDGE_EVENT_VARIANT", rename_all = "PascalCase")]
+pub enum BridgeEventVariant {
     UserTransfer,
     ReserveTransfer,
     InvalidTransfer,
@@ -72,7 +72,7 @@ pub enum BridgePalletEventVariant {
 /// transaction. See the c2m-bridge pallet's flowchart in the bridge protocol docs for the
 /// decision flow that produces each variant.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum BridgePalletEvent {
+pub enum BridgeEvent {
     /// Approved user deposit. Funds credited to `recipient` via DistributeNight CardanoBridge.
     UserTransfer {
         mc_tx_hash: McTxHash,
@@ -120,16 +120,14 @@ pub enum BridgePalletEvent {
     },
 }
 
-impl BridgePalletEvent {
-    pub fn variant(&self) -> BridgePalletEventVariant {
+impl BridgeEvent {
+    pub fn variant(&self) -> BridgeEventVariant {
         match self {
-            Self::UserTransfer { .. } => BridgePalletEventVariant::UserTransfer,
-            Self::ReserveTransfer { .. } => BridgePalletEventVariant::ReserveTransfer,
-            Self::InvalidTransfer { .. } => BridgePalletEventVariant::InvalidTransfer,
-            Self::UnapprovedTransfer { .. } => BridgePalletEventVariant::UnapprovedTransfer,
-            Self::SubminimalFlushTransfer { .. } => {
-                BridgePalletEventVariant::SubminimalFlushTransfer
-            }
+            Self::UserTransfer { .. } => BridgeEventVariant::UserTransfer,
+            Self::ReserveTransfer { .. } => BridgeEventVariant::ReserveTransfer,
+            Self::InvalidTransfer { .. } => BridgeEventVariant::InvalidTransfer,
+            Self::UnapprovedTransfer { .. } => BridgeEventVariant::UnapprovedTransfer,
+            Self::SubminimalFlushTransfer { .. } => BridgeEventVariant::SubminimalFlushTransfer,
         }
     }
 
@@ -230,31 +228,31 @@ mod tests {
         let mn = ByteArray([2u8; 32]);
 
         assert_eq!(
-            BridgePalletEvent::UserTransfer {
+            BridgeEvent::UserTransfer {
                 mc_tx_hash: mc,
                 amount: 100,
                 recipient: recipient.clone(),
                 midnight_tx_hash: mn,
             }
             .variant(),
-            BridgePalletEventVariant::UserTransfer
+            BridgeEventVariant::UserTransfer
         );
 
         assert_eq!(
-            BridgePalletEvent::SubminimalFlushTransfer {
+            BridgeEvent::SubminimalFlushTransfer {
                 amount: 999,
                 count: 3,
                 midnight_tx_hash: mn,
             }
             .variant(),
-            BridgePalletEventVariant::SubminimalFlushTransfer
+            BridgeEventVariant::SubminimalFlushTransfer
         );
     }
 
     #[test]
     fn subminimal_flush_has_no_mc_tx_hash() {
         let mn = ByteArray([2u8; 32]);
-        let event = BridgePalletEvent::SubminimalFlushTransfer {
+        let event = BridgeEvent::SubminimalFlushTransfer {
             amount: 999,
             count: 3,
             midnight_tx_hash: mn,
@@ -266,14 +264,14 @@ mod tests {
     #[test]
     fn json_roundtrip() {
         let recipient = BridgeRecipient::new(vec![0xab; 32]).unwrap();
-        let event = BridgePalletEvent::UserTransfer {
+        let event = BridgeEvent::UserTransfer {
             mc_tx_hash: ByteArray([1u8; 32]),
             amount: 1_000_000,
             recipient,
             midnight_tx_hash: ByteArray([2u8; 32]),
         };
         let json = serde_json::to_string(&event).unwrap();
-        let parsed: BridgePalletEvent = serde_json::from_str(&json).unwrap();
+        let parsed: BridgeEvent = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed, event);
     }
 }

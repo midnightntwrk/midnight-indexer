@@ -790,7 +790,7 @@ where
         Ok(shares.into_iter().map(Into::into).collect())
     }
 
-    /// List c2m-bridge pallet events with optional filters.
+    /// List c2m-bridge events with optional filters.
     #[trace]
     #[allow(clippy::too_many_arguments)]
     #[graphql(directive = beta::apply())]

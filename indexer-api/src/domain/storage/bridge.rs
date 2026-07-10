@@ -15,13 +15,13 @@ use crate::domain::{
     bridge::{BridgeBalance, BridgeEvent, BridgePoolSummary, TreasuryReason},
     storage::NoopStorage,
 };
-use indexer_common::domain::{UnshieldedAddress, bridge::BridgePalletEventVariant};
+use indexer_common::domain::{UnshieldedAddress, bridge::BridgeEventVariant};
 
 /// Filters for `get_bridge_events`. All fields combined with AND; empty `variants` matches all
 /// variants.
 #[derive(Debug, Default, Clone)]
 pub struct BridgeEventFilter {
-    pub variants: Vec<BridgePalletEventVariant>,
+    pub variants: Vec<BridgeEventVariant>,
     pub recipient: Option<UnshieldedAddress>,
     pub block_height_from: Option<u64>,
     pub block_height_to: Option<u64>,
@@ -33,7 +33,7 @@ pub trait BridgeStorage
 where
     Self: Send + Sync,
 {
-    /// Fetch bridge pallet events filtered by the given criteria, paginated.
+    /// Fetch bridge events filtered by the given criteria, paginated.
     async fn get_bridge_events(
         &self,
         filter: &BridgeEventFilter,

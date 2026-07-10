@@ -21,7 +21,7 @@
 --------------------------------------------------------------------------------
 -- types
 --------------------------------------------------------------------------------
-CREATE TYPE BRIDGE_PALLET_EVENT_VARIANT AS ENUM(
+CREATE TYPE PROTOCOL_BRIDGE_EVENT_VARIANT AS ENUM(
   'UserTransfer',
   'ReserveTransfer',
   'InvalidTransfer',
@@ -30,13 +30,13 @@ CREATE TYPE BRIDGE_PALLET_EVENT_VARIANT AS ENUM(
 );
 
 --------------------------------------------------------------------------------
--- bridge_pallet_events
+-- protocol_bridge_events
 --------------------------------------------------------------------------------
-CREATE TABLE bridge_pallet_events (
+CREATE TABLE protocol_bridge_events (
   id BIGSERIAL PRIMARY KEY,
   block_id BIGINT NOT NULL REFERENCES blocks (id),
   transaction_id BIGINT REFERENCES transactions (id),
-  variant BRIDGE_PALLET_EVENT_VARIANT NOT NULL,
+  variant PROTOCOL_BRIDGE_EVENT_VARIANT NOT NULL,
   mc_tx_hash BYTEA,
   amount BYTEA NOT NULL,
   recipient BYTEA,
@@ -44,12 +44,12 @@ CREATE TABLE bridge_pallet_events (
   count INTEGER
 );
 
-CREATE INDEX ON bridge_pallet_events (block_id);
-CREATE INDEX ON bridge_pallet_events (transaction_id);
-CREATE INDEX ON bridge_pallet_events (mc_tx_hash) WHERE mc_tx_hash IS NOT NULL;
-CREATE INDEX ON bridge_pallet_events (midnight_tx_hash);
-CREATE INDEX ON bridge_pallet_events (recipient) WHERE recipient IS NOT NULL;
-CREATE INDEX ON bridge_pallet_events (variant, recipient);
+CREATE INDEX ON protocol_bridge_events (block_id);
+CREATE INDEX ON protocol_bridge_events (transaction_id);
+CREATE INDEX ON protocol_bridge_events (mc_tx_hash) WHERE mc_tx_hash IS NOT NULL;
+CREATE INDEX ON protocol_bridge_events (midnight_tx_hash);
+CREATE INDEX ON protocol_bridge_events (recipient) WHERE recipient IS NOT NULL;
+CREATE INDEX ON protocol_bridge_events (variant, recipient);
 
 --------------------------------------------------------------------------------
 -- bridge_claims

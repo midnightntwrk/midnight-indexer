@@ -18,9 +18,9 @@ use crate::{
     infra::api::v4::{HexEncodable, HexEncoded, directives::beta},
 };
 use async_graphql::{Enum, Interface, SimpleObject};
-use indexer_common::domain::bridge::BridgePalletEventVariant;
+use indexer_common::domain::bridge::BridgeEventVariant as DomainBridgeEventVariant;
 
-/// GraphQL discriminator for bridge pallet events.
+/// GraphQL discriminator for bridge events.
 #[derive(Enum, Copy, Clone, Eq, PartialEq, Debug)]
 pub enum BridgeEventVariant {
     UserTransfer,
@@ -30,19 +30,19 @@ pub enum BridgeEventVariant {
     SubminimalFlushTransfer,
 }
 
-impl From<BridgePalletEventVariant> for BridgeEventVariant {
-    fn from(v: BridgePalletEventVariant) -> Self {
+impl From<DomainBridgeEventVariant> for BridgeEventVariant {
+    fn from(v: DomainBridgeEventVariant) -> Self {
         match v {
-            BridgePalletEventVariant::UserTransfer => Self::UserTransfer,
-            BridgePalletEventVariant::ReserveTransfer => Self::ReserveTransfer,
-            BridgePalletEventVariant::InvalidTransfer => Self::InvalidTransfer,
-            BridgePalletEventVariant::UnapprovedTransfer => Self::UnapprovedTransfer,
-            BridgePalletEventVariant::SubminimalFlushTransfer => Self::SubminimalFlushTransfer,
+            DomainBridgeEventVariant::UserTransfer => Self::UserTransfer,
+            DomainBridgeEventVariant::ReserveTransfer => Self::ReserveTransfer,
+            DomainBridgeEventVariant::InvalidTransfer => Self::InvalidTransfer,
+            DomainBridgeEventVariant::UnapprovedTransfer => Self::UnapprovedTransfer,
+            DomainBridgeEventVariant::SubminimalFlushTransfer => Self::SubminimalFlushTransfer,
         }
     }
 }
 
-impl From<BridgeEventVariant> for BridgePalletEventVariant {
+impl From<BridgeEventVariant> for DomainBridgeEventVariant {
     fn from(v: BridgeEventVariant) -> Self {
         match v {
             BridgeEventVariant::UserTransfer => Self::UserTransfer,
@@ -173,7 +173,7 @@ impl From<domain_bridge::BridgeEvent> for BridgeEvent {
         };
 
         match e.variant {
-            BridgePalletEventVariant::UserTransfer => Self::UserTransfer(BridgeUserTransfer {
+            DomainBridgeEventVariant::UserTransfer => Self::UserTransfer(BridgeUserTransfer {
                 id,
                 block_height,
                 midnight_tx_hash,
@@ -181,7 +181,7 @@ impl From<domain_bridge::BridgeEvent> for BridgeEvent {
                 amount,
                 recipient: recipient_or_empty(),
             }),
-            BridgePalletEventVariant::ReserveTransfer => {
+            DomainBridgeEventVariant::ReserveTransfer => {
                 Self::ReserveTransfer(BridgeReserveTransfer {
                     id,
                     block_height,
@@ -190,7 +190,7 @@ impl From<domain_bridge::BridgeEvent> for BridgeEvent {
                     amount,
                 })
             }
-            BridgePalletEventVariant::InvalidTransfer => {
+            DomainBridgeEventVariant::InvalidTransfer => {
                 Self::InvalidTransfer(BridgeInvalidTransfer {
                     id,
                     block_height,
@@ -199,7 +199,7 @@ impl From<domain_bridge::BridgeEvent> for BridgeEvent {
                     amount,
                 })
             }
-            BridgePalletEventVariant::UnapprovedTransfer => {
+            DomainBridgeEventVariant::UnapprovedTransfer => {
                 Self::UnapprovedTransfer(BridgeUnapprovedTransfer {
                     id,
                     block_height,
@@ -209,7 +209,7 @@ impl From<domain_bridge::BridgeEvent> for BridgeEvent {
                     recipient: recipient_or_empty(),
                 })
             }
-            BridgePalletEventVariant::SubminimalFlushTransfer => {
+            DomainBridgeEventVariant::SubminimalFlushTransfer => {
                 Self::SubminimalFlushTransfer(BridgeSubminimalFlushTransfer {
                     id,
                     block_height,
@@ -274,11 +274,11 @@ impl From<domain_bridge::BridgePoolSummary> for BridgePoolSummary {
             .into_iter()
             .filter_map(|agg| {
                 let reason = match agg.reason {
-                    BridgePalletEventVariant::InvalidTransfer => BridgeTreasuryReason::Invalid,
-                    BridgePalletEventVariant::UnapprovedTransfer => {
+                    DomainBridgeEventVariant::InvalidTransfer => BridgeTreasuryReason::Invalid,
+                    DomainBridgeEventVariant::UnapprovedTransfer => {
                         BridgeTreasuryReason::Unapproved
                     }
-                    BridgePalletEventVariant::SubminimalFlushTransfer => {
+                    DomainBridgeEventVariant::SubminimalFlushTransfer => {
                         BridgeTreasuryReason::SubminimalFlush
                     }
                     _ => return None,

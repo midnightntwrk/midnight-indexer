@@ -5,9 +5,9 @@
 -- partial indexes use `WHERE` clauses.
 
 --------------------------------------------------------------------------------
--- bridge_pallet_events
+-- protocol_bridge_events
 --------------------------------------------------------------------------------
-CREATE TABLE bridge_pallet_events (
+CREATE TABLE protocol_bridge_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   block_id INTEGER NOT NULL REFERENCES blocks (id),
   transaction_id INTEGER REFERENCES transactions (id),
@@ -25,12 +25,12 @@ CREATE TABLE bridge_pallet_events (
   count INTEGER
 );
 
-CREATE INDEX bridge_pallet_events_block_id_idx          ON bridge_pallet_events (block_id);
-CREATE INDEX bridge_pallet_events_transaction_id_idx    ON bridge_pallet_events (transaction_id);
-CREATE INDEX bridge_pallet_events_mc_tx_hash_idx        ON bridge_pallet_events (mc_tx_hash) WHERE mc_tx_hash IS NOT NULL;
-CREATE INDEX bridge_pallet_events_midnight_tx_hash_idx  ON bridge_pallet_events (midnight_tx_hash);
-CREATE INDEX bridge_pallet_events_recipient_idx         ON bridge_pallet_events (recipient) WHERE recipient IS NOT NULL;
-CREATE INDEX bridge_pallet_events_variant_recipient_idx ON bridge_pallet_events (variant, recipient);
+CREATE INDEX protocol_bridge_events_block_id_idx          ON protocol_bridge_events (block_id);
+CREATE INDEX protocol_bridge_events_transaction_id_idx    ON protocol_bridge_events (transaction_id);
+CREATE INDEX protocol_bridge_events_mc_tx_hash_idx        ON protocol_bridge_events (mc_tx_hash) WHERE mc_tx_hash IS NOT NULL;
+CREATE INDEX protocol_bridge_events_midnight_tx_hash_idx  ON protocol_bridge_events (midnight_tx_hash);
+CREATE INDEX protocol_bridge_events_recipient_idx         ON protocol_bridge_events (recipient) WHERE recipient IS NOT NULL;
+CREATE INDEX protocol_bridge_events_variant_recipient_idx ON protocol_bridge_events (variant, recipient);
 
 --------------------------------------------------------------------------------
 -- bridge_claims

@@ -15,7 +15,7 @@ use crate::domain::DustRegistrationEvent;
 use indexer_common::domain::{
     BlockAuthor, BlockHash, ByteVec, ProtocolVersion, SerializedDustCommitmentMerkleTreeRoot,
     SerializedDustGenerationMerkleTreeRoot, SerializedLedgerParameters,
-    SerializedZswapMerkleTreeRoot, bridge::BridgePalletEvent,
+    SerializedZswapMerkleTreeRoot, bridge::BridgeEvent,
 };
 use std::fmt::Debug;
 
@@ -32,10 +32,10 @@ pub struct Block {
     // TODO: Remove Option once support for Node < 0.22 is dropped!
     pub ledger_state_root: Option<ByteVec>,
     pub dust_registration_events: Vec<DustRegistrationEvent>,
-    /// c2m-bridge pallet events (5 variants, see indexer-common::domain::bridge), decoded from
+    /// c2m-bridge events (5 variants, see indexer-common::domain::bridge), decoded from
     /// the node 2.0+ runtime (`infra/subxt_node/runtimes/v2_0_0.rs`); always empty for earlier
     /// runtimes, where the pallet does not exist.
-    pub bridge_pallet_events: Vec<BridgePalletEvent>,
+    pub bridge_events: Vec<BridgeEvent>,
 
     // These fields are set after applying all transactions of this block to the ledger state.
     pub ledger_parameters: SerializedLedgerParameters,

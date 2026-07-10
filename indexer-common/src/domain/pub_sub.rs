@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{UnshieldedAddress, bridge::BridgePalletEvent};
+use crate::domain::{UnshieldedAddress, bridge::BridgeEvent};
 use derive_more::derive::From;
 use futures::{Stream, stream};
 use serde::{Deserialize, Serialize};
@@ -63,11 +63,11 @@ pub struct UnshieldedUtxoIndexed {
 }
 message!(UnshieldedUtxoIndexed);
 
-/// Emitted when a c2m-bridge pallet event (any of the 5 variants) is indexed.
+/// Emitted when a c2m-bridge event (any of the 5 variants) is indexed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BridgeEventIndexed {
     pub block_height: u64,
-    pub event: BridgePalletEvent,
+    pub event: BridgeEvent,
 }
 message!(BridgeEventIndexed);
 

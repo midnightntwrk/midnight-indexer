@@ -206,7 +206,7 @@ impl SubxtNode {
             timestamp,
             transactions,
             mut dust_registration_events,
-            bridge_pallet_events,
+            bridge_events,
         } = runtimes::make_block_details(authorities, node_version, &block).await?;
 
         // At genesis, Substrate does not emit events (Parity PR #5463). Fetch cNight
@@ -240,7 +240,7 @@ impl SubxtNode {
             ledger_state_root,
             transactions,
             dust_registration_events,
-            bridge_pallet_events,
+            bridge_events,
         };
 
         debug!(

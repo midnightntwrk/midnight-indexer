@@ -24,7 +24,7 @@ use fastrace::trace;
 use indexer_common::{
     domain::{
         UnshieldedAddress,
-        bridge::{BridgePalletEventVariant, BridgeRecipient, McTxHash, MidnightTxHash},
+        bridge::{BridgeEventVariant, BridgeRecipient, McTxHash, MidnightTxHash},
     },
     infra::sqlx::U128BeBytes,
 };
@@ -36,11 +36,11 @@ type Db = sqlx::Postgres;
 #[cfg(feature = "standalone")]
 type Db = sqlx::Sqlite;
 
-/// SQL fragment selecting all `bridge_pallet_events` columns plus the joined block height.
+/// SQL fragment selecting all `bridge_events` columns plus the joined block height.
 const SELECT_EVENT_FRAGMENT: &str = "SELECT \
     bpe.id, b.height, bpe.transaction_id, bpe.variant, \
     bpe.mc_tx_hash, bpe.amount, bpe.recipient, bpe.midnight_tx_hash, bpe.count \
-    FROM bridge_pallet_events bpe \
+    FROM protocol_bridge_events bpe \
     JOIN blocks b ON b.id = bpe.block_id ";
 
 fn decode_u64_be(bytes: &[u8]) -> u64 {
@@ -54,7 +54,7 @@ fn map_event_row(row: &<Db as sqlx::Database>::Row) -> Result<BridgeEvent, sqlx:
     let id: i64 = row.try_get(0)?;
     let height: i64 = row.try_get(1)?;
     let transaction_id: Option<i64> = row.try_get(2)?;
-    let variant: BridgePalletEventVariant = row.try_get(3)?;
+    let variant: BridgeEventVariant = row.try_get(3)?;
     let mc_tx_hash: Option<Vec<u8>> = row.try_get(4)?;
     let amount: Vec<u8> = row.try_get(5)?;
     let recipient: Option<Vec<u8>> = row.try_get(6)?;
@@ -152,13 +152,13 @@ impl BridgeStorage for Storage {
     ) -> Result<BridgeBalance, sqlx::Error> {
         let deposited_q = indoc! {"
             SELECT amount
-            FROM bridge_pallet_events
+            FROM protocol_bridge_events
             WHERE variant = $1
               AND recipient = $2
         "};
 
         let deposited_rows: Vec<(Vec<u8>,)> = sqlx::query_as(deposited_q)
-            .bind(BridgePalletEventVariant::UserTransfer)
+            .bind(BridgeEventVariant::UserTransfer)
             .bind(recipient.as_ref())
             .fetch_all(&*self.pool)
             .await?;
@@ -200,7 +200,7 @@ impl BridgeStorage for Storage {
         limit: u64,
     ) -> Result<Vec<BridgeEvent>, sqlx::Error> {
         let filter = BridgeEventFilter {
-            variants: vec![BridgePalletEventVariant::ReserveTransfer],
+            variants: vec![BridgeEventVariant::ReserveTransfer],
             block_height_from,
             block_height_to,
             ..Default::default()
@@ -225,11 +225,11 @@ impl BridgeStorage for Storage {
             }
             None => {
                 builder.push("bpe.variant IN (");
-                builder.push_bind(BridgePalletEventVariant::InvalidTransfer);
+                builder.push_bind(BridgeEventVariant::InvalidTransfer);
                 builder.push(", ");
-                builder.push_bind(BridgePalletEventVariant::UnapprovedTransfer);
+                builder.push_bind(BridgeEventVariant::UnapprovedTransfer);
                 builder.push(", ");
-                builder.push_bind(BridgePalletEventVariant::SubminimalFlushTransfer);
+                builder.push_bind(BridgeEventVariant::SubminimalFlushTransfer);
                 builder.push(")");
             }
         }
@@ -258,9 +258,9 @@ impl BridgeStorage for Storage {
 
         // Pull every relevant row; in practice volumes are low. Aggregate in app layer to avoid
         // dialect-specific SUM/CASE differences between Postgres and SQLite.
-        let rows: Vec<(BridgePalletEventVariant, Vec<u8>, Option<i32>)> = sqlx::query_as(indoc! {"
+        let rows: Vec<(BridgeEventVariant, Vec<u8>, Option<i32>)> = sqlx::query_as(indoc! {"
             SELECT bpe.variant, bpe.amount, bpe.count
-            FROM bridge_pallet_events bpe
+            FROM protocol_bridge_events bpe
             JOIN blocks b ON b.id = bpe.block_id
             WHERE b.height <= $1
         "})
@@ -280,31 +280,31 @@ impl BridgeStorage for Storage {
         for (variant, amount_bytes, count) in &rows {
             let amount = decode_u64_be(amount_bytes) as u128;
             match variant {
-                BridgePalletEventVariant::ReserveTransfer => {
+                BridgeEventVariant::ReserveTransfer => {
                     reserve_total = reserve_total.saturating_add(amount);
                 }
-                BridgePalletEventVariant::InvalidTransfer => {
+                BridgeEventVariant::InvalidTransfer => {
                     invalid_total = invalid_total.saturating_add(amount);
                     invalid_count += 1;
                 }
-                BridgePalletEventVariant::UnapprovedTransfer => {
+                BridgeEventVariant::UnapprovedTransfer => {
                     unapproved_total = unapproved_total.saturating_add(amount);
                     unapproved_count += 1;
                 }
-                BridgePalletEventVariant::SubminimalFlushTransfer => {
+                BridgeEventVariant::SubminimalFlushTransfer => {
                     flush_total = flush_total.saturating_add(amount);
                     flush_count += 1;
                     if let Some(c) = count {
                         subminimum_tx_count += *c as u64;
                     }
                 }
-                BridgePalletEventVariant::UserTransfer => {}
+                BridgeEventVariant::UserTransfer => {}
             }
         }
 
         let last_height_q = indoc! {"
             SELECT MAX(b.height)
-            FROM bridge_pallet_events bpe
+            FROM protocol_bridge_events bpe
             JOIN blocks b ON b.id = bpe.block_id
             WHERE b.height <= $1
         "};
@@ -319,17 +319,17 @@ impl BridgeStorage for Storage {
             reserve_total,
             treasury_by_reason: vec![
                 BridgeTreasuryAggregate {
-                    reason: BridgePalletEventVariant::InvalidTransfer,
+                    reason: BridgeEventVariant::InvalidTransfer,
                     total: invalid_total,
                     count: invalid_count,
                 },
                 BridgeTreasuryAggregate {
-                    reason: BridgePalletEventVariant::UnapprovedTransfer,
+                    reason: BridgeEventVariant::UnapprovedTransfer,
                     total: unapproved_total,
                     count: unapproved_count,
                 },
                 BridgeTreasuryAggregate {
-                    reason: BridgePalletEventVariant::SubminimalFlushTransfer,
+                    reason: BridgeEventVariant::SubminimalFlushTransfer,
                     total: flush_total,
                     count: flush_count,
                 },

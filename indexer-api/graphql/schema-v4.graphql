@@ -163,7 +163,7 @@ interface BridgeEvent {
 }
 
 """
-GraphQL discriminator for bridge pallet events.
+GraphQL discriminator for bridge events.
 """
 enum BridgeEventVariant {
 	USER_TRANSFER
@@ -1044,7 +1044,7 @@ type Query {
 	"""
 	stakeDistribution(limit: Int, offset: Int, search: String, orderByStakeDesc: Boolean): [StakeShare!]!
 	"""
-	List c2m-bridge pallet events with optional filters.
+	List c2m-bridge events with optional filters.
 	"""
 	bridgeEvents(recipient: HexEncoded, variant: BridgeEventVariant, blockHeightFrom: Int, blockHeightTo: Int, offset: Int, limit: Int): [BridgeEvent!]! @beta
 	"""
@@ -1408,7 +1408,7 @@ type Subscription {
 	"""
 	blocks(offset: BlockOffset): Block!
 	"""
-	Subscribe to c2m-bridge pallet events.
+	Subscribe to c2m-bridge events.
 	
 	Backfills events with id > `from` then live-tails new events. Filters apply across both
 	phases.
@@ -1423,7 +1423,7 @@ type Subscription {
 	"""
 	Subscribe to a recipient's bridge balance. Emits the current balance on subscribe and
 	re-emits whenever a bridge event for the recipient indexes or the recipient's unshielded
-	UTXOs change (a claim emits no bridge pallet event, but it creates unshielded UTXOs for
+	UTXOs change (a claim emits no bridge event, but it creates unshielded UTXOs for
 	the recipient).
 	"""
 	bridgeBalance(address: HexEncoded!): BridgeBalance! @beta

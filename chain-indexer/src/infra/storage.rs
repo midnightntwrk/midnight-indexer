@@ -21,7 +21,7 @@ use indexer_common::{
     domain::{
         BlockHash, ByteVec, ContractAttributes, ContractBalance, LedgerEvent,
         LedgerEventAttributes, ProtocolVersion, SerializedLedgerStateKey, TermsAndConditionsHash,
-        UnshieldedUtxo, bridge::BridgePalletEvent,
+        UnshieldedUtxo, bridge::BridgeEvent,
     },
     infra::sqlx::U128BeBytes,
 };
@@ -346,7 +346,7 @@ async fn save_block(
 
     save_dust_registration_events(dust_registration_events, block_id, block.timestamp, tx).await?;
 
-    save_bridge_pallet_events(&block.bridge_pallet_events, block_id, tx).await?;
+    save_bridge_events(&block.bridge_events, block_id, tx).await?;
 
     Ok(max_transaction_id)
 }
@@ -1153,14 +1153,14 @@ async fn save_bridge_claim(
 }
 
 #[trace(properties = { "block_id": "{block_id}" })]
-async fn save_bridge_pallet_events(
-    events: &[BridgePalletEvent],
+async fn save_bridge_events(
+    events: &[BridgeEvent],
     block_id: i64,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
     for event in events {
         let query = indoc! {"
-            INSERT INTO bridge_pallet_events (
+            INSERT INTO protocol_bridge_events (
                 block_id,
                 transaction_id,
                 variant,
@@ -1175,7 +1175,7 @@ async fn save_bridge_pallet_events(
 
         let amount = event.amount().to_be_bytes().to_vec();
         let count = match event {
-            BridgePalletEvent::SubminimalFlushTransfer { count, .. } => Some(*count as i32),
+            BridgeEvent::SubminimalFlushTransfer { count, .. } => Some(*count as i32),
             _ => None,
         };
 

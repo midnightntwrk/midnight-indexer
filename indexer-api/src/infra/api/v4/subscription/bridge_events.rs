@@ -29,8 +29,7 @@ use async_graphql::{Context, SimpleObject, Subscription};
 use async_stream::try_stream;
 use futures::{Stream, TryStreamExt, stream};
 use indexer_common::domain::{
-    BridgeEventIndexed, Subscriber, UnshieldedAddress, UnshieldedUtxoIndexed,
-    bridge::BridgePalletEvent,
+    BridgeEventIndexed, Subscriber, UnshieldedAddress, UnshieldedUtxoIndexed, bridge,
 };
 use std::{future::ready, marker::PhantomData, pin::pin};
 
@@ -47,7 +46,7 @@ pub struct BridgePoolUpdate {
 
 /// Synthesise a `domain_bridge::BridgeEvent` from a pub-sub message so the subscription can emit
 /// the same `BridgeEvent` interface used elsewhere. The `id` and `transaction_id` fields are
-/// zero-valued/absent when sourced from pub-sub since the message carries the pallet-event
+/// zero-valued/absent when sourced from pub-sub since the message carries the event
 /// payload and block height but not the persisted-row identifiers; consumers needing them should
 /// read from the live tail of `bridgeEvents` instead.
 fn synthesise_event(msg: BridgeEventIndexed) -> domain_bridge::BridgeEvent {
@@ -57,7 +56,7 @@ fn synthesise_event(msg: BridgeEventIndexed) -> domain_bridge::BridgeEvent {
     let recipient = msg.event.recipient().cloned();
     let midnight_tx_hash = *msg.event.midnight_tx_hash();
     let count = match msg.event {
-        BridgePalletEvent::SubminimalFlushTransfer { count, .. } => Some(count),
+        bridge::BridgeEvent::SubminimalFlushTransfer { count, .. } => Some(count),
         _ => None,
     };
     domain_bridge::BridgeEvent {
@@ -93,7 +92,7 @@ where
     S: Storage,
     B: Subscriber,
 {
-    /// Subscribe to c2m-bridge pallet events.
+    /// Subscribe to c2m-bridge events.
     ///
     /// Backfills events with id > `from` then live-tails new events. Filters apply across both
     /// phases.
@@ -111,14 +110,14 @@ where
             .map(|h| h.hex_decode::<UnshieldedAddress>())
             .transpose()
             .map_err_into_client_error(|| "invalid recipient address")?;
-        let variant_pallet = variant.map(Into::into);
+        let domain_variant = variant.map(Into::into);
 
         let stream = try_stream! {
             let mut last_id = from.unwrap_or(0);
 
             loop {
                 let filter = BridgeEventFilter {
-                    variants: variant_pallet.into_iter().collect(),
+                    variants: domain_variant.into_iter().collect(),
                     recipient,
                     block_height_from: None,
                     block_height_to: None,
@@ -145,7 +144,7 @@ where
                     let recipient_match = recipient
                         .map(|r| evt.event.recipient().map(|er| er.as_bytes() == r.as_ref()).unwrap_or(false))
                         .unwrap_or(true);
-                    let variant_match = variant_pallet
+                    let variant_match = domain_variant
                         .map(|v| evt.event.variant() == v)
                         .unwrap_or(true);
                     ready(recipient_match && variant_match)
@@ -155,7 +154,7 @@ where
                 .map_err_into_server_error(|| "subscribe BridgeEventIndexed")?
             {
                 let filter = BridgeEventFilter {
-                    variants: variant_pallet.into_iter().collect(),
+                    variants: domain_variant.into_iter().collect(),
                     recipient,
                     block_height_from: None,
                     block_height_to: None,
@@ -197,7 +196,7 @@ where
             let live = subscriber
                 .subscribe::<BridgeEventIndexed>()
                 .try_filter(|evt| {
-                    use indexer_common::domain::bridge::BridgePalletEventVariant::*;
+                    use indexer_common::domain::bridge::BridgeEventVariant::*;
                     let interesting = matches!(
                         evt.event.variant(),
                         ReserveTransfer | InvalidTransfer | UnapprovedTransfer | SubminimalFlushTransfer
@@ -224,7 +223,7 @@ where
 
     /// Subscribe to a recipient's bridge balance. Emits the current balance on subscribe and
     /// re-emits whenever a bridge event for the recipient indexes or the recipient's unshielded
-    /// UTXOs change (a claim emits no bridge pallet event, but it creates unshielded UTXOs for
+    /// UTXOs change (a claim emits no bridge event, but it creates unshielded UTXOs for
     /// the recipient).
     #[graphql(directive = beta::apply())]
     async fn bridge_balance<'a>(

@@ -31,10 +31,10 @@ pub struct BlockDetails {
     pub timestamp: Option<u64>,
     pub transactions: Vec<Transaction>,
     pub dust_registration_events: Vec<DustRegistrationEvent>,
-    /// c2m-bridge pallet events. Only populated for node 2.0+, where the
+    /// c2m-bridge events. Only populated for node 2.0+, where the
     /// `c2m-bridge` pallet exists in the runtime metadata. Empty for earlier
     /// node versions (the pallet did not yet exist there).
-    pub bridge_pallet_events: Vec<indexer_common::domain::bridge::BridgePalletEvent>,
+    pub bridge_events: Vec<indexer_common::domain::bridge::BridgeEvent>,
 }
 
 /// Runtime specific (serialized) transaction.

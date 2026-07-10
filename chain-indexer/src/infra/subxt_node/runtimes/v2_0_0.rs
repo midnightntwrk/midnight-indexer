@@ -22,7 +22,7 @@ use futures::TryStreamExt;
 use indexer_common::domain::{
     ByteVec, DustPublicKey, SerializedContractAddress, SerializedContractState,
     TermsAndConditionsHash,
-    bridge::{BridgePalletEvent, BridgeRecipient},
+    bridge::{BridgeEvent, BridgeRecipient},
 };
 use itertools::Itertools;
 use parity_scale_codec::Decode;
@@ -91,7 +91,7 @@ pub async fn make_block_details(
 
     let mut dust_registration_events = vec![];
     let mut system_transactions_from_events = vec![];
-    let mut bridge_pallet_events = vec![];
+    let mut bridge_events = vec![];
 
     let events = block
         .events()
@@ -156,11 +156,11 @@ pub async fn make_block_details(
                 _ => {}
             },
 
-            // c2m-bridge pallet events (node 2.0.0-alpha.1 + introduced this pallet
+            // c2m-bridge events (node 2.0.0-alpha.1 + introduced this pallet
             // via PR #1386 et al.). Pallet ships inert; events only fire after
             // governance enables it (set MainChainScripts + data checkpoint).
             //
-            // Matching shape (see indexer-common::domain::bridge::BridgePalletEvent):
+            // Matching shape (see indexer-common::domain::bridge::BridgeEvent):
             //   UserTransfer            { mc_tx_hash, amount, recipient, midnight_tx_hash }
             //   ReserveTransfer         { mc_tx_hash, amount, midnight_tx_hash }
             //   InvalidTransfer         { mc_tx_hash, amount, midnight_tx_hash }
@@ -174,7 +174,7 @@ pub async fn make_block_details(
                     midnight_tx_hash,
                 } => {
                     let recipient = BridgeRecipient::new(recipient.0.0)?;
-                    bridge_pallet_events.push(BridgePalletEvent::UserTransfer {
+                    bridge_events.push(BridgeEvent::UserTransfer {
                         mc_tx_hash: mc_tx_hash.0.into(),
                         amount,
                         recipient,
@@ -186,7 +186,7 @@ pub async fn make_block_details(
                     amount,
                     midnight_tx_hash,
                 } => {
-                    bridge_pallet_events.push(BridgePalletEvent::ReserveTransfer {
+                    bridge_events.push(BridgeEvent::ReserveTransfer {
                         mc_tx_hash: mc_tx_hash.0.into(),
                         amount,
                         midnight_tx_hash: midnight_tx_hash.into(),
@@ -197,7 +197,7 @@ pub async fn make_block_details(
                     amount,
                     midnight_tx_hash,
                 } => {
-                    bridge_pallet_events.push(BridgePalletEvent::InvalidTransfer {
+                    bridge_events.push(BridgeEvent::InvalidTransfer {
                         mc_tx_hash: mc_tx_hash.0.into(),
                         amount,
                         midnight_tx_hash: midnight_tx_hash.into(),
@@ -210,7 +210,7 @@ pub async fn make_block_details(
                     midnight_tx_hash,
                 } => {
                     let recipient = BridgeRecipient::new(recipient.0.0)?;
-                    bridge_pallet_events.push(BridgePalletEvent::UnapprovedTransfer {
+                    bridge_events.push(BridgeEvent::UnapprovedTransfer {
                         mc_tx_hash: mc_tx_hash.0.into(),
                         amount,
                         recipient,
@@ -222,7 +222,7 @@ pub async fn make_block_details(
                     count,
                     midnight_tx_hash,
                 } => {
-                    bridge_pallet_events.push(BridgePalletEvent::SubminimalFlushTransfer {
+                    bridge_events.push(BridgeEvent::SubminimalFlushTransfer {
                         amount,
                         count,
                         midnight_tx_hash: midnight_tx_hash.into(),
@@ -243,7 +243,7 @@ pub async fn make_block_details(
         timestamp,
         transactions,
         dust_registration_events,
-        bridge_pallet_events,
+        bridge_events,
     })
 }
 
