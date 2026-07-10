@@ -887,10 +887,21 @@ async fn test_contract_zswap_state_query(
                     if c.entry_point == "selfMint"
             )
         })
-        .context("selfMint ContractCall not found — was zswap-holder deployed in the fixture?")?;
+        .with_context(|| {
+            format!(
+                "selfMint ContractCall not found in the first {MAX_HEIGHT} blocks collected by \
+                 IndexerData — the zswap-holder deploy/selfMint must land within that window. If \
+                 the fixture drifted, regenerate it (generate_node_data.sh) and/or raise MAX_HEIGHT."
+            )
+        })?;
 
     let zswap_address = selfmint.address.clone();
     let selfmint_height = selfmint.transaction.block.height;
+    // Sanity: everything we assert on must be inside the collected 0..=MAX_HEIGHT window.
+    assert!(
+        selfmint_height <= MAX_HEIGHT as i64,
+        "selfMint at height {selfmint_height} is outside the collected window (MAX_HEIGHT = {MAX_HEIGHT})"
+    );
 
     // Find the corresponding deploy action for the same address.
     let deploy = indexer_data

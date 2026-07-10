@@ -48,6 +48,30 @@ rm_root_dir() {
     docker run --rm -v "$(dirname "$dir")":/parent --entrypoint sh "$toolkit_image" \
         -c "rm -rf /parent/$(basename "$dir")"
 }
+
+# Capture a deployed contract's on-chain state, polling until it is actually available instead of
+# assuming a fixed `sleep` is long enough for the deploy tx to land. `contract-state` only writes a
+# populated state file once the deploy has been included on chain, so we retry until the output is
+# non-empty (bounded by a timeout). A fixed delay is flaky on slow/CI runners: it can read stale or
+# empty state and bake a bad fixture (the follow-up circuit call then proves against wrong state).
+# Args: <contract-address> </out dest file (e.g. /out/emit_onchain_state.mn)>.
+wait_for_contract_state() {
+    local address="$1" dest="$2"
+    local timeout=120 start
+    start=$(date +%s)
+    while true; do
+        docker run --rm --network host -v toolkit_out:/out $toolkit_image \
+            contract-state --contract-address "$address" --dest-file "$dest" >/dev/null 2>&1 || true
+        if docker run --rm -v toolkit_out:/out --entrypoint sh $toolkit_image -c "test -s '$dest'"; then
+            return 0
+        fi
+        if (( $(date +%s) - start > timeout )); then
+            echo "Timeout after ${timeout}s waiting for contract-state of $address" >&2
+            return 1
+        fi
+        sleep 3
+    done
+}
 readonly rng_seed="0000000000000000000000000000000000000000000000000000000000000037"
 readonly node_dir="$(pwd)/.node/$node_version"
 
@@ -250,16 +274,9 @@ docker run \
     $toolkit_image \
     generate-txs --src-file /out/emit_deploy_tx.mn --dest-url ws://127.0.0.1:9944 send
 
-# Wait for the deploy to be finalized before calling the emit circuit.
-sleep 15
-docker run \
-    --rm \
-    --network host \
-    -v toolkit_out:/out \
-    $toolkit_image \
-    contract-state \
-    --contract-address $(cat /tmp/emit_contract_address.mn) \
-    --dest-file /out/emit_onchain_state.mn
+# Wait for the deploy to land on chain (poll rather than a fixed sleep), capturing the emit
+# contract's on-chain state for the circuit call.
+wait_for_contract_state "$(cat /tmp/emit_contract_address.mn)" /out/emit_onchain_state.mn
 
 # Call the emit_unpaused circuit: intent -> proven tx file -> send.
 docker run \
@@ -350,15 +367,9 @@ docker run \
     $toolkit_image \
     generate-txs --src-file /out/zswap_deploy_tx.mn --dest-url ws://127.0.0.1:9944 send
 
-sleep 15
-docker run \
-    --rm \
-    --network host \
-    -v toolkit_out:/out \
-    $toolkit_image \
-    contract-state \
-    --contract-address $(cat /tmp/zswap_holder_address.mn) \
-    --dest-file /out/zswap_onchain_state.mn
+# Wait for the deploy to land on chain (poll rather than a fixed sleep), capturing the zswap-holder
+# contract's on-chain state for the selfMint circuit call.
+wait_for_contract_state "$(cat /tmp/zswap_holder_address.mn)" /out/zswap_onchain_state.mn
 
 docker run \
     --rm \
