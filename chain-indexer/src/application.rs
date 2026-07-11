@@ -26,8 +26,8 @@ use async_stream::stream;
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{Stream, StreamExt, TryStreamExt, future::ok};
 use indexer_common::domain::{
-    BlockIndexed, LedgerVersion, NetworkId, Publisher, SerializedLedgerStateKey,
-    UnshieldedUtxoIndexed,
+    BlockIndexed, BridgeEventIndexed, LedgerVersion, NetworkId, Publisher,
+    SerializedLedgerStateKey, UnshieldedUtxoIndexed,
 };
 use log::{debug, info, warn};
 use parking_lot::RwLock;
@@ -610,6 +610,24 @@ where
         );
     }
 
+    // Stage BridgeEventIndexed for each c2m-bridge event, so it is delivered iff the transaction
+    // commits (consistent with the other events; the fire-and-forget `publish` API was removed
+    // along with the NATS backend).
+    for event in &block.bridge_events {
+        pending.push(
+            publisher
+                .stage(
+                    &mut tx,
+                    &BridgeEventIndexed {
+                        block_height: block.height,
+                        event: event.clone(),
+                    },
+                )
+                .await
+                .context("stage BridgeEventIndexed event")?,
+        );
+    }
+
     tx.commit().await.context("commit transaction")?;
 
     // Deliver notifications now that the transaction has committed (a no-op for Postgres, which
@@ -800,6 +818,7 @@ mod tests {
         ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
+        bridge_events: Default::default(),
     });
 
     static BLOCK_1: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -813,6 +832,7 @@ mod tests {
         ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
+        bridge_events: Default::default(),
     });
 
     static BLOCK_2: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -826,6 +846,7 @@ mod tests {
         ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
+        bridge_events: Default::default(),
     });
 
     static BLOCK_3: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -839,6 +860,7 @@ mod tests {
         ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
+        bridge_events: Default::default(),
     });
 
     const ZERO_HASH: BlockHash = ByteArray([0; 32]);

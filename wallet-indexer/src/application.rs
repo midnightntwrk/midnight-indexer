@@ -123,14 +123,25 @@ where
                             .try_acquire_owned();
 
                         if permit.is_ok() {
-                            index_wallet(
+                            // A transient database error (e.g. a pooled connection dropped by the
+                            // server, surfaced by sqlx/rustls as an unexpected EOF) must not kill
+                            // the indexer. Log it and carry on: sqlx reconnects transparently and
+                            // this wallet is retried on the next active-wallet cycle.
+                            if let Err(error) = index_wallet(
                                 wallet_id,
                                 transaction_batch_size,
                                 max_transaction_id,
                                 &mut publisher,
                                 &mut storage,
                             )
-                            .await?;
+                            .await
+                            {
+                                warn!(
+                                    wallet_id:%,
+                                    error:% = format!("{error:#}");
+                                    "failed to index wallet; retrying next cycle"
+                                );
+                            }
                         }
 
                         Ok(())

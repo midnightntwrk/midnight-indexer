@@ -166,6 +166,7 @@ pub async fn make_block_details(
         timestamp,
         transactions,
         dust_registration_events,
+        bridge_events: vec![],
     })
 }
 

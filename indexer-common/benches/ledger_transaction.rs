@@ -14,12 +14,13 @@
 //! Transaction deserialisation and wallet-relevance filtering.
 
 use bip32::{DerivationPath, XPrv};
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use indexer_common::{
     domain::{LedgerVersion, ViewingKey, ledger::Transaction},
     infra::ledger_db,
 };
 use midnight_zswap_v8::keys::{SecretKeys, Seed};
+use std::hint::black_box;
 use std::{fs, str::FromStr};
 use tokio::runtime::Runtime;
 

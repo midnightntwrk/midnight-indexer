@@ -14,12 +14,13 @@
 //! `LedgerState::from_genesis` on live-node genesis bytes (preprod by default,
 //! override with `BENCH_NODE_URL`). Network hit once at setup; bytes cached.
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use indexer_common::{
     domain::{LedgerVersion, ledger::LedgerState},
     infra::ledger_db,
 };
 use serde::Deserialize;
+use std::hint::black_box;
 use std::{env, time::Duration};
 use tokio::runtime::Runtime;
 

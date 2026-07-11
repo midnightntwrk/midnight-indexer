@@ -15,11 +15,12 @@
 //! of transaction count.
 
 use chain_indexer::domain::LedgerState;
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use indexer_common::{
     domain::{BlockHash, LedgerVersion, NetworkId},
     infra::ledger_db,
 };
+use std::hint::black_box;
 use tokio::runtime::Runtime;
 
 fn init_ledger_db(rt: &Runtime) -> tempfile::TempDir {

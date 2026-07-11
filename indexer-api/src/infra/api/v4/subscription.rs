@@ -12,6 +12,7 @@
 // limitations under the License.
 
 mod block;
+mod bridge_events;
 mod contract_action;
 mod dust_generations;
 mod dust_ledger_events;
@@ -25,8 +26,8 @@ mod zswap_ledger_events;
 use crate::{
     domain::storage::Storage,
     infra::api::v4::subscription::{
-        block::BlockSubscription, contract_action::ContractActionSubscription,
-        dust_generations::DustGenerationsSubscription,
+        block::BlockSubscription, bridge_events::BridgeEventsSubscription,
+        contract_action::ContractActionSubscription, dust_generations::DustGenerationsSubscription,
         dust_ledger_events::DustLedgerEventsSubscription,
         dust_nullifier_transactions::DustNullifierTransactionsSubscription,
         shielded::ShieldedTransactionsSubscription,
@@ -41,6 +42,7 @@ use indexer_common::domain::Subscriber;
 #[derive(MergedSubscription)]
 pub struct Subscription<S, B>(
     BlockSubscription<S, B>,
+    BridgeEventsSubscription<S, B>,
     ContractActionSubscription<S, B>,
     DustGenerationsSubscription<S, B>,
     DustLedgerEventsSubscription<S, B>,
@@ -62,6 +64,7 @@ where
     fn default() -> Self {
         Subscription(
             BlockSubscription::default(),
+            BridgeEventsSubscription::default(),
             ContractActionSubscription::default(),
             DustGenerationsSubscription::default(),
             DustLedgerEventsSubscription::default(),
