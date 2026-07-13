@@ -14,6 +14,7 @@
 mod v0_22_0;
 mod v1_0_0;
 mod v2_0_0;
+mod v2_1_0;
 
 // To see how this is generated, look in build.rs
 include!(concat!(env!("OUT_DIR"), "/generated_runtime.rs"));
@@ -54,6 +55,7 @@ pub async fn make_block_details(
         NodeVersion::V0_22 => v0_22_0::make_block_details(authorities, block).await,
         NodeVersion::V1_0 => v1_0_0::make_block_details(authorities, block).await,
         NodeVersion::V2_0 => v2_0_0::make_block_details(authorities, block).await,
+        NodeVersion::V2_1 => v2_1_0::make_block_details(authorities, block).await,
     }
 }
 
@@ -66,6 +68,7 @@ pub async fn fetch_authorities(
         NodeVersion::V0_22 => v0_22_0::fetch_authorities(block).await,
         NodeVersion::V1_0 => v1_0_0::fetch_authorities(block).await,
         NodeVersion::V2_0 => v2_0_0::fetch_authorities(block).await,
+        NodeVersion::V2_1 => v2_1_0::fetch_authorities(block).await,
     }
 }
 
@@ -75,6 +78,7 @@ pub fn decode_slot(slot: &[u8], node_version: NodeVersion) -> Result<u64, SubxtN
         NodeVersion::V0_22 => v0_22_0::decode_slot(slot),
         NodeVersion::V1_0 => v1_0_0::decode_slot(slot),
         NodeVersion::V2_0 => v2_0_0::decode_slot(slot),
+        NodeVersion::V2_1 => v2_1_0::decode_slot(slot),
     }
 }
 
@@ -88,6 +92,7 @@ pub async fn get_contract_state(
         NodeVersion::V0_22 => v0_22_0::get_contract_state(address, block).await,
         NodeVersion::V1_0 => v1_0_0::get_contract_state(address, block).await,
         NodeVersion::V2_0 => v2_0_0::get_contract_state(address, block).await,
+        NodeVersion::V2_1 => v2_1_0::get_contract_state(address, block).await,
     }
 }
 
@@ -99,6 +104,7 @@ pub async fn get_zswap_merkle_tree_root(
         NodeVersion::V0_22 => v0_22_0::get_zswap_merkle_tree_root(block).await,
         NodeVersion::V1_0 => v1_0_0::get_zswap_merkle_tree_root(block).await,
         NodeVersion::V2_0 => v2_0_0::get_zswap_merkle_tree_root(block).await,
+        NodeVersion::V2_1 => v2_1_0::get_zswap_merkle_tree_root(block).await,
     }
 }
 
@@ -111,6 +117,7 @@ pub async fn get_ledger_state_root(
         NodeVersion::V0_22 => v0_22_0::get_ledger_state_root(block).await,
         NodeVersion::V1_0 => v1_0_0::get_ledger_state_root(block).await,
         NodeVersion::V2_0 => v2_0_0::get_ledger_state_root(block).await,
+        NodeVersion::V2_1 => v2_1_0::get_ledger_state_root(block).await,
     }
 }
 
@@ -123,6 +130,7 @@ pub async fn get_d_parameter(
         NodeVersion::V0_22 => v0_22_0::get_d_parameter(block).await,
         NodeVersion::V1_0 => v1_0_0::get_d_parameter(block).await,
         NodeVersion::V2_0 => v2_0_0::get_d_parameter(block).await,
+        NodeVersion::V2_1 => v2_1_0::get_d_parameter(block).await,
     }
 }
 
@@ -137,6 +145,7 @@ pub async fn fetch_genesis_cnight_registrations(
         NodeVersion::V0_22 => v0_22_0::fetch_genesis_cnight_registrations(block).await,
         NodeVersion::V1_0 => v1_0_0::fetch_genesis_cnight_registrations(block).await,
         NodeVersion::V2_0 => v2_0_0::fetch_genesis_cnight_registrations(block).await,
+        NodeVersion::V2_1 => v2_1_0::fetch_genesis_cnight_registrations(block).await,
     }
 }
 
@@ -149,5 +158,6 @@ pub async fn get_terms_and_conditions(
         NodeVersion::V0_22 => v0_22_0::get_terms_and_conditions(block).await,
         NodeVersion::V1_0 => v1_0_0::get_terms_and_conditions(block).await,
         NodeVersion::V2_0 => v2_0_0::get_terms_and_conditions(block).await,
+        NodeVersion::V2_1 => v2_1_0::get_terms_and_conditions(block).await,
     }
 }
