@@ -539,6 +539,36 @@ export type BridgeTreasuryInflowsResponse = GraphQLResponse<{
   bridgeTreasuryInflows: BridgeEvent[];
 }>;
 
+// #1275: top-level Contract type and contract(address, offset) query.
+export type ContractMaintenanceVerifyingKeyKind = 'SCHNORR' | 'ECDSA';
+
+export interface ContractMaintenanceVerifyingKey {
+  kind: ContractMaintenanceVerifyingKeyKind;
+  key: string;
+}
+
+export interface ContractMaintenanceAuthority {
+  committee: ContractMaintenanceVerifyingKey[];
+  threshold: number;
+  counter: number;
+}
+
+export type ContractActionTypeEnum = 'DEPLOY' | 'CALL' | 'UPDATE';
+
+export interface ContractTypeActionRef {
+  __typename: string;
+  address: string;
+}
+
+export interface ContractType {
+  address: string;
+  state: string;
+  maintenanceAuthority: ContractMaintenanceAuthority;
+  actions: ContractTypeActionRef[];
+}
+
+export type ContractResponse = GraphQLResponse<{ contract: ContractType | null }>;
+
 export interface DustCommitmentMerkleTreeUpdateResult {
   startIndex: number;
   endIndex: number;
