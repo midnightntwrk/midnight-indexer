@@ -49,11 +49,15 @@ import type {
   BridgeReserveInflowsResponse,
   BridgeTreasuryInflowsResponse,
   BridgeTreasuryReason,
+  BlockContractZswapStateResponse,
+  ExecutionInputsResponse,
 } from './indexer-types';
 import {
   GET_LATEST_BLOCK,
   GET_BLOCK_BY_OFFSET,
   GET_ZSWAP_MERKLE_TREE_COLLAPSED_UPDATE,
+  GET_BLOCK_CONTRACT_ZSWAP_STATE,
+  GET_EXECUTION_INPUTS,
 } from './graphql/block-queries';
 import { GET_TRANSACTION_BY_OFFSET } from './graphql/transaction-queries';
 import { GET_CONTRACT_EVENTS } from './graphql/contract-event-queries';
@@ -492,6 +496,24 @@ export class IndexerHttpClient {
     return response;
   }
 
+  async getBlockContractZswapState(
+    address: string,
+    offset?: BlockOffset,
+    queryOverride?: string,
+  ): Promise<BlockContractZswapStateResponse> {
+    const query = queryOverride || GET_BLOCK_CONTRACT_ZSWAP_STATE;
+    const variables = { ADDRESS: address, OFFSET: offset };
+
+    const response = await this.rawRequestWithRetry<BlockContractZswapStateResponse['data']>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
   async getBridgeBalance(address: string, queryOverride?: string): Promise<BridgeBalanceResponse> {
     const query = queryOverride || GET_BRIDGE_BALANCE;
     const variables = { ADDRESS: address };
@@ -593,6 +615,23 @@ export class IndexerHttpClient {
     };
 
     const response = await this.rawRequestWithRetry<{ bridgeTreasuryInflows: BridgeEvent[] }>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getExecutionInputs(
+    address: string,
+    queryOverride?: string,
+  ): Promise<ExecutionInputsResponse> {
+    const query = queryOverride || GET_EXECUTION_INPUTS;
+    const variables = { ADDRESS: address };
+
+    const response = await this.rawRequestWithRetry<ExecutionInputsResponse['data']>(
       query,
       variables,
     );
