@@ -51,6 +51,9 @@ import type {
   BridgeTreasuryReason,
   BlockContractZswapStateResponse,
   ExecutionInputsResponse,
+  ContractType,
+  ContractActionTypeEnum,
+  ContractResponse,
 } from './indexer-types';
 import {
   GET_LATEST_BLOCK,
@@ -62,6 +65,7 @@ import {
 import { GET_TRANSACTION_BY_OFFSET } from './graphql/transaction-queries';
 import { GET_CONTRACT_EVENTS } from './graphql/contract-event-queries';
 import { GET_CONTRACT_ACTION, GET_CONTRACT_ACTION_BY_OFFSET } from './graphql/contract-queries';
+import { GET_CONTRACT } from './graphql/contract-type-queries';
 import {
   GET_DUST_GENERATION_STATUS,
   GET_DUST_GENERATIONS,
@@ -632,6 +636,33 @@ export class IndexerHttpClient {
     const variables = { ADDRESS: address };
 
     const response = await this.rawRequestWithRetry<ExecutionInputsResponse['data']>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getContract(
+    address: string,
+    options: {
+      offset?: BlockOffset;
+      actionsLimit?: number;
+      actionsType?: ContractActionTypeEnum;
+    } = {},
+    queryOverride?: string,
+  ): Promise<ContractResponse> {
+    const query = queryOverride || GET_CONTRACT;
+    const variables = {
+      ADDRESS: address,
+      OFFSET: options.offset,
+      ACTIONS_LIMIT: options.actionsLimit,
+      ACTIONS_TYPE: options.actionsType,
+    };
+
+    const response = await this.rawRequestWithRetry<{ contract: ContractType | null }>(
       query,
       variables,
     );
