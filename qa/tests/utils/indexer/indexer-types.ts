@@ -478,6 +478,40 @@ export interface BridgeUserTransfer {
   recipient: string;
 }
 
+// c2m-bridge pool observability surface (#944).
+export type BridgeTreasuryReason = 'INVALID' | 'UNAPPROVED' | 'SUBMINIMAL_FLUSH';
+
+export const BRIDGE_TREASURY_REASONS: BridgeTreasuryReason[] = [
+  'INVALID',
+  'UNAPPROVED',
+  'SUBMINIMAL_FLUSH',
+];
+
+export interface BridgeTreasuryAggregate {
+  reason: BridgeTreasuryReason;
+  total: string;
+}
+
+export interface BridgePoolSummary {
+  reserveTotal: string;
+  treasuryByReason: BridgeTreasuryAggregate[];
+  subminimumTxCount: number;
+  lastEventBlockHeight: number | null;
+}
+
+export type BridgePoolSummaryResponse = GraphQLResponse<{ bridgePoolSummary: BridgePoolSummary }>;
+
+// Inflow event lists. Only BridgeReserveTransfer carries populated fields today;
+// treasury variants are discriminated by __typename until data exists.
+export interface BridgeReserveTransfer {
+  __typename: 'BridgeReserveTransfer';
+  id: number;
+  blockHeight: number;
+  midnightTxHash: string;
+  cardanoTxHash: string;
+  amount: string;
+}
+
 export interface BridgeEventOther {
   __typename: string;
   id?: number;
@@ -485,7 +519,7 @@ export interface BridgeEventOther {
   amount?: string;
 }
 
-export type BridgeEvent = BridgeUserTransfer | BridgeEventOther;
+export type BridgeEvent = BridgeUserTransfer | BridgeReserveTransfer | BridgeEventOther;
 
 export type BridgeEventsResponse = GraphQLResponse<{ bridgeEvents: BridgeEvent[] }>;
 
@@ -498,6 +532,12 @@ export interface BridgeBalance {
 }
 
 export type BridgeBalanceResponse = GraphQLResponse<{ bridgeBalance: BridgeBalance }>;
+
+export type BridgeReserveInflowsResponse = GraphQLResponse<{ bridgeReserveInflows: BridgeEvent[] }>;
+
+export type BridgeTreasuryInflowsResponse = GraphQLResponse<{
+  bridgeTreasuryInflows: BridgeEvent[];
+}>;
 
 export interface DustCommitmentMerkleTreeUpdateResult {
   startIndex: number;
