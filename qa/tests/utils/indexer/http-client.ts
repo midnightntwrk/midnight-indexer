@@ -41,6 +41,10 @@ import type {
   ContractEvent,
   ContractEventFilter,
   ContractEventResponse,
+  BridgeEvent,
+  BridgeEventsResponse,
+  BridgeDepositsResponse,
+  BridgeBalanceResponse,
 } from './indexer-types';
 import {
   GET_LATEST_BLOCK,
@@ -56,6 +60,11 @@ import {
   GET_DUST_COMMITMENT_MERKLE_TREE_UPDATE,
   GET_DUST_GENERATION_MERKLE_TREE_UPDATE,
 } from './graphql/dust-queries';
+import {
+  GET_BRIDGE_EVENTS,
+  GET_BRIDGE_BALANCE,
+  GET_BRIDGE_DEPOSITS,
+} from './graphql/bridge-queries';
 
 /**
  * Recognise operation-level GraphQL errors that look like *server* failures
@@ -434,6 +443,74 @@ export class IndexerHttpClient {
     log.debug(`Using variables\n${JSON.stringify(variables, null, 2)}`);
 
     const response = await this.rawRequestWithRetry<{ contractEvents: ContractEvent[] }>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getBridgeEvents(
+    filters: {
+      recipient?: string;
+      variant?: string;
+      blockHeightFrom?: number;
+      blockHeightTo?: number;
+      offset?: number;
+      limit?: number;
+    } = {},
+    queryOverride?: string,
+  ): Promise<BridgeEventsResponse> {
+    const query = queryOverride || GET_BRIDGE_EVENTS;
+    const variables = {
+      RECIPIENT: filters.recipient,
+      VARIANT: filters.variant,
+      BLOCK_HEIGHT_FROM: filters.blockHeightFrom,
+      BLOCK_HEIGHT_TO: filters.blockHeightTo,
+      OFFSET: filters.offset,
+      LIMIT: filters.limit,
+    };
+
+    const response = await this.rawRequestWithRetry<{ bridgeEvents: BridgeEvent[] }>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getBridgeBalance(address: string, queryOverride?: string): Promise<BridgeBalanceResponse> {
+    const query = queryOverride || GET_BRIDGE_BALANCE;
+    const variables = { ADDRESS: address };
+
+    const response = await this.rawRequestWithRetry<BridgeBalanceResponse['data']>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getBridgeDeposits(
+    recipient: string,
+    options: { includeUnapproved?: boolean; offset?: number; limit?: number } = {},
+    queryOverride?: string,
+  ): Promise<BridgeDepositsResponse> {
+    const query = queryOverride || GET_BRIDGE_DEPOSITS;
+    const variables = {
+      RECIPIENT: recipient,
+      INCLUDE_UNAPPROVED: options.includeUnapproved,
+      OFFSET: options.offset,
+      LIMIT: options.limit,
+    };
+
+    const response = await this.rawRequestWithRetry<{ bridgeDeposits: BridgeEvent[] }>(
       query,
       variables,
     );
