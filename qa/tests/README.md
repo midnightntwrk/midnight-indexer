@@ -25,7 +25,7 @@ This project provides a structured environment for running smoke and integration
 ```bash
 # 1) Install dependencies
 cd qa/tests
-yarn install --immutable
+bun install --frozen-lockfile
 
 # 2) Load shared env from the repo root
 cd ../.. && source .envrc
@@ -35,10 +35,10 @@ cd ../.. && source .envrc
 #     NODE_TAG must be one of the values listed in NODE_VERSIONS (repo root);
 #     INDEXER_TAG must be an indexer version compatible with that node version.
 cd qa/tests
-NODE_TAG=1.0.0 INDEXER_TAG=4.3.2 TARGET_ENV=undeployed yarn test:smoke
+NODE_TAG=1.0.0 INDEXER_TAG=4.3.2 TARGET_ENV=undeployed bun run test:smoke
 
 # 3b) Or run against a DEPLOYED environment (versions are fixed by the env — do NOT set NODE_TAG/INDEXER_TAG)
-TARGET_ENV=qanet yarn test:integration
+TARGET_ENV=qanet bun run test:integration
 ```
 
 See [Test Framework Organization](#-test-framework-organization) for the difference between `test:smoke`, `test:integration`, and `test:e2e`, and the [Environment Variables](#-environment-variables-reference) reference table for every supported variable.
@@ -47,8 +47,8 @@ See [Test Framework Organization](#-test-framework-organization) for the differe
 
 ## 📦 Prerequisites
 
-- **Node.js**: v22 or higher
-- **Yarn**: v3.6.x (already included in .yarn/releases)
+- **Node.js**: v22 or higher (vitest runs under Node; Bun is the package manager/launcher)
+- **Bun**: v1.3.x
 - **Midnight Indexer**: 3.x and above
 - **Docker**: latest stable (required for local/undeployed runs)
 
@@ -60,7 +60,7 @@ From the **QA tests folder**, install all required dependencies:
 
 ```bash
 cd qa/tests
-yarn install --immutable
+bun install --frozen-lockfile
 ```
 
 ---
@@ -121,7 +121,7 @@ Each project can be run independently or together. E2E tests include a cache war
 
 ```bash
 cd qa/tests
-yarn install --immutable
+bun install --frozen-lockfile
 ```
 
 ### 2) Move to the **repo root**:
@@ -220,10 +220,10 @@ The blue/green environments run two indexer instances behind the public `indexer
 
 ```bash
 # Target the blue instance
-INDEXER_INSTANCE=blue TARGET_ENV=qanet yarn test:smoke
+INDEXER_INSTANCE=blue TARGET_ENV=qanet bun run test:smoke
 
 # Target the green instance
-INDEXER_INSTANCE=green TARGET_ENV=qanet yarn test:smoke
+INDEXER_INSTANCE=green TARGET_ENV=qanet bun run test:smoke
 ```
 
 This rewrites the indexer host to `indexer-blue.<env>.midnight.network` / `indexer-green.<env>.midnight.network` for both the HTTP and WebSocket clients. If not set, the clients use the primary `indexer.<env>.midnight.network` URL. The value is case-insensitive and accepts only `blue` or `green`; any other value fails fast.
@@ -242,10 +242,10 @@ By default Vitest sizes its worker pool to all available parallelism (≈ `os.cp
 
 ```bash
 # Cap to a single worker (serial file execution)
-VITEST_MAX_WORKERS=1 TARGET_ENV=qanet yarn test:integration
+VITEST_MAX_WORKERS=1 TARGET_ENV=qanet bun run test:integration
 
 # Or a percentage of available CPUs
-VITEST_MAX_WORKERS=50% TARGET_ENV=qanet yarn test:integration
+VITEST_MAX_WORKERS=50% TARGET_ENV=qanet bun run test:integration
 ```
 
 Accepted values: a positive integer (`1`, `2`, …) or a `"<n>%"` percentage. Invalid values fail fast at config load with a clear error rather than crashing inside the worker pool. When the variable is unset, Vitest falls back to its default (all available parallelism), so local and unconstrained CI runs are unaffected.
@@ -281,8 +281,8 @@ Stack flavour by suite:
 
 ```bash
 cd qa/tests
-NODE_TAG=1.0.0 INDEXER_TAG=4.3.2 TARGET_ENV=undeployed yarn test:smoke
-NODE_TAG=1.0.0 INDEXER_TAG=4.3.2 TARGET_ENV=undeployed yarn test:integration
+NODE_TAG=1.0.0 INDEXER_TAG=4.3.2 TARGET_ENV=undeployed bun run test:smoke
+NODE_TAG=1.0.0 INDEXER_TAG=4.3.2 TARGET_ENV=undeployed bun run test:integration
 ```
 
 Smoke uses the same with-data stack as integration, so a smoke pass is a
@@ -297,7 +297,7 @@ cache). Start it once before running:
 bash qa/scripts/start-toolkit-postgres.sh
 
 cd qa/tests
-NODE_TAG=1.0.0 INDEXER_TAG=4.3.2 TARGET_ENV=undeployed yarn test:e2e
+NODE_TAG=1.0.0 INDEXER_TAG=4.3.2 TARGET_ENV=undeployed bun run test:e2e
 ```
 
 ### Clash safety
@@ -310,7 +310,7 @@ runs by spinning it up yourself first.
 ### Manual stack management (optional)
 
 The provisioning scripts remain available for direct invocation if you prefer
-to manage the stack yourself (e.g. to keep it up across many `yarn test:*`
+to manage the stack yourself (e.g. to keep it up across many `bun run test:*`
 runs, or for debugging):
 
 ```bash
@@ -365,7 +365,7 @@ The script pauses after environment startup so you can run pre-upgrade tests:
 
 ```bash
 cd qa/tests
-TARGET_ENV=undeployed yarn test:integration
+TARGET_ENV=undeployed bun run test:integration
 ```
 
 You can verify the node version before and after the upgrade on https://polkadot.js.org/apps/?rpc=ws%3A%2F%2F127.0.0.1%3A9944#/explorer — the runtime version should change after the upgrade.
@@ -373,7 +373,7 @@ You can verify the node version before and after the upgrade on https://polkadot
 Press Enter in the script to trigger the runtime upgrade. After the upgrade completes, run post-upgrade tests:
 
 ```bash
-TARGET_ENV=undeployed yarn test:integration
+TARGET_ENV=undeployed bun run test:integration
 ```
 
 #### Environment variables
@@ -411,14 +411,14 @@ fetch cache (Postgres)” above) — unlike the **undeployed** e2e flow, which c
 (NOTE: use lower case for environment names):
 
 ```bash
-TARGET_ENV=devnet yarn test       # devnet
-TARGET_ENV=qanet yarn test    # qanet
+TARGET_ENV=devnet bun run test       # devnet
+TARGET_ENV=qanet bun run test    # qanet
 ```
 
 If the target environment uses a different indexer API version than the default (`v4`), set `INDEXER_API_VERSION` accordingly:
 
 ```bash
-TARGET_ENV=preprod INDEXER_API_VERSION=v3 yarn test:integration
+TARGET_ENV=preprod INDEXER_API_VERSION=v3 bun run test:integration
 ```
 
 ---

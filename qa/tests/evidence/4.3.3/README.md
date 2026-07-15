@@ -47,19 +47,19 @@ export NODE_TAG=1.0.0
 export NODE_TOOLKIT_TAG=1.0.0
 export XRAY_COMPONENT=indexer
 export VITEST_MAX_WORKERS=4
-yarn test:e2e
+bun run test:e2e
 
 # qanet — smoke
 export TARGET_ENV=qanet
 export FUNDING_SEED_QANET=<wallet seed with shielded + unshielded txs>
 export XRAY_COMPONENT=indexer
 export VITEST_MAX_WORKERS=4
-yarn test:smoke
+bun run test:smoke
 
 # qanet — integration
 export TARGET_ENV=qanet
 export FUNDING_SEED_QANET=<wallet seed with shielded + unshielded txs>
 export XRAY_COMPONENT=indexer
 export VITEST_MAX_WORKERS=4
-yarn test:integration
+bun run test:integration
 ```
