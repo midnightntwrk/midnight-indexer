@@ -101,8 +101,8 @@ export type ContractEventSubscriptionResponse = GraphQLResponse<{
  * Handlers used to respond to incoming GraphQL subscription messages.
  */
 export interface SubscriptionHandlers<T> {
-  /** Called when a new payload is received */
-  next: (value: T) => void;
+  /** Called when a new payload is received (optional: the client invokes it as `next?.()`) */
+  next?: (value: T) => void;
 
   /** Called when an error is received */
   error?: (err: Error | GraphQLError) => void;

@@ -6,6 +6,7 @@
     "lint": "eslint '**/*.{js,jsx,ts,tsx}'",
     "lint:fix": "eslint '**/*.{js,jsx,ts,tsx}' --fix",
     "audit": "bun audit --audit-level=high",
+    "compile-check": "tsc --noEmit",
     "test": "vitest run --project smoke --project e2e --project integration",
     "test:e2e": "vitest run --project e2e",
     "test:smoke": "vitest run --project smoke",
