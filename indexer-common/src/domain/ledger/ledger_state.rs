@@ -3027,3 +3027,104 @@ mod tests {
         StateValue::Cell(Sp::new(aligned))
     }
 }
+
+#[cfg(test)]
+mod merkle_collapsed_update_tests {
+    use midnight_storage_core_v1::db::InMemoryDB;
+
+    const LEAVES: u64 = 86;
+    const HEIGHT: u8 = 32;
+
+    /// V8 (transient-crypto v2): a tree rebuilt from the collapsed update
+    /// covering the newest leaf reconstructs the rehashed root. This is the
+    /// invariant PR #1266 guarantees; it would break if the collapsed update
+    /// were built from a tree carrying a stale hash for the newest leaf.
+    #[test]
+    fn v8_collapsed_update_over_newest_leaf_reconstructs_rehashed_root() {
+        use midnight_transient_crypto_v2::{
+            curve::Fr,
+            merkle_tree::{MerkleTree, MerkleTreeCollapsedUpdate},
+        };
+
+        // Build a tree with LEAVES leaves and rehash — as the fixed
+        // collapsed-update methods now do before `MerkleTreeCollapsedUpdate::new`.
+        let tree = (0..LEAVES)
+            .try_fold(MerkleTree::<(), InMemoryDB>::blank(HEIGHT), |tree, i| {
+                tree.try_update(i, &Fr::from(i + 1), ())
+            })
+            .expect("insert leaves")
+            .rehash();
+        let served_root = tree.root().expect("rehashed tree has a root");
+
+        // Collapsed update covering the whole populated range, including the
+        // newest leaf (index LEAVES - 1) — the shape the sync endpoints serve.
+        let update = MerkleTreeCollapsedUpdate::new(&tree, 0, LEAVES - 1)
+            .expect("collapsed update over a rehashed tree");
+
+        // A wallet rebuilds its tree from the collapsed update and rehashes.
+        let rebuilt = MerkleTree::<(), InMemoryDB>::blank(HEIGHT)
+            .apply_collapsed_update(&update)
+            .expect("apply collapsed update")
+            .rehash();
+
+        assert_eq!(
+            rebuilt.root().expect("rebuilt tree has a root"),
+            served_root,
+            "tree rebuilt from the collapsed update must match the rehashed served root",
+        );
+    }
+
+    /// V8 (transient-crypto v2): building the collapsed update off an
+    /// un-rehashed tree fails with `NotFullyRehashed`. This is the concrete
+    /// reason the fix adds `.rehash()` — the pre-fix call path could not
+    /// produce a correct update from a tree whose hashes were not finalised.
+    #[test]
+    fn v8_collapsed_update_requires_rehash() {
+        use midnight_transient_crypto_v2::{
+            curve::Fr,
+            merkle_tree::{InvalidUpdate, MerkleTree, MerkleTreeCollapsedUpdate},
+        };
+
+        let unrehashed = (0..LEAVES)
+            .try_fold(MerkleTree::<(), InMemoryDB>::blank(HEIGHT), |tree, i| {
+                tree.try_update(i, &Fr::from(i + 1), ())
+            })
+            .expect("insert leaves");
+
+        let result = MerkleTreeCollapsedUpdate::new(&unrehashed, 0, LEAVES - 1);
+        assert!(
+            matches!(result, Err(InvalidUpdate::NotFullyRehashed)),
+            "collapsed update off an un-rehashed tree must fail with NotFullyRehashed, got {result:?}",
+        );
+    }
+
+    #[test]
+    fn v9_collapsed_update_over_newest_leaf_reconstructs_rehashed_root() {
+        use midnight_transient_crypto_v3::{
+            curve::Fr,
+            merkle_tree::{MerkleTree, MerkleTreeCollapsedUpdate},
+        };
+
+        let tree = (0..LEAVES)
+            .try_fold(MerkleTree::<(), InMemoryDB>::blank(HEIGHT), |tree, i| {
+                tree.try_update(i, &Fr::from(i + 1), ())
+            })
+            .expect("insert leaves")
+            .rehash();
+        let served_root = tree.root().expect("rehashed tree has a root");
+
+        let update = MerkleTreeCollapsedUpdate::new(&tree, 0, LEAVES - 1)
+            .expect("collapsed update over a rehashed tree");
+
+        let rebuilt = MerkleTree::<(), InMemoryDB>::blank(HEIGHT)
+            .apply_collapsed_update(&update)
+            .expect("apply collapsed update")
+            .rehash();
+
+        assert_eq!(
+            rebuilt.root().expect("rebuilt tree has a root"),
+            served_root,
+            "tree rebuilt from the collapsed update must match the rehashed served root",
+        );
+    }
+}
