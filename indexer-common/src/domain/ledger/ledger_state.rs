@@ -2439,6 +2439,139 @@ mod tests {
         Ok(())
     }
 
+    /// Populates a V8 zswap Merkle tree, `persist()`s it to the ledger DB, and reloads it via
+    /// `LedgerState::load` — the depth-0 `get_lazy` path that left the newest leaf's hash
+    /// unmaterialised and surfaced the bug. It then exercises the actual fix site,
+    /// `make_zswap_collapsed_update`, and asserts that a tree rebuilt from that collapsed update
+    /// reconstructs the same root the (rehashing) `zswap_merkle_tree_root` accessor serves.
+    ///
+    /// Unlike the in-memory `merkle_collapsed_update_tests`, this calls the indexer's own method
+    /// through the real `v1_1::LedgerDb` load path, so reverting the `.rehash()` from #1266 makes
+    /// this assertion fail (the reloaded tree is stale) — a genuine guard for the fix.
+    #[cfg(any(feature = "cloud", feature = "standalone"))]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_zswap_collapsed_update_survives_lazy_reload() -> Result<(), BoxError> {
+        use midnight_serialize_v1::tagged_deserialize;
+        use midnight_storage_core_v1::arena::Sp;
+        use midnight_transient_crypto_v2::{curve::Fr, merkle_tree::MerkleTreeCollapsedUpdate};
+
+        const LEAVES: u64 = 86;
+
+        #[cfg(feature = "cloud")]
+        let _postgres_container = {
+            use crate::infra::{ledger_db, migrations, pool::postgres::PostgresPool};
+            use sqlx::postgres::PgSslMode;
+            use std::time::Duration;
+            use testcontainers::{ImageExt, runners::AsyncRunner};
+            use testcontainers_modules::postgres::Postgres;
+
+            let postgres_container = Postgres::default()
+                .with_db_name("indexer")
+                .with_user("indexer")
+                .with_password(env!("APP__INFRA__STORAGE__PASSWORD"))
+                .with_tag("17.1-alpine")
+                .start()
+                .await
+                .context("start Postgres container")?;
+            let postgres_port = postgres_container
+                .get_host_port_ipv4(5432)
+                .await
+                .context("get Postgres port")?;
+
+            let config = crate::infra::pool::postgres::Config {
+                host: "localhost".to_string(),
+                port: postgres_port,
+                dbname: "indexer".to_string(),
+                user: "indexer".to_string(),
+                password: env!("APP__INFRA__STORAGE__PASSWORD").into(),
+                sslmode: PgSslMode::Prefer,
+                max_connections: 10,
+                idle_timeout: Duration::from_secs(60),
+                max_lifetime: Duration::from_secs(5 * 60),
+            };
+
+            let pool = PostgresPool::new(config).await.context("create pool")?;
+            migrations::postgres::run(&pool)
+                .await
+                .context("run migrations")?;
+
+            ledger_db::init(ledger_db::Config { cache_size: 1_024 }, pool);
+
+            postgres_container
+        };
+
+        #[cfg(feature = "standalone")]
+        let _temp_dir = {
+            use crate::infra::ledger_db;
+
+            let temp_dir = tempfile::tempdir().context("cannot create tempdir")?;
+            let sqlite_ledger_db_file = temp_dir
+                .path()
+                .join("ledger-db.sqlite")
+                .display()
+                .to_string();
+
+            ledger_db::init(ledger_db::Config {
+                cache_size: 1_024,
+                cnn_url: sqlite_ledger_db_file,
+            })
+            .await
+            .expect("ledger DB can be initialized");
+
+            temp_dir
+        };
+
+        let mut state = LedgerState::new("undeployed".try_into()?, LedgerVersion::V8)
+            .expect("ledger state can be constructed");
+        match &mut state {
+            LedgerState::V8 { ledger_state, .. } => {
+                let mut zswap = (*ledger_state.zswap).clone();
+                let coin_coms = (0..LEAVES).fold(zswap.coin_coms.clone(), |tree, i| {
+                    tree.try_update(i, &Fr::from(i + 1), None)
+                        .expect("insert coin commitment")
+                });
+                zswap.coin_coms = coin_coms;
+                zswap.first_free = LEAVES;
+                ledger_state.zswap = Sp::new(zswap);
+            }
+            LedgerState::V9 { .. } => unreachable!("constructed as V8"),
+        }
+
+        let (state, key) = state.persist()?;
+        drop(state);
+
+        let reloaded = LedgerState::load(&key, LedgerVersion::V8)?;
+
+        let served = match reloaded.zswap_merkle_tree_root() {
+            super::ZswapMerkleTreeRoot::V8(root) => root,
+            super::ZswapMerkleTreeRoot::V9(_) => panic!("expected a V8 zswap root"),
+        };
+
+        let update_bytes = reloaded.make_zswap_collapsed_update(0, LEAVES - 1)?;
+        let update = tagged_deserialize::<MerkleTreeCollapsedUpdate>(&mut update_bytes.as_ref())
+            .map_err(|error| format!("deserialize collapsed update: {error}"))?;
+
+        let blank = LedgerState::new("undeployed".try_into()?, LedgerVersion::V8)
+            .expect("ledger state can be constructed");
+        let blank_coin_coms = match &blank {
+            LedgerState::V8 { ledger_state, .. } => ledger_state.zswap.coin_coms.clone(),
+            LedgerState::V9 { .. } => unreachable!("constructed as V8"),
+        };
+        let reconstructed = blank_coin_coms
+            .apply_collapsed_update(&update)
+            .expect("apply collapsed update")
+            .rehash();
+
+        assert_eq!(
+            reconstructed.root(),
+            Some(served),
+            "collapsed update from make_zswap_collapsed_update (through the lazy reload) must \
+             reconstruct the served rehashed root",
+        );
+
+        Ok(())
+    }
+
     /// Overflow in any dimension clamps to the corresponding limit; resulting `NormalizedCost`
     /// has each dim = 1.0. Regression guard for GH #1060: previously we used
     /// `.normalize().unwrap_or(NormalizedCost::ZERO)` which flipped the sign of the
