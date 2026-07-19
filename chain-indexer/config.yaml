@@ -19,6 +19,7 @@ infra:
     dbname: "indexer"
     user: "indexer"
     sslmode: "prefer"
+    min_connections: 10
     max_connections: 10
     idle_timeout: "1m"
     max_lifetime: "5m"
