@@ -13,7 +13,9 @@
 
 pub mod block;
 pub mod bridge;
+pub mod contract;
 pub mod contract_action;
+pub mod contract_event;
 pub mod dataloader;
 pub mod directives;
 pub mod dust;
@@ -42,7 +44,8 @@ use crate::{
         v4::{
             block::BlockOffset,
             dataloader::{
-                BlockByHashLoader, ContractActionsByTransactionIdLoader, TransactionByIdLoader,
+                BlockByHashLoader, ContractActionsByTransactionIdLoader,
+                ContractEventsByContractActionIdLoader, TransactionByIdLoader,
                 TransactionsByBlockIdLoader,
             },
             mutation::Mutation,
@@ -401,6 +404,10 @@ where
         ))
         .data(DataLoader::new(
             ContractActionsByTransactionIdLoader::new(storage.clone()),
+            tokio::spawn,
+        ))
+        .data(DataLoader::new(
+            ContractEventsByContractActionIdLoader::new(storage.clone()),
             tokio::spawn,
         ))
         .data(storage)

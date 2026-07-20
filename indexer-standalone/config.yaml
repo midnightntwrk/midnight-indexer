@@ -58,6 +58,8 @@ infra:
         batch_size: 20
       contract_actions:
         batch_size: 20
+      contract_events:
+        batch_size: 20
       dust_generations:
         batch_size: 20
       dust_ledger_events:

@@ -35,6 +35,8 @@ infra:
         batch_size: 20
       contract_actions:
         batch_size: 20
+      contract_events:
+        batch_size: 20
       dust_generations:
         batch_size: 20
         # Snapshots older than this many blocks are rejected; keep well below
