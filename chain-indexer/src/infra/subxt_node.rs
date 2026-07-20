@@ -177,19 +177,28 @@ impl SubxtNode {
         let node_version = protocol_version.node_version();
         let ledger_version = protocol_version.ledger_version();
 
+        // `node_version` (from the header digest) decodes this block's own extrinsics and header,
+        // produced by the runtime that authored the block. Runtime-API and storage reads pinned to
+        // this block, however, execute against the runtime in the block's resulting state, which at
+        // a runtime-upgrade enactment block is one version ahead of the digest. Use the live
+        // runtime version for those reads (see `live_node_version`); for every non-enactment block
+        // the two are identical.
+        let api_node_version = self.live_node_version(block.block_hash()).await?;
+
         debug!(
             hash:%,
             height,
             parent_hash:%,
             protocol_version:?,
             node_version:%,
+            api_node_version:%,
             ledger_version:%;
             "making block"
         );
 
         // Fetch authorities if `None`, either initially or because of a `NewSession` event (below).
         if authorities.is_none() {
-            *authorities = Some(runtimes::fetch_authorities(node_version, &block).await?);
+            *authorities = Some(runtimes::fetch_authorities(api_node_version, &block).await?);
         }
         let author = authorities
             .as_ref()
@@ -198,7 +207,7 @@ impl SubxtNode {
             .flatten();
 
         let zswap_merkle_tree_root =
-            runtimes::get_zswap_merkle_tree_root(node_version, &block).await?;
+            runtimes::get_zswap_merkle_tree_root(api_node_version, &block).await?;
         let zswap_merkle_tree_root =
             ZswapMerkleTreeRoot::deserialize(zswap_merkle_tree_root, ledger_version)?;
 
@@ -225,7 +234,7 @@ impl SubxtNode {
         };
 
         let transactions = stream::iter(transactions)
-            .then(|t| make_transaction(t, protocol_version, &block))
+            .then(|t| make_transaction(t, protocol_version, api_node_version, &block))
             .try_collect::<Vec<_>>()
             .await?;
 
@@ -268,6 +277,31 @@ impl SubxtNode {
             .at_block(height)
             .await
             .map_err(|error| SubxtNodeError::GetOnlineClientAtHeight(height, error.into()))
+    }
+
+    /// Determine the [NodeVersion] to use for runtime-API/storage reads pinned *at* the given
+    /// block.
+    ///
+    /// Such reads execute against the runtime in the block's resulting state (its `:code`). At a
+    /// runtime-upgrade *enactment* block that is the *new* runtime, whereas the `MNSV`
+    /// protocol-version header digest still carries the *old* version (the block was authored under
+    /// the previous runtime). Selecting the subxt module from the header digest therefore picks a
+    /// module one version behind the live runtime, and subxt rejects the call with "the static
+    /// Runtime API address used is not compatible with the live chain" (mainnet incident
+    /// 2026-07-20, block 1,774,491). We read the live runtime version via
+    /// `state_getRuntimeVersion(block)` and map it to the matching module. For every non-enactment
+    /// block this equals the header-digest version, so behavior is unchanged there.
+    async fn live_node_version(&self, hash: H256) -> Result<NodeVersion, SubxtNodeError> {
+        let legacy_rpc_methods = LegacyRpcMethods::<RpcConfigFor<SubstrateConfig>>::new(
+            self.rpc_client.to_owned().into(),
+        );
+        let runtime_version = legacy_rpc_methods
+            .state_get_runtime_version(Some(hash))
+            .await
+            .map_err(|error| SubxtNodeError::GetRuntimeVersion(hash, error))?;
+        let protocol_version = ProtocolVersion::try_from(runtime_version.spec_version)?;
+
+        Ok(protocol_version.node_version())
     }
 }
 
@@ -602,6 +636,9 @@ pub enum SubxtNodeError {
     #[error("cannot fetch system properties")]
     FetchSystemProperties(#[source] subxt::rpcs::Error),
 
+    #[error("cannot get runtime version at block {0}")]
+    GetRuntimeVersion(H256, #[source] subxt::rpcs::Error),
+
     #[error("no String type genesis ledger state in system parameters")]
     GenesisLedgerStateNotFound,
 
@@ -657,11 +694,12 @@ where
 async fn make_transaction(
     transaction: runtimes::Transaction,
     protocol_version: ProtocolVersion,
+    api_node_version: NodeVersion,
     block: &OnlineClientAtBlock,
 ) -> Result<Transaction, SubxtNodeError> {
     match transaction {
         runtimes::Transaction::Regular(transaction) => {
-            make_regular_transaction(transaction, protocol_version, block).await
+            make_regular_transaction(transaction, protocol_version, api_node_version, block).await
         }
 
         runtimes::Transaction::System(transaction) => {
@@ -673,10 +711,9 @@ async fn make_transaction(
 async fn make_regular_transaction(
     transaction: ByteVec,
     protocol_version: ProtocolVersion,
+    api_node_version: NodeVersion,
     block: &OnlineClientAtBlock,
 ) -> Result<Transaction, SubxtNodeError> {
-    let node_version = protocol_version.node_version();
-
     let ledger_transaction =
         ledger::Transaction::deserialize(&transaction, protocol_version.ledger_version())?;
 
@@ -684,9 +721,11 @@ async fn make_regular_transaction(
 
     let identifiers = ledger_transaction.identifiers()?;
 
+    // Contract state is read *at* this block, so it must use the block's live runtime version, not
+    // the header-digest version (see `make_block` / `live_node_version`).
     let contract_actions = ledger_transaction
         .contract_actions(|address| async move {
-            runtimes::get_contract_state(address, node_version, block).await
+            runtimes::get_contract_state(address, api_node_version, block).await
         })
         .await?
         .into_iter()
