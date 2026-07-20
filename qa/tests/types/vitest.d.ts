@@ -19,13 +19,15 @@ declare module 'vitest' {
     toBeSuccess(message?: string): void;
   }
 
-  interface TestContext {
-    skip?: (condition: boolean, reason?: string) => void;
-    task?: {
-      meta: {
-        done?: boolean;
-        custom?: Record<string, unknown>;
-      };
-    };
+  // Custom fields we attach via `ctx.task.meta` in tests. Augment TaskMeta
+  // (the type of Test.meta) rather than redefining TestContext, so vitest's
+  // own TestContext members (skip, task, signal, …) are preserved.
+  interface TaskMeta {
+    done?: boolean;
+    custom?: Record<string, unknown>;
   }
 }
+
+// This file must be a module for `declare module 'vitest'` to *augment*
+// (merge with) vitest's types rather than shadow them.
+export {};
