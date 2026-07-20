@@ -71,9 +71,49 @@ pub fn decode_slot(slot: &[u8], node_version: NodeVersion) -> Result<u64, SubxtN
 }
 
 /// Get contract state depending on the given protocol version.
+///
+/// Hotfix (mainnet incident 2026-07-20): at a runtime-upgrade *enactment* block the `MNSV`
+/// protocol-version header digest lags the block's live runtime by one block (the block is
+/// authored under the previous runtime while the new `:code` is already active in its state, which
+/// is what runtime-API calls execute against). The digest-selected module is therefore one version
+/// behind, so subxt rejects the call with "the static Runtime API address used is not compatible
+/// with the live chain" — but only when the enactment block contains a contract action (mainnet
+/// block 1,774,491; preprod's enactment block had none, which is why it was unaffected).
+///
+/// subxt validates each static module against the block's live metadata, so at most one module can
+/// succeed for a given block. We therefore try the digest-selected module first (the fast path, no
+/// behavior change for ordinary blocks) and, only on failure, fall back to the other module(s);
+/// this changes behavior solely at an enactment block. The durable fix is to select the module from
+/// the block's live runtime version rather than the header digest.
 pub async fn get_contract_state(
     address: SerializedContractAddress,
     node_version: NodeVersion,
+    block: &OnlineClientAtBlock,
+) -> Result<SerializedContractState, SubxtNodeError> {
+    // Fast path: the module selected from the block's protocol-version digest.
+    let result = get_contract_state_for(node_version, address.clone(), block).await;
+    if result.is_ok() {
+        return result;
+    }
+
+    // Boundary fallback: retry with the other runtime module(s). Only the module whose static
+    // metadata matches the block's live runtime passes subxt's compatibility check, so a success
+    // here is the correct state and any real (e.g. transient) failure still surfaces below.
+    for version in [NodeVersion::V0_22, NodeVersion::V1_0] {
+        if version == node_version {
+            continue;
+        }
+        if let Ok(state) = get_contract_state_for(version, address.clone(), block).await {
+            return Ok(state);
+        }
+    }
+
+    result
+}
+
+async fn get_contract_state_for(
+    node_version: NodeVersion,
+    address: SerializedContractAddress,
     block: &OnlineClientAtBlock,
 ) -> Result<SerializedContractState, SubxtNodeError> {
     match node_version {
