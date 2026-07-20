@@ -31,6 +31,8 @@ import type {
   ContractEvent,
   ContractEventFilter,
   GraphQLResponse,
+  BridgeEvent,
+  BridgeBalance,
 } from './indexer-types';
 import { CONTRACT_EVENTS_SUBSCRIPTION } from './graphql/contract-event-queries';
 import {
@@ -48,6 +50,9 @@ import {
   SHIELDED_NULLIFIER_TRANSACTIONS_SUBSCRIPTION,
   ZSWAP_LEDGER_EVENTS_SUBSCRIPTION_DEFAULT,
   ZSWAP_LEDGER_EVENTS_SUBSCRIPTION_FROM_ID,
+  BRIDGE_EVENTS_SUBSCRIPTION_DEFAULT,
+  BRIDGE_EVENTS_SUBSCRIPTION_FROM,
+  BRIDGE_BALANCE_SUBSCRIPTION,
 } from './graphql/subscriptions';
 
 export type BlockSubscriptionResponse = GraphQLResponse<{ blocks: Block }>;
@@ -71,6 +76,10 @@ export type DustLedgerEventSubscriptionResponse = GraphQLResponse<{
 export type DustGenerationsSubscriptionResponse = GraphQLResponse<{
   dustGenerations: DustGenerationsEvent;
 }>;
+
+export type BridgeEventSubscriptionResponse = GraphQLResponse<{ bridgeEvents: BridgeEvent }>;
+
+export type BridgeBalanceSubscriptionResponse = GraphQLResponse<{ bridgeBalance: BridgeBalance }>;
 
 export type DustNullifierTransactionSubscriptionResponse = GraphQLResponse<{
   dustNullifierTransactions: DustNullifierTransaction;
@@ -1234,6 +1243,97 @@ export class IndexerWsClient {
           id: subscriptionId,
           type: 'stop',
         };
+        this.getWs().send(JSON.stringify(stopMessage));
+        this.handlersMap.delete(subscriptionId);
+      },
+    };
+  }
+
+  /**
+   * Subscribes to c2m-bridge events (#942).
+   *
+   * - Without `from`: streams historical events from the beginning, then live-tails.
+   * - With `from`: replays events with id greater than the cursor, then live-tails.
+   *
+   * There is no completion sentinel; callers terminate on their own condition.
+   *
+   * @param handlers - Callbacks for incoming bridge event messages
+   * @param opts - Optional `from` event-id cursor, `recipient` and `variant` filters
+   * @param queryOverride - Optional custom GraphQL subscription query
+   * @returns An object with subscription ID and unsubscribe function
+   */
+  subscribeToBridgeEvents(
+    handlers: SubscriptionHandlers<BridgeEventSubscriptionResponse>,
+    opts: { from?: number; recipient?: string; variant?: string } = {},
+    queryOverride?: string,
+  ): { unsubscribe: () => void; id: string } {
+    const hasFrom = opts.from !== undefined;
+    const query =
+      queryOverride ||
+      (hasFrom ? BRIDGE_EVENTS_SUBSCRIPTION_FROM : BRIDGE_EVENTS_SUBSCRIPTION_DEFAULT);
+    const variables = {
+      FROM: opts.from,
+      RECIPIENT: opts.recipient,
+      VARIANT: opts.variant,
+    };
+
+    const subscriptionId = this.getNextId();
+
+    const payload: GraphQLStartMessage = {
+      id: subscriptionId,
+      type: 'start',
+      payload: { query, variables },
+    };
+
+    log.debug(`Bridge Events payload:\n${JSON.stringify(payload, null, 2)}`);
+
+    this.handlersMap.set(subscriptionId, handlers as SubscriptionHandlers<unknown>);
+    this.getWs().send(JSON.stringify(payload));
+
+    return {
+      id: subscriptionId,
+      unsubscribe: () => {
+        const stopMessage: GraphQLStopMessage = { id: subscriptionId, type: 'stop' };
+        this.getWs().send(JSON.stringify(stopMessage));
+        this.handlersMap.delete(subscriptionId);
+      },
+    };
+  }
+
+  /**
+   * Subscribes to a c2m-bridge address balance (#942). Emits the current balance
+   * immediately on connect, then re-emits on every relevant event for the address.
+   *
+   * @param handlers - Callbacks for incoming bridge balance messages
+   * @param address - The hex-encoded address to observe
+   * @param queryOverride - Optional custom GraphQL subscription query
+   * @returns An object with subscription ID and unsubscribe function
+   */
+  subscribeToBridgeBalance(
+    handlers: SubscriptionHandlers<BridgeBalanceSubscriptionResponse>,
+    address: string,
+    queryOverride?: string,
+  ): { unsubscribe: () => void; id: string } {
+    const query = queryOverride || BRIDGE_BALANCE_SUBSCRIPTION;
+    const variables = { ADDRESS: address };
+
+    const subscriptionId = this.getNextId();
+
+    const payload: GraphQLStartMessage = {
+      id: subscriptionId,
+      type: 'start',
+      payload: { query, variables },
+    };
+
+    log.debug(`Bridge Balance payload:\n${JSON.stringify(payload, null, 2)}`);
+
+    this.handlersMap.set(subscriptionId, handlers as SubscriptionHandlers<unknown>);
+    this.getWs().send(JSON.stringify(payload));
+
+    return {
+      id: subscriptionId,
+      unsubscribe: () => {
+        const stopMessage: GraphQLStopMessage = { id: subscriptionId, type: 'stop' };
         this.getWs().send(JSON.stringify(stopMessage));
         this.handlersMap.delete(subscriptionId);
       },

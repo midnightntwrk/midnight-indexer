@@ -422,3 +422,50 @@ export const SHIELDED_NULLIFIER_TRANSACTIONS_SUBSCRIPTION = `
     }
   }
 `;
+
+// c2m-bridge event stream (#942). `from` is an event-id cursor: the subscription
+// replays matching historical events with id > from, then live-tails. Omitting
+// `from` streams from the beginning. There is no completion sentinel.
+export const BRIDGE_EVENTS_SUBSCRIPTION_DEFAULT = `
+  subscription BridgeEvents($RECIPIENT: HexEncoded, $VARIANT: BridgeEventVariant) {
+    bridgeEvents(recipient: $RECIPIENT, variant: $VARIANT) {
+      __typename
+      ... on BridgeUserTransfer {
+        id
+        blockHeight
+        midnightTxHash
+        cardanoTxHash
+        amount
+        recipient
+      }
+    }
+  }
+`;
+
+export const BRIDGE_EVENTS_SUBSCRIPTION_FROM = `
+  subscription BridgeEventsFrom($FROM: Int, $RECIPIENT: HexEncoded, $VARIANT: BridgeEventVariant) {
+    bridgeEvents(from: $FROM, recipient: $RECIPIENT, variant: $VARIANT) {
+      __typename
+      ... on BridgeUserTransfer {
+        id
+        blockHeight
+        midnightTxHash
+        cardanoTxHash
+        amount
+        recipient
+      }
+    }
+  }
+`;
+
+// bridgeBalance emits the current balance immediately on connect, then re-emits
+// on every relevant event for the address.
+export const BRIDGE_BALANCE_SUBSCRIPTION = `
+  subscription BridgeBalance($ADDRESS: HexEncoded!) {
+    bridgeBalance(address: $ADDRESS) {
+      deposited
+      claimed
+      balance
+    }
+  }
+`;

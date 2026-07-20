@@ -1,12 +1,11 @@
 {
   "name": "midnight-indexer-viteset",
-  "packageManager": "yarn@3.6.4",
   "scripts": {
     "format": "prettier --write '**/*.{js,jsx,json,ts,tsx,graphql,gql}' '!.tmp/**'",
     "format:check": "prettier --check '**/*.{js,jsx,json,ts,tsx,graphql,gql}' '!.tmp/**'",
     "lint": "eslint '**/*.{js,jsx,ts,tsx}'",
     "lint:fix": "eslint '**/*.{js,jsx,ts,tsx}' --fix",
-    "audit": "yarn npm audit --severity high && echo 'No known vulnerabilities found.'",
+    "audit": "bun audit --audit-level=high",
     "test": "vitest run --project smoke --project e2e --project integration",
     "test:e2e": "vitest run --project e2e",
     "test:smoke": "vitest run --project smoke",
@@ -15,11 +14,11 @@
     "test:coverage": "vitest run --coverage",
     "coverage:generate": "ts-node --esm ./coverage/src/cli.ts generate",
     "coverage:check": "ts-node --esm ./coverage/src/cli.ts check",
-    "coverage:all": "yarn coverage:generate && yarn coverage:check",
+    "coverage:all": "bun run coverage:generate && bun run coverage:check",
     "clean:logs": "rm -rf logs/",
     "clean:reports": "rm -rf reports/",
     "clean:modules": "rm -rf node_modules/",
-    "clean": "yarn clean:logs && yarn clean:reports && yarn clean:modules",
+    "clean": "bun run clean:logs && bun run clean:reports && bun run clean:modules",
     "prepare": "cd ../.. && husky qa/tests/.husky"
   },
   "lint-staged": {

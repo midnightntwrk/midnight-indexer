@@ -21,7 +21,7 @@ use indexer_common::{
     domain::{
         BlockHash, ByteVec, ContractAttributes, ContractBalance, LedgerEvent,
         LedgerEventAttributes, LedgerEventGrouping, ProtocolVersion, SerializedLedgerStateKey,
-        TermsAndConditionsHash, UnshieldedUtxo,
+        TermsAndConditionsHash, UnshieldedUtxo, bridge::BridgeEvent,
     },
     infra::sqlx::U128BeBytes,
 };
@@ -369,6 +369,8 @@ async fn save_block(
 
     save_dust_registration_events(dust_registration_events, block_id, block.timestamp, tx).await?;
 
+    save_bridge_events(&block.bridge_events, block_id, tx).await?;
+
     Ok(max_transaction_id)
 }
 
@@ -509,6 +511,12 @@ async fn save_regular_transaction(
     save_dust_nullifiers(&transaction.ledger_events, transaction_id, block_id, tx).await?;
 
     save_zswap_nullifiers(&transaction.ledger_events, transaction_id, block_id, tx).await?;
+
+    // Persist a Cardano-bridge claim when the regular transaction is a `ClaimRewards` with
+    // `ClaimKind::CardanoBridge` (populated by indexer-common's apply path).
+    if let Some(claim) = &transaction.bridge_claim {
+        save_bridge_claim(transaction_id, claim.recipient.as_ref(), claim.amount, tx).await?;
+    }
 
     Ok(transaction_id as u64)
 }
@@ -1268,6 +1276,88 @@ async fn save_system_parameters_change(
             .bind(change.timestamp as i64)
             .bind(terms_and_conditions.hash.as_ref())
             .bind(&terms_and_conditions.url)
+            .execute(&mut **tx)
+            .await?;
+    }
+
+    Ok(())
+}
+
+/// Save a bridge claim parsed from a regular `ClaimRewardsTransaction` with
+/// `ClaimKind::CardanoBridge`, as populated on the transaction by the indexer-common apply path
+/// and persisted from `save_regular_transaction`.
+#[trace(properties = { "transaction_id": "{transaction_id}" })]
+async fn save_bridge_claim(
+    transaction_id: i64,
+    recipient: &[u8],
+    amount: u128,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    let query = indoc! {"
+        INSERT INTO bridge_claims (transaction_id, recipient, amount)
+        VALUES ($1, $2, $3)
+    "};
+
+    sqlx::query(query)
+        .bind(transaction_id)
+        .bind(recipient)
+        .bind(U128BeBytes::from(amount))
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
+}
+
+#[trace(properties = { "block_id": "{block_id}" })]
+async fn save_bridge_events(
+    events: &[BridgeEvent],
+    block_id: i64,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    for event in events {
+        let query = indoc! {"
+            INSERT INTO protocol_bridge_events (
+                block_id,
+                transaction_id,
+                variant,
+                mc_tx_hash,
+                amount,
+                recipient,
+                midnight_tx_hash,
+                count
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        "};
+
+        let amount = event.amount().to_be_bytes().to_vec();
+        let count = match event {
+            BridgeEvent::SubminimalFlushTransfer { count, .. } => Some(*count as i32),
+            _ => None,
+        };
+
+        // Link to the system transaction the handler produced: its hash equals the event's
+        // `midnight_tx_hash`, saved in this same DB transaction by `save_transactions` above.
+        let link_query = indoc! {"
+            SELECT id
+            FROM transactions
+            WHERE block_id = $1 AND hash = $2
+        "};
+        let transaction_id = sqlx::query_as::<_, (i64,)>(link_query)
+            .bind(block_id)
+            .bind(event.midnight_tx_hash().as_ref())
+            .fetch_optional(&mut **tx)
+            .await?
+            .map(|(id,)| id);
+
+        sqlx::query(query)
+            .bind(block_id)
+            .bind(transaction_id)
+            .bind(event.variant())
+            .bind(event.mc_tx_hash().map(|h| h.as_ref()))
+            .bind(amount)
+            .bind(event.recipient().map(|r| r.as_bytes()))
+            .bind(event.midnight_tx_hash().as_ref())
+            .bind(count)
             .execute(&mut **tx)
             .await?;
     }

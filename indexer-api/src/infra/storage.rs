@@ -12,6 +12,7 @@
 // limitations under the License.
 
 mod block;
+mod bridge;
 mod contract_action;
 mod contract_event;
 mod dust;

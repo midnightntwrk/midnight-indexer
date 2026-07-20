@@ -466,6 +466,39 @@ export type DustGenerationsResponse = GraphQLResponse<{
   dustGenerations: DustGenerations[];
 }>;
 
+// c2m-bridge query surface (#941). Only BridgeUserTransfer carries fully-populated
+// fields today; other variants are discriminated by __typename until data exists.
+export interface BridgeUserTransfer {
+  __typename: 'BridgeUserTransfer';
+  id: number;
+  blockHeight: number;
+  midnightTxHash: string;
+  cardanoTxHash: string;
+  amount: string;
+  recipient: string;
+}
+
+export interface BridgeEventOther {
+  __typename: string;
+  id?: number;
+  recipient?: string;
+  amount?: string;
+}
+
+export type BridgeEvent = BridgeUserTransfer | BridgeEventOther;
+
+export type BridgeEventsResponse = GraphQLResponse<{ bridgeEvents: BridgeEvent[] }>;
+
+export type BridgeDepositsResponse = GraphQLResponse<{ bridgeDeposits: BridgeEvent[] }>;
+
+export interface BridgeBalance {
+  deposited: string;
+  claimed: string;
+  balance: string;
+}
+
+export type BridgeBalanceResponse = GraphQLResponse<{ bridgeBalance: BridgeBalance }>;
+
 export interface DustCommitmentMerkleTreeUpdateResult {
   startIndex: number;
   endIndex: number;
@@ -527,9 +560,7 @@ export interface DustGenerationDtimeUpdateItem {
 }
 
 export type DustGenerationsEvent =
-  | DustGenerationsItem
-  | DustGenerationsProgress
-  | DustGenerationDtimeUpdateItem;
+  DustGenerationsItem | DustGenerationsProgress | DustGenerationDtimeUpdateItem;
 
 export interface DustNullifierTransaction {
   nullifierLeBytes: string;

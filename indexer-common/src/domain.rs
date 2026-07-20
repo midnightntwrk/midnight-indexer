@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod bridge;
 pub mod dust;
 pub mod ledger;
 
@@ -159,6 +160,10 @@ pub struct ApplyRegularTransactionOutcome {
     pub spent_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub ledger_events: Vec<LedgerEvent>,
     pub fees: u128,
+    /// Populated when the transaction is a `ClaimRewards(claim)` with
+    /// `claim.kind == ClaimKind::CardanoBridge`. The recipient is the claim's
+    /// owner (32-byte address); the amount is the claim's value.
+    pub bridge_claim: Option<crate::domain::bridge::BridgeClaim>,
 }
 
 /// The outcome of applying a system transaction to the ledger state along with extracted data.
