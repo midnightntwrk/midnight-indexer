@@ -16,7 +16,27 @@ if [ -z "$1" ]; then
     exit 1
 fi
 readonly node_version="$1"
-readonly toolkit_image="midnightntwrk/midnight-node-toolkit:$node_version"
+
+# Release images live on Docker Hub (midnightntwrk), pre-release builds on GHCR
+# (ghcr.io/midnight-ntwrk). Resolve whichever registry has the tag, preferring a
+# locally present image, then Docker Hub.
+resolve_image() {
+    local image="$1"
+    local candidate
+    for candidate in "midnightntwrk/$image" "ghcr.io/midnight-ntwrk/$image"; do
+        if docker image inspect "$candidate" >/dev/null 2>&1 \
+            || docker manifest inspect "$candidate" >/dev/null 2>&1; then
+            echo "$candidate"
+            return
+        fi
+    done
+    echo "Error: $image not found on Docker Hub (midnightntwrk) or GHCR (midnight-ntwrk)" >&2
+    return 1
+}
+
+toolkit_image=$(resolve_image "midnight-node-toolkit:$node_version")
+node_image=$(resolve_image "midnight-node:$node_version")
+readonly toolkit_image node_image
 readonly rng_seed="0000000000000000000000000000000000000000000000000000000000000037"
 readonly node_dir="$(pwd)/.node/$node_version"
 
@@ -36,7 +56,7 @@ docker run \
     -e SIDECHAIN_BLOCK_BENEFICIARY="04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e" \
     -e THRESHOLD=0 \
     -v $node_dir:/node \
-    midnightntwrk/midnight-node:$node_version
+    $node_image
 
 # Wait for node to be ready.
 echo "Waiting for node to be ready..."
@@ -57,7 +77,7 @@ while true; do
             "id":1,
             "method":"chain_getFinalizedHead",
             "params":[]
-        }' | jq -r .result)
+        }' | jq -r .result || true)
     if [[ -z "$finalized_hash" || "$finalized_hash" == "null" ]]; then
         echo "No finalized hash"
         continue
@@ -70,7 +90,7 @@ while true; do
             \"id\":2,
             \"method\":\"chain_getHeader\",
             \"params\":[\"$finalized_hash\"]
-        }" | jq -r '.result.number')
+        }" | jq -r '.result.number' || true)
     if [[ -z "$finalized_number" || "$finalized_number" == "null" ]]; then
         echo "No finalized number"
         continue
@@ -155,6 +175,114 @@ docker run \
     --contract-address $(cat /tmp/contract_address.mn) \
     --new-authority-seed 1000000000000000000000000000000000000000000000000000000000000001
 
+# Emit a standard contract event so the e2e chain exercises the `contractEvents` query and
+# subscription (#1163; test_contract_event_query / test_contract_events_subscription in
+# indexer-tests/src/e2e.rs). The emit contract source lives in indexer-tests/emit-contract; it is
+# compiled with the compactc bundled in the toolkit image and driven through the toolkit's
+# generate-intent / send-intent custom-contract pipeline (see util/toolkit README in midnight-node).
+readonly emit_work=$(mktemp -d)
+cp indexer-tests/emit-contract/emitcounter.compact indexer-tests/emit-contract/contract.config.ts "$emit_work"
+chmod -R a+rX "$emit_work"
+
+# Compile the emit contract with the bundled compactc (runs as root via the shell entrypoint so it
+# can write into the bind mount).
+docker run \
+    --rm \
+    -v "$emit_work":/toolkit-js/contract-emit \
+    --entrypoint sh \
+    $toolkit_image \
+    -c 'cd /toolkit-js/contract-emit && /compact-home/compactc emitcounter.compact managed/emitcounter'
+
+readonly emit_coin_public=$(docker run --rm $toolkit_image show-address \
+    --network undeployed \
+    --seed 0000000000000000000000000000000000000000000000000000000000000001 \
+    --coin-public | tail -1)
+
+# Deploy the emit contract: intent -> proven tx file -> send.
+docker run \
+    --rm \
+    --network host \
+    -v "$emit_work":/toolkit-js/contract-emit \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    generate-intent deploy \
+    -c /toolkit-js/contract-emit/contract.config.ts \
+    --toolkit-js-path /toolkit-js \
+    --coin-public "$emit_coin_public" \
+    --output-intent /out/emit_deploy.bin \
+    --output-private-state /out/emit_private_state.json \
+    --output-zswap-state /out/emit_zswap.json \
+    0
+docker run \
+    --rm \
+    --network host \
+    -v "$emit_work":/toolkit-js/contract-emit \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    send-intent \
+    --intent-file /out/emit_deploy.bin \
+    --compiled-contract-dir /toolkit-js/contract-emit/managed/emitcounter \
+    --dest-file /out/emit_deploy_tx.mn
+docker run \
+    --rm \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    contract-address --src-file /out/emit_deploy_tx.mn > /tmp/emit_contract_address.mn
+docker run \
+    --rm \
+    --network host \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    generate-txs --src-file /out/emit_deploy_tx.mn --dest-url ws://127.0.0.1:9944 send
+
+# Wait for the deploy to be finalized before calling the emit circuit.
+sleep 15
+docker run \
+    --rm \
+    --network host \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    contract-state \
+    --contract-address $(cat /tmp/emit_contract_address.mn) \
+    --dest-file /out/emit_onchain_state.mn
+
+# Call the emit_unpaused circuit: intent -> proven tx file -> send.
+docker run \
+    --rm \
+    --network host \
+    -v "$emit_work":/toolkit-js/contract-emit \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    generate-intent circuit \
+    -c /toolkit-js/contract-emit/contract.config.ts \
+    --toolkit-js-path /toolkit-js \
+    --contract-address $(cat /tmp/emit_contract_address.mn) \
+    --coin-public "$emit_coin_public" \
+    --input-onchain-state /out/emit_onchain_state.mn \
+    --input-private-state /out/emit_private_state.json \
+    --output-intent /out/emit_call.bin \
+    --output-private-state /out/emit_ps2.json \
+    --output-zswap-state /out/emit_zswap2.json \
+    emit_unpaused
+docker run \
+    --rm \
+    --network host \
+    -v "$emit_work":/toolkit-js/contract-emit \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    send-intent \
+    --intent-file /out/emit_call.bin \
+    --compiled-contract-dir /toolkit-js/contract-emit/managed/emitcounter \
+    --dest-file /out/emit_call_tx.mn
+docker run \
+    --rm \
+    --network host \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    generate-txs --src-file /out/emit_call_tx.mn --dest-url ws://127.0.0.1:9944 send
+
+rm -rf "$emit_work"
+
 # Wait for enough blocks to be finalized so that the pre-populated chain data
 # contains sufficient blocks for e2e tests (MAX_HEIGHT = 32 in e2e.rs).
 readonly min_finalized_height=40
@@ -176,7 +304,7 @@ while true; do
             "id":1,
             "method":"chain_getFinalizedHead",
             "params":[]
-        }' | jq -r .result)
+        }' | jq -r .result || true)
     if [[ -z "$finalized_hash" || "$finalized_hash" == "null" ]]; then
         continue
     fi
@@ -188,7 +316,7 @@ while true; do
             \"id\":2,
             \"method\":\"chain_getHeader\",
             \"params\":[\"$finalized_hash\"]
-        }" | jq -r '.result.number')
+        }" | jq -r '.result.number' || true)
     if [[ -z "$finalized_number" || "$finalized_number" == "null" ]]; then
         continue
     fi

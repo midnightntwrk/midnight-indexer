@@ -17,6 +17,25 @@ if [ -z "$1" ]; then
 fi
 node_version="$1"
 
+# Release images live on Docker Hub (midnightntwrk), pre-release builds on GHCR
+# (ghcr.io/midnight-ntwrk). Resolve whichever registry has the tag, preferring a
+# locally present image, then Docker Hub.
+resolve_image() {
+    local image="$1"
+    local candidate
+    for candidate in "midnightntwrk/$image" "ghcr.io/midnight-ntwrk/$image"; do
+        if docker image inspect "$candidate" >/dev/null 2>&1 \
+            || docker manifest inspect "$candidate" >/dev/null 2>&1; then
+            echo "$candidate"
+            return
+        fi
+    done
+    echo "Error: $image not found on Docker Hub (midnightntwrk) or GHCR (midnight-ntwrk)" >&2
+    return 1
+}
+
+node_image=$(resolve_image "midnight-node:$node_version")
+
 # Check if subxt is installed and verify version
 if ! command -v subxt &> /dev/null; then
     echo "Error: subxt is not installed. Install it with: cargo install subxt-cli" >&2
@@ -46,7 +65,7 @@ docker run \
     -e SHOW_CONFIG=false \
     -e CFG_PRESET=dev \
     -e SIDECHAIN_BLOCK_BENEFICIARY="04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e" \
-    midnightntwrk/midnight-node:$node_version
+    $node_image
 
 # Wait for port to be available (max 30 seconds)
 echo "Waiting for node to be ready..."

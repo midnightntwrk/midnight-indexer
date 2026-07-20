@@ -16,7 +16,27 @@ if [ -z "$1" ]; then
     exit 1
 fi
 readonly node_version="$1"
-readonly toolkit_image="midnightntwrk/midnight-node-toolkit:$node_version"
+
+# Release images live on Docker Hub (midnightntwrk), pre-release builds on GHCR
+# (ghcr.io/midnight-ntwrk). Resolve whichever registry has the tag, preferring a
+# locally present image, then Docker Hub.
+resolve_image() {
+    local image="$1"
+    local candidate
+    for candidate in "midnightntwrk/$image" "ghcr.io/midnight-ntwrk/$image"; do
+        if docker image inspect "$candidate" >/dev/null 2>&1 \
+            || docker manifest inspect "$candidate" >/dev/null 2>&1; then
+            echo "$candidate"
+            return
+        fi
+    done
+    echo "Error: $image not found on Docker Hub (midnightntwrk) or GHCR (midnight-ntwrk)" >&2
+    return 1
+}
+
+toolkit_image=$(resolve_image "midnight-node-toolkit:$node_version")
+node_image=$(resolve_image "midnight-node:$node_version")
+readonly toolkit_image node_image
 
 # Start the node container.
 docker run \
@@ -27,7 +47,7 @@ docker run \
     -e CFG_PRESET=dev \
     -e SIDECHAIN_BLOCK_BENEFICIARY="04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e" \
     -e THRESHOLD=0 \
-    midnightntwrk/midnight-node:$node_version
+    $node_image
 
 # Wait for node to be ready.
 echo "Waiting for node to be ready..."
@@ -48,7 +68,7 @@ while true; do
             "id":1,
             "method":"chain_getFinalizedHead",
             "params":[]
-        }' | jq -r .result)
+        }' | jq -r .result || true)
     if [[ -z "$finalized_hash" || "$finalized_hash" == "null" ]]; then
         echo "No finalized hash"
         continue
@@ -61,7 +81,7 @@ while true; do
             \"id\":2,
             \"method\":\"chain_getHeader\",
             \"params\":[\"$finalized_hash\"]
-        }" | jq -r '.result.number')
+        }" | jq -r '.result.number' || true)
     if [[ -z "$finalized_number" || "$finalized_number" == "null" ]]; then
         echo "No finalized number"
         continue
