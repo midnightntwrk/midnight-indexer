@@ -22,14 +22,14 @@ concurrency:
 
 jobs:
   build-and-push:
-    name: Build and push
+    name: Build and push (${{ matrix.image.name }}, ${{ matrix.platform.arch }})
     runs-on: ubuntu-latest-16-core-x64
     permissions:
       packages: write
     strategy:
       fail-fast: false
       matrix:
-        include:
+        image:
           - name: chain-indexer
             description: Midnight Chain Indexer
           - name: indexer-api
@@ -40,6 +40,17 @@ jobs:
             description: Midnight Indexer
           - name: spo-indexer
             description: Midnight SPO Indexer
+        # Each (image, arch) is an independent parallel job. amd64 keeps the existing (warm)
+        # buildcache ref and the unsuffixed tag and builds natively, so it publishes without
+        # waiting for arm64. arm64 builds in parallel under QEMU and publishes an -arm64-suffixed
+        # tag, so the slow emulated build never blocks the amd64 image from being pushed.
+        platform:
+          - arch: amd64
+            suffix: ""
+            cache_scope: ""
+          - arch: arm64
+            suffix: "-arm64"
+            cache_scope: "-arm64"
     steps:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -73,17 +84,20 @@ jobs:
           DOCKER_METADATA_SHORT_SHA_LENGTH: 8
         with:
           images: |
-            ghcr.io/midnight-ntwrk/${{ matrix.name }}
-            ${{ github.ref_type == 'tag' && format('midnightntwrk/{0}', matrix.name) || '' }}
+            ghcr.io/midnight-ntwrk/${{ matrix.image.name }}
+            ${{ github.ref_type == 'tag' && format('midnightntwrk/{0}', matrix.image.name) || '' }}
+          flavor: |
+            suffix=${{ matrix.platform.suffix }}
           tags: |
             type=semver,pattern={{version}}
             ${{ github.ref_type != 'tag' && format('type=sha,prefix={0}-,format=short', env.VERSION) || '' }}
           labels: |
             org.opencontainers.image.source=https://github.com/midnightntwrk/midnight-indexer/
-            org.opencontainers.image.title=${{ matrix.name }}
-            org.opencontainers.image.description=${{ matrix.description }}
+            org.opencontainers.image.title=${{ matrix.image.name }}
+            org.opencontainers.image.description=${{ matrix.image.description }}
 
       - name: Setup QEMU
+        if: matrix.platform.arch == 'arm64'
         uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
         with:
           image: tonistiigi/binfmt:qemu-v8.1.5
@@ -97,20 +111,20 @@ jobs:
           PROFILE: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || 'dev' }}
         with:
           context: .
-          file: ./${{ matrix.name }}/Dockerfile
+          file: ./${{ matrix.image.name }}/Dockerfile
           push: true
           build-args: |
             PROFILE=${{ env.PROFILE }}
             RUST_VERSION=${{ env.TOOLCHAIN }}
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/${{ matrix.platform.arch }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: |
-            type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.name }}:buildcache
-            type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.name }}:buildcache-${{ env.PROFILE }}
+            type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.image.name }}:buildcache${{ matrix.platform.cache_scope }}
+            type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.image.name }}:buildcache-${{ env.PROFILE }}${{ matrix.platform.cache_scope }}
           cache-to: |
-            type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.name }}:buildcache,mode=max
-            type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.name }}:buildcache-${{ env.PROFILE }},mode=max
+            type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.image.name }}:buildcache${{ matrix.platform.cache_scope }},mode=max
+            type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.image.name }}:buildcache-${{ env.PROFILE }}${{ matrix.platform.cache_scope }},mode=max
 
   docker-compose-validation:
     name: Docker Compose Validation
