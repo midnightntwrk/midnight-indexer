@@ -1086,15 +1086,17 @@ export class IndexerWsClient {
   }
 
   /**
-   * Subscribes to dust generation entries for a dust address within an index range.
+   * Subscribes to a dust address's generations as a consistent snapshot at a block hash.
    *
-   * Entries are interleaved with collapsed Merkle tree updates to fill gaps.
-   * The subscription finishes after reaching the end index with a final collapsed update.
+   * Owned dtime updates after the cutoff height are issued first, then owned generation
+   * entries interleaved with collapsed Merkle tree updates for the non-owned gaps, all
+   * served at the given block's state. The subscription completes once emitted.
    *
    * @param handlers - Callback functions for handling incoming dust generation events
    * @param dustAddress - Bech32m-encoded dust address to subscribe for
-   * @param startIndex - Start index into the dust commitment tree
-   * @param endIndex - End index into the dust commitment tree
+   * @param blockHash - Hex-encoded block hash the generation snapshot is pinned to
+   * @param dtimeCutoffHeight - Block height after which owned dtime updates are replayed
+   *                            (pass 0 to replay all)
    * @param queryOverride - Optional custom GraphQL subscription query
    *
    * @returns An object with subscription ID and unsubscribe function
@@ -1102,12 +1104,12 @@ export class IndexerWsClient {
   subscribeToDustGenerations(
     handlers: SubscriptionHandlers<DustGenerationsSubscriptionResponse>,
     dustAddress: string,
-    startIndex: number,
-    endIndex: number,
+    blockHash: string,
+    dtimeCutoffHeight: number,
     queryOverride?: string,
   ): { unsubscribe: () => void; id: string } {
     const query = queryOverride || DUST_GENERATIONS_SUBSCRIPTION;
-    const variables = { dustAddress, startIndex, endIndex };
+    const variables = { dustAddress, blockHash, dtimeCutoffHeight };
 
     const subscriptionId = this.getNextId();
 

@@ -50,6 +50,151 @@ function safeUnsubscribe(unsubscribe: () => void): void {
   }
 }
 
+/**
+ * Resolves the dust address a wallet registered for the given Cardano reward address.
+ */
+async function fetchDustAddress(rewardAddress: string): Promise<string> {
+  const generationsResponse = await indexerHttpClient.getDustGenerations([rewardAddress]);
+  expect(generationsResponse).toBeSuccess();
+  const generations = generationsResponse.data!.dustGenerations;
+  expect(generations.length).toBeGreaterThanOrEqual(1);
+  expect(generations[0].registrations.length).toBeGreaterThanOrEqual(1);
+  return generations[0].registrations[0].dustAddress;
+}
+
+/**
+ * Fetches the block the subscription snapshot is pinned to.
+ */
+async function fetchBlock(offset?: {
+  height: number;
+}): Promise<{ hash: string; height: number; dustGenerationEndIndex: number }> {
+  const response = offset
+    ? await indexerHttpClient.getBlockByOffset(offset)
+    : await indexerHttpClient.getLatestBlock();
+  expect(response).toBeSuccess();
+  const block = response.data!.block!;
+  return {
+    hash: block.hash,
+    height: block.height,
+    dustGenerationEndIndex: block.dustGenerationEndIndex!,
+  };
+}
+
+interface DustGenerationsSubscriptionArgs {
+  dustAddress: string;
+  blockHash: string;
+  dtimeCutoffHeight: number;
+}
+
+/**
+ * Subscribes to dustGenerations and collects every event until the server completes
+ * the subscription. The block-hash-scoped subscription is finite by design, so
+ * completion is the expected terminal signal; an error or a timeout rejects.
+ */
+function collectDustGenerations(
+  wsClient: IndexerWsClient,
+  args: DustGenerationsSubscriptionArgs,
+  timeoutMs = 30_000,
+): Promise<DustGenerationsSubscriptionResponse[]> {
+  return new Promise((resolve, reject) => {
+    const events: DustGenerationsSubscriptionResponse[] = [];
+    let settled = false;
+    let unsubscribe = () => {};
+    const settle = (handler: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      handler();
+    };
+
+    const timeout = setTimeout(() => {
+      safeUnsubscribe(unsubscribe);
+      settle(() =>
+        reject(
+          new Error(
+            `Timed out after ${timeoutMs}ms waiting for the dust generations subscription ` +
+              `to complete (received ${events.length} events)`,
+          ),
+        ),
+      );
+    }, timeoutMs);
+
+    const subscription = wsClient.subscribeToDustGenerations(
+      {
+        next: (payload) => {
+          events.push(payload);
+        },
+        error: (error) => {
+          safeUnsubscribe(unsubscribe);
+          settle(() => reject(new Error(`Subscription error: ${JSON.stringify(error)}`)));
+        },
+        complete: () => {
+          settle(() => resolve(events));
+        },
+      },
+      args.dustAddress,
+      args.blockHash,
+      args.dtimeCutoffHeight,
+    );
+    unsubscribe = subscription.unsubscribe;
+  });
+}
+
+/**
+ * Subscribes to dustGenerations and resolves with the subscription error message.
+ * Completion without an error, or a timeout, rejects.
+ */
+function collectDustGenerationsError(
+  wsClient: IndexerWsClient,
+  args: DustGenerationsSubscriptionArgs,
+  timeoutMs = 10_000,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let unsubscribe = () => {};
+    const timeout = setTimeout(() => {
+      safeUnsubscribe(unsubscribe);
+      reject(new Error('Timed out waiting for a subscription error'));
+    }, timeoutMs);
+
+    const subscription = wsClient.subscribeToDustGenerations(
+      {
+        error: (error) => {
+          clearTimeout(timeout);
+          safeUnsubscribe(unsubscribe);
+          resolve(extractSubscriptionErrorMessage(error));
+        },
+        complete: () => {
+          clearTimeout(timeout);
+          reject(new Error('Subscription completed without error'));
+        },
+      },
+      args.dustAddress,
+      args.blockHash,
+      args.dtimeCutoffHeight,
+    );
+    unsubscribe = subscription.unsubscribe;
+  });
+}
+
+function assertEventsMatchSchema(events: DustGenerationsSubscriptionResponse[]): void {
+  for (const msg of events) {
+    expect(msg).toBeSuccess();
+    const event = msg.data!.dustGenerations;
+    const parsed = DustGenerationsEventSchema.safeParse(event);
+    expect(
+      parsed.success,
+      `Dust generations event schema validation failed: ${JSON.stringify(parsed.error, null, 2)}`,
+    ).toBe(true);
+  }
+}
+
+function eventsOfType(
+  events: DustGenerationsSubscriptionResponse[],
+  typename: string,
+): DustGenerationsSubscriptionResponse[] {
+  return events.filter((msg) => msg.data?.dustGenerations?.__typename === typename);
+}
+
 // Dust generation registrations require a Cardano-side mapping which has no
 // counterpart in the `undeployed` environment. Skip the whole surface there;
 // re-enable once #1152 lands local Cardano test-data provisioning.
@@ -65,150 +210,154 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
     await indexerWsClient.connectionClose();
   });
 
-  describe('streaming dust generation entries', () => {
+  describe('a subscription at the latest block hash', () => {
     /**
-     * A dust generations subscription streams items and ends with a progress event
+     * A dust generations subscription streams a finite snapshot and completes.
      *
-     * @given a registered dust address in bech32m format (mn_dust...) and a valid index range
-     * @when we subscribe to dustGenerations
-     * @then we should receive DustGenerationsItem and/or DustGenerationsProgress events
-     * @and each event should match the expected schema
+     * @given a registered dust address and the latest block hash
+     * @when a dustGenerations subscription is opened at that block with dtimeCutoffHeight 0
+     * @then generation events are streamed, the last event is a DustGenerationsProgress,
+     *       and the subscription completes on its own
+     * @and each event matches the expected schema
      */
-    test('should stream dust generation events for a valid dust address in bech32m format', async () => {
+    test('should stream a complete generation snapshot for a registered dust address', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations'] };
+
       let rewardAddress: string;
       try {
         rewardAddress = dataProvider.getCardanoRewardAddress('registered-with-dust');
       } catch (error) {
         log.warn(error);
+        ctx.skip?.(true, (error as Error).message);
         return;
       }
 
-      // Get the dust address from the generations query
-      const generationsResponse = await indexerHttpClient.getDustGenerations([rewardAddress]);
-      expect(generationsResponse).toBeSuccess();
+      const dustAddress = await fetchDustAddress(rewardAddress);
+      const block = await fetchBlock();
+      log.debug(`Subscribing for ${dustAddress} at block ${block.height} (${block.hash})`);
 
-      const generations = generationsResponse.data!.dustGenerations;
-      expect(generations.length).toBeGreaterThanOrEqual(1);
-      expect(generations[0].registrations.length).toBeGreaterThanOrEqual(1);
-
-      const dustAddress = generations[0].registrations[0].dustAddress;
-      log.debug(`Using dust address (bech32m): ${dustAddress}`);
-
-      // Subscribe with a small range starting from 0
-      const received: DustGenerationsSubscriptionResponse[] = [];
-
-      await new Promise<void>((resolve, reject) => {
-        let settled = false;
-        let unsubscribe = () => {};
-        const settle = (handler: () => void) => {
-          if (settled) return;
-          settled = true;
-          handler();
-        };
-
-        // 60s ceiling. Under healthy conditions the indexer responds with
-        // historical events + a Progress message in well under a second; the
-        // previous 12s window was too tight when qanet was loaded or
-        // recovering from a 503 burst, causing the stream's first event to
-        // arrive late and the test to fail with zero events received.
-        const timeout = setTimeout(() => {
-          safeUnsubscribe(unsubscribe);
-          // It's OK if we received some events before timeout
-          if (received.length > 0) {
-            settle(resolve);
-          } else {
-            settle(() => reject(new Error('Timed out waiting for dust generations events')));
-          }
-        }, 60_000);
-
-        const subscription = indexerWsClient.subscribeToDustGenerations(
-          {
-            next: (payload) => {
-              received.push(payload);
-              log.debug(
-                `Received dust generations event ${received.length}: ${JSON.stringify(payload.data?.dustGenerations?.__typename)}`,
-              );
-
-              // Stop after receiving a progress event (indicates completion)
-              if (payload.data?.dustGenerations?.__typename === 'DustGenerationsProgress') {
-                clearTimeout(timeout);
-                safeUnsubscribe(unsubscribe);
-                settle(resolve);
-              }
-            },
-            error: (error) => {
-              clearTimeout(timeout);
-              safeUnsubscribe(unsubscribe);
-              settle(() => reject(new Error(`Subscription error: ${JSON.stringify(error)}`)));
-            },
-            complete: () => {
-              clearTimeout(timeout);
-              settle(resolve);
-            },
-          },
-          dustAddress,
-          0,
-          10,
-        );
-        unsubscribe = subscription.unsubscribe;
+      const events = await collectDustGenerations(indexerWsClient, {
+        dustAddress,
+        blockHash: block.hash,
+        dtimeCutoffHeight: 0,
       });
 
-      expect(received.length).toBeGreaterThan(0);
+      expect(events.length).toBeGreaterThan(0);
+      assertEventsMatchSchema(events);
 
-      // Validate each event against the schema
-      for (const msg of received) {
-        expect(msg).toBeSuccess();
-        const event = msg.data!.dustGenerations;
-        const parsed = DustGenerationsEventSchema.safeParse(event);
-        expect(
-          parsed.success,
-          `Dust generations event schema validation failed: ${JSON.stringify(parsed.error, null, 2)}`,
-        ).toBe(true);
+      const lastEvent = events[events.length - 1].data!.dustGenerations;
+      expect(lastEvent.__typename).toBe('DustGenerationsProgress');
+    }, 60_000);
+  });
+
+  describe('a subscription pinned to a block hash', () => {
+    /**
+     * The block-hash snapshot is deterministic: the same block yields the same events.
+     *
+     * @given a registered dust address and a fixed block hash
+     * @when two dustGenerations subscriptions are opened with identical arguments
+     * @then both deliver exactly the same event sequence
+     *
+     * midnight-indexer#1283
+     */
+    test('should deliver identical events for repeated subscriptions at the same block', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations'] };
+
+      let rewardAddress: string;
+      try {
+        rewardAddress = dataProvider.getCardanoRewardAddress('registered-with-dust');
+      } catch (error) {
+        log.warn(error);
+        ctx.skip?.(true, (error as Error).message);
+        return;
       }
 
-      // The last event should be a DustGenerationsProgress
-      const lastEvent = received[received.length - 1].data!.dustGenerations;
-      expect(lastEvent.__typename).toBe('DustGenerationsProgress');
+      const dustAddress = await fetchDustAddress(rewardAddress);
+      const block = await fetchBlock();
+      const args = { dustAddress, blockHash: block.hash, dtimeCutoffHeight: 0 };
 
-      // Wire-format coverage for DustGenerationDtimeUpdateItem (issue #1078).
-      // The discriminated-union schema above (DustGenerationsEventSchema) is
-      // the actual regression guard: any payload whose `__typename` is
-      // `DustGenerationDtimeUpdateItem` is validated against
-      // DustGenerationDtimeUpdateItemSchema as part of the union match, so a
-      // drift in the new variant's field set would already have failed there.
-      // Here we only count occurrences for visibility — presence is
-      // environment-dependent (requires the wallet's backing NIGHT/cNIGHT UTXO
-      // to have been spent on chain, and `startIndex` past the wallet's first
-      // owned entry to trigger historical replay).
-      const dtimeUpdateCount = received.filter(
-        (msg) => msg.data?.dustGenerations?.__typename === 'DustGenerationDtimeUpdateItem',
-      ).length;
-      log.debug(`Received ${dtimeUpdateCount} DustGenerationDtimeUpdateItem event(s)`);
-      // Test-level timeout must comfortably exceed the internal 60s ceiling
-      // for the dust-generations subscription wait, plus query + teardown.
+      const firstRun = await collectDustGenerations(indexerWsClient, args);
+      const secondRun = await collectDustGenerations(indexerWsClient, args);
+
+      expect(firstRun.length).toBeGreaterThan(0);
+      expect(secondRun.length).toBe(firstRun.length);
+      expect(secondRun.map((msg) => msg.data!.dustGenerations)).toStrictEqual(
+        firstRun.map((msg) => msg.data!.dustGenerations),
+      );
+    }, 90_000);
+
+    /**
+     * The snapshot reflects the queried block's generation tree, not the tip's.
+     *
+     * @given two blocks between which the dust generation tree has grown
+     *        (their dustGenerationEndIndex values differ)
+     * @when a dustGenerations subscription is opened at each block's hash
+     * @then each final progress event reports highestIndex equal to that block's
+     *       dustGenerationEndIndex - 1, so the earlier block yields the smaller snapshot
+     *
+     * midnight-indexer#1283
+     */
+    test('should snapshot the generation tree at the queried block rather than the tip', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations'] };
+
+      let rewardAddress: string;
+      try {
+        rewardAddress = dataProvider.getCardanoRewardAddress('registered-with-dust');
+      } catch (error) {
+        log.warn(error);
+        ctx.skip?.(true, (error as Error).message);
+        return;
+      }
+
+      const dustAddress = await fetchDustAddress(rewardAddress);
+      const tipBlock = await fetchBlock();
+      const earlierBlock = await fetchBlock({ height: Math.floor(tipBlock.height / 2) });
+
+      if (
+        earlierBlock.dustGenerationEndIndex === 0 ||
+        earlierBlock.dustGenerationEndIndex === tipBlock.dustGenerationEndIndex
+      ) {
+        ctx.skip?.(
+          true,
+          `generation tree did not grow between block ${earlierBlock.height} ` +
+            `(endIndex ${earlierBlock.dustGenerationEndIndex}) and block ${tipBlock.height} ` +
+            `(endIndex ${tipBlock.dustGenerationEndIndex}) — snapshot comparison is vacuous`,
+        );
+        return;
+      }
+
+      for (const block of [earlierBlock, tipBlock]) {
+        const events = await collectDustGenerations(indexerWsClient, {
+          dustAddress,
+          blockHash: block.hash,
+          dtimeCutoffHeight: 0,
+        });
+
+        const progressEvents = eventsOfType(events, 'DustGenerationsProgress');
+        expect(progressEvents).toHaveLength(1);
+        const progress = progressEvents[0].data!.dustGenerations as { highestIndex: number };
+        expect(
+          progress.highestIndex,
+          `highestIndex at block ${block.height} should reflect that block's tree size`,
+        ).toBe(block.dustGenerationEndIndex - 1);
+      }
     }, 90_000);
   });
 
-  /**
-   * Regression guard for midnight-indexer#1167.
-   *
-   * Before the fix, both dtime drain sites in dust_generations.rs were gated on
-   * `dtime_cutoff_block_id.is_some()`, which returns None when startIndex=0 and
-   * the wallet has no prior owned entries below that index — silently dropping all
-   * DustGenerationDtimeUpdateItem records for wallets that begin syncing after
-   * their NIGHT has already been spent.
-   *
-   * The fix: unwrap_or(0) the cutoff and run the drain unconditionally. The dtime
-   * SQL still filters by owner and event-id cursor, so cutoff=0 is safe.
-   */
-  describe('fresh subscription dtime delivery (#1167)', () => {
+  describe('dtime update delivery relative to the cutoff height', () => {
     /**
-     * @given a wallet known to have spent NIGHT UTXOs (registered-with-dust-and-spent)
-     * @when we open a fresh dustGenerations subscription with startIndex=0
-     * @then at least one DustGenerationDtimeUpdateItem is received before the progress
-     *       event, and each event matches the expected schema
+     * A zero cutoff replays the wallet's full owned dtime history before the tree events.
+     *
+     * @given a wallet with spent backing NIGHT UTXOs (registered-with-dust-and-spent)
+     * @when a dustGenerations subscription is opened with dtimeCutoffHeight 0
+     * @then at least one DustGenerationDtimeUpdateItem is delivered
+     * @and every dtime update precedes the first DustGenerationsItem in the stream
+     *
+     * midnight-indexer#1283 (supersedes the startIndex-based #1167 regression guard)
      */
-    test('fresh startIndex=0 subscription delivers DustGenerationDtimeUpdateItem for a wallet with spent NIGHT', async (ctx: TestContext) => {
+    test('should replay owned dtime updates before generation items when the cutoff is zero', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations'] };
+
       let rewardAddress: string;
       try {
         rewardAddress = dataProvider.getCardanoRewardAddress('registered-with-dust-and-spent');
@@ -218,121 +367,50 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
         return;
       }
 
-      const generationsResponse = await indexerHttpClient.getDustGenerations([rewardAddress]);
-      expect(generationsResponse).toBeSuccess();
-      const generations = generationsResponse.data!.dustGenerations;
-      expect(generations.length).toBeGreaterThanOrEqual(1);
-      expect(generations[0].registrations.length).toBeGreaterThanOrEqual(1);
-      const dustAddress = generations[0].registrations[0].dustAddress;
-      log.debug(`Using dust address (bech32m): ${dustAddress}`);
+      const dustAddress = await fetchDustAddress(rewardAddress);
+      const block = await fetchBlock();
 
-      const received: DustGenerationsSubscriptionResponse[] = [];
-
-      // DustGenerationsProgress is only emitted when the chain's generation-tree head
-      // has advanced past endIndex, which for this wallet's historical data doesn't
-      // happen within the test window. Instead we terminate on an idle signal: if no
-      // new event arrives within IDLE_MS after the last one, all historical data has
-      // been delivered and we can assert.
-      const IDLE_MS = 5_000;
-      const HARD_TIMEOUT_MS = 60_000;
-
-      await new Promise<void>((resolve, reject) => {
-        let settled = false;
-        let idleTimer: ReturnType<typeof setTimeout> | undefined;
-        let unsubscribe = () => {};
-        const settle = (handler: () => void) => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(idleTimer);
-          handler();
-        };
-
-        const hardTimeout = setTimeout(() => {
-          safeUnsubscribe(unsubscribe);
-          // Hard timeout: fail only if we received no events at all.
-          if (received.length > 0) {
-            settle(resolve);
-          } else {
-            settle(() => reject(new Error('Hard timeout: no dust generations events received')));
-          }
-        }, HARD_TIMEOUT_MS);
-
-        const resetIdle = () => {
-          clearTimeout(idleTimer);
-          idleTimer = setTimeout(() => {
-            clearTimeout(hardTimeout);
-            safeUnsubscribe(unsubscribe);
-            settle(resolve);
-          }, IDLE_MS);
-        };
-
-        const subscription = indexerWsClient.subscribeToDustGenerations(
-          {
-            next: (payload) => {
-              received.push(payload);
-              resetIdle();
-            },
-            error: (error) => {
-              clearTimeout(hardTimeout);
-              clearTimeout(idleTimer);
-              safeUnsubscribe(unsubscribe);
-              settle(() => reject(new Error(`Subscription error: ${JSON.stringify(error)}`)));
-            },
-            complete: () => {
-              clearTimeout(hardTimeout);
-              settle(resolve);
-            },
-          },
-          dustAddress,
-          0,
-          2_147_483_647,
-        );
-        unsubscribe = subscription.unsubscribe;
+      const events = await collectDustGenerations(indexerWsClient, {
+        dustAddress,
+        blockHash: block.hash,
+        dtimeCutoffHeight: 0,
       });
 
-      for (const msg of received) {
-        expect(msg).toBeSuccess();
-        const event = msg.data!.dustGenerations;
-        const parsed = DustGenerationsEventSchema.safeParse(event);
-        expect(
-          parsed.success,
-          `Dust generations event schema validation failed: ${JSON.stringify(parsed.error, null, 2)}`,
-        ).toBe(true);
-      }
+      assertEventsMatchSchema(events);
 
-      const dtimeItems = received.filter(
-        (msg) => msg.data?.dustGenerations?.__typename === 'DustGenerationDtimeUpdateItem',
-      );
-      log.debug(
-        `Received ${dtimeItems.length} DustGenerationDtimeUpdateItem event(s) (expected ≥1)`,
-      );
+      const typenames = events.map((msg) => msg.data!.dustGenerations.__typename);
+      const dtimeCount = typenames.filter((t) => t === 'DustGenerationDtimeUpdateItem').length;
+      log.debug(`Received ${dtimeCount} DustGenerationDtimeUpdateItem event(s)`);
       expect(
-        dtimeItems.length,
-        'Expected ≥1 DustGenerationDtimeUpdateItem on a fresh startIndex=0 subscription ' +
-          'for a wallet with spent NIGHT UTXOs — regression guard for #1167',
+        dtimeCount,
+        'Expected ≥1 DustGenerationDtimeUpdateItem with dtimeCutoffHeight=0 ' +
+          'for a wallet with spent NIGHT UTXOs',
       ).toBeGreaterThanOrEqual(1);
-    }, 90_000);
+
+      const firstItemIndex = typenames.indexOf('DustGenerationsItem');
+      const lastDtimeIndex = typenames.lastIndexOf('DustGenerationDtimeUpdateItem');
+      if (firstItemIndex !== -1) {
+        expect(
+          lastDtimeIndex,
+          'All dtime updates should be issued before the first DustGenerationsItem',
+        ).toBeLessThan(firstItemIndex);
+      }
+    }, 60_000);
 
     /**
-     * Resumption flow: a subscription with startIndex > 0, where entries below that
-     * index already exist, must still work correctly — items returned must be scoped
-     * to [startIndex, endIndex), and the subscription must complete.
+     * A cutoff at the snapshot block suppresses the dtime delta entirely.
      *
-     * This is the complementary case to the startIndex=0 test above. The #1167 fix
-     * (unwrap_or(0) on the dtime cutoff) must not disturb the pre-existing cutoff-based
-     * logic used when startIndex > 0.
+     * @given a wallet with spent backing NIGHT UTXOs (registered-with-dust-and-spent)
+     * @when a dustGenerations subscription is opened with the dtimeCutoffHeight equal to
+     *       the snapshot block's height
+     * @then no DustGenerationDtimeUpdateItem is delivered, while the generation snapshot
+     *       (items and final progress) still streams and completes
      *
-     * Fixture: registered-with-dust-and-spent has gen entries at mtIndex
-     * [283, 559, 560, 561, 169290-169304]. startIndex=559 places exactly one entry
-     * (mtIndex 283) below the subscription window, exercising the non-None cutoff path.
-     *
-     * @given a wallet with entries below startIndex (registered-with-dust-and-spent,
-     *        startIndex=559 leaves one entry at mtIndex 283 below the window)
-     * @when we subscribe to dustGenerations with startIndex=559
-     * @then all DustGenerationsItem events have generationMtIndex >= 559
-     * @and every event passes schema validation
+     * midnight-indexer#1283
      */
-    test('resumption startIndex>0 delivers only in-range items and completes correctly', async (ctx: TestContext) => {
+    test('should deliver no dtime updates when the cutoff equals the snapshot block height', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations'] };
+
       let rewardAddress: string;
       try {
         rewardAddress = dataProvider.getCardanoRewardAddress('registered-with-dust-and-spent');
@@ -342,149 +420,37 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
         return;
       }
 
-      const generationsResponse = await indexerHttpClient.getDustGenerations([rewardAddress]);
-      expect(generationsResponse).toBeSuccess();
-      const generations = generationsResponse.data!.dustGenerations;
-      expect(generations.length).toBeGreaterThanOrEqual(1);
-      expect(generations[0].registrations.length).toBeGreaterThanOrEqual(1);
-      const dustAddress = generations[0].registrations[0].dustAddress;
-      log.debug(`Using dust address (bech32m): ${dustAddress}`);
+      const dustAddress = await fetchDustAddress(rewardAddress);
+      const block = await fetchBlock();
 
-      // startIndex=559 is the second-lowest gen entry for this wallet (283 sits below it),
-      // exercising the non-None cutoff path in get_dust_generation_dtime_cutoff_block_id.
-      const RESUMPTION_START_INDEX = 559;
-
-      const received: DustGenerationsSubscriptionResponse[] = [];
-
-      // Same idle-based termination as the fresh-sub test above: DustGenerationsProgress
-      // does not fire for historical data ranges on this environment.
-      const IDLE_MS = 5_000;
-      const HARD_TIMEOUT_MS = 60_000;
-
-      await new Promise<void>((resolve, reject) => {
-        let settled = false;
-        let idleTimer: ReturnType<typeof setTimeout> | undefined;
-        let unsubscribe = () => {};
-        const settle = (handler: () => void) => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(idleTimer);
-          handler();
-        };
-
-        const hardTimeout = setTimeout(() => {
-          safeUnsubscribe(unsubscribe);
-          if (received.length > 0) {
-            settle(resolve);
-          } else {
-            settle(() => reject(new Error('Hard timeout: no dust generations events received')));
-          }
-        }, HARD_TIMEOUT_MS);
-
-        const resetIdle = () => {
-          clearTimeout(idleTimer);
-          idleTimer = setTimeout(() => {
-            clearTimeout(hardTimeout);
-            safeUnsubscribe(unsubscribe);
-            settle(resolve);
-          }, IDLE_MS);
-        };
-
-        const subscription = indexerWsClient.subscribeToDustGenerations(
-          {
-            next: (payload) => {
-              received.push(payload);
-              resetIdle();
-            },
-            error: (error) => {
-              clearTimeout(hardTimeout);
-              clearTimeout(idleTimer);
-              safeUnsubscribe(unsubscribe);
-              settle(() => reject(new Error(`Subscription error: ${JSON.stringify(error)}`)));
-            },
-            complete: () => {
-              clearTimeout(hardTimeout);
-              settle(resolve);
-            },
-          },
-          dustAddress,
-          RESUMPTION_START_INDEX,
-          2_147_483_647,
-        );
-        unsubscribe = subscription.unsubscribe;
+      const events = await collectDustGenerations(indexerWsClient, {
+        dustAddress,
+        blockHash: block.hash,
+        dtimeCutoffHeight: block.height,
       });
 
-      for (const msg of received) {
-        expect(msg).toBeSuccess();
-        const event = msg.data!.dustGenerations;
-        const parsed = DustGenerationsEventSchema.safeParse(event);
-        expect(
-          parsed.success,
-          `Dust generations event schema validation failed: ${JSON.stringify(parsed.error, null, 2)}`,
-        ).toBe(true);
-      }
-
-      // All generation items must be within the requested window
-      const genItems = received.filter(
-        (msg) => msg.data?.dustGenerations?.__typename === 'DustGenerationsItem',
-      );
-      for (const msg of genItems) {
-        const event = msg.data!.dustGenerations as { generationMtIndex: number };
-        expect(
-          event.generationMtIndex,
-          `DustGenerationsItem at mtIndex ${event.generationMtIndex} is below startIndex ${RESUMPTION_START_INDEX}`,
-        ).toBeGreaterThanOrEqual(RESUMPTION_START_INDEX);
-      }
-
-      // At least some items must be delivered (proves the subscription works)
-      expect(
-        received.length,
-        'Expected at least one event from the resumption subscription',
-      ).toBeGreaterThan(0);
-
-      const dtimeItems = received.filter(
-        (msg) => msg.data?.dustGenerations?.__typename === 'DustGenerationDtimeUpdateItem',
-      );
-      log.debug(
-        `Resumption (startIndex=${RESUMPTION_START_INDEX}): ` +
-          `${genItems.length} gen items, ${dtimeItems.length} dtime items`,
-      );
-    }, 90_000);
+      assertEventsMatchSchema(events);
+      expect(eventsOfType(events, 'DustGenerationDtimeUpdateItem')).toHaveLength(0);
+      expect(eventsOfType(events, 'DustGenerationsProgress')).toHaveLength(1);
+    }, 60_000);
   });
 
   describe('subscription error handling', () => {
     /**
-     * A dust generations subscription with an invalid dust address should return an error
+     * A dust generations subscription with an invalid dust address returns an error.
      *
-     * @given an invalid hex-encoded dust address
-     * @when we subscribe to dustGenerations
-     * @then the subscription should return an error
+     * @given an invalid dust address and a valid block hash
+     * @when a dustGenerations subscription is opened
+     * @then the subscription returns an error
      */
-    test('should return an error for an invalid dust address', async () => {
-      const errorReceived = await new Promise<string>((resolve, reject) => {
-        let unsubscribe = () => {};
-        const timeout = setTimeout(() => {
-          safeUnsubscribe(unsubscribe);
-          reject(new Error('Timed out waiting for error'));
-        }, 10_000);
+    test('should return an error for an invalid dust address', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations', 'Negative'] };
 
-        const subscription = indexerWsClient.subscribeToDustGenerations(
-          {
-            error: (error) => {
-              clearTimeout(timeout);
-              safeUnsubscribe(unsubscribe);
-              resolve(extractSubscriptionErrorMessage(error));
-            },
-            complete: () => {
-              clearTimeout(timeout);
-              reject(new Error('Subscription completed without error'));
-            },
-          },
-          'invalid_address',
-          0,
-          10,
-        );
-        unsubscribe = subscription.unsubscribe;
+      const block = await fetchBlock();
+      const errorReceived = await collectDustGenerationsError(indexerWsClient, {
+        dustAddress: 'invalid_address',
+        blockHash: block.hash,
+        dtimeCutoffHeight: 0,
       });
 
       expect(errorReceived).toBeDefined();
@@ -492,15 +458,19 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
     });
 
     /**
-     * A dust generations subscription with a valid bech32m dust address from another network should return an error
+     * A valid bech32m dust address from another network returns an HRP error.
      *
      * @given valid bech32m dust addresses for all network IDs other than the target one
-     * @when we subscribe to dustGenerations
-     * @then Indexer should return an error related to unexpected/wrong HRP prefix
+     *        and a valid block hash
+     * @when a dustGenerations subscription is opened for each foreign address
+     * @then the indexer returns an error related to an unexpected/wrong HRP prefix
      */
-    test('should return an error for a valid address that is meant for another networkid', async () => {
+    test('should return an error for a valid address that is meant for another networkid', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations', 'Negative'] };
+
       const targetNetworkId = env.getNetworkId().toLowerCase();
       const networkIds = env.getAllEnvironmentNames();
+      const block = await fetchBlock();
 
       for (const networkId of networkIds) {
         if (networkId.toLowerCase() === targetNetworkId) {
@@ -510,60 +480,16 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
         const foreignDustAddress = generateDustAddressForNetworkId(networkId);
         log.debug(`Testing foreign dust address for networkId=${networkId}: ${foreignDustAddress}`);
 
-        const result = await new Promise<{
-          error: string | null;
-          completed: boolean;
-          timedOut: boolean;
-        }>((resolve) => {
-          let settled = false;
-          let unsubscribe = () => {};
-          const settle = (value: {
-            error: string | null;
-            completed: boolean;
-            timedOut: boolean;
-          }) => {
-            if (settled) return;
-            settled = true;
-            resolve(value);
-          };
+        const result = await collectDustGenerationsError(indexerWsClient, {
+          dustAddress: foreignDustAddress,
+          blockHash: block.hash,
+          dtimeCutoffHeight: 0,
+        }).then(
+          (error) => ({ error, failure: null as string | null }),
+          (failure: Error) => ({ error: null as string | null, failure: failure.message }),
+        );
 
-          const timeout = setTimeout(() => {
-            safeUnsubscribe(unsubscribe);
-            settle({ error: null, completed: false, timedOut: true });
-          }, 10_000);
-
-          const subscription = indexerWsClient.subscribeToDustGenerations(
-            {
-              error: (error) => {
-                clearTimeout(timeout);
-                safeUnsubscribe(unsubscribe);
-                settle({
-                  error: extractSubscriptionErrorMessage(error),
-                  completed: false,
-                  timedOut: false,
-                });
-              },
-              complete: () => {
-                clearTimeout(timeout);
-                settle({ error: null, completed: true, timedOut: false });
-              },
-            },
-            foreignDustAddress,
-            0,
-            10,
-          );
-          unsubscribe = subscription.unsubscribe;
-        });
-
-        expect
-          .soft(result.timedOut, `networkId=${networkId} timed out waiting for error`)
-          .toBe(false);
-        expect
-          .soft(
-            result.completed,
-            `networkId=${networkId} subscription completed without emitting an error`,
-          )
-          .toBe(false);
+        expect.soft(result.failure, `networkId=${networkId}: ${result.failure}`).toBeNull();
         expect.soft(result.error, `networkId=${networkId} should emit an error`).toBeTruthy();
         if (result.error) {
           expect
@@ -577,41 +503,24 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
     });
 
     /**
-     * A dust generations subscription with a hex-encoded address should return an error.
+     * A dust address passed in hex format returns a bech32m/HRP error.
      *
-     * @given a valid bech32m dust address converted to hex format
-     * @when we subscribe to dustGenerations using hex format
-     * @then Indexer should return an error indicating the expected bech32m/HRP format
+     * @given a valid bech32m dust address converted to hex format and a valid block hash
+     * @when a dustGenerations subscription is opened using the hex format
+     * @then the indexer returns an error indicating the expected bech32m/HRP format
      */
-    test('should return an error for a valid dust address passed in hex format', async () => {
+    test('should return an error for a valid dust address passed in hex format', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations', 'Negative'] };
+
       const targetNetworkId = env.getNetworkId().toLowerCase();
       const bech32DustAddress = generateDustAddressForNetworkId(targetNetworkId);
       const hexDustAddress = encodeDustAddressAsHex(bech32DustAddress);
+      const block = await fetchBlock();
 
-      const errorReceived = await new Promise<string>((resolve, reject) => {
-        let unsubscribe = () => {};
-        const timeout = setTimeout(() => {
-          safeUnsubscribe(unsubscribe);
-          reject(new Error('Timed out waiting for error for hex dust address'));
-        }, 10_000);
-
-        const subscription = indexerWsClient.subscribeToDustGenerations(
-          {
-            error: (error) => {
-              clearTimeout(timeout);
-              safeUnsubscribe(unsubscribe);
-              resolve(extractSubscriptionErrorMessage(error));
-            },
-            complete: () => {
-              clearTimeout(timeout);
-              reject(new Error('Subscription completed without error for hex dust address'));
-            },
-          },
-          hexDustAddress,
-          0,
-          10,
-        );
-        unsubscribe = subscription.unsubscribe;
+      const errorReceived = await collectDustGenerationsError(indexerWsClient, {
+        dustAddress: hexDustAddress,
+        blockHash: block.hash,
+        dtimeCutoffHeight: 0,
       });
 
       expect(errorReceived).toBeDefined();
@@ -619,10 +528,59 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
         /(expected hrp|unexpected hrp|wrong hrp|bech32|invalid.*address)/,
       );
     });
+
+    /**
+     * A well-formed block hash that matches no indexed block returns an error.
+     *
+     * @given a valid dust address and a 32-byte hex block hash unknown to the indexer
+     * @when a dustGenerations subscription is opened at that block hash
+     * @then the indexer returns an "unknown block hash" error
+     *
+     * midnight-indexer#1283
+     */
+    test('should return an error for an unknown block hash', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations', 'Negative'] };
+
+      const targetNetworkId = env.getNetworkId().toLowerCase();
+      const dustAddress = generateDustAddressForNetworkId(targetNetworkId);
+      const unknownBlockHash = '00'.repeat(32);
+
+      const errorReceived = await collectDustGenerationsError(indexerWsClient, {
+        dustAddress,
+        blockHash: unknownBlockHash,
+        dtimeCutoffHeight: 0,
+      });
+
+      expect(errorReceived.toLowerCase()).toMatch(/unknown block hash/);
+    });
+
+    /**
+     * A block hash that is not valid hex returns an error.
+     *
+     * @given a valid dust address and a block hash that cannot be hex-decoded
+     * @when a dustGenerations subscription is opened at that block hash
+     * @then the indexer returns an invalid block hash error
+     *
+     * midnight-indexer#1283
+     */
+    test('should return an error for a malformed block hash', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations', 'Negative'] };
+
+      const targetNetworkId = env.getNetworkId().toLowerCase();
+      const dustAddress = generateDustAddressForNetworkId(targetNetworkId);
+
+      const errorReceived = await collectDustGenerationsError(indexerWsClient, {
+        dustAddress,
+        blockHash: 'not-a-hex-block-hash',
+        dtimeCutoffHeight: 0,
+      });
+
+      expect(errorReceived.toLowerCase()).toMatch(/(invalid block hash|hex)/);
+    });
   });
 
   /**
-   * Coverage for midnight-indexer#1114 / PR #1116
+   * Coverage for `transactionHash` on dust generation events
    * (`feat(indexer-api): add transactionHash to event subscription response types`).
    *
    * `transactionHash: HexEncoded!` was added to `DustGenerationsItem` and
@@ -631,19 +589,23 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
    * The `transactionId` BIGSERIAL is indexer-internal and not portable across
    * indexer instances; the hash is. The schema-level shape (64-hex,
    * non-nullable) is already enforced by the discriminated-union zod schema
-   * used by the streaming test above. This block adds the round-trip check.
+   * used by the streaming tests above. This block adds the round-trip check.
+   *
+   * midnight-indexer#1114
    */
-  describe('transactionHash on dust generation events (#1114)', () => {
+  describe('transactionHash on dust generation events', () => {
     /**
      * @given a registered dust address that emits at least one
      *        `DustGenerationsItem` or `DustGenerationDtimeUpdateItem`
-     * @when we subscribe to `dustGenerations` and look up the first event's
-     *       `transactionHash` via `transactions(offset: { hash: ... })`
+     * @when the first event's `transactionHash` is looked up via
+     *       `transactions(offset: { hash: ... })`
      * @then the lookup resolves a single transaction whose `hash` equals the
      *       streamed `transactionHash` — proving the field is the on-chain
-     *       identifier wallets can use to fetch the full transaction.
+     *       identifier wallets can use to fetch the full transaction
      */
     test('first item transactionHash resolves via transactions(offset)', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations', 'Transaction'] };
+
       let rewardAddress: string;
       try {
         rewardAddress = dataProvider.getCardanoRewardAddress('registered-with-dust');
@@ -653,74 +615,28 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
         return;
       }
 
-      const generationsResponse = await indexerHttpClient.getDustGenerations([rewardAddress]);
-      expect(generationsResponse).toBeSuccess();
-      const dustAddress = generationsResponse.data!.dustGenerations[0].registrations[0].dustAddress;
-      log.debug(`Using dust address: ${dustAddress}`);
+      const dustAddress = await fetchDustAddress(rewardAddress);
+      const block = await fetchBlock();
 
-      const firstItem = await new Promise<{
-        transactionId: number;
-        transactionHash: string;
-        __typename: 'DustGenerationsItem' | 'DustGenerationDtimeUpdateItem';
-      } | null>((resolve, reject) => {
-        let settled = false;
-        let unsubscribe = () => {};
-        const settle = (handler: () => void) => {
-          if (settled) return;
-          settled = true;
-          handler();
-        };
-
-        // Returning null (instead of rejecting) on timeout lets the caller
-        // ctx.skip when the streaming surface is in a known-flaky state on
-        // the target environment, rather than false-failing this test.
-        const timeout = setTimeout(() => {
-          safeUnsubscribe(unsubscribe);
-          settle(() => resolve(null));
-        }, 15_000);
-
-        const subscription = indexerWsClient.subscribeToDustGenerations(
-          {
-            next: (payload) => {
-              const event = payload.data?.dustGenerations;
-              if (
-                event?.__typename === 'DustGenerationsItem' ||
-                event?.__typename === 'DustGenerationDtimeUpdateItem'
-              ) {
-                clearTimeout(timeout);
-                safeUnsubscribe(unsubscribe);
-                settle(() =>
-                  resolve({
-                    transactionId: event.transactionId,
-                    transactionHash: event.transactionHash,
-                    __typename: event.__typename,
-                  }),
-                );
-              }
-            },
-            error: (error) => {
-              clearTimeout(timeout);
-              safeUnsubscribe(unsubscribe);
-              settle(() => reject(new Error(`Subscription error: ${JSON.stringify(error)}`)));
-            },
-            complete: () => {
-              clearTimeout(timeout);
-              settle(() => resolve(null));
-            },
-          },
-          dustAddress,
-          0,
-          2_147_483_647,
-        );
-        unsubscribe = subscription.unsubscribe;
+      const events = await collectDustGenerations(indexerWsClient, {
+        dustAddress,
+        blockHash: block.hash,
+        dtimeCutoffHeight: 0,
       });
 
-      if (firstItem === null) {
-        log.warn(
-          'no DustGenerationsItem / DtimeUpdateItem event received within the timeout — ' +
-            'streaming surface is currently flaky on this environment (round-trip skipped)',
+      const firstItem = events
+        .map((msg) => msg.data!.dustGenerations)
+        .find(
+          (event) =>
+            event.__typename === 'DustGenerationsItem' ||
+            event.__typename === 'DustGenerationDtimeUpdateItem',
+        ) as { transactionId: number; transactionHash: string; __typename: string } | undefined;
+
+      if (firstItem === undefined) {
+        ctx.skip?.(
+          true,
+          'no DustGenerationsItem / DtimeUpdateItem event for this address — round-trip vacuous',
         );
-        ctx.skip?.(true, 'no dust generations item event in time — round-trip vacuous');
         return;
       }
 
@@ -736,6 +652,6 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
       const transactions = txResponse.data!.transactions;
       expect(transactions).toHaveLength(1);
       expect(transactions[0].hash).toBe(firstItem.transactionHash);
-    }, 30_000);
+    }, 60_000);
   });
 });
