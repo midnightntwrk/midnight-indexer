@@ -13,8 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { zstdDecompressSync } from 'node:zlib';
-
 import { env } from 'environment/model';
 
 export interface CompressionProbeResult {
@@ -58,6 +56,12 @@ const INTROSPECTION_QUERY = `{
  * So for zstd we read the raw bytes and decompress them ourselves (see below).
  * The Content-Encoding header is preserved in `response.headers` regardless and
  * reflects what the server actually sent.
+ *
+ * Note on the zstd runtime requirement: `zstdDecompressSync` was only added to
+ * `node:zlib` in Node 22.15.0. We import it lazily, inside the zstd branch, so
+ * the gzip / brotli / identity probes keep working on earlier Node 22.x
+ * releases — only the zstd decompression path needs Node >= 22.15.0 (see the
+ * prerequisites note in qa/tests/README.md).
  *
  * Note on identity responses: undici unconditionally appends its own
  * `Accept-Encoding` (gzip, deflate, br) to every outgoing request. To test
@@ -103,7 +107,21 @@ export async function probeGraphQLCompression(
     buffer[1] === 0xb5 &&
     buffer[2] === 0x2f &&
     buffer[3] === 0xfd;
-  const data = JSON.parse((isRawZstd ? zstdDecompressSync(buffer) : buffer).toString('utf8'));
+
+  let payload = buffer;
+  if (isRawZstd) {
+    // Import lazily so the module still loads on Node 22.x < 22.15, where
+    // `zstdDecompressSync` does not exist — only this branch needs it.
+    const { zstdDecompressSync } = await import('node:zlib');
+    if (typeof zstdDecompressSync !== 'function') {
+      throw new Error(
+        'Received a zstd-compressed response but node:zlib.zstdDecompressSync ' +
+          'is unavailable; Node >= 22.15.0 is required to decompress zstd.',
+      );
+    }
+    payload = zstdDecompressSync(buffer);
+  }
+  const data = JSON.parse(payload.toString('utf8'));
 
   return {
     status: response.status,

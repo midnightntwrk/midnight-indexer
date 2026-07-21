@@ -47,7 +47,7 @@ See [Test Framework Organization](#-test-framework-organization) for the differe
 
 ## 📦 Prerequisites
 
-- **Node.js**: v22 or higher (vitest runs under Node; Bun is the package manager/launcher)
+- **Node.js**: v22 or higher (vitest runs under Node; Bun is the package manager/launcher). The HTTP compression probe's `zstd` decompression path additionally requires Node >= 22.15.0 (where `node:zlib.zstdDecompressSync` was added); the gzip/brotli/identity paths work on any v22.
 - **Bun**: v1.3.x
 - **Midnight Indexer**: 3.x and above
 - **Docker**: latest stable (required for local/undeployed runs)
