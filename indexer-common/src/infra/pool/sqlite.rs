@@ -63,6 +63,13 @@ pub enum Error {
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub cnn_url: String,
+
+    #[serde(default = "create_if_missing_default")]
+    pub create_if_missing: bool,
+}
+
+pub(crate) const fn create_if_missing_default() -> bool {
+    true
 }
 
 impl TryFrom<Config> for SqliteConnectOptions {
@@ -70,7 +77,7 @@ impl TryFrom<Config> for SqliteConnectOptions {
 
     fn try_from(config: Config) -> Result<Self, Self::Error> {
         let mut options = config.cnn_url.parse::<SqliteConnectOptions>()?;
-        options = options.create_if_missing(true);
+        options = options.create_if_missing(config.create_if_missing);
         Ok(options)
     }
 }
@@ -79,6 +86,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             cnn_url: "sqlite::memory:".to_string(),
+            create_if_missing: create_if_missing_default(),
         }
     }
 }
@@ -102,6 +110,7 @@ mod tests {
 
         let pool = SqlitePool::new(Config {
             cnn_url: format!("sqlite://{db_path}"),
+            create_if_missing: true,
         })
         .await;
 
@@ -110,6 +119,21 @@ mod tests {
         fs::remove_file(db_path)
             .await
             .expect("Failed to remove test database file");
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_pool_file_creation_disabled() {
+        let temp_dir = tempfile::tempdir().expect("create temp directory");
+        let db_path = temp_dir.path().join("missing.sqlite");
+
+        let pool = SqlitePool::new(Config {
+            cnn_url: format!("sqlite://{}", db_path.display()),
+            create_if_missing: false,
+        })
+        .await;
+
+        assert!(pool.is_err());
+        assert!(!db_path.exists());
     }
 
     #[tokio::test]

@@ -34,9 +34,14 @@ pub async fn init(config: Config) -> Result<(), Error> {
     let Config {
         cache_size,
         cnn_url,
+        create_if_missing,
     } = config;
 
-    let pool = sqlite::SqlitePool::new(sqlite::Config { cnn_url }).await?;
+    let pool = sqlite::SqlitePool::new(sqlite::Config {
+        cnn_url,
+        create_if_missing,
+    })
+    .await?;
     migrations::sqlite::run_for_ledger_db(&pool).await?;
 
     let db = v1_1::LedgerDb::new(pool);
@@ -54,6 +59,10 @@ pub struct Config {
 
     #[cfg(feature = "standalone")]
     pub cnn_url: String,
+
+    #[cfg(feature = "standalone")]
+    #[serde(default = "crate::infra::pool::sqlite::create_if_missing_default")]
+    pub create_if_missing: bool,
 }
 
 #[cfg(feature = "standalone")]

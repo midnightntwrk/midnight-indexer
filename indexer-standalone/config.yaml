@@ -27,10 +27,12 @@ infra:
 
   storage:
     cnn_url: "/data/indexer.sqlite"
+    create_if_missing: false
 
   ledger_db:
     cache_size: "1kiB"
     cnn_url: "/data/ledger-db.sqlite"
+    create_if_missing: false
 
   node:
     url: "ws://localhost:9944"
