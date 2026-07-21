@@ -2572,6 +2572,176 @@ mod tests {
         Ok(())
     }
 
+    /// End-to-end guard for the exact reported repro of #1265: pre-populate the zswap tree,
+    /// persist and lazily reload it (`get_lazy`), and take a first collapsed update; then add
+    /// more leaves to that lazily loaded state, persist and lazily reload again, and take a
+    /// second collapsed update — the contiguous inclusive ranges the subscription API serves.
+    /// Finally replay both updates over a blank tree, as a syncing wallet does, asserting after
+    /// each update that the reconstructed root matches the served (rehashing) root.
+    ///
+    /// Without the `.rehash()` from #1266 the `make_zswap_collapsed_update` calls are built off
+    /// an un-rehashed, lazily loaded tree and fail with `InvalidUpdate(NotFullyRehashed)` — the
+    /// same staleness that surfaced to wallets as a root hash mismatch.
+    #[cfg(any(feature = "cloud", feature = "standalone"))]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_two_collapsed_updates_from_lazy_reloads_replay_over_blank_state()
+    -> Result<(), BoxError> {
+        use midnight_serialize_v1::tagged_deserialize;
+        use midnight_transient_crypto_v2::{curve::Fr, merkle_tree::MerkleTreeCollapsedUpdate};
+
+        const FIRST_LEAVES: u64 = 86;
+        const SECOND_LEAVES: u64 = 35;
+
+        #[cfg(feature = "cloud")]
+        let _postgres_container = {
+            use crate::infra::{ledger_db, migrations, pool::postgres::PostgresPool};
+            use sqlx::postgres::PgSslMode;
+            use std::time::Duration;
+            use testcontainers::{ImageExt, runners::AsyncRunner};
+            use testcontainers_modules::postgres::Postgres;
+
+            let postgres_container = Postgres::default()
+                .with_db_name("indexer")
+                .with_user("indexer")
+                .with_password(env!("APP__INFRA__STORAGE__PASSWORD"))
+                .with_tag("17.1-alpine")
+                .start()
+                .await
+                .context("start Postgres container")?;
+            let postgres_port = postgres_container
+                .get_host_port_ipv4(5432)
+                .await
+                .context("get Postgres port")?;
+
+            let config = crate::infra::pool::postgres::Config {
+                host: "localhost".to_string(),
+                port: postgres_port,
+                dbname: "indexer".to_string(),
+                user: "indexer".to_string(),
+                password: env!("APP__INFRA__STORAGE__PASSWORD").into(),
+                sslmode: PgSslMode::Prefer,
+                max_connections: 10,
+                idle_timeout: Duration::from_secs(60),
+                max_lifetime: Duration::from_secs(5 * 60),
+            };
+
+            let pool = PostgresPool::new(config).await.context("create pool")?;
+            migrations::postgres::run(&pool)
+                .await
+                .context("run migrations")?;
+
+            ledger_db::init(ledger_db::Config { cache_size: 1_024 }, pool);
+
+            postgres_container
+        };
+
+        #[cfg(feature = "standalone")]
+        let _temp_dir = {
+            use crate::infra::ledger_db;
+
+            let temp_dir = tempfile::tempdir().context("cannot create tempdir")?;
+            let sqlite_ledger_db_file = temp_dir
+                .path()
+                .join("ledger-db.sqlite")
+                .display()
+                .to_string();
+
+            ledger_db::init(ledger_db::Config {
+                cache_size: 1_024,
+                cnn_url: sqlite_ledger_db_file,
+            })
+            .await
+            .expect("ledger DB can be initialized");
+
+            temp_dir
+        };
+
+        // Insert the given range of coin commitments and advance `first_free`, as applying
+        // transactions would.
+        let add_zswap_leaves = |state: &mut LedgerState, leaves: std::ops::Range<u64>| match state {
+            LedgerState::V8 { ledger_state, .. } => {
+                let mut zswap = (*ledger_state.zswap).clone();
+                let coin_coms = leaves.clone().fold(zswap.coin_coms.clone(), |tree, i| {
+                    tree.try_update(i, &Fr::from(i + 1), None)
+                        .expect("insert coin commitment")
+                });
+                zswap.coin_coms = coin_coms;
+                zswap.first_free = leaves.end;
+                ledger_state.zswap = Sp::new(zswap);
+            }
+            LedgerState::V9 { .. } => unreachable!("constructed as V8"),
+        };
+
+        let v8_zswap_root = |state: &LedgerState| match state.zswap_merkle_tree_root() {
+            super::ZswapMerkleTreeRoot::V8(root) => root,
+            super::ZswapMerkleTreeRoot::V9(_) => panic!("expected a V8 zswap root"),
+        };
+
+        // Pre-populate the tree, persist, and reload via the lazy `get_lazy` path.
+        let mut state = LedgerState::new("undeployed".try_into()?, LedgerVersion::V8)
+            .expect("ledger state can be constructed");
+        add_zswap_leaves(&mut state, 0..FIRST_LEAVES);
+        let (state, key) = state.persist()?;
+        drop(state);
+        let reloaded = LedgerState::load(&key, LedgerVersion::V8)?;
+
+        // First collapsed update and served root, as the subscription API serves them.
+        let first_update_bytes = reloaded.make_zswap_collapsed_update(0, FIRST_LEAVES - 1)?;
+        let first_root = v8_zswap_root(&reloaded);
+
+        // Add more leaves to the lazily reloaded state, persist, and reload again.
+        let mut state = reloaded;
+        add_zswap_leaves(&mut state, FIRST_LEAVES..FIRST_LEAVES + SECOND_LEAVES);
+        let (state, key) = state.persist()?;
+        drop(state);
+        let reloaded = LedgerState::load(&key, LedgerVersion::V8)?;
+
+        // Second collapsed update over the newly added range only — contiguous with the first,
+        // matching the `[index, zswap_start_index - 1]` ranges of the shielded subscription.
+        let second_update_bytes =
+            reloaded.make_zswap_collapsed_update(FIRST_LEAVES, FIRST_LEAVES + SECOND_LEAVES - 1)?;
+        let second_root = v8_zswap_root(&reloaded);
+
+        let first_update =
+            tagged_deserialize::<MerkleTreeCollapsedUpdate>(&mut first_update_bytes.as_ref())
+                .map_err(|error| format!("deserialize first collapsed update: {error}"))?;
+        let second_update =
+            tagged_deserialize::<MerkleTreeCollapsedUpdate>(&mut second_update_bytes.as_ref())
+                .map_err(|error| format!("deserialize second collapsed update: {error}"))?;
+
+        // A wallet replays both updates over a blank tree, rehashing after each to compute the
+        // root it compares against the served one.
+        let blank = LedgerState::new("undeployed".try_into()?, LedgerVersion::V8)
+            .expect("ledger state can be constructed");
+        let blank_coin_coms = match &blank {
+            LedgerState::V8 { ledger_state, .. } => ledger_state.zswap.coin_coms.clone(),
+            LedgerState::V9 { .. } => unreachable!("constructed as V8"),
+        };
+
+        let after_first = blank_coin_coms
+            .apply_collapsed_update(&first_update)
+            .expect("apply first collapsed update")
+            .rehash();
+        assert_eq!(
+            after_first.root(),
+            Some(first_root),
+            "first collapsed update must reconstruct the root served after pre-population",
+        );
+
+        let after_second = after_first
+            .apply_collapsed_update(&second_update)
+            .expect("apply second collapsed update")
+            .rehash();
+        assert_eq!(
+            after_second.root(),
+            Some(second_root),
+            "both collapsed updates replayed over the blank state must reconstruct the root \
+             served after the second batch of leaves",
+        );
+
+        Ok(())
+    }
+
     /// Overflow in any dimension clamps to the corresponding limit; resulting `NormalizedCost`
     /// has each dim = 1.0. Regression guard for GH #1060: previously we used
     /// `.normalize().unwrap_or(NormalizedCost::ZERO)` which flipped the sign of the
