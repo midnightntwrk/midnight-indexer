@@ -4,6 +4,46 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.4.0] - 2026-07-22
+
+### 🚀 Features
+
+- Support ledger v9 and node v2.0 (#1232)
+- Rehash merkle tree before building collapsed updates (#1266)
+- Per-block dust merkle roots (#1267)
+- *(indexer-api)* Compress HTTP responses and subscription WebSockets (#1252)
+- *(indexer)* Adopt storage-core gc-v1 to cull orphaned ledger_db_nodes (#1086)
+- Expand process docs (#1287)
+- *(indexer-api)* Block-hash dust generations sync (#1291)
+- Let's try removing netrc (#1301)
+- *(indexer)* Adopt storage-core gc-v1 with a ledger state retention window (#1308)
+- *(bridge)* C2m-bridge events, claims, queries and subscriptions (#1102)
+- Public contract events and CCC execution-inputs queries (#1158-#1162, #1275, #1304) (#1185)
+
+### 🐛 Bug Fixes
+
+- Contract action unshieldedBalances always empty (#1246)
+- Clippy is a superset of check (#1322)
+
+### 📚 Documentation
+
+- *(api)* Update v4 API documentation to match main (#1294)
+- Add telemetry notes (logging, tracing, metrics) (#1325)
+
+### ⚡ Performance
+
+- *(indexer-common)* Add UNIQUE index on blocks.height for sqlite (#1187)
+- *(indexer-api)* Jitter and idle-backoff subscription polling, throttle keep-alive (#1233)
+- *(indexer-api)* Cache shielded/unshielded progress across subscribers (#1234)
+- *(indexer-api)* Drop OR-in-JOIN from unshielded transaction queries (#1133)
+
+### ⚙️ Miscellaneous Tasks
+
+- Use stable rustfmt for formatting (#1258)
+- Add Claude skill for formatting indexer release notes (#1103)
+- *(test)* Use ledger v9 token types in the v9 balances test (#1299)
+- *(indexer-common)* Log NATS reconnects at info (#1297)
+
 ## [4.3.3] - 2026-06-04
 
 ### 🚀 Features
