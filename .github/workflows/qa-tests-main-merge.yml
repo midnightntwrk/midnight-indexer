@@ -31,6 +31,11 @@ on:
         description: Indexer tag (leave empty to derive <cargo-version>-<sha8> from the checked-out commit)
         required: false
         default: ""
+      node_toolkit_tag:
+        type: string
+        description: Node toolkit tag (leave empty to pair with the node tag)
+        required: false
+        default: ""
 
 jobs:
   derive-tags:
@@ -47,6 +52,7 @@ jobs:
       ref: ${{ steps.tags.outputs.ref }}
       node_tag: ${{ steps.tags.outputs.node_tag }}
       indexer_tag: ${{ steps.tags.outputs.indexer_tag }}
+      node_toolkit_tag: ${{ steps.tags.outputs.node_toolkit_tag }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -59,6 +65,7 @@ jobs:
           HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
           NODE_TAG_INPUT: ${{ inputs.node_tag }}
           INDEXER_TAG_INPUT: ${{ inputs.indexer_tag }}
+          NODE_TOOLKIT_TAG_INPUT: ${{ inputs.node_toolkit_tag }}
         run: |
           echo "ref=$HEAD_SHA" >> "$GITHUB_OUTPUT"
 
@@ -88,6 +95,19 @@ jobs:
           fi
           echo "node_tag=$node_tag" >> "$GITHUB_OUTPUT"
 
+          # Node toolkit tag: paired 1:1 with the node tag — the toolkit
+          # publishes a matching tag for every node release, and running
+          # a node with its own toolkit version keeps the test data
+          # generation consistent with the node under test.
+          if [ -n "$NODE_TOOLKIT_TAG_INPUT" ]; then
+            node_toolkit_tag="$NODE_TOOLKIT_TAG_INPUT"
+            echo "Using node toolkit tag from workflow dispatch: $node_toolkit_tag"
+          else
+            node_toolkit_tag="$node_tag"
+            echo "Pairing node toolkit tag with node tag: $node_toolkit_tag"
+          fi
+          echo "node_toolkit_tag=$node_toolkit_tag" >> "$GITHUB_OUTPUT"
+
   qa-tests:
     name: Indexer QA Tests on undeployed
     needs: derive-tags
@@ -98,6 +118,7 @@ jobs:
       publish_to_xray: false
       node_tag: ${{ needs.derive-tags.outputs.node_tag }}
       indexer_tag: ${{ needs.derive-tags.outputs.indexer_tag }}
+      node_toolkit_tag: ${{ needs.derive-tags.outputs.node_toolkit_tag }}
     secrets:
       MIDNIGHTCI_PACKAGES_READ: ${{ secrets.MIDNIGHTCI_PACKAGES_READ }}
       APP__INFRA__SECRET: ${{ secrets.APP__INFRA__SECRET }}
