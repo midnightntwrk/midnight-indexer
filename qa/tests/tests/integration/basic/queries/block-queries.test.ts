@@ -17,6 +17,7 @@ import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
 import { BlockSchema } from '@utils/indexer/graphql/schema';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
+import { isPerBlockDustRootsSupported } from '@utils/indexer/schema-feature-probe';
 import type {
   Block,
   BlockResponse,
@@ -460,6 +461,166 @@ describe('block queries', () => {
       expect(latest.zswapEndIndex).toBeGreaterThanOrEqual(parent.zswapEndIndex);
       expect(latest.dustCommitmentEndIndex).toBeGreaterThanOrEqual(parent.dustCommitmentEndIndex);
       expect(latest.dustGenerationEndIndex).toBeGreaterThanOrEqual(parent.dustGenerationEndIndex);
+    });
+  });
+
+  // Indexers up to 4.3.3 resolve the Block dust root fields at the latest indexed
+  // state (the tip) by design, so per-block assertions only hold on deployments
+  // that include the per-block change. Each test probes the deployed schema and
+  // skips on tip-scoped deployments rather than false-failing there.
+  describe('per-block dust merkle tree roots', () => {
+    /**
+     * Dust roots belong to the queried block, not the tip.
+     *
+     * @given two blocks between which the dust generation tree has grown
+     *        (their dustGenerationEndIndex values differ)
+     * @when both blocks' dust generation Merkle tree roots are read
+     * @then the roots differ — a tree with more leaves cannot share a root
+     *       with its earlier, smaller state
+     *
+     * midnight-indexer#1260
+     */
+    test('should return different dust generation roots for blocks with different tree sizes', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['Query', 'Block', 'Dust', 'MerkleRoot', '#1260'],
+      };
+
+      if (!(await isPerBlockDustRootsSupported())) {
+        ctx.skip?.(true, 'deployed indexer serves tip-scoped dust roots (pre per-block change)');
+        return;
+      }
+
+      const latestResponse = await indexerHttpClient.getLatestBlock();
+      expect(latestResponse).toBeSuccess();
+      const tip = latestResponse.data!.block;
+
+      const earlierResponse = await indexerHttpClient.getBlockByOffset({
+        height: Math.floor(tip.height / 2),
+      });
+      expect(earlierResponse).toBeSuccess();
+      const earlier = earlierResponse.data!.block;
+
+      if (earlier.dustGenerationMerkleTreeRoot === null) {
+        ctx.skip?.(
+          true,
+          `block ${earlier.height} has no stored dust roots — history predates the per-block change`,
+        );
+        return;
+      }
+
+      if (earlier.dustGenerationEndIndex === tip.dustGenerationEndIndex) {
+        ctx.skip?.(
+          true,
+          `generation tree did not grow between block ${earlier.height} and block ${tip.height} ` +
+            `(endIndex ${tip.dustGenerationEndIndex}) — root comparison is vacuous`,
+        );
+        return;
+      }
+
+      log.debug(
+        `Block ${earlier.height} (endIndex=${earlier.dustGenerationEndIndex}) root=${earlier.dustGenerationMerkleTreeRoot} vs ` +
+          `block ${tip.height} (endIndex=${tip.dustGenerationEndIndex}) root=${tip.dustGenerationMerkleTreeRoot}`,
+      );
+
+      expect(tip.dustGenerationMerkleTreeRoot).not.toBeNull();
+      expect(earlier.dustGenerationMerkleTreeRoot).not.toBe(tip.dustGenerationMerkleTreeRoot);
+
+      if (earlier.dustCommitmentEndIndex !== tip.dustCommitmentEndIndex) {
+        expect(tip.dustCommitmentMerkleTreeRoot).not.toBeNull();
+        expect(earlier.dustCommitmentMerkleTreeRoot).not.toBe(tip.dustCommitmentMerkleTreeRoot);
+      }
+    });
+
+    /**
+     * Per-block dust roots are stable: the same block always reports the same roots.
+     *
+     * @given a historical block queried twice by height
+     * @when the dust commitment and generation roots of both responses are compared
+     * @then both queries return identical, non-null roots
+     *
+     * midnight-indexer#1260
+     */
+    test('should return identical dust roots for repeated queries of the same block', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['Query', 'Block', 'Dust', 'MerkleRoot', '#1260'],
+      };
+
+      if (!(await isPerBlockDustRootsSupported())) {
+        ctx.skip?.(true, 'deployed indexer serves tip-scoped dust roots (pre per-block change)');
+        return;
+      }
+
+      const latestResponse = await indexerHttpClient.getLatestBlock();
+      expect(latestResponse).toBeSuccess();
+      const height = Math.floor(latestResponse.data!.block.height / 2);
+
+      const firstResponse = await indexerHttpClient.getBlockByOffset({ height });
+      expect(firstResponse).toBeSuccess();
+      const first = firstResponse.data!.block;
+
+      if (first.dustGenerationMerkleTreeRoot === null) {
+        ctx.skip?.(
+          true,
+          `block ${height} has no stored dust roots — history predates the per-block change`,
+        );
+        return;
+      }
+
+      const secondResponse = await indexerHttpClient.getBlockByOffset({ height });
+      expect(secondResponse).toBeSuccess();
+      const second = secondResponse.data!.block;
+
+      expect(second.dustGenerationMerkleTreeRoot).toBe(first.dustGenerationMerkleTreeRoot);
+      expect(second.dustCommitmentMerkleTreeRoot).toBe(first.dustCommitmentMerkleTreeRoot);
+      expect(first.dustCommitmentMerkleTreeRoot).not.toBeNull();
+    });
+
+    /**
+     * Root and tree size move together: an unchanged tree keeps its root.
+     *
+     * @given the latest block and its parent
+     * @when their dust generation end indexes are equal
+     * @then their dust generation Merkle tree roots are equal as well
+     *       (same leaves, same tree, same root)
+     *
+     * midnight-indexer#1260
+     */
+    test('should return equal dust generation roots for parent and child with equal tree sizes', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['Query', 'Block', 'Dust', 'MerkleRoot', '#1260'],
+      };
+
+      if (!(await isPerBlockDustRootsSupported())) {
+        ctx.skip?.(true, 'deployed indexer serves tip-scoped dust roots (pre per-block change)');
+        return;
+      }
+
+      const latestResponse = await indexerHttpClient.getLatestBlock();
+      expect(latestResponse).toBeSuccess();
+      const latest = latestResponse.data!.block;
+
+      if (latest.height === 0) {
+        ctx.skip?.(true, 'only genesis block available — no parent to compare against');
+        return;
+      }
+
+      const parentResponse = await indexerHttpClient.getBlockByOffset({
+        height: latest.height - 1,
+      });
+      expect(parentResponse).toBeSuccess();
+      const parent = parentResponse.data!.block;
+
+      if (parent.dustGenerationEndIndex !== latest.dustGenerationEndIndex) {
+        ctx.skip?.(
+          true,
+          `generation tree grew between block ${parent.height} and block ${latest.height} — ` +
+            'equal-size comparison is not applicable',
+        );
+        return;
+      }
+
+      expect(latest.dustGenerationMerkleTreeRoot).not.toBeNull();
+      expect(latest.dustGenerationMerkleTreeRoot).toBe(parent.dustGenerationMerkleTreeRoot);
     });
   });
 });
