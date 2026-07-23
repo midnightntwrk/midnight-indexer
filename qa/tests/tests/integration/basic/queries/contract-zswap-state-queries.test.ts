@@ -122,6 +122,75 @@ describe.skipIf(env.isUndeployedEnv())('contract zswap state queries', () => {
       expect(second).toBeSuccess();
       expect(second.data!.block!.contractZswapState).toBe(first.data!.block!.contractZswapState);
     });
+
+    /**
+     * @given a set of malformed-format contract addresses
+     * @when block.contractZswapState is queried for each
+     * @then the indexer rejects every one with a GraphQL error
+     */
+    test('should error for malformed contract addresses', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Query', 'Block', 'Contract', 'Zswap', 'Negative'] };
+      if (!surfacePresent) return ctx.skip();
+
+      for (const malformedAddress of dataProvider.getFabricatedMalformedContractAddresses()) {
+        const response = await httpClient.getBlockContractZswapState(malformedAddress);
+        // A malformed address is rejected as a GraphQL error. Depending on the
+        // input it surfaces either as a variable-coercion error (no data) or a
+        // field-level error on the otherwise-resolved block, so assert on the
+        // presence of an error rather than the whole-response shape.
+        expect
+          .soft(
+            response.errors ?? [],
+            `expected a GraphQL error for malformed address ${malformedAddress}`,
+          )
+          .not.toHaveLength(0);
+      }
+    });
+
+    /**
+     * @given a known contract and a set of malformed-format block hashes
+     * @when block.contractZswapState is queried at each malformed hash offset
+     * @then the indexer rejects every one with a GraphQL error
+     */
+    test('should error for a malformed block-hash offset', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = {
+        labels: ['Query', 'Block', 'Contract', 'Zswap', 'ByHash', 'Negative'],
+      };
+      if (!surfacePresent) return ctx.skip();
+      if (!knownContract) return ctx.skip(true, 'no known contract fixture on this env');
+
+      for (const malformedHash of dataProvider.getFabricatedMalformedHashes()) {
+        const response = await httpClient.getBlockContractZswapState(knownContract, {
+          hash: malformedHash,
+        });
+        expect.soft(response).toBeError();
+      }
+    });
+
+    /**
+     * @given a known contract and the latest block pinned by height
+     * @when block.contractZswapState is queried at that height offset
+     * @then a non-empty hex-encoded zswap state is returned, identical to the
+     *       state read at the same block pinned by hash
+     */
+    test('should return the zswap state when the block is pinned by height', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Query', 'Block', 'Contract', 'Zswap', 'ByHeight'] };
+      if (!surfacePresent) return ctx.skip();
+      if (!knownContract) return ctx.skip(true, 'no known contract fixture on this env');
+
+      const latest = await httpClient.getLatestBlock();
+      expect(latest).toBeSuccess();
+      const { hash, height } = latest.data!.block!;
+
+      const byHeight = await httpClient.getBlockContractZswapState(knownContract, { height });
+      const byHash = await httpClient.getBlockContractZswapState(knownContract, { hash });
+
+      expect(byHeight).toBeSuccess();
+      const state = byHeight.data!.block!.contractZswapState;
+      expect(state).not.toBeNull();
+      expect(state).toMatch(HEX);
+      expect(state).toBe(byHash.data!.block!.contractZswapState);
+    });
   });
 
   describe('the composed execution-inputs query', () => {
