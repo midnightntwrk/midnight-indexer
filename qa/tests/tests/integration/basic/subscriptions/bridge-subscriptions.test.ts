@@ -47,6 +47,22 @@ import type { BridgeUserTransfer } from '@utils/indexer/indexer-types';
 const EMPTY_RECIPIENT = '0'.repeat(64);
 const ZERO_U128 = '0'.repeat(32);
 
+// The bridgeEvents subscription selects id/recipient only on the UserTransfer
+// fragment. Cross-variant filter/resume cases pass this override so id is present
+// on every variant and recipient on both recipient-bearing variants. `from` is a
+// separate operation because the client picks the query by presence of `from`.
+const SUB_ALL_FIELDS_FROM = `
+subscription BridgeEventsFromAll($FROM: Int, $RECIPIENT: HexEncoded, $VARIANT: BridgeEventVariant) {
+  bridgeEvents(from: $FROM, recipient: $RECIPIENT, variant: $VARIANT) {
+    __typename
+    ... on BridgeUserTransfer { id blockHeight recipient }
+    ... on BridgeReserveTransfer { id blockHeight }
+    ... on BridgeInvalidTransfer { id blockHeight }
+    ... on BridgeUnapprovedTransfer { id blockHeight recipient }
+    ... on BridgeSubminimalFlushTransfer { id blockHeight }
+  }
+}`;
+
 let surfacePresent = false;
 let sampleUserTransfer: BridgeUserTransfer | null = null;
 
@@ -57,6 +73,74 @@ function safeUnsubscribe(unsubscribe: () => void): void {
     log.debug(`Ignoring unsubscribe error during teardown: ${String(error)}`);
   }
 }
+
+/**
+ * Opens a bridgeEvents subscription, collects every frame delivered during the
+ * backfill-then-live-tail window, and resolves once the stream goes idle (no new
+ * frame for `idleMs`). Mirrors the settle/idle/hard-timeout pattern of the
+ * replay test so the filter/resume cases share one race-free collector.
+ *
+ * Resolves with whatever was collected when the stream goes idle or the hard
+ * timeout fires; rejects only on a subscription error.
+ */
+function collectBridgeEventFrames(
+  wsClient: IndexerWsClient,
+  opts: { from?: number; recipient?: string; variant?: string },
+  queryOverride?: string,
+  timing: { idleMs: number; hardMs: number } = { idleMs: 5_000, hardMs: 30_000 },
+): Promise<BridgeEventSubscriptionResponse[]> {
+  const received: BridgeEventSubscriptionResponse[] = [];
+  return new Promise<BridgeEventSubscriptionResponse[]>((resolve, reject) => {
+    let settled = false;
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    let unsubscribe = () => {};
+    const settle = (handler: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(idleTimer);
+      handler();
+    };
+    const hardTimeout = setTimeout(() => {
+      safeUnsubscribe(unsubscribe);
+      settle(() => resolve(received));
+    }, timing.hardMs);
+    const resetIdle = () => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        clearTimeout(hardTimeout);
+        safeUnsubscribe(unsubscribe);
+        settle(() => resolve(received));
+      }, timing.idleMs);
+    };
+
+    const subscription = wsClient.subscribeToBridgeEvents(
+      {
+        next: (payload) => {
+          received.push(payload);
+          resetIdle();
+        },
+        error: (error) => {
+          clearTimeout(hardTimeout);
+          safeUnsubscribe(unsubscribe);
+          settle(() => reject(new Error(`Subscription error: ${JSON.stringify(error)}`)));
+        },
+      },
+      opts,
+      queryOverride,
+    );
+    unsubscribe = subscription.unsubscribe;
+  });
+}
+
+// Extracts the bridge event payloads (single event per frame) from collected frames.
+const framesToEvents = (frames: BridgeEventSubscriptionResponse[]) =>
+  frames.map((f) => f.data!.bridgeEvents);
+// Sorted, de-duplicated ids from a set of collected events (variants without a
+// selected id are dropped).
+const sortedUniqueIds = (events: { id?: number }[]): number[] =>
+  [...new Set(events.map((e) => e.id).filter((id): id is number => id !== undefined))].sort(
+    (a, b) => a - b,
+  );
 
 /**
  * Probes the bridge query surface over HTTP to decide surface presence and pick
@@ -186,31 +270,110 @@ describe.skipIf(env.isUndeployedEnv())('bridge subscriptions', () => {
     }, 60_000);
 
     /**
-     * @given a chain with events for multiple recipients
+     * @given a chain with bridge events for a known recipient
      * @when a bridgeEvents subscription is opened with recipient = <knownAddress>
-     * @then only events with the matching recipient are delivered
+     * @then every delivered event echoes the matching recipient
      */
-    test.todo('should only deliver events matching the recipient filter');
+    test('should only deliver events matching the recipient filter', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Subscription', 'Bridge', 'Filter'] };
+      if (!surfacePresent) return ctx.skip();
+      if (!sampleUserTransfer) return ctx.skip(true, 'no BridgeUserTransfer data on this env');
+
+      const recipient = sampleUserTransfer.recipient;
+      const frames = await collectBridgeEventFrames(
+        wsClient,
+        { from: 0, recipient },
+        SUB_ALL_FIELDS_FROM,
+      );
+
+      const events = framesToEvents(frames);
+      expect(events.length).toBeGreaterThan(0);
+      for (const event of events) {
+        expect((event as { recipient?: string }).recipient).toBe(recipient);
+      }
+    }, 60_000);
 
     /**
      * @given a chain with multiple event variants
      * @when a bridgeEvents subscription is opened with variant = USER_TRANSFER
      * @then only BridgeUserTransfer events are delivered
      */
-    test.todo('should only deliver events matching the variant filter');
+    test('should only deliver events matching the variant filter', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Subscription', 'Bridge', 'Filter', 'UserTransfer'] };
+      if (!surfacePresent) return ctx.skip();
+      if (!sampleUserTransfer) return ctx.skip(true, 'no BridgeUserTransfer data on this env');
+
+      const frames = await collectBridgeEventFrames(wsClient, {
+        from: 0,
+        variant: 'USER_TRANSFER',
+      });
+
+      const events = framesToEvents(frames);
+      expect(events.length).toBeGreaterThan(0);
+      for (const event of events) {
+        expect(event.__typename).toBe('BridgeUserTransfer');
+      }
+    }, 60_000);
 
     /**
-     * @given the id of the last event received in a previous subscription
-     * @when a subscription reconnects with from = <lastId>
-     * @then events with id > lastId arrive with no gap or duplication
+     * @given the ordered ids of all events replayed from a from:0 subscription
+     * @when a second subscription resumes from a mid-stream cursor id
+     * @then the resumed ids are a contiguous tail of the full order — ascending,
+     *       de-duplicated (no duplication) and gap-free
      */
-    test.todo('should resume from cursor without gap or duplication on reconnection');
+    test('should resume from cursor without gap or duplication on reconnection', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Subscription', 'Bridge', 'Resume'] };
+      if (!surfacePresent) return ctx.skip();
 
-    // Blocked: UnapprovedTransfer is unreachable until the approval governance
-    // logic lands on the node (ApprovedTransactions storage + governance
-    // extrinsic).
-    // Tracking: https://github.com/midnightntwrk/midnight-indexer/issues/940
-    test.skip('should deliver BridgeUnapprovedTransfer events via subscription', () => {});
+      const allFrames = await collectBridgeEventFrames(wsClient, { from: 0 }, SUB_ALL_FIELDS_FROM);
+      const allIds = sortedUniqueIds(framesToEvents(allFrames));
+      if (allIds.length < 3) {
+        return ctx.skip(true, `need >= 3 replayable events to resume, found ${allIds.length}`);
+      }
+
+      // Resume from a mid-stream cursor so the tail is a strict subset.
+      const cursor = allIds[1];
+      const resumedFrames = await collectBridgeEventFrames(
+        wsClient,
+        { from: cursor },
+        SUB_ALL_FIELDS_FROM,
+      );
+      const resumedIds = sortedUniqueIds(framesToEvents(resumedFrames));
+
+      expect(resumedIds.length).toBeGreaterThan(0);
+      // No duplication: sortedUniqueIds already dedups, so a duplicate would have
+      // shrunk it below the raw frame count for the selected variants.
+      const rawResumedIds = framesToEvents(resumedFrames)
+        .map((e) => e.id)
+        .filter((id): id is number => id !== undefined);
+      expect(rawResumedIds).toHaveLength(resumedIds.length);
+      // Gap-free contiguous tail of the full ordered id list.
+      expect(resumedIds).toEqual(allIds.slice(allIds.length - resumedIds.length));
+      // Actually resumed partway, so it is shorter than the full replay.
+      expect(resumedIds.length).toBeLessThan(allIds.length);
+    }, 90_000);
+
+    /**
+     * @given a Cardano-backed chain that has produced an UnapprovedTransfer
+     * @when a bridgeEvents subscription replays from the start
+     * @then at least one BridgeUnapprovedTransfer frame is delivered
+     *
+     * Was blocked (#940) on the node's approval governance; that logic ships in
+     * node >= 2.0.0-rc.3, so UnapprovedTransfer is now produced. Skips gracefully
+     * where the chain has no such event.
+     */
+    test('should deliver BridgeUnapprovedTransfer events via subscription', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Subscription', 'Bridge', 'Unapproved'] };
+      if (!surfacePresent) return ctx.skip();
+
+      const frames = await collectBridgeEventFrames(wsClient, { from: 0 }, SUB_ALL_FIELDS_FROM);
+      const events = framesToEvents(frames);
+      const hasUnapproved = events.some((e) => e.__typename === 'BridgeUnapprovedTransfer');
+      if (!hasUnapproved) {
+        return ctx.skip(true, 'no UnapprovedTransfer event on this chain');
+      }
+      expect(hasUnapproved).toBe(true);
+    }, 60_000);
   });
 
   describe('claims via unshieldedTransactions', () => {
