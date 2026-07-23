@@ -33,6 +33,7 @@ import type {
   GraphQLResponse,
   BridgeEvent,
   BridgeBalance,
+  BridgePoolSummary,
 } from './indexer-types';
 import { CONTRACT_EVENTS_SUBSCRIPTION } from './graphql/contract-event-queries';
 import {
@@ -53,9 +54,19 @@ import {
   BRIDGE_EVENTS_SUBSCRIPTION_DEFAULT,
   BRIDGE_EVENTS_SUBSCRIPTION_FROM,
   BRIDGE_BALANCE_SUBSCRIPTION,
+  BRIDGE_POOL_UPDATES_SUBSCRIPTION,
 } from './graphql/subscriptions';
 
 export type BlockSubscriptionResponse = GraphQLResponse<{ blocks: Block }>;
+
+export interface BridgePoolUpdate {
+  newEvent: BridgeEvent | null;
+  pool: BridgePoolSummary;
+}
+
+export type BridgePoolUpdateSubscriptionResponse = GraphQLResponse<{
+  bridgePoolUpdates: BridgePoolUpdate;
+}>;
 
 export type UnshieldedTxSubscriptionResponse = GraphQLResponse<{
   unshieldedTransactions: UnshieldedTransactionEvent;
@@ -1328,6 +1339,44 @@ export class IndexerWsClient {
     };
 
     log.debug(`Bridge Balance payload:\n${JSON.stringify(payload, null, 2)}`);
+
+    this.handlersMap.set(subscriptionId, handlers as SubscriptionHandlers<unknown>);
+    this.getWs().send(JSON.stringify(payload));
+
+    return {
+      id: subscriptionId,
+      unsubscribe: () => {
+        const stopMessage: GraphQLStopMessage = { id: subscriptionId, type: 'stop' };
+        this.getWs().send(JSON.stringify(stopMessage));
+        this.handlersMap.delete(subscriptionId);
+      },
+    };
+  }
+
+  /**
+   * Subscribes to c2m-bridge pool updates (#944). Emits an initial snapshot on
+   * connect (newEvent = null, pool = current summary), then a refreshed summary
+   * paired with each new pool-affecting event. There is no completion sentinel.
+   *
+   * @param handlers - Callbacks for incoming pool update messages
+   * @param queryOverride - Optional custom GraphQL subscription query
+   * @returns An object with subscription ID and unsubscribe function
+   */
+  subscribeToBridgePoolUpdates(
+    handlers: SubscriptionHandlers<BridgePoolUpdateSubscriptionResponse>,
+    queryOverride?: string,
+  ): { unsubscribe: () => void; id: string } {
+    const query = queryOverride || BRIDGE_POOL_UPDATES_SUBSCRIPTION;
+
+    const subscriptionId = this.getNextId();
+
+    const payload: GraphQLStartMessage = {
+      id: subscriptionId,
+      type: 'start',
+      payload: { query },
+    };
+
+    log.debug(`Bridge Pool Updates payload:\n${JSON.stringify(payload, null, 2)}`);
 
     this.handlersMap.set(subscriptionId, handlers as SubscriptionHandlers<unknown>);
     this.getWs().send(JSON.stringify(payload));

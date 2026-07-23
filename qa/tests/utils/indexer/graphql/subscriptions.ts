@@ -469,3 +469,25 @@ export const BRIDGE_BALANCE_SUBSCRIPTION = `
     }
   }
 `;
+
+// c2m-bridge pool observability stream (#944). Emits an initial snapshot on
+// subscribe (newEvent = null), then a refreshed summary paired with each new
+// pool-affecting event.
+export const BRIDGE_POOL_UPDATES_SUBSCRIPTION = `
+  subscription BridgePoolUpdates {
+    bridgePoolUpdates {
+      newEvent {
+        __typename
+      }
+      pool {
+        reserveTotal
+        treasuryByReason {
+          reason
+          total
+        }
+        subminimumTxCount
+        lastEventBlockHeight
+      }
+    }
+  }
+`;

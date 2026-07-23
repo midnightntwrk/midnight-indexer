@@ -45,6 +45,10 @@ import type {
   BridgeEventsResponse,
   BridgeDepositsResponse,
   BridgeBalanceResponse,
+  BridgePoolSummaryResponse,
+  BridgeReserveInflowsResponse,
+  BridgeTreasuryInflowsResponse,
+  BridgeTreasuryReason,
 } from './indexer-types';
 import {
   GET_LATEST_BLOCK,
@@ -65,6 +69,11 @@ import {
   GET_BRIDGE_BALANCE,
   GET_BRIDGE_DEPOSITS,
 } from './graphql/bridge-queries';
+import {
+  GET_BRIDGE_POOL_SUMMARY,
+  GET_BRIDGE_RESERVE_INFLOWS,
+  GET_BRIDGE_TREASURY_INFLOWS,
+} from './graphql/bridge-pool-queries';
 
 /**
  * Recognise operation-level GraphQL errors that look like *server* failures
@@ -511,6 +520,79 @@ export class IndexerHttpClient {
     };
 
     const response = await this.rawRequestWithRetry<{ bridgeDeposits: BridgeEvent[] }>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getBridgePoolSummary(
+    atBlock?: number,
+    queryOverride?: string,
+  ): Promise<BridgePoolSummaryResponse> {
+    const query = queryOverride || GET_BRIDGE_POOL_SUMMARY;
+    const variables = { AT_BLOCK: atBlock };
+
+    const response = await this.rawRequestWithRetry<BridgePoolSummaryResponse['data']>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getBridgeReserveInflows(
+    range: {
+      blockHeightFrom?: number;
+      blockHeightTo?: number;
+      offset?: number;
+      limit?: number;
+    } = {},
+    queryOverride?: string,
+  ): Promise<BridgeReserveInflowsResponse> {
+    const query = queryOverride || GET_BRIDGE_RESERVE_INFLOWS;
+    const variables = {
+      BLOCK_HEIGHT_FROM: range.blockHeightFrom,
+      BLOCK_HEIGHT_TO: range.blockHeightTo,
+      OFFSET: range.offset,
+      LIMIT: range.limit,
+    };
+
+    const response = await this.rawRequestWithRetry<{ bridgeReserveInflows: BridgeEvent[] }>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getBridgeTreasuryInflows(
+    options: {
+      reason?: BridgeTreasuryReason;
+      blockHeightFrom?: number;
+      blockHeightTo?: number;
+      offset?: number;
+      limit?: number;
+    } = {},
+    queryOverride?: string,
+  ): Promise<BridgeTreasuryInflowsResponse> {
+    const query = queryOverride || GET_BRIDGE_TREASURY_INFLOWS;
+    const variables = {
+      REASON: options.reason,
+      BLOCK_HEIGHT_FROM: options.blockHeightFrom,
+      BLOCK_HEIGHT_TO: options.blockHeightTo,
+      OFFSET: options.offset,
+      LIMIT: options.limit,
+    };
+
+    const response = await this.rawRequestWithRetry<{ bridgeTreasuryInflows: BridgeEvent[] }>(
       query,
       variables,
     );
