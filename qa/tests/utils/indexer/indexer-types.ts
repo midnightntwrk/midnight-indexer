@@ -539,6 +539,24 @@ export type BridgeTreasuryInflowsResponse = GraphQLResponse<{
   bridgeTreasuryInflows: BridgeEvent[];
 }>;
 
+// #1304: Block.contractZswapState and the composed CCC execution-inputs read.
+export type BlockContractZswapStateResponse = GraphQLResponse<{
+  block: {
+    hash: string;
+    height: number;
+    contractZswapState: string | null;
+  } | null;
+}>;
+
+export type ExecutionInputsResponse = GraphQLResponse<{
+  block: {
+    hash: string;
+    ledgerParameters: string;
+    contractZswapState: string | null;
+  } | null;
+  contract: { state: string } | null;
+}>;
+
 export interface DustCommitmentMerkleTreeUpdateResult {
   startIndex: number;
   endIndex: number;
