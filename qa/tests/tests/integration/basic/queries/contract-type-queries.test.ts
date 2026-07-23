@@ -103,6 +103,29 @@ describe.skipIf(env.isUndeployedEnv())('contract type queries', () => {
       expect(response).toBeSuccess();
       expect(response.data!.contract).toBeNull();
     });
+
+    /**
+     * @given a set of malformed-format contract addresses
+     * @when contract(address) is queried for each
+     * @then the indexer rejects every one with a GraphQL error
+     */
+    test('should error for malformed contract addresses', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Query', 'Contract', 'Negative'] };
+      if (!surfacePresent) return ctx.skip();
+
+      for (const malformedAddress of dataProvider.getFabricatedMalformedContractAddresses()) {
+        const response = await httpClient.getContract(malformedAddress);
+        // A malformed address is rejected as a GraphQL error, surfacing either as
+        // a variable-coercion error (no data) or a field-level error, so assert on
+        // the presence of an error rather than the whole-response shape.
+        expect
+          .soft(
+            response.errors ?? [],
+            `expected a GraphQL error for malformed address ${malformedAddress}`,
+          )
+          .not.toHaveLength(0);
+      }
+    });
   });
 
   describe('the maintenance authority', () => {
@@ -172,6 +195,31 @@ describe.skipIf(env.isUndeployedEnv())('contract type queries', () => {
         expect(action.address).toBe(knownContract);
       }
     });
+
+    /**
+     * @given a contract known to exist that has at least one Call action
+     * @when actions(type: CALL) is requested
+     * @then every returned action is a ContractCall for that contract
+     */
+    test('should filter actions by type CALL', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Query', 'Contract', 'Actions'] };
+      if (!surfacePresent) return ctx.skip();
+      if (!knownContract) return ctx.skip(true, 'no known contract fixture on this env');
+
+      const response = await httpClient.getContract(knownContract, { actionsType: 'CALL' });
+      expect(response).toBeSuccess();
+      const actions = response.data!.contract!.actions;
+      expect(actions.length).toBeGreaterThanOrEqual(1);
+      for (const action of actions) {
+        expect(action.__typename).toBe('ContractCall');
+        expect(action.address).toBe(knownContract);
+      }
+    });
+
+    // No contract with a ContractUpdate (maintenance) action exists on the
+    // current validation environments; the fixtures carry only Deploy and Call
+    // actions. Cover the UPDATE filter once such data is available.
+    test.todo('should filter actions by type UPDATE');
   });
 
   describe('point-in-time state via offset', () => {
@@ -193,6 +241,30 @@ describe.skipIf(env.isUndeployedEnv())('contract type queries', () => {
       expect(response).toBeSuccess();
       expect(response.data!.contract).not.toBeNull();
       expect(response.data!.contract!.state).toMatch(HEX);
+    });
+
+    /**
+     * @given a contract known to exist and the latest block pinned by height
+     * @when contract(address, offset: { height }) is queried
+     * @then the contract resolves with a hex-encoded state as of that block,
+     *       identical to the state read at the same block pinned by hash
+     */
+    test('should return state as of a pinned block height', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Query', 'Contract', 'State', 'ByHeight'] };
+      if (!surfacePresent) return ctx.skip();
+      if (!knownContract) return ctx.skip(true, 'no known contract fixture on this env');
+
+      const latest = await httpClient.getLatestBlock();
+      expect(latest).toBeSuccess();
+      const { hash, height } = latest.data!.block!;
+
+      const byHeight = await httpClient.getContract(knownContract, { offset: { height } });
+      const byHash = await httpClient.getContract(knownContract, { offset: { hash } });
+
+      expect(byHeight).toBeSuccess();
+      expect(byHeight.data!.contract).not.toBeNull();
+      expect(byHeight.data!.contract!.state).toMatch(HEX);
+      expect(byHeight.data!.contract!.state).toBe(byHash.data!.contract!.state);
     });
 
     /**
