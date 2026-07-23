@@ -347,10 +347,7 @@ describe.skipIf(env.isUndeployedEnv())('bridge queries', () => {
       expect(events).toBeSuccess();
       const userTransfers = events.data!.bridgeEvents as BridgeUserTransfer[];
       expect(userTransfers.length).toBeGreaterThan(0);
-      const expectedDeposited = userTransfers.reduce(
-        (acc, e) => acc + BigInt(`0x${e.amount}`),
-        0n,
-      );
+      const expectedDeposited = userTransfers.reduce((acc, e) => acc + BigInt(`0x${e.amount}`), 0n);
 
       const balance = await httpClient.getBridgeBalance(recipient);
       expect(balance).toBeSuccess();
