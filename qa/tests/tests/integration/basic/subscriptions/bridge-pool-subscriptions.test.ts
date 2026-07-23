@@ -46,7 +46,14 @@ import { BRIDGE_TREASURY_REASONS } from '@utils/indexer/indexer-types';
 const httpClient = new IndexerHttpClient();
 const ZERO_U128 = '0'.repeat(32);
 
+const hexToBigInt = (hex: string): bigint => BigInt(`0x${hex || '0'}`);
+
 let surfacePresent = false;
+// Any non-zero pool state (treasury or reserve). The immediate-snapshot frame
+// only carries all-zero pool totals on an environment with no pool events; on a
+// data-bearing environment (e.g. local-env) it reflects the live totals, so the
+// zero-specific assertions are gated behind this.
+let poolDataPresent = false;
 
 function safeUnsubscribe(unsubscribe: () => void): void {
   try {
@@ -66,6 +73,12 @@ describe.skipIf(env.isUndeployedEnv())('bridge pool subscription', () => {
       return;
     }
     surfacePresent = true;
+
+    const summary = probe.data.bridgePoolSummary;
+    poolDataPresent =
+      summary.subminimumTxCount > 0 ||
+      hexToBigInt(summary.reserveTotal) > 0n ||
+      summary.treasuryByReason.some((t) => hexToBigInt(t.total) > 0n);
   }, 30_000);
 
   beforeEach(async () => {
@@ -114,11 +127,21 @@ describe.skipIf(env.isUndeployedEnv())('bridge pool subscription', () => {
 
       expect(firstFrame).toBeSuccess();
       const update = firstFrame.data!.bridgePoolUpdates;
+      // The immediate snapshot always has a null triggering event and exposes the
+      // three treasury reasons, regardless of whether pool data exists.
       expect(update.newEvent).toBeNull();
-      expect(update.pool.reserveTotal).toBe(ZERO_U128);
-      expect(update.pool.subminimumTxCount).toBe(0);
       const reasons = update.pool.treasuryByReason.map((t) => t.reason).sort();
       expect(reasons).toEqual([...BRIDGE_TREASURY_REASONS].sort());
+
+      if (poolDataPresent) {
+        // On a data-bearing env the snapshot reflects live totals; assert only
+        // well-formedness (the zero-state assertions below do not hold here).
+        expect(update.pool.reserveTotal).toMatch(/^[0-9a-f]+$/);
+        expect(update.pool.subminimumTxCount).toBeGreaterThanOrEqual(0);
+      } else {
+        expect(update.pool.reserveTotal).toBe(ZERO_U128);
+        expect(update.pool.subminimumTxCount).toBe(0);
+      }
     }, 30_000);
 
     /**
