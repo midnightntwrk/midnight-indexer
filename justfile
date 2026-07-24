@@ -154,3 +154,59 @@ run-node node_version=latest_node_version:
         -e SIDECHAIN_BLOCK_BENEFICIARY="04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e" \
         -v $node_dir:/node \
         midnightntwrk/midnight-node:{{node_version}}
+
+# --- Forked-network integration (midnight-node local-environment) ------------
+# Runs the cloud indexer stack against a forked well-known network (e.g. a
+# mainnet fork) brought up by midnight-node's `local-environment` tooling.
+# See docs/running-against-a-fork.md. Set MIDNIGHT_NODE_DIR to an existing
+# midnight-node checkout to skip the sparse clone.
+
+midnight_node_dir := env_var_or_default("MIDNIGHT_NODE_DIR", ".midnight-node")
+midnight_node_repo := env_var_or_default("MIDNIGHT_NODE_REPO", "https://github.com/midnightntwrk/midnight-node")
+midnight_node_ref := env_var_or_default("MIDNIGHT_NODE_REF", "v" + latest_node_version)
+
+# Sparse-clone midnight-node (local-environment only) at MIDNIGHT_NODE_REF.
+fork-clone:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -d "{{midnight_node_dir}}/local-environment" ]; then
+        echo "using existing midnight-node checkout: {{midnight_node_dir}}"
+        exit 0
+    fi
+    git clone --filter=blob:none --sparse --depth 1 --branch "{{midnight_node_ref}}" \
+        "{{midnight_node_repo}}" "{{midnight_node_dir}}"
+    git -C "{{midnight_node_dir}}" sparse-checkout set local-environment
+
+# Bring up the fork, then attach the indexer stack (NODE_IMAGE required; pass `--from-snapshot <url>` on first run).
+fork-up network="mainnet" *args="": fork-clone
+    #!/usr/bin/env bash
+    set -euo pipefail
+    local_env="{{midnight_node_dir}}/local-environment"
+    [ -d "$local_env/node_modules" ] || (cd "$local_env" && npm ci)
+    (cd "$local_env" && npm run "run:{{network}}" -- {{args}})
+    manifest="$local_env/artifacts/{{network}}.manifest.env"
+    [ -f "$manifest" ] || { echo "fork manifest not found: $manifest" >&2; exit 1; }
+    # The fork must run a node version this indexer has metadata for, or
+    # chain-indexer will reject the chain (see docs/updating-node-version.md).
+    tag=$(sed -n 's/^MIDNIGHT_FORK_NODE_TAG=//p' "$manifest")
+    supported=false
+    while read -r v; do [[ "$tag" == "$v"* ]] && supported=true; done < NODE_VERSIONS
+    if [ "$supported" != true ]; then
+        echo "fork node tag '$tag' is not in NODE_VERSIONS; chain-indexer will refuse it." >&2
+        echo "Set FORK_SKIP_VERSION_CHECK=1 to proceed anyway." >&2
+        [ "${FORK_SKIP_VERSION_CHECK:-0}" = "1" ] || exit 1
+    fi
+    docker compose --env-file "$manifest" -f docker-compose.midnight-fork.yaml up -d
+    echo "indexer-api: http://localhost:${INDEXER_API_PORT:-8088} (GraphQL at /api/v4/graphql)"
+
+# Tear down the indexer overlay, then the fork (overlay first so the fork can remove its network).
+fork-down network="mainnet":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    manifest="{{midnight_node_dir}}/local-environment/artifacts/{{network}}.manifest.env"
+    if [ -f "$manifest" ]; then
+        docker compose --env-file "$manifest" -f docker-compose.midnight-fork.yaml down --volumes
+    else
+        docker compose -p midnight-indexer-fork down --volumes
+    fi
+    (cd "{{midnight_node_dir}}/local-environment" && npm run "stop:{{network}}")
