@@ -19,7 +19,10 @@ import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
 import { IndexerWsClient } from '@utils/indexer/websocket-client';
 import { extractSubscriptionErrorMessage } from '@utils/indexer/subscription-error';
-import { contractEventsSurfacePresent } from '@utils/indexer/contract-events-support';
+import {
+  contractEventsSurfacePresent,
+  indexedContractFieldsOf,
+} from '@utils/indexer/contract-events-support';
 import { ContractEventUnionSchema } from '@utils/indexer/graphql/schema';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import type { ContractEvent } from '@utils/indexer/indexer-types';
@@ -153,6 +156,61 @@ describe('contract event subscription', () => {
       expect(settled.error).not.toBeNull();
       expect(settled.eventCount).toBe(0);
     }, 20_000);
+
+    /**
+     * An unknown field prefix field name is rejected by the subscription.
+     *
+     * @given a contract events filter with a fieldPrefixes entry whose fieldName
+     *        "bogus" is not an indexable contract field
+     * @when a contract events subscription is opened with that filter
+     * @then the subscription surfaces an error rather than streaming events
+     */
+    test('should return an error for an unknown field prefix field name', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Subscription', 'ContractEvents', 'Negative'] };
+      if (!surfacePresent) return ctx.skip?.(true, 'contract events surface not present');
+
+      const settled = await new Promise<{ error: string | null; eventCount: number }>(
+        (resolve, reject) => {
+          let eventCount = 0;
+          const timeout = setTimeout(() => {
+            subscription.unsubscribe();
+            // Validation errors are immediate; a 10s silence is a real problem,
+            // so fail loudly rather than resolving `error: null` and tripping
+            // the assertion with a misleading value.
+            reject(
+              new Error(
+                'Timed out after 10s waiting for the unknown-field-name subscription to error',
+              ),
+            );
+          }, 10_000);
+
+          const subscription = wsClient.subscribeToContractEvents(
+            {
+              next: () => {
+                eventCount++;
+              },
+              error: (error) => {
+                clearTimeout(timeout);
+                subscription.unsubscribe();
+                resolve({ error: extractSubscriptionErrorMessage(error), eventCount });
+              },
+              complete: () => {
+                clearTimeout(timeout);
+                resolve({ error: null, eventCount });
+              },
+            },
+            {
+              contractAddress: dataProvider.getNonExistingContractAddress(),
+              fieldPrefixes: [{ fieldName: 'bogus', prefix: '' }],
+            },
+            0,
+          );
+        },
+      );
+
+      expect(settled.error).not.toBeNull();
+      expect(settled.eventCount).toBe(0);
+    }, 20_000);
   });
 
   describe('a contract events subscription for a contract with emitted events', () => {
@@ -236,6 +294,102 @@ describe('contract event subscription', () => {
           `Contract event schema validation failed: ${JSON.stringify(parsed.error, null, 2)}`,
         ).toBe(true);
         expect(event.contractAddress).toBe(contractAddress);
+      }
+    }, 30_000);
+
+    /**
+     * A field-prefix-filtered subscription streams only events carrying the field.
+     *
+     * Skipped until an event-emitting contract fixture is configured for the
+     * environment (see testdata-provider.getEventEmittingContracts); the
+     * emit-bearing toolchain path is tracked by midnight-indexer#1163.
+     *
+     * @given a contract that emitted an event carrying an indexed field
+     * @when a contract events subscription bounded by the latest block is opened
+     *       filtered by that field name with an empty prefix
+     * @then the stream completes via the toBlock terminator having delivered at
+     *       least one event, each carrying the filtered field
+     */
+    test('should stream only events carrying the filtered field', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Subscription', 'ContractEvents'] };
+      if (!surfacePresent) return ctx.skip?.(true, 'contract events surface not present');
+
+      let contracts: EventEmittingContractInfo[];
+      try {
+        contracts = dataProvider.getEventEmittingContracts();
+      } catch (error) {
+        log.warn(error);
+        return ctx.skip?.(true, (error as Error).message);
+      }
+
+      // Pick, via the query surface, a fixture contract and a field name one of
+      // its events actually carries, so the subscription is expected to stream.
+      let contractAddress: string | undefined;
+      let fieldName: string | undefined;
+      for (const contract of contracts) {
+        const response = await httpClient.getContractEvents({
+          contractAddress: contract['contract-address'],
+        });
+        expect(response).toBeSuccess();
+        const fields = (response.data?.contractEvents ?? []).flatMap(indexedContractFieldsOf);
+        if (fields.length > 0) {
+          contractAddress = contract['contract-address'];
+          fieldName = fields[0].fieldName;
+          break;
+        }
+      }
+      if (!contractAddress || !fieldName) {
+        return ctx.skip?.(true, 'no event-emitting contract fixture exposes an indexed field');
+      }
+
+      const blockResponse = await httpClient.getLatestBlock();
+      expect(blockResponse).toBeSuccess();
+      const toBlock = blockResponse.data!.block.height;
+
+      const received: ContractEvent[] = [];
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          subscription.unsubscribe();
+          reject(
+            new Error(
+              `Timed out after 20s waiting for the ${fieldName}-filtered stream to complete`,
+            ),
+          );
+        }, 20_000);
+
+        const subscription = wsClient.subscribeToContractEvents(
+          {
+            next: (payload) => {
+              const event = payload.data?.contractEvents;
+              if (event) received.push(event);
+            },
+            error: (error) => {
+              clearTimeout(timeout);
+              subscription.unsubscribe();
+              reject(new Error(`Subscription error: ${JSON.stringify(error)}`));
+            },
+            complete: () => {
+              clearTimeout(timeout);
+              resolve();
+            },
+          },
+          {
+            contractAddress,
+            fieldPrefixes: [{ fieldName, prefix: '' }],
+            fromBlock: 0,
+            toBlock,
+          },
+          0,
+        );
+      });
+
+      expect(received.length).toBeGreaterThan(0);
+      for (const event of received) {
+        expect(event.contractAddress).toBe(contractAddress);
+        expect(
+          indexedContractFieldsOf(event).map((field) => field.fieldName),
+          `streamed event ${event.id} does not carry "${fieldName}"`,
+        ).toContain(fieldName);
       }
     }, 30_000);
   });

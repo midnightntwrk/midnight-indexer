@@ -16,6 +16,7 @@
 import log from '@utils/logging/logger';
 import { env } from 'environment/model';
 import { retry } from '@utils/retry-helper';
+import type { AddressOrContract, ContractEvent } from './indexer-types';
 
 /**
  * Probes whether the deployed indexer exposes the public contract-events surface
@@ -56,4 +57,68 @@ export async function contractEventsSurfacePresent(): Promise<boolean> {
     },
     { maxRetries: 2, delayMs: 1000, retryLabel: 'contract events surface probe' },
   );
+}
+
+/** An indexed contract-event field paired with its hex value as returned by the API. */
+export interface IndexedContractField {
+  fieldName: string;
+  value: string;
+}
+
+/** Hex value of whichever side of an `AddressOrContract` union is populated. */
+function addressValue(address: AddressOrContract): string {
+  return address.userAddress ?? address.contractAddress ?? '';
+}
+
+/**
+ * The MIP-0002 indexed fields a contract event contributes to the
+ * `contract_event_indexed_fields` sidecar (#1159), as `{fieldName, value}`
+ * pairs usable in a `fieldPrefixes` filter. Mirrors the indexer's
+ * `LedgerEvent::indexable_contract_fields` per-variant sets: `sender` /
+ * `recipient` resolve to the populated side of the address union (the sidecar
+ * stores the flat address bytes regardless of kind), a `ShieldedReceiveEvent`
+ * without ciphertext indexes no `ciphertext`, and Paused / Unpaused / Misc
+ * events index nothing.
+ */
+export function indexedContractFieldsOf(event: ContractEvent): IndexedContractField[] {
+  switch (event.__typename) {
+    case 'ShieldedSpendEvent':
+      return [{ fieldName: 'nullifier', value: event.nullifier }];
+    case 'ShieldedReceiveEvent':
+      return [
+        { fieldName: 'commitment', value: event.commitment },
+        ...(event.ciphertext ? [{ fieldName: 'ciphertext', value: event.ciphertext }] : []),
+      ];
+    case 'ShieldedMintEvent':
+      return [
+        { fieldName: 'commitment', value: event.commitment },
+        { fieldName: 'domainSep', value: event.domainSep },
+      ];
+    case 'ShieldedBurnEvent':
+      return [{ fieldName: 'nullifier', value: event.nullifier }];
+    case 'UnshieldedSpendEvent':
+      return [
+        { fieldName: 'sender', value: addressValue(event.sender) },
+        { fieldName: 'domainSep', value: event.domainSep },
+        { fieldName: 'tokenType', value: event.tokenType },
+      ];
+    case 'UnshieldedReceiveEvent':
+      return [
+        { fieldName: 'recipient', value: addressValue(event.recipient) },
+        { fieldName: 'domainSep', value: event.domainSep },
+        { fieldName: 'tokenType', value: event.tokenType },
+      ];
+    case 'UnshieldedMintEvent':
+      return [
+        { fieldName: 'domainSep', value: event.domainSep },
+        { fieldName: 'tokenType', value: event.tokenType },
+      ];
+    case 'UnshieldedBurnEvent':
+      return [
+        { fieldName: 'sender', value: addressValue(event.sender) },
+        { fieldName: 'tokenType', value: event.tokenType },
+      ];
+    default:
+      return [];
+  }
 }
