@@ -423,6 +423,7 @@ mod tests {
                 user: "indexer".to_string(),
                 password: env!("APP__INFRA__STORAGE__PASSWORD").into(),
                 sslmode: PgSslMode::Prefer,
+                min_connections: 0,
                 max_connections: 10,
                 idle_timeout: Duration::from_secs(60),
                 max_lifetime: Duration::from_secs(5 * 60),
