@@ -43,6 +43,41 @@ const EMPTY_RECIPIENT = '0'.repeat(64);
 // 16-byte u128 zero value, as returned by the bridge amount/balance fields.
 const ZERO_U128 = '0'.repeat(32);
 
+// The five concrete BridgeEvent union members.
+const KNOWN_BRIDGE_TYPENAMES = new Set([
+  'BridgeUserTransfer',
+  'BridgeReserveTransfer',
+  'BridgeInvalidTransfer',
+  'BridgeUnapprovedTransfer',
+  'BridgeSubminimalFlushTransfer',
+]);
+
+// The shared GET_BRIDGE_EVENTS selects id/blockHeight/recipient only on the
+// BridgeUserTransfer fragment. Filter/pagination cases need a stable ordering key
+// (id) on every variant and the recipient on both recipient-bearing variants, so
+// they pass this override to the client.
+const BRIDGE_EVENTS_ALL_FIELDS = `
+query BridgeEventsAll($RECIPIENT: HexEncoded, $VARIANT: BridgeEventVariant, $BLOCK_HEIGHT_FROM: Int, $BLOCK_HEIGHT_TO: Int, $OFFSET: Int, $LIMIT: Int) {
+  bridgeEvents(recipient: $RECIPIENT, variant: $VARIANT, blockHeightFrom: $BLOCK_HEIGHT_FROM, blockHeightTo: $BLOCK_HEIGHT_TO, offset: $OFFSET, limit: $LIMIT) {
+    __typename
+    ... on BridgeUserTransfer { id blockHeight recipient }
+    ... on BridgeReserveTransfer { id blockHeight }
+    ... on BridgeInvalidTransfer { id blockHeight }
+    ... on BridgeUnapprovedTransfer { id blockHeight recipient }
+    ... on BridgeSubminimalFlushTransfer { id blockHeight }
+  }
+}`;
+
+// A HexEncoded scalar is a hex string; a valid recipient is 32 bytes (64 hex
+// chars). These are rejected by the indexer with a hex-decode error.
+const MALFORMED_RECIPIENT_ODD_LENGTH = 'abc';
+const MALFORMED_RECIPIENT_NON_HEX = 'zz'.repeat(32);
+
+// Reads the `id` from any variant (typed as optional on non-UserTransfer).
+const bridgeEventId = (e: { id?: number }): number => Number(e.id);
+// Reads the `recipient` from a recipient-bearing variant.
+const bridgeEventRecipient = (e: { recipient?: string }): string | undefined => e.recipient;
+
 // Probed once against the target environment: whether the bridge surface exists,
 // a real UserTransfer to assert shape against, and a fully-claimed address (a
 // recipient whose deposited > 0 but remaining balance is zero).
@@ -115,32 +150,123 @@ describe.skipIf(env.isUndeployedEnv())('bridge queries', () => {
     });
 
     /**
-     * @given an environment whose chain has UserTransfer events for a known recipient
+     * @given an environment whose chain has bridge events for a known recipient
      * @when bridgeEvents(recipient: <knownAddress>) is queried
-     * @then every returned event has recipient equal to <knownAddress>
+     * @then every returned event echoes recipient equal to <knownAddress>
      */
-    test.todo('should return only events for the specified recipient address');
+    test('should return only events for the specified recipient address', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Query', 'Bridge', 'Filter'] };
+      if (!surfacePresent) return ctx.skip();
+      if (!sampleUserTransfer) return ctx.skip(true, 'no BridgeUserTransfer data on this env');
+
+      const recipient = sampleUserTransfer.recipient;
+      const response = await httpClient.getBridgeEvents({ recipient }, BRIDGE_EVENTS_ALL_FIELDS);
+
+      expect(response).toBeSuccess();
+      const events = response.data!.bridgeEvents;
+      // The known recipient must have at least its UserTransfer.
+      expect(events.length).toBeGreaterThan(0);
+      // Only recipient-bearing variants can match a recipient filter, and each
+      // must echo exactly the filtered recipient.
+      for (const event of events) {
+        expect(bridgeEventRecipient(event)).toBe(recipient);
+      }
+    });
 
     /**
-     * @given a chain containing all 5 bridge pallet event variants
+     * @given a chain whose bridge events span several variants
      * @when bridgeEvents is queried with no filters
-     * @then the response contains events of each __typename
+     * @then every returned __typename is one of the five known bridge variants
+     * @and at least one variant is present (the env has the surface + Cardano data)
+     *
+     * NOTE: RESERVE_TRANSFER is not asserted present — it requires reserve-contract
+     * activity the c2m-bridge flood does not drive, so it is commonly absent.
      */
-    test.todo('should return events of all 5 variant types when present');
+    test('should return events of the known variant types present on chain', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Query', 'Bridge', 'Variants'] };
+      if (!surfacePresent) return ctx.skip();
+
+      const response = await httpClient.getBridgeEvents({ limit: 100 }, BRIDGE_EVENTS_ALL_FIELDS);
+
+      expect(response).toBeSuccess();
+      const seen = new Set(response.data!.bridgeEvents.map((e) => e.__typename));
+      expect(seen.size).toBeGreaterThan(0);
+      for (const typename of seen) {
+        expect(KNOWN_BRIDGE_TYPENAMES.has(typename)).toBe(true);
+      }
+    });
 
     /**
-     * @given a chain with at least 3 indexed bridge events
+     * @given a chain with at least 3 indexed bridge events (ordered by ascending id)
      * @when bridgeEvents(limit: 2, offset: 0) and (limit: 2, offset: 1) are queried
      * @then the two pages overlap by exactly 1 event and ids are ascending
      */
-    test.todo('should paginate results with offset and limit');
+    test('should paginate results with offset and limit', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Query', 'Bridge', 'Pagination'] };
+      if (!surfacePresent) return ctx.skip();
+
+      const all = await httpClient.getBridgeEvents({ limit: 100 }, BRIDGE_EVENTS_ALL_FIELDS);
+      expect(all).toBeSuccess();
+      const total = all.data!.bridgeEvents.length;
+      if (total < 3) return ctx.skip(true, `need >= 3 bridge events to paginate, found ${total}`);
+
+      const page0 = await httpClient.getBridgeEvents(
+        { limit: 2, offset: 0 },
+        BRIDGE_EVENTS_ALL_FIELDS,
+      );
+      const page1 = await httpClient.getBridgeEvents(
+        { limit: 2, offset: 1 },
+        BRIDGE_EVENTS_ALL_FIELDS,
+      );
+      expect(page0).toBeSuccess();
+      expect(page1).toBeSuccess();
+
+      const p0 = page0.data!.bridgeEvents;
+      const p1 = page1.data!.bridgeEvents;
+      expect(p0).toHaveLength(2);
+      expect(p1).toHaveLength(2);
+
+      // A one-row offset shift makes page0's second row equal page1's first row.
+      expect(bridgeEventId(p0[1])).toBe(bridgeEventId(p1[0]));
+      // Default order is ascending id within each page.
+      expect(bridgeEventId(p0[0])).toBeLessThan(bridgeEventId(p0[1]));
+      expect(bridgeEventId(p1[0])).toBeLessThan(bridgeEventId(p1[1]));
+    });
 
     /**
      * @given a chain containing indexed UserTransfer events
      * @when bridgeEvents(variant: USER_TRANSFER) is queried
      * @then every event has __typename BridgeUserTransfer
      */
-    test.todo('should return only UserTransfer events when filtered by variant USER_TRANSFER');
+    test('should return only UserTransfer events when filtered by variant USER_TRANSFER', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Query', 'Bridge', 'Filter', 'UserTransfer'] };
+      if (!surfacePresent) return ctx.skip();
+      if (!sampleUserTransfer) return ctx.skip(true, 'no BridgeUserTransfer data on this env');
+
+      const response = await httpClient.getBridgeEvents({ variant: 'USER_TRANSFER', limit: 100 });
+
+      expect(response).toBeSuccess();
+      const events = response.data!.bridgeEvents;
+      expect(events.length).toBeGreaterThan(0);
+      for (const event of events) {
+        expect(event.__typename).toBe('BridgeUserTransfer');
+      }
+    });
+
+    /**
+     * @given the bridge surface
+     * @when bridgeEvents(recipient:) is given a malformed HexEncoded value
+     * @then the indexer rejects it with a GraphQL error rather than returning data
+     */
+    test('should reject a malformed recipient with a GraphQL error', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Query', 'Bridge', 'Negative', 'Validation'] };
+      if (!surfacePresent) return ctx.skip();
+
+      for (const bad of [MALFORMED_RECIPIENT_ODD_LENGTH, MALFORMED_RECIPIENT_NON_HEX]) {
+        const response = await httpClient.getBridgeEvents({ recipient: bad });
+        expect(response).toBeError();
+      }
+    });
   });
 
   describe('claims via unshieldedTransactions', () => {
@@ -203,8 +329,30 @@ describe.skipIf(env.isUndeployedEnv())('bridge queries', () => {
      * @given an address with UserTransfer events
      * @when bridgeBalance(address: <knownAddress>) is queried
      * @then deposited equals the sum of UserTransfer.amount values for that address
+     *
+     * Amounts are hex u128 strings of differing widths (event vs balance field),
+     * so they are compared as BigInt values rather than string-equal.
      */
-    test.todo('should set deposited to the sum of UserTransfer amounts for the address');
+    test('should set deposited to the sum of UserTransfer amounts for the address', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Query', 'Bridge', 'Balance'] };
+      if (!surfacePresent) return ctx.skip();
+      if (!sampleUserTransfer) return ctx.skip(true, 'no BridgeUserTransfer data on this env');
+
+      const recipient = sampleUserTransfer.recipient;
+      const events = await httpClient.getBridgeEvents({
+        recipient,
+        variant: 'USER_TRANSFER',
+        limit: 100,
+      });
+      expect(events).toBeSuccess();
+      const userTransfers = events.data!.bridgeEvents as BridgeUserTransfer[];
+      expect(userTransfers.length).toBeGreaterThan(0);
+      const expectedDeposited = userTransfers.reduce((acc, e) => acc + BigInt(`0x${e.amount}`), 0n);
+
+      const balance = await httpClient.getBridgeBalance(recipient);
+      expect(balance).toBeSuccess();
+      expect(BigInt(`0x${balance.data!.bridgeBalance.deposited}`)).toBe(expectedDeposited);
+    });
 
     /**
      * @given an address with a UserTransfer and a subsequent partial claim
@@ -231,16 +379,55 @@ describe.skipIf(env.isUndeployedEnv())('bridge queries', () => {
     });
 
     /**
-     * @given a chain with both UserTransfer and UnapprovedTransfer for the same address
+     * @given a chain with UserTransfer (and possibly UnapprovedTransfer) for an address
      * @when bridgeDeposits(recipient: <address>) is queried without includeUnapproved
      * @then only BridgeUserTransfer events are returned (no BridgeUnapprovedTransfer)
      */
-    test.todo('should return only UserTransfer events by default (excludes UnapprovedTransfer)');
+    test('should return only UserTransfer events by default (excludes UnapprovedTransfer)', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Query', 'Bridge', 'Deposits'] };
+      if (!surfacePresent) return ctx.skip();
+      if (!sampleUserTransfer) return ctx.skip(true, 'no BridgeUserTransfer data on this env');
 
-    // Blocked: UnapprovedTransfer is emitted only after the approval governance
-    // logic lands on the node. The variant is defined but unreachable until the
-    // ApprovedTransactions storage and governance extrinsic land.
-    // Tracking: https://github.com/midnightntwrk/midnight-indexer/issues/940
-    test.skip('should include UnapprovedTransfer events when includeUnapproved=true', () => {});
+      const response = await httpClient.getBridgeDeposits(sampleUserTransfer.recipient);
+
+      expect(response).toBeSuccess();
+      const deposits = response.data!.bridgeDeposits;
+      expect(deposits.length).toBeGreaterThan(0);
+      for (const event of deposits) {
+        expect(event.__typename).toBe('BridgeUserTransfer');
+      }
+    });
+
+    /**
+     * @given an address that has an UnapprovedTransfer deposit
+     * @when bridgeDeposits(recipient: <address>, includeUnapproved: true) is queried
+     * @then the result is a superset of the default (approved) deposits
+     * @and it contains at least one BridgeUnapprovedTransfer
+     *
+     * Was blocked (#940) on the node's approval governance; that logic ships in
+     * node >= 2.0.0-rc.3, so UnapprovedTransfer is now produced on a Cardano-backed
+     * stack. Skips gracefully where the recipient has no unapproved deposit.
+     */
+    test('should include UnapprovedTransfer events when includeUnapproved=true', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Query', 'Bridge', 'Deposits'] };
+      if (!surfacePresent) return ctx.skip();
+      if (!sampleUserTransfer) return ctx.skip(true, 'no BridgeUserTransfer data on this env');
+
+      const recipient = sampleUserTransfer.recipient;
+      const withUnapproved = await httpClient.getBridgeDeposits(recipient, {
+        includeUnapproved: true,
+      });
+      expect(withUnapproved).toBeSuccess();
+      const events = withUnapproved.data!.bridgeDeposits;
+
+      const hasUnapproved = events.some((e) => e.__typename === 'BridgeUnapprovedTransfer');
+      if (!hasUnapproved) {
+        return ctx.skip(true, 'no UnapprovedTransfer deposit for this recipient on this env');
+      }
+      // includeUnapproved must not drop the approved deposits — it is a superset.
+      const defaultDeposits = await httpClient.getBridgeDeposits(recipient);
+      expect(defaultDeposits).toBeSuccess();
+      expect(events.length).toBeGreaterThanOrEqual(defaultDeposits.data!.bridgeDeposits.length);
+    });
   });
 });
