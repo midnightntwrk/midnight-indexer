@@ -446,6 +446,14 @@ impl LedgerState {
 
     /// Apply the given serialized regular transaction to this ledger state and return the
     /// transaction result as well as the created and spent unshielded UTXOs.
+    ///
+    /// `block_timestamp` drives the block context passed to `apply`, and thus the timestamps the
+    /// ledger writes into its state (e.g. dust generation `dtime`), so it must always be the real
+    /// block time. `well_formed_timestamp` is the `tblock` used only for the dust-validity-window
+    /// check in `well_formed`; it normally equals `block_timestamp` but is bumped ahead for the
+    /// first regular transaction in a block to reproduce the node's cached mempool validity result
+    /// (see `chain-indexer`'s `apply_transactions`). Bumping it only affects whether the check
+    /// passes, not the resulting state, since `well_formed` merely validates.
     #[trace]
     pub fn apply_regular_transaction(
         &mut self,
@@ -453,6 +461,7 @@ impl LedgerState {
         parent_block_hash: ByteArray<32>,
         block_timestamp: u64,
         parent_block_timestamp: u64,
+        well_formed_timestamp: u64,
     ) -> Result<ApplyRegularTransactionOutcome, Error> {
         match self {
             Self::V8 {
@@ -481,7 +490,11 @@ impl LedgerState {
                     .fees(&ledger_state.parameters, true)
                     .map_err(|error| Error::TransactionCost(error.into()))?;
                 let verified_ledger_transaction = transaction
-                    .well_formed(&cx.ref_state, *STRICTNESS_V8, cx.block_context.tblock)
+                    .well_formed(
+                        &cx.ref_state,
+                        *STRICTNESS_V8,
+                        timestamp(well_formed_timestamp),
+                    )
                     .map_err(|error| Error::MalformedTransaction(error.into()))?;
                 let (ledger_state, transaction_result) =
                     ledger_state.apply(&verified_ledger_transaction, &cx);
@@ -573,7 +586,11 @@ impl LedgerState {
                         .into_atomic_units(SPECKS_PER_DUST_V9)
                 };
                 let verified_ledger_transaction = transaction
-                    .well_formed(&cx.ref_state, *STRICTNESS_V9, cx.block_context.tblock)
+                    .well_formed(
+                        &cx.ref_state,
+                        *STRICTNESS_V9,
+                        timestamp(well_formed_timestamp),
+                    )
                     .map_err(|error| Error::MalformedTransaction(error.into()))?;
                 let (ledger_state, transaction_result) =
                     ledger_state.apply(&verified_ledger_transaction, &cx);
