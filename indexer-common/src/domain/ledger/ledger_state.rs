@@ -2397,6 +2397,7 @@ mod tests {
 
             let pool = SqlitePool::new(pool::sqlite::Config {
                 cnn_url: sqlite_file,
+                create_if_missing: true,
             })
             .await
             .context("create pool")?;
@@ -2407,6 +2408,7 @@ mod tests {
             ledger_db::init(ledger_db::Config {
                 cache_size: 1_024,
                 cnn_url: sqlite_ledger_db_file,
+                create_if_missing: true,
             })
             .await
             .expect("ledger DB can be initialized");

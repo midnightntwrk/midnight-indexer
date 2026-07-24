@@ -86,6 +86,8 @@ By default it connects to a local Midnight Node at `ws://localhost:9944` and exp
 |---|---|---|
 | APP__APPLICATION__NETWORK_ID | Network ID | `undeployed` |
 | APP__INFRA__STORAGE__CNN_URL | SQlite connection URL | `/data/indexer.sqlite` |
+| APP__INFRA__STORAGE__CREATE_IF_MISSING | Create the index database file when it is missing | `false` |
+| APP__INFRA__LEDGER_DB__CREATE_IF_MISSING | Create the ledger database file when it is missing | `false` |
 | APP__INFRA__NODE__URL | WebSocket Endpoint of Midnight Node | `ws://localhost:9944` |
 | APP__INFRA__API__PORT | Port of the GraphQL API | `8088` |
 | APP__INFRA__SECRET | Hex-encoded 32-byte secret to encrypt stored sensitive data | - |
