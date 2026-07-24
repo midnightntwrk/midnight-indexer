@@ -545,6 +545,89 @@ describe('contract event queries', () => {
     });
 
     /**
+     * Multiple field prefixes combine with AND semantics.
+     *
+     * Skipped until an event-emitting contract fixture is configured for the
+     * environment; tracked by midnight-indexer#1163.
+     *
+     * @given a contract that emitted an event carrying at least two indexed
+     *        fields (e.g. an unshielded event's domainSep and tokenType)
+     * @when a contract events query is filtered by matching prefixes of both
+     *       fields together, and again with one of the two prefixes mutated
+     * @then the event is returned when both prefixes match and absent when
+     *       either prefix does not
+     */
+    test('should combine multiple field prefixes with AND semantics', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Query', 'ContractEvents'] };
+      if (!surfacePresent) return ctx.skip?.(true, 'contract events surface not present');
+
+      let contracts: EventEmittingContractInfo[];
+      try {
+        contracts = dataProvider.getEventEmittingContracts();
+      } catch (error) {
+        log.warn(error);
+        return ctx.skip?.(true, (error as Error).message);
+      }
+
+      for (const contract of contracts) {
+        const address = contract['contract-address'];
+        const unfiltered = await httpClient.getContractEvents({ contractAddress: address }, 500);
+        expect(unfiltered).toBeSuccess();
+
+        const withTwoFields = (unfiltered.data?.contractEvents ?? [])
+          .map((event) => ({
+            event,
+            fields: indexedContractFieldsOf(event).filter((field) => field.value.length >= 2),
+          }))
+          .find(({ fields }) => fields.length >= 2);
+        if (!withTwoFields) continue;
+
+        const { event } = withTwoFields;
+        const [first, second] = withTwoFields.fields;
+        const firstPrefix = first.value.slice(0, 8);
+        const secondPrefix = second.value.slice(0, 8);
+
+        const both = await httpClient.getContractEvents(
+          {
+            contractAddress: address,
+            fieldPrefixes: [
+              { fieldName: first.fieldName, prefix: firstPrefix },
+              { fieldName: second.fieldName, prefix: secondPrefix },
+            ],
+          },
+          500,
+        );
+        expect(both).toBeSuccess();
+        expect(
+          (both.data?.contractEvents ?? []).map((matched) => matched.id),
+          `event ${event.id} not matched by ${first.fieldName} and ${second.fieldName} together`,
+        ).toContain(event.id);
+
+        // Same length and hex alphabet as the second prefix, last digit flipped:
+        // under OR (or ignored-entry) semantics the still-matching first prefix
+        // would wrongly keep returning the event.
+        const mutated = secondPrefix.slice(0, -1) + (secondPrefix.endsWith('0') ? '1' : '0');
+        const excluded = await httpClient.getContractEvents(
+          {
+            contractAddress: address,
+            fieldPrefixes: [
+              { fieldName: first.fieldName, prefix: firstPrefix },
+              { fieldName: second.fieldName, prefix: mutated },
+            ],
+          },
+          500,
+        );
+        expect(excluded).toBeSuccess();
+        expect(
+          (excluded.data?.contractEvents ?? []).map((matched) => matched.id),
+          `event ${event.id} wrongly matched despite a mutated ${second.fieldName} prefix`,
+        ).not.toContain(event.id);
+        return;
+      }
+      return ctx.skip?.(true, 'no event-emitting contract fixture exposes two indexed fields');
+    });
+
+    /**
      * An empty prefix acts as a has-this-field filter.
      *
      * Skipped until an event-emitting contract fixture is configured for the
