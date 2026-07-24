@@ -281,19 +281,21 @@ impl DB for LedgerDb {
     fn get_root_count(&self, key: &ArenaHash<Self::Hasher>) -> u32 {
         block_in_place(|| {
             Handle::current().block_on(async {
+                // Read the stored `count` column, not `count(1)`: the row-count aggregate
+                // is 0/1 (key is the primary key) and under-reports true counts >= 2, which
+                // storage-core's flush then drives negative. A missing row means count 0.
                 let query = indoc! {"
-                    SELECT count(1)
+                    SELECT count
                     FROM ledger_db_roots
                     WHERE key = $1
                 "};
 
-                let (count,) = sqlx::query_as::<_, (i64,)>(query)
+                sqlx::query_as::<_, (i64,)>(query)
                     .bind(key.0.as_slice())
-                    .fetch_one(&*self.pool)
+                    .fetch_optional(&*self.pool)
                     .await
-                    .unwrap_or_panic("cannot get root count");
-
-                count as u32
+                    .unwrap_or_panic("cannot get root count")
+                    .map_or(0, |(count,)| count as u32)
             })
         })
     }
