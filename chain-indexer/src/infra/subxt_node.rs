@@ -177,6 +177,13 @@ impl SubxtNode {
         let node_version = protocol_version.node_version();
         let ledger_version = protocol_version.ledger_version();
 
+        // Runtime API calls and storage queries execute against the block's state. At a
+        // runtime-upgrade enactment block the state already contains the next runtime, so its
+        // version can be newer than the protocol version in the MNSV digest (the runtime that
+        // built the block). Block contents (extrinsics, events, transactions) are still decoded
+        // with the MNSV based `node_version`.
+        let state_node_version = ProtocolVersion::try_from(block.spec_version())?.node_version();
+
         debug!(
             hash:%,
             height,
@@ -189,7 +196,7 @@ impl SubxtNode {
 
         // Fetch authorities if `None`, either initially or because of a `NewSession` event (below).
         if authorities.is_none() {
-            *authorities = Some(runtimes::fetch_authorities(node_version, &block).await?);
+            *authorities = Some(runtimes::fetch_authorities(state_node_version, &block).await?);
         }
         let author = authorities
             .as_ref()
@@ -198,7 +205,7 @@ impl SubxtNode {
             .flatten();
 
         let zswap_merkle_tree_root =
-            runtimes::get_zswap_merkle_tree_root(node_version, &block).await?;
+            runtimes::get_zswap_merkle_tree_root(state_node_version, &block).await?;
         let zswap_merkle_tree_root =
             ZswapMerkleTreeRoot::deserialize(zswap_merkle_tree_root, ledger_version)?;
 
@@ -225,7 +232,7 @@ impl SubxtNode {
         };
 
         let transactions = stream::iter(transactions)
-            .then(|t| make_transaction(t, protocol_version, &block))
+            .then(|t| make_transaction(t, protocol_version, state_node_version, &block))
             .try_collect::<Vec<_>>()
             .await?;
 
@@ -435,9 +442,13 @@ impl Node for SubxtNode {
         block_hash: BlockHash,
         block_height: u64,
         timestamp: u64,
-        node_version: NodeVersion,
+        _node_version: NodeVersion,
     ) -> Result<SystemParametersChange, Self::Error> {
         let block = self.block_at(H256(block_hash.0)).await?;
+
+        // Storage queries execute against the block's state, whose runtime can be newer than
+        // the one that built the block (MNSV) at a runtime-upgrade enactment block.
+        let node_version = ProtocolVersion::try_from(block.spec_version())?.node_version();
 
         let (d_parameter, terms_and_conditions) = tokio::try_join!(
             runtimes::get_d_parameter(node_version, &block),
@@ -657,11 +668,12 @@ where
 async fn make_transaction(
     transaction: runtimes::Transaction,
     protocol_version: ProtocolVersion,
+    state_node_version: NodeVersion,
     block: &OnlineClientAtBlock,
 ) -> Result<Transaction, SubxtNodeError> {
     match transaction {
         runtimes::Transaction::Regular(transaction) => {
-            make_regular_transaction(transaction, protocol_version, block).await
+            make_regular_transaction(transaction, protocol_version, state_node_version, block).await
         }
 
         runtimes::Transaction::System(transaction) => {
@@ -673,10 +685,9 @@ async fn make_transaction(
 async fn make_regular_transaction(
     transaction: ByteVec,
     protocol_version: ProtocolVersion,
+    state_node_version: NodeVersion,
     block: &OnlineClientAtBlock,
 ) -> Result<Transaction, SubxtNodeError> {
-    let node_version = protocol_version.node_version();
-
     let ledger_transaction =
         ledger::Transaction::deserialize(&transaction, protocol_version.ledger_version())?;
 
@@ -686,7 +697,7 @@ async fn make_regular_transaction(
 
     let contract_actions = ledger_transaction
         .contract_actions(|address| async move {
-            runtimes::get_contract_state(address, node_version, block).await
+            runtimes::get_contract_state(address, state_node_version, block).await
         })
         .await?
         .into_iter()
