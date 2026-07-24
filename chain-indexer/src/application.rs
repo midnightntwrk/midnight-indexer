@@ -66,6 +66,36 @@ pub struct Config {
     pub ledger_state_retention: NonZeroUsize,
 }
 
+/// Maximum number of consecutive `index_blocks_task` panics tolerated without indexing progress
+/// before giving up and letting the orchestrator restart the process. Transient ledger-side
+/// panics (e.g. the storage-core root-count underflow, midnight-ledger#548) clear on a fresh
+/// attempt; a genuinely stuck/poison-block panic keeps failing, hits this bound and exits as
+/// before instead of hot-looping forever.
+const MAX_CONSECUTIVE_INDEX_TASK_PANICS: u32 = 5;
+
+/// Base backoff between in-process index-task restarts; scales linearly with the consecutive
+/// panic count, so retries span ~2s..10s before [`MAX_CONSECUTIVE_INDEX_TASK_PANICS`] gives up.
+const INDEX_TASK_PANIC_BACKOFF: Duration = Duration::from_secs(2);
+
+/// Supervision policy for a recoverable index-task panic: given the number of consecutive panics
+/// observed *without indexing progress in between*, return `Some(backoff)` to wait and retry
+/// in-process, or `None` to give up (bound exceeded) and let the orchestrator restart the process.
+fn index_panic_backoff(consecutive_panics: u32) -> Option<Duration> {
+    (consecutive_panics <= MAX_CONSECUTIVE_INDEX_TASK_PANICS)
+        .then(|| INDEX_TASK_PANIC_BACKOFF * consecutive_panics)
+}
+
+/// Outcome of a single indexing attempt ([`run_once`]).
+enum RunOutcome {
+    /// A clean stop was requested (SIGTERM) or the highest-block task ended; stop the service.
+    Shutdown,
+
+    /// The index task panicked. The panic unwinds only the task, leaving the persisted DB
+    /// consistent, so indexing can be rebuilt and retried in-process rather than crashing the
+    /// process. Carries the panic message for logging.
+    RecoverablePanic(String),
+}
+
 pub async fn run(
     config: Config,
     node: impl Node,
@@ -73,6 +103,86 @@ pub async fn run(
     publisher: impl Publisher,
     mut sigterm: Signal,
 ) -> anyhow::Result<()> {
+    // Supervise indexing: an `index_blocks_task` panic aborts only that task, not the process.
+    // Rebuild ledger/indexing state from the (consistent) DB and retry in-process, backing off
+    // and bounding consecutive no-progress panics so a genuinely fatal panic still exits and the
+    // orchestrator can take over. This keeps a transient ledger panic (midnight-ledger#548) from
+    // turning into a CrashLoopBackOff. See midnight-indexer#1150 (root-cause fix: #1213).
+    let mut consecutive_panics = 0u32;
+    let mut last_height = highest_block_height(&mut storage)
+        .await
+        .context("get highest block height")?;
+
+    loop {
+        match run_once(
+            config.clone(),
+            &node,
+            storage.clone(),
+            &publisher,
+            &mut sigterm,
+        )
+        .await?
+        {
+            RunOutcome::Shutdown => return Ok(()),
+
+            RunOutcome::RecoverablePanic(panic) => {
+                // Reset the counter whenever indexing advanced since the previous attempt, so only
+                // panics with no progress in between count toward the give-up bound.
+                let height = highest_block_height(&mut storage)
+                    .await
+                    .context("get highest block height")?;
+                if height > last_height {
+                    consecutive_panics = 0;
+                }
+                last_height = height;
+                consecutive_panics += 1;
+
+                let Some(backoff) = index_panic_backoff(consecutive_panics) else {
+                    bail!(
+                        "index_blocks_task panicked {consecutive_panics} times consecutively \
+                         without indexing progress; last panic: {panic}"
+                    );
+                };
+
+                warn!(
+                    consecutive_panics,
+                    backoff:?,
+                    panic:% = panic;
+                    "index_blocks_task panicked; restarting indexing in-process after backoff \
+                     (see midnight-indexer#1150, midnight-ledger#548)"
+                );
+                sleep(backoff).await;
+            }
+        }
+    }
+}
+
+/// Read the current highest indexed block height, if any.
+async fn highest_block_height(storage: &mut impl Storage) -> anyhow::Result<Option<u64>> {
+    Ok(storage
+        .get_highest_block()
+        .await
+        .context("get highest block")?
+        .map(|(block_ref, _, _)| block_ref.height))
+}
+
+/// Run a single indexing attempt until it stops: a clean shutdown ([`RunOutcome::Shutdown`]), a
+/// recoverable index-task panic ([`RunOutcome::RecoverablePanic`]), or a fatal error (`Err`).
+async fn run_once<N, S, P>(
+    config: Config,
+    node: &N,
+    mut storage: S,
+    publisher: &P,
+    sigterm: &mut Signal,
+) -> anyhow::Result<RunOutcome>
+where
+    N: Node,
+    S: Storage,
+    P: Publisher,
+{
+    let node = node.clone();
+    let publisher = publisher.clone();
+
     let Config {
         network_id,
         blocks_buffer,
@@ -189,7 +299,7 @@ pub async fn run(
     });
 
     // Spawn task to index blocks.
-    let mut index_blocks_task = task::spawn({
+    let mut index_blocks_task: task::JoinHandle<anyhow::Result<()>> = task::spawn({
         let node = node.clone();
 
         async move {
@@ -254,26 +364,40 @@ pub async fn run(
 
     select! {
         result = &mut highest_block_on_node_task => {
-            let result = result
-                .context("highest_block_on_node_task panicked")
-                .and_then(|r| r.context("highest_block_on_node_task failed"));
             index_blocks_task.abort();
             result
+                .context("highest_block_on_node_task panicked")
+                .and_then(|r| r.context("highest_block_on_node_task failed"))?;
+            // The highest-block task is not expected to complete; treat it as a stop.
+            Ok(RunOutcome::Shutdown)
         },
 
         result = &mut index_blocks_task => {
-            let result = result
-                .context("index_blocks_task panicked")
-                .and_then(|r: anyhow::Result<()>| r.context("index_blocks_task failed"));
             highest_block_on_node_task.abort();
-            result
+            match result {
+                // The indexing loop is infinite; an inner error is fatal, a clean return is
+                // unexpected but not an error.
+                Ok(inner) => {
+                    inner.context("index_blocks_task failed")?;
+                    Ok(RunOutcome::Shutdown)
+                }
+                // A panic unwinds only the task and leaves the persisted DB consistent, so it is
+                // recoverable: the supervisor in `run` rebuilds state and retries in-process.
+                Err(join_error) if join_error.is_panic() => {
+                    Ok(RunOutcome::RecoverablePanic(join_error.to_string()))
+                }
+                // Cancellation (or any non-panic join failure) is not expected here; treat as fatal.
+                Err(join_error) => {
+                    Err(anyhow::Error::new(join_error).context("index_blocks_task join failed"))
+                }
+            }
         },
 
         _ = sigterm.recv() => {
             warn!("SIGTERM received");
             highest_block_on_node_task.abort();
             index_blocks_task.abort();
-            Ok(())
+            Ok(RunOutcome::Shutdown)
         }
     }
 }
@@ -723,6 +847,28 @@ mod tests {
         assert_eq!(heights, vec![0, 1, 2, 3]);
 
         Ok(())
+    }
+
+    #[test]
+    fn index_panic_backoff_policy() {
+        use crate::application::{
+            INDEX_TASK_PANIC_BACKOFF, MAX_CONSECUTIVE_INDEX_TASK_PANICS, index_panic_backoff,
+        };
+
+        // The first panic backs off by the base interval, and backoff scales linearly.
+        assert_eq!(index_panic_backoff(1), Some(INDEX_TASK_PANIC_BACKOFF));
+        assert_eq!(index_panic_backoff(3), Some(INDEX_TASK_PANIC_BACKOFF * 3));
+
+        // At the bound it still retries (linear, uncapped within the bound); one past the
+        // bound it gives up (returns None) and lets the orchestrator restart the process.
+        assert_eq!(
+            index_panic_backoff(MAX_CONSECUTIVE_INDEX_TASK_PANICS),
+            Some(INDEX_TASK_PANIC_BACKOFF * MAX_CONSECUTIVE_INDEX_TASK_PANICS)
+        );
+        assert_eq!(
+            index_panic_backoff(MAX_CONSECUTIVE_INDEX_TASK_PANICS + 1),
+            None
+        );
     }
 
     #[derive(Clone)]
