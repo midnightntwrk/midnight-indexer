@@ -345,10 +345,10 @@ describe('contract event queries', () => {
       ctx.task!.meta.custom = { labels: ['Query', 'ContractEvents', 'Negative'] };
       if (!surfacePresent) return ctx.skip?.(true, 'contract events surface not present');
 
-      const validAddress = dataProvider.getNonExistingContractAddress();
+      const contractAddress = dataProvider.getNonExistingContractAddress();
       for (const fieldName of ['bogus', 'domainsep']) {
         const response = await httpClient.getContractEvents({
-          contractAddress: validAddress,
+          contractAddress,
           fieldPrefixes: [{ fieldName, prefix: '' }],
         });
         expect.soft(response, `fieldName "${fieldName}" is not indexable`).toBeError();
@@ -476,8 +476,9 @@ describe('contract event queries', () => {
      * environment; tracked by midnight-indexer#1163.
      *
      * @given a contract that emitted an event carrying an indexed field
-     * @when a contract events query is filtered by the first four bytes of that
-     *       field's value, by the full value, and by a mutated non-matching prefix
+     * @when a contract events query is filtered by a prefix of up to the first
+     *       four bytes of that field's value, by the full value, and by a
+     *       mutated non-matching prefix
      * @then the event is returned for both matching prefixes and absent for the
      *       mutated one
      */
