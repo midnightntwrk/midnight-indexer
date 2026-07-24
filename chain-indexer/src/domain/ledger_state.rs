@@ -102,6 +102,13 @@ impl LedgerState {
     }
 
     /// Apply the given node transactions to this ledger state and return domain transactions.
+    ///
+    /// `bump_first_regular_tblock` selects whether the node's mempool-cached validity result is
+    /// reproduced for the first regular transaction (see below). It must be `false` for the genesis
+    /// block (height 0): the transactions embedded in genesis never transited the mempool, so the
+    /// node never cached a bumped result for them and validated them against the real block time.
+    /// Bumping them would push the well-formed `tblock` past a bootstrap transaction's intent TTL
+    /// and wrongly reject it.
     #[trace(properties = { "parent_block_hash": "{parent_block_hash}" })]
     pub fn apply_transactions(
         &mut self,
@@ -109,6 +116,7 @@ impl LedgerState {
         parent_block_hash: BlockHash,
         block_timestamp: u64,
         parent_block_timestamp: u64,
+        bump_first_regular_tblock: bool,
     ) -> Result<(Vec<Transaction>, LedgerParameters), Error> {
         // The node validates a mempool transaction's dust validity window against a `tblock` bumped
         // two slots ahead of block time, then caches the well-formed result keyed on (tx_hash,
@@ -122,7 +130,9 @@ impl LedgerState {
             .into_iter()
             .map(|transaction| match transaction {
                 node::Transaction::Regular(transaction) => {
-                    let well_formed_timestamp = if first_regular_transaction {
+                    let well_formed_timestamp = if first_regular_transaction
+                        && bump_first_regular_tblock
+                    {
                         block_timestamp + MEMPOOL_TBLOCK_BUMP_MILLIS
                     } else {
                         block_timestamp
