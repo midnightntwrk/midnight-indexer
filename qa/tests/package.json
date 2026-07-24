@@ -30,9 +30,6 @@
       "prettier --write"
     ]
   },
-  "resolutions": {
-    "graphql": "16.11.0"
-  },
   "devDependencies": {
     "@graphql-inspector/core": "^6.2.1",
     "@types/node": "^22.18.8",
@@ -56,12 +53,12 @@
     "pino": "^9.13.1",
     "pino-pretty": "^13.1.1",
     "prettier": "^3.6.2",
-    "testcontainers": "^11.7.1",
+    "testcontainers": "^12.0.4",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
     "vitest": "^4.1.8",
     "ws": "^8.21.1",
-    "xmlbuilder2": "^3.1.1",
+    "xmlbuilder2": "^4.0.3",
     "zod": "^3.25.76"
   }
 }
