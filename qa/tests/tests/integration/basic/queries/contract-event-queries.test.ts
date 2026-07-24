@@ -496,7 +496,9 @@ describe('contract event queries', () => {
 
       for (const contract of contracts) {
         const address = contract['contract-address'];
-        const unfiltered = await httpClient.getContractEvents({ contractAddress: address });
+        // Explicit limit 500 (the server max) on every fixture-gated query so
+        // membership comparisons are not distorted by the default limit of 100.
+        const unfiltered = await httpClient.getContractEvents({ contractAddress: address }, 500);
         expect(unfiltered).toBeSuccess();
 
         const withField = (unfiltered.data?.contractEvents ?? [])
@@ -508,10 +510,13 @@ describe('contract event queries', () => {
         const { fieldName, value } = withField.fields.find((field) => field.value.length >= 2)!;
 
         for (const prefix of [value.slice(0, 8), value]) {
-          const response = await httpClient.getContractEvents({
-            contractAddress: address,
-            fieldPrefixes: [{ fieldName, prefix }],
-          });
+          const response = await httpClient.getContractEvents(
+            {
+              contractAddress: address,
+              fieldPrefixes: [{ fieldName, prefix }],
+            },
+            500,
+          );
           expect(response).toBeSuccess();
           expect(
             (response.data?.contractEvents ?? []).map((matched) => matched.id),
@@ -522,10 +527,13 @@ describe('contract event queries', () => {
         // Same length and hex alphabet as the matching prefix, last digit flipped.
         const matching = value.slice(0, 8);
         const mutated = matching.slice(0, -1) + (matching.endsWith('0') ? '1' : '0');
-        const excluded = await httpClient.getContractEvents({
-          contractAddress: address,
-          fieldPrefixes: [{ fieldName, prefix: mutated }],
-        });
+        const excluded = await httpClient.getContractEvents(
+          {
+            contractAddress: address,
+            fieldPrefixes: [{ fieldName, prefix: mutated }],
+          },
+          500,
+        );
         expect(excluded).toBeSuccess();
         expect(
           (excluded.data?.contractEvents ?? []).map((matched) => matched.id),
@@ -562,7 +570,10 @@ describe('contract event queries', () => {
 
       for (const contract of contracts) {
         const address = contract['contract-address'];
-        const unfiltered = await httpClient.getContractEvents({ contractAddress: address });
+        // Explicit limit 500 (the server max) on both queries: with the default
+        // limit of 100 the two lists would be truncated independently and the
+        // set comparison could fail against a correct server.
+        const unfiltered = await httpClient.getContractEvents({ contractAddress: address }, 500);
         expect(unfiltered).toBeSuccess();
 
         const expectedIds = (unfiltered.data?.contractEvents ?? [])
@@ -572,10 +583,13 @@ describe('contract event queries', () => {
           .map((event) => event.id)
           .sort((a, b) => a - b);
 
-        const filtered = await httpClient.getContractEvents({
-          contractAddress: address,
-          fieldPrefixes: [{ fieldName: 'nullifier', prefix: '' }],
-        });
+        const filtered = await httpClient.getContractEvents(
+          {
+            contractAddress: address,
+            fieldPrefixes: [{ fieldName: 'nullifier', prefix: '' }],
+          },
+          500,
+        );
         expect(filtered).toBeSuccess();
         const filteredIds = (filtered.data?.contractEvents ?? [])
           .map((event) => event.id)
@@ -612,20 +626,27 @@ describe('contract event queries', () => {
         return ctx.skip?.(true, (error as Error).message);
       }
 
+      let anyFieldSeen = false;
       for (const contract of contracts) {
         const address = contract['contract-address'];
-        const unfiltered = await httpClient.getContractEvents({ contractAddress: address });
+        // Explicit limit 500 (the server max) on both queries so reachability
+        // checks are not distorted by the default limit of 100.
+        const unfiltered = await httpClient.getContractEvents({ contractAddress: address }, 500);
         expect(unfiltered).toBeSuccess();
         const events = unfiltered.data?.contractEvents ?? [];
 
         const fieldNames = new Set(
           events.flatMap((event) => indexedContractFieldsOf(event).map((field) => field.fieldName)),
         );
+        anyFieldSeen ||= fieldNames.size > 0;
         for (const fieldName of fieldNames) {
-          const filtered = await httpClient.getContractEvents({
-            contractAddress: address,
-            fieldPrefixes: [{ fieldName, prefix: '' }],
-          });
+          const filtered = await httpClient.getContractEvents(
+            {
+              contractAddress: address,
+              fieldPrefixes: [{ fieldName, prefix: '' }],
+            },
+            500,
+          );
           expect(filtered).toBeSuccess();
           const filteredIds = (filtered.data?.contractEvents ?? []).map((event) => event.id);
 
@@ -637,6 +658,11 @@ describe('contract event queries', () => {
             }
           }
         }
+      }
+      if (!anyFieldSeen) {
+        // Without at least one indexed field the loop above asserts nothing;
+        // skip explicitly rather than reporting a vacuous pass.
+        return ctx.skip?.(true, 'no event-emitting contract fixture exposes an indexed field');
       }
     });
   });
