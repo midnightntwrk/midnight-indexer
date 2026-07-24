@@ -130,13 +130,12 @@ impl LedgerState {
             .into_iter()
             .map(|transaction| match transaction {
                 node::Transaction::Regular(transaction) => {
-                    let well_formed_timestamp = if first_regular_transaction
-                        && bump_first_regular_tblock
-                    {
-                        block_timestamp + MEMPOOL_TBLOCK_BUMP_MILLIS
-                    } else {
-                        block_timestamp
-                    };
+                    let well_formed_timestamp =
+                        if first_regular_transaction && bump_first_regular_tblock {
+                            block_timestamp + MEMPOOL_TBLOCK_BUMP_MILLIS
+                        } else {
+                            block_timestamp
+                        };
                     first_regular_transaction = false;
 
                     self.apply_regular_transaction(
