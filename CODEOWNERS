@@ -1,4 +1,5 @@
 * @midnightntwrk/mn-codeowners-indexer @midnightntwrk/mn-sre
+/qa/ @midnightntwrk/mn-qa @midnightntwrk/mn-codeowners-indexer
 /.github/ISSUE_TEMPLATE/ @midnightntwrk/mn-security @midnightntwrk/mn-sre
 /.github/PULL_REQUEST_TEMPLATE/ @midnightntwrk/mn-security @midnightntwrk/mn-sre
 /.github/workflows/scan.yaml @midnightntwrk/mn-security @midnightntwrk/mn-sre
