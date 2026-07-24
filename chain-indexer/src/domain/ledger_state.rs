@@ -22,6 +22,12 @@ use indexer_common::domain::{
 use std::{collections::HashSet, ops::DerefMut};
 use thiserror::Error;
 
+/// Amount, in milliseconds, by which the first regular transaction's dust-validity `tblock` is
+/// bumped ahead of block time. The node validates mempool transactions against a `tblock` bumped
+/// `slot_duration_secs + skipped_slots_margin` (one slot each, two slots by default) ahead of block
+/// time. Midnight slots are 6s, so the default bump is two slots. Block timestamps are milliseconds.
+const MEMPOOL_TBLOCK_BUMP_MILLIS: u64 = 2 * 6_000;
+
 /// New type for ledger state from indexer_common.
 #[derive(Debug, Clone, From, Deref)]
 pub struct LedgerState(pub indexer_common::domain::ledger::LedgerState);
@@ -104,15 +110,33 @@ impl LedgerState {
         block_timestamp: u64,
         parent_block_timestamp: u64,
     ) -> Result<(Vec<Transaction>, LedgerParameters), Error> {
+        // The node validates a mempool transaction's dust validity window against a `tblock` bumped
+        // two slots ahead of block time, then caches the well-formed result keyed on (tx_hash,
+        // ledger_state_key). At block inclusion only the first regular transaction still matches
+        // that key, so the node reuses the cached (bumped) validity result and skips re-checking it
+        // against the real block time; later transactions get a fresh check against block time.
+        // Reproduce that by bumping only the first regular transaction's well-formed `tblock`.
+        // `apply` always runs against the real block time, so the resulting state matches the node.
+        let mut first_regular_transaction = true;
         let transactions = transactions
             .into_iter()
             .map(|transaction| match transaction {
-                node::Transaction::Regular(transaction) => self.apply_regular_transaction(
-                    transaction,
-                    parent_block_hash,
-                    block_timestamp,
-                    parent_block_timestamp,
-                ),
+                node::Transaction::Regular(transaction) => {
+                    let well_formed_timestamp = if first_regular_transaction {
+                        block_timestamp + MEMPOOL_TBLOCK_BUMP_MILLIS
+                    } else {
+                        block_timestamp
+                    };
+                    first_regular_transaction = false;
+
+                    self.apply_regular_transaction(
+                        transaction,
+                        parent_block_hash,
+                        block_timestamp,
+                        parent_block_timestamp,
+                        well_formed_timestamp,
+                    )
+                }
 
                 node::Transaction::System(transaction) => {
                     self.apply_system_transaction(transaction, block_timestamp)
@@ -134,7 +158,8 @@ impl LedgerState {
 
     #[trace(properties = {
         "parent_block_hash": "{parent_block_hash}",
-        "block_timestamp": "{block_timestamp}"
+        "block_timestamp": "{block_timestamp}",
+        "well_formed_timestamp": "{well_formed_timestamp}"
     })]
     fn apply_regular_transaction(
         &mut self,
@@ -142,6 +167,7 @@ impl LedgerState {
         parent_block_hash: BlockHash,
         block_timestamp: u64,
         parent_block_timestamp: u64,
+        well_formed_timestamp: u64,
     ) -> Result<Transaction, Error> {
         let mut transaction = RegularTransaction::from(transaction);
 
@@ -163,6 +189,7 @@ impl LedgerState {
                 parent_block_hash,
                 block_timestamp,
                 parent_block_timestamp,
+                well_formed_timestamp,
             )
             .map_err(|error| Error::ApplyRegularTransaction(Some(transaction.hash), error))?;
 
