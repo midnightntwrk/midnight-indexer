@@ -17,6 +17,7 @@ import { randomBytes } from 'crypto';
 import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
 import { IndexerWsClient } from '@utils/indexer/websocket-client';
+import { extractSubscriptionErrorMessage } from '@utils/indexer/subscription-error';
 import { BLOCKS_SUBSCRIPTION_FROM_LATEST_BLOCK } from '@utils/indexer/graphql/subscriptions';
 import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
 
@@ -75,7 +76,7 @@ describe('subscription quotas', () => {
           },
           error: (err) => {
             throw new Error(
-              `Subscription #${idx} of ${PER_CONNECTION_CAP} unexpectedly errored: ${err.message}`,
+              `Subscription #${idx} of ${PER_CONNECTION_CAP} unexpectedly errored: ${extractSubscriptionErrorMessage(err)}`,
             );
           },
         });
@@ -84,7 +85,7 @@ describe('subscription quotas', () => {
 
       await sleep(REGISTRATION_WAIT_MS);
 
-      const rejected = await new Promise<Error | null>((resolve) => {
+      const rejected = await new Promise<string | null>((resolve) => {
         const timeout = setTimeout(() => resolve(null), RESPONSE_TIMEOUT_MS);
         const cleanupExtra = client.subscribe(BLOCKS_SUBSCRIPTION_FROM_LATEST_BLOCK, {
           next: () => {
@@ -94,7 +95,7 @@ describe('subscription quotas', () => {
           },
           error: (err) => {
             clearTimeout(timeout);
-            resolve(err as Error);
+            resolve(extractSubscriptionErrorMessage(err));
           },
         });
       });
@@ -103,7 +104,7 @@ describe('subscription quotas', () => {
         rejected,
         `Expected the ${PER_CONNECTION_CAP + 1}th subscription to be rejected, but no error was returned within ${RESPONSE_TIMEOUT_MS}ms`,
       ).not.toBeNull();
-      expect(rejected!.message.toLowerCase()).toContain('subscription limit exceeded');
+      expect(rejected!.toLowerCase()).toContain('subscription limit exceeded');
       expect(
         client.getState(),
         `WebSocket connection should stay open after a single subscription is rejected, got ${IndexerWsClient.getStateName(client.getState())}`,
@@ -187,9 +188,10 @@ describe('subscription quotas', () => {
     };
 
     // Starts `count` shielded subscriptions for the session in rapid succession,
-    // collecting unexpected rejections instead of throwing so callers can assert on them.
+    // collecting unexpected rejection messages instead of throwing so callers can
+    // assert on them.
     const openShieldedSubscriptions = (sessionId: string, count: number) => {
-      const errors: Error[] = [];
+      const errors: string[] = [];
       const cleanups: Array<() => void> = [];
       for (let i = 0; i < count; i++) {
         const cleanup = client.subscribeToShieldedTransactionEvents(
@@ -198,7 +200,7 @@ describe('subscription quotas', () => {
               /* drain quietly */
             },
             error: (err) => {
-              errors.push(err as Error);
+              errors.push(extractSubscriptionErrorMessage(err));
             },
           },
           sessionId,
@@ -209,11 +211,9 @@ describe('subscription quotas', () => {
     };
 
     // Attempts one more shielded subscription creation for the session. Resolves with
-    // 'accepted' once its first progress event arrives, the rejection Error if the
-    // creation is refused, or 'no response' if neither happens in time.
-    const attemptShieldedSubscription = (
-      sessionId: string,
-    ): Promise<Error | 'accepted' | 'no response'> => {
+    // 'accepted' once its first progress event arrives, the normalized rejection
+    // message if the creation is refused, or 'no response' if neither happens in time.
+    const attemptShieldedSubscription = (sessionId: string): Promise<string> => {
       return new Promise((resolve) => {
         const timeout = setTimeout(() => resolve('no response'), RESPONSE_TIMEOUT_MS);
         const cleanup = client.subscribeToShieldedTransactionEvents(
@@ -225,7 +225,7 @@ describe('subscription quotas', () => {
             },
             error: (err) => {
               clearTimeout(timeout);
-              resolve(err as Error);
+              resolve(extractSubscriptionErrorMessage(err));
             },
           },
           sessionId,
@@ -257,16 +257,17 @@ describe('subscription quotas', () => {
       await sleep(REGISTRATION_WAIT_MS);
       expect(
         errors,
-        `The first ${PER_SESSION_RATE_LIMIT} subscription creations should all be accepted, got: ${errors.map((e) => e.message).join('; ')}`,
+        `The first ${PER_SESSION_RATE_LIMIT} subscription creations should all be accepted, got: ${errors.join('; ')}`,
       ).toHaveLength(0);
 
       const outcome = await attemptShieldedSubscription(sessionId);
 
+      // 'per-session rate limit' pins the rejection to the rate-limit guardrail;
+      // the per-connection cap shares the same 'subscription limit exceeded' wrapper.
       expect(
-        outcome,
-        `Expected creation ${PER_SESSION_RATE_LIMIT + 1} within the same minute to be rejected, got: ${String(outcome)}`,
-      ).toBeInstanceOf(Error);
-      expect((outcome as Error).message.toLowerCase()).toContain('subscription limit exceeded');
+        outcome.toLowerCase(),
+        `Expected creation ${PER_SESSION_RATE_LIMIT + 1} within the same minute to be rejected by the per-session rate limit, got: ${outcome}`,
+      ).toContain('per-session rate limit');
       expect(
         client.getState(),
         `WebSocket connection should stay open after a rate-limited creation, got ${IndexerWsClient.getStateName(client.getState())}`,
@@ -295,21 +296,21 @@ describe('subscription quotas', () => {
       await sleep(REGISTRATION_WAIT_MS);
       expect(
         errors,
-        `The first ${PER_SESSION_RATE_LIMIT} subscription creations should all be accepted, got: ${errors.map((e) => e.message).join('; ')}`,
+        `The first ${PER_SESSION_RATE_LIMIT} subscription creations should all be accepted, got: ${errors.join('; ')}`,
       ).toHaveLength(0);
 
       const rejected = await attemptShieldedSubscription(sessionId);
       expect(
-        rejected,
-        `The creation allowance should be exhausted before the refill wait, got: ${String(rejected)}`,
-      ).toBeInstanceOf(Error);
+        rejected.toLowerCase(),
+        `The creation allowance should be exhausted before the refill wait, got: ${rejected}`,
+      ).toContain('per-session rate limit');
 
       await sleep(TOKEN_REFILL_WAIT_MS);
 
       const outcome = await attemptShieldedSubscription(sessionId);
       expect(
         outcome,
-        `Expected a creation ${TOKEN_REFILL_WAIT_MS}ms after exhaustion to be accepted, got: ${outcome instanceof Error ? outcome.message : String(outcome)}`,
+        `Expected a creation ${TOKEN_REFILL_WAIT_MS}ms after exhaustion to be accepted, got: ${outcome}`,
       ).toBe('accepted');
 
       cleanups.forEach((fn) => fn());
@@ -332,7 +333,7 @@ describe('subscription quotas', () => {
       const sessionId = await openRandomWalletSession();
 
       const progressTimestamps: number[] = [];
-      const liveErrors: Error[] = [];
+      const liveErrors: string[] = [];
       const stopLive = client.subscribeToShieldedTransactionEvents(
         {
           next: (payload) => {
@@ -341,7 +342,7 @@ describe('subscription quotas', () => {
             }
           },
           error: (err) => {
-            liveErrors.push(err as Error);
+            liveErrors.push(extractSubscriptionErrorMessage(err));
           },
         },
         sessionId,
@@ -351,15 +352,14 @@ describe('subscription quotas', () => {
       await sleep(REGISTRATION_WAIT_MS);
       expect(
         errors,
-        `The live subscription plus ${PER_SESSION_RATE_LIMIT - 1} further creations should all be accepted, got: ${errors.map((e) => e.message).join('; ')}`,
+        `The live subscription plus ${PER_SESSION_RATE_LIMIT - 1} further creations should all be accepted, got: ${errors.join('; ')}`,
       ).toHaveLength(0);
 
       const outcome = await attemptShieldedSubscription(sessionId);
       expect(
-        outcome,
-        `Expected the creation beyond the allowance to be rejected, got: ${String(outcome)}`,
-      ).toBeInstanceOf(Error);
-      expect((outcome as Error).message.toLowerCase()).toContain('subscription limit exceeded');
+        outcome.toLowerCase(),
+        `Expected the creation beyond the allowance to be rejected by the per-session rate limit, got: ${outcome}`,
+      ).toContain('per-session rate limit');
       const rejectionTime = Date.now();
 
       // The live subscription re-polls progress within its 30s base interval ±20%
@@ -375,7 +375,7 @@ describe('subscription quotas', () => {
       ).toBe(true);
       expect(
         liveErrors,
-        `The live subscription should not error while creations are rate-limited, got: ${liveErrors.map((e) => e.message).join('; ')}`,
+        `The live subscription should not error while creations are rate-limited, got: ${liveErrors.join('; ')}`,
       ).toHaveLength(0);
       expect(
         client.getState(),
