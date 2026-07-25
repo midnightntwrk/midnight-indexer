@@ -118,13 +118,20 @@ impl LedgerState {
         parent_block_timestamp: u64,
         bump_first_regular_tblock: bool,
     ) -> Result<(Vec<Transaction>, LedgerParameters), Error> {
-        // The node validates a mempool transaction's dust validity window against a `tblock` bumped
-        // two slots ahead of block time, then caches the well-formed result keyed on (tx_hash,
-        // ledger_state_key). At block inclusion only the first regular transaction still matches
-        // that key, so the node reuses the cached (bumped) validity result and skips re-checking it
-        // against the real block time; later transactions get a fresh check against block time.
-        // Reproduce that by bumping only the first regular transaction's well-formed `tblock`.
-        // `apply` always runs against the real block time, so the resulting state matches the node.
+        // The node validates a mempool transaction against a `tblock` bumped two slots ahead of the
+        // *parent* (last produced) block's time, then caches the well-formed result keyed on
+        // (tx_hash, ledger_state_key). At block inclusion only the first regular transaction still
+        // matches that key, so the node reuses the cached (bumped) validity result and skips
+        // re-checking it against the real block time; later transactions get a fresh check against
+        // block time. The bump base is the parent block time (`get_block_context().tblock` during
+        // pool validation still holds the last produced block's timestamp; see the node's
+        // `pallet-midnight` `validate_unsigned`), NOT the current block time — bumping from the
+        // current block overshoots by the inter-block gap and can push `tblock` past a
+        // transaction's intent TTL, wrongly rejecting a tx the node accepted.
+        //
+        // Reproduce that by bumping only the first regular transaction's well-formed `tblock` off
+        // the parent block time. `apply` always runs against the real block time, so the resulting
+        // state matches the node.
         let mut first_regular_transaction = true;
         let transactions = transactions
             .into_iter()
@@ -132,7 +139,7 @@ impl LedgerState {
                 node::Transaction::Regular(transaction) => {
                     let well_formed_timestamp =
                         if first_regular_transaction && bump_first_regular_tblock {
-                            block_timestamp + MEMPOOL_TBLOCK_BUMP_MILLIS
+                            parent_block_timestamp + MEMPOOL_TBLOCK_BUMP_MILLIS
                         } else {
                             block_timestamp
                         };
@@ -341,4 +348,103 @@ pub enum Error {
 fn stringify_hash(hash: &Option<TransactionHash>) -> String {
     hash.map(|hash| hash.to_string())
         .unwrap_or_else(|| "<hash unavailable>".to_string())
+}
+
+#[cfg(all(test, feature = "standalone"))]
+mod tests {
+    use super::LedgerState;
+    use crate::domain::node;
+    use indexer_common::{
+        domain::{
+            BlockHash, ByteVec, LedgerVersion, NetworkId, ProtocolVersion,
+            ledger::Transaction as LedgerTransaction,
+        },
+        infra::ledger_db,
+    };
+    use std::fs;
+
+    /// Reproduces the preview crash-loop at block 128537 through the real `apply_transactions`
+    /// path. The block's sole (hence first) regular tx is `3864da18…`, whose earliest intent TTL
+    /// is `Timestamp(1784987084)`.
+    ///
+    /// `apply_transactions` bumps the first regular tx's `well_formed` `tblock` by two slots
+    /// (`MEMPOOL_TBLOCK_BUMP_MILLIS`) to reproduce the node's mempool-cached validity result. The
+    /// node bumps from the *parent* (last produced) block time: `1784987070 + 12 = 1784987082 <=
+    /// TTL`, so it accepts the tx. The current code bumps from the *current* block time:
+    /// `1784987076 + 12 = 1784987088 > TTL`, so `well_formed` rejects it with "Intent TTL has
+    /// expired" — the exact production error — a tx the node included in a finalized block.
+    ///
+    /// The intent-TTL check runs before any state-dependent verification (see the ledger's
+    /// `ttl_check_weak`), so it reproduces against a fresh ledger state. This test asserts the
+    /// indexer never rejects this node-accepted tx for intent-TTL expiry: it fails on the current
+    /// (current-block) base and passes on the fixed (parent-block) base.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn block_128537_first_tx_not_rejected_for_intent_ttl() {
+        // Preview block timestamps (milliseconds), read from the node's timestamp inherents.
+        const BLOCK_TIMESTAMP_MS: u64 = 1_784_987_076_000; // block 128537
+        const PARENT_TIMESTAMP_MS: u64 = 1_784_987_070_000; // block 128536
+
+        let temp_dir = tempfile::tempdir().expect("create tempdir");
+        let sqlite_file = temp_dir
+            .path()
+            .join("ledger-db.sqlite")
+            .display()
+            .to_string();
+        ledger_db::init(ledger_db::Config {
+            cache_size: 1_024,
+            cnn_url: sqlite_file,
+        })
+        .await
+        .expect("init ledger_db");
+
+        let raw_bytes = fs::read(format!(
+            "{}/../indexer-common/tests/block_128537_tx.raw",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("read block 128537 tx fixture");
+
+        // Block 128537 is protocol 1_000_000 -> V1_0 -> ledger V8.
+        let raw: ByteVec = raw_bytes.into();
+        let deserialized = LedgerTransaction::deserialize(&raw, LedgerVersion::V8)
+            .expect("deserialize fixture transaction");
+        let tx = node::RegularTransaction {
+            hash: deserialized.hash(),
+            protocol_version: ProtocolVersion::V1_0(1_000_000),
+            raw,
+            identifiers: deserialized.identifiers().expect("identifiers"),
+            contract_actions: vec![],
+        };
+
+        let mut ledger_state =
+            LedgerState::new(NetworkId("preview".to_string()), LedgerVersion::V8)
+                .expect("create ledger state");
+
+        let result = ledger_state.apply_transactions(
+            [node::Transaction::Regular(tx)],
+            BlockHash::from([0u8; 32]),
+            BLOCK_TIMESTAMP_MS,
+            PARENT_TIMESTAMP_MS,
+            true, // bump the first regular tx's tblock, as in production
+        );
+
+        if let Err(error) = &result {
+            let chain = error_chain(error);
+            eprintln!("apply_transactions returned:\n  {chain}");
+            assert!(
+                !chain.contains("Intent TTL has expired"),
+                "chain-indexer rejected node-accepted preview tx 3864da18… for intent-TTL \
+                 expiry:\n  {chain}"
+            );
+        }
+    }
+
+    fn error_chain(error: &impl std::error::Error) -> String {
+        let mut rendered = error.to_string();
+        let mut source = std::error::Error::source(error);
+        while let Some(inner) = source {
+            rendered.push_str(&format!(": {inner}"));
+            source = inner.source();
+        }
+        rendered
+    }
 }

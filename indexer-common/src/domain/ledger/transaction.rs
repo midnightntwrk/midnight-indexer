@@ -491,6 +491,96 @@ mod tests {
         Ok(())
     }
 
+    /// Regression fixture for the block that crash-looped `chain-indexer` 4.3.4 on preview with
+    /// `Intent TTL has expired. TTL: Timestamp(1784987084), Current block: Timestamp(1784987088)`.
+    ///
+    /// `block_128537_tx.raw` is the sole (hence first) regular transaction of preview block 128537,
+    /// pulled from the node via `chain_getBlock`. Timestamps (seconds) read off the timestamp
+    /// inherents of the surrounding blocks:
+    ///
+    /// - parent block 128536: `1_784_987_070`
+    /// - block 128537:        `1_784_987_076` (parent + 1 slot)
+    /// - this tx's intent TTL: `1_784_987_084` (parent + 14s, block + 8s)
+    ///
+    /// The node pool-validates the first regular tx of a block against the *parent* (last produced)
+    /// block time bumped two slots (`SLOT_DURATION * (1 + MaxSkippedSlots) = 12s`) and caches that
+    /// result, so `well_formed` runs at `1_784_987_070 + 12 = 1_784_987_082 <= TTL` and the tx is
+    /// accepted. `chain-indexer` instead bumped from the *current* block time
+    /// (`1_784_987_076 + 12 = 1_784_987_088 > TTL`), falsely rejecting it. This test pins the tx
+    /// identity and TTL so the bump base cannot silently regress to the current block time.
+    ///
+    /// Block 128537 is `specVersion` 1_000_000 (`ProtocolVersion::V1_0` -> `LedgerVersion::V8`), so
+    /// the transaction deserializes via the V8 ledger crate (tag `midnight:transaction[v9]`).
+    #[cfg(feature = "standalone")]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn block_128537_first_tx_intent_ttl_bump_base() {
+        use crate::{domain::ledger::TransactionV8, infra::ledger_db};
+
+        // `SLOT_DURATION` (6s) * (1 + `MaxSkippedSlots` = 1); mirrors chain-indexer's
+        // `MEMPOOL_TBLOCK_BUMP_MILLIS`.
+        const MEMPOOL_TBLOCK_BUMP_MILLIS: u64 = 2 * 6_000;
+        const PARENT_TS_MS: u64 = 1_784_987_070_000; // block 128536
+        const BLOCK_TS_MS: u64 = 1_784_987_076_000; // block 128537
+
+        let temp_dir = tempfile::tempdir().expect("create tempdir");
+        let sqlite_file = temp_dir
+            .path()
+            .join("ledger-db.sqlite")
+            .display()
+            .to_string();
+        ledger_db::init(ledger_db::Config {
+            cache_size: 1_024,
+            cnn_url: sqlite_file,
+        })
+        .await
+        .expect("init ledger_db");
+
+        let raw = fs::read(format!(
+            "{}/tests/block_128537_tx.raw",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("transaction file can be read");
+        let transaction = Transaction::deserialize(raw, LedgerVersion::V8)
+            .expect("transaction can be deserialized");
+
+        // Identity: this is exactly the transaction from the incident.
+        assert_eq!(
+            const_hex::encode(transaction.hash().0),
+            "3864da188d7c1d85062c914f879e1e4c096d443abf139aa9717b5266945959e8",
+        );
+
+        // The earliest intent TTL is what `well_formed` fails against.
+        let Transaction::V8(inner) = &transaction else {
+            panic!("expected a V8 transaction");
+        };
+        let TransactionV8::Standard(standard) = inner else {
+            panic!("expected a standard transaction");
+        };
+        let min_intent_ttl_secs = standard
+            .intents
+            .values()
+            .map(|intent| intent.ttl.to_secs())
+            .min()
+            .expect("transaction has at least one intent");
+        assert_eq!(min_intent_ttl_secs, 1_784_987_084);
+
+        // Bumping from the current block time overshoots the TTL — the bug.
+        let current_based = (BLOCK_TS_MS + MEMPOOL_TBLOCK_BUMP_MILLIS) / 1_000;
+        assert_eq!(current_based, 1_784_987_088);
+        assert!(
+            current_based > min_intent_ttl_secs,
+            "current-block bump reproduces the crash: {current_based} > {min_intent_ttl_secs}"
+        );
+
+        // Bumping from the parent block time (as the node does) stays within it — the fix.
+        let parent_based = (PARENT_TS_MS + MEMPOOL_TBLOCK_BUMP_MILLIS) / 1_000;
+        assert_eq!(parent_based, 1_784_987_082);
+        assert!(
+            parent_based <= min_intent_ttl_secs,
+            "parent-block bump keeps the tx well-formed: {parent_based} <= {min_intent_ttl_secs}"
+        );
+    }
+
     fn viewing_key(n: u8) -> ViewingKey {
         let mut seed = [0; 32];
         seed[31] = n;
