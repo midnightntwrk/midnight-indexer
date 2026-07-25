@@ -291,7 +291,7 @@ describe.skipIf(!env.isUndeployedEnv())('subscription polling', () => {
     // Deferred end-to-end proof that the throttled heartbeat keeps a wallet
     // active beyond the wallet-indexer's 30m inactivity TTL: it needs
     // interval/TTL environment pass-throughs in docker-compose.yaml to run in
-    // reasonable time — tracked as a follow-up QA ticket.
+    // reasonable time — tracked in midnightntwrk/midnight-indexer#1372.
     test.todo('should keep a subscribed wallet active beyond the wallet-indexer inactivity TTL');
   });
 
