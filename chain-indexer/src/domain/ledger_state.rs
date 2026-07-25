@@ -118,13 +118,20 @@ impl LedgerState {
         parent_block_timestamp: u64,
         bump_first_regular_tblock: bool,
     ) -> Result<(Vec<Transaction>, LedgerParameters), Error> {
-        // The node validates a mempool transaction's dust validity window against a `tblock` bumped
-        // two slots ahead of block time, then caches the well-formed result keyed on (tx_hash,
-        // ledger_state_key). At block inclusion only the first regular transaction still matches
-        // that key, so the node reuses the cached (bumped) validity result and skips re-checking it
-        // against the real block time; later transactions get a fresh check against block time.
-        // Reproduce that by bumping only the first regular transaction's well-formed `tblock`.
-        // `apply` always runs against the real block time, so the resulting state matches the node.
+        // The node validates a mempool transaction against a `tblock` bumped two slots ahead of the
+        // *parent* (last produced) block's time, then caches the well-formed result keyed on
+        // (tx_hash, ledger_state_key). At block inclusion only the first regular transaction still
+        // matches that key, so the node reuses the cached (bumped) validity result and skips
+        // re-checking it against the real block time; later transactions get a fresh check against
+        // block time. The bump base is the parent block time (`get_block_context().tblock` during
+        // pool validation still holds the last produced block's timestamp; see the node's
+        // `pallet-midnight` `validate_unsigned`), NOT the current block time — bumping from the
+        // current block overshoots by the inter-block gap and can push `tblock` past a
+        // transaction's intent TTL, wrongly rejecting a tx the node accepted.
+        //
+        // Reproduce that by bumping only the first regular transaction's well-formed `tblock` off
+        // the parent block time. `apply` always runs against the real block time, so the resulting
+        // state matches the node.
         let mut first_regular_transaction = true;
         let transactions = transactions
             .into_iter()
@@ -132,7 +139,7 @@ impl LedgerState {
                 node::Transaction::Regular(transaction) => {
                     let well_formed_timestamp =
                         if first_regular_transaction && bump_first_regular_tblock {
-                            block_timestamp + MEMPOOL_TBLOCK_BUMP_MILLIS
+                            parent_block_timestamp + MEMPOOL_TBLOCK_BUMP_MILLIS
                         } else {
                             block_timestamp
                         };
