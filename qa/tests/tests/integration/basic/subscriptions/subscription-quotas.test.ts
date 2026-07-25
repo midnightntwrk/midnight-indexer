@@ -13,24 +13,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
 import { IndexerWsClient } from '@utils/indexer/websocket-client';
+import { BLOCKS_SUBSCRIPTION_FROM_LATEST_BLOCK } from '@utils/indexer/graphql/subscriptions';
 
+// Shipped default from the indexer-api `infra.api.quota` configuration.
 const PER_CONNECTION_CAP = 20;
+
 const REGISTRATION_WAIT_MS = 1_000;
 const RESPONSE_TIMEOUT_MS = 5_000;
 const WS_OPEN = 1;
 
-const blockSubscriptionQuery = `
-  subscription {
-    blocks {
-      hash
-      height
-    }
-  }
-`;
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-describe('subscription quotas (HAL-03 / SSE-196)', () => {
+describe('subscription quotas', () => {
   let client: IndexerWsClient;
 
   beforeEach(async () => {
@@ -56,12 +53,14 @@ describe('subscription quotas (HAL-03 / SSE-196)', () => {
      * @then the 21st subscription returns a client error mentioning the limit
      * @and the WebSocket connection stays open
      */
-    test('should reject a subscription beyond the per-connection cap', async () => {
+    test('should reject a subscription beyond the per-connection cap', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Subscription', 'Quota', 'Negative'] };
+
       const cleanups: Array<() => void> = [];
 
       for (let i = 0; i < PER_CONNECTION_CAP; i++) {
         const idx = i + 1;
-        const cleanup = client.subscribe(blockSubscriptionQuery, {
+        const cleanup = client.subscribe(BLOCKS_SUBSCRIPTION_FROM_LATEST_BLOCK, {
           next: () => {
             /* drain quietly */
           },
@@ -74,11 +73,11 @@ describe('subscription quotas (HAL-03 / SSE-196)', () => {
         cleanups.push(cleanup);
       }
 
-      await new Promise((resolve) => setTimeout(resolve, REGISTRATION_WAIT_MS));
+      await sleep(REGISTRATION_WAIT_MS);
 
       const rejected = await new Promise<Error | null>((resolve) => {
         const timeout = setTimeout(() => resolve(null), RESPONSE_TIMEOUT_MS);
-        const cleanupExtra = client.subscribe(blockSubscriptionQuery, {
+        const cleanupExtra = client.subscribe(BLOCKS_SUBSCRIPTION_FROM_LATEST_BLOCK, {
           next: () => {
             clearTimeout(timeout);
             cleanupExtra();
@@ -114,11 +113,13 @@ describe('subscription quotas (HAL-03 / SSE-196)', () => {
      * @when one of the active subscriptions is closed
      * @then a new subscription opened on the same connection succeeds
      */
-    test('should free a slot when an active subscription is closed', async () => {
+    test('should free a slot when an active subscription is closed', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Subscription', 'Quota'] };
+
       const cleanups: Array<() => void> = [];
 
       for (let i = 0; i < PER_CONNECTION_CAP; i++) {
-        const cleanup = client.subscribe(blockSubscriptionQuery, {
+        const cleanup = client.subscribe(BLOCKS_SUBSCRIPTION_FROM_LATEST_BLOCK, {
           next: () => {
             /* drain quietly */
           },
@@ -126,16 +127,16 @@ describe('subscription quotas (HAL-03 / SSE-196)', () => {
         cleanups.push(cleanup);
       }
 
-      await new Promise((resolve) => setTimeout(resolve, REGISTRATION_WAIT_MS));
+      await sleep(REGISTRATION_WAIT_MS);
 
       const closed = cleanups.shift();
       closed!();
 
-      await new Promise((resolve) => setTimeout(resolve, REGISTRATION_WAIT_MS));
+      await sleep(REGISTRATION_WAIT_MS);
 
       const succeeded = await new Promise<boolean>((resolve) => {
         const timeout = setTimeout(() => resolve(false), RESPONSE_TIMEOUT_MS);
-        const cleanupExtra = client.subscribe(blockSubscriptionQuery, {
+        const cleanupExtra = client.subscribe(BLOCKS_SUBSCRIPTION_FROM_LATEST_BLOCK, {
           next: () => {
             clearTimeout(timeout);
             cleanupExtra();
