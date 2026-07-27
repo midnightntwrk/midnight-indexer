@@ -227,11 +227,9 @@ export async function setupWalletEventSubscriptions(
     { address: sourceAddress },
   );
 
-  // Historical events from the indexer websocket for both the source addresses
-  let historicalSourceEvents: UnshieldedTxSubscriptionResponse[] = [];
-
-  // Wait until source events count stabilizes, then snapshot to historical array
-  historicalSourceEvents = await waitForEventsStabilization(sourceAddressEvents, 1000);
+  // Historical events from the indexer websocket for both the source addresses:
+  // wait until source events count stabilizes, then snapshot to historical array
+  const historicalSourceEvents = await waitForEventsStabilization(sourceAddressEvents, 1000);
 
   // Derive and subscribe ALL destination wallets dynamically.
   //
@@ -258,16 +256,15 @@ export async function setupWalletEventSubscriptions(
       }
 
       const events: UnshieldedTxSubscriptionResponse[] = [];
-      // We use the array to capture events before submitting the transaction
-      let historicalDestinationEvents: UnshieldedTxSubscriptionResponse[] = [];
 
       // Subscribe the destination wallet to unshielded transaction events
       const unsubscribe = indexerWsClient.subscribeToUnshieldedTransactionEvents(
         { next: (event) => events.push(event) },
         { address: destinationAddress },
       );
-      // Wait until destination events count stabilizes, then snapshot to historical array
-      historicalDestinationEvents = await waitForEventsStabilization(events, 1000);
+      // Historical events captured before submitting the transaction: wait until
+      // destination events count stabilizes, then snapshot to historical array
+      const historicalDestinationEvents = await waitForEventsStabilization(events, 1000);
 
       return {
         seed,
