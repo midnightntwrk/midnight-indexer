@@ -22,6 +22,10 @@
     "clean": "bun run clean:logs && bun run clean:reports && bun run clean:modules",
     "prepare": "cd ../.. && husky qa/tests/.husky"
   },
+  "overrides": {
+    "brace-expansion": "^5.0.8",
+    "minimatch": "^10.2.5"
+  },
   "lint-staged": {
     "**/*.{js,jsx,ts,tsx}": [
       "eslint --fix",
