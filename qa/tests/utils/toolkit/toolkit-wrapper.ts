@@ -479,6 +479,7 @@ class ToolkitWrapper {
           throw new Error(
             `[SETUP] Cache warmup exhausted ${MAX_ATTEMPTS} RPC-timeout retries; ` +
               `node RPC appears unreachable. Last error: ${error}`,
+            { cause: error },
           );
         }
         // Any non-timeout error means the sync completed and the tx failed for an expected
