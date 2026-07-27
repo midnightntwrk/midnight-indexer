@@ -60,5 +60,9 @@
     "ws": "^8.21.1",
     "xmlbuilder2": "^4.0.3",
     "zod": "^3.25.76"
+  },
+  "overrides": {
+    "minimatch": "^10.2.5",
+    "brace-expansion": "^5.0.8"
   }
 }
