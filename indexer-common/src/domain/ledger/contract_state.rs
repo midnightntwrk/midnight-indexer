@@ -12,14 +12,20 @@
 // limitations under the License.
 
 use crate::domain::{
-    ContractBalance, LedgerVersion, TokenType,
+    ContractBalance, ContractMaintenanceAuthority, ContractMaintenanceVerifyingKey, LedgerVersion,
+    TokenType, VerifyingKeyKind,
     ledger::{Error, TaggedSerializableExt},
 };
 use fastrace::trace;
 use midnight_coin_structure_v2::coin::TokenType as MidnightTokenType;
 use midnight_coin_structure_v3::coin::TokenType as MidnightTokenTypeV9;
 use midnight_onchain_runtime_v3::state::ContractState as ContractStateV3;
-use midnight_onchain_runtime_v4::state::ContractState as ContractStateV4;
+// v8's maintenance authority committee is `Vec<VerifyingKey>` (Schnorr only). v9 generalised it to
+// a `ContractMaintenanceVerifyingKey` enum (Schnorr | ECDSA), re-exported by the v9 runtime.
+use midnight_onchain_runtime_v4::state::{
+    ContractMaintenanceVerifyingKey as ContractMaintenanceVerifyingKeyV4,
+    ContractState as ContractStateV4,
+};
 use midnight_serialize_v1::tagged_deserialize;
 use midnight_storage_core_v1::DefaultDB;
 
@@ -126,6 +132,61 @@ impl ContractState {
                         }
                     })
                     .collect()
+            }
+        }
+    }
+
+    /// Get the maintenance authority for this contract.
+    pub fn maintenance_authority(&self) -> Result<ContractMaintenanceAuthority, Error> {
+        match self {
+            Self::V3(contract_state) => {
+                let authority = &contract_state.maintenance_authority;
+                // v8 committee keys are all Schnorr (`Vec<VerifyingKey>`, no scheme tag).
+                let committee = authority
+                    .committee
+                    .iter()
+                    .map(|key| {
+                        let key = key
+                            .tagged_serialize()
+                            .map_err(|error| Error::Serialize("VerifyingKeyV8", error))?;
+                        Ok(ContractMaintenanceVerifyingKey {
+                            kind: VerifyingKeyKind::Schnorr,
+                            key,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, Error>>()?;
+
+                Ok(ContractMaintenanceAuthority {
+                    committee,
+                    threshold: authority.threshold,
+                    counter: authority.counter,
+                })
+            }
+
+            Self::V4(contract_state) => {
+                let authority = &contract_state.maintenance_authority;
+                let committee = authority
+                    .committee
+                    .iter()
+                    .map(|key| {
+                        let (kind, key) = match key {
+                            ContractMaintenanceVerifyingKeyV4::Schnorr(key) => {
+                                (VerifyingKeyKind::Schnorr, key.tagged_serialize())
+                            }
+                            ContractMaintenanceVerifyingKeyV4::ECDSA(key) => {
+                                (VerifyingKeyKind::Ecdsa, key.tagged_serialize())
+                            }
+                        };
+                        let key = key.map_err(|error| Error::Serialize("VerifyingKeyV9", error))?;
+                        Ok(ContractMaintenanceVerifyingKey { kind, key })
+                    })
+                    .collect::<Result<Vec<_>, Error>>()?;
+
+                Ok(ContractMaintenanceAuthority {
+                    committee,
+                    threshold: authority.threshold,
+                    counter: authority.counter,
+                })
             }
         }
     }

@@ -72,6 +72,7 @@ fn bench_apply_transactions_empty(c: &mut Criterion) {
                         black_box(parent_block_hash),
                         black_box(block_timestamp),
                         black_box(parent_block_timestamp),
+                        black_box(true),
                     )
                     .expect("apply_transactions")
             },

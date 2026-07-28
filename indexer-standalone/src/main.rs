@@ -89,6 +89,25 @@ fn run() -> anyhow::Result<()> {
         "starting"
     );
 
+    // Retention/freshness invariant, enforceable only here where both configs share a process
+    // (in cloud they live in separate binaries, so there it is an operator responsibility): the
+    // dust generations subscription accepts snapshots up to `max_snapshot_age` blocks old, but
+    // the chain-indexer only keeps the newest `ledger_state_retention` blocks' ledger states
+    // loadable. If retention does not exceed the freshness window, an accepted snapshot can
+    // resolve to garbage-collected state and panic inside storage-core on load.
+    let ledger_state_retention = application_config.ledger_state_retention.get();
+    let max_snapshot_age = infra_config
+        .api_config
+        .subscription_config
+        .dust_generations
+        .max_snapshot_age;
+    assert!(
+        u64::try_from(ledger_state_retention).unwrap_or(u64::MAX) > u64::from(max_snapshot_age),
+        "ledger_state_retention ({ledger_state_retention}) must exceed \
+         dust_generations.max_snapshot_age ({max_snapshot_age}): otherwise a snapshot can pass \
+         the freshness check yet resolve to garbage-collected ledger state and panic on load"
+    );
+
     let InfraConfig {
         run_migrations,
         storage_config,

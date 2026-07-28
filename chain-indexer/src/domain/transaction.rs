@@ -99,6 +99,11 @@ pub struct RegularTransaction {
     pub spent_unshielded_utxos: Vec<UnshieldedUtxo>,
     #[debug(skip)]
     pub ledger_events: Vec<LedgerEvent>,
+    /// Populated when the underlying transaction is a `ClaimRewards` with
+    /// `ClaimKind::CardanoBridge` (a user claiming bridged NIGHT). Set from the indexer-common
+    /// apply outcome; `None` for every other transaction.
+    #[debug(skip)]
+    pub bridge_claim: Option<indexer_common::domain::bridge::BridgeClaim>,
 }
 
 impl From<node::RegularTransaction> for RegularTransaction {
@@ -122,6 +127,8 @@ impl From<node::RegularTransaction> for RegularTransaction {
             created_unshielded_utxos: Default::default(),
             spent_unshielded_utxos: Default::default(),
             ledger_events: Default::default(),
+            // Set after applying the transaction; see `apply_regular_transaction`.
+            bridge_claim: None,
         }
     }
 }

@@ -243,6 +243,9 @@ impl IndexerData {
                 block_subscription::BlockSubscriptionBlocksTransactionsOn::SystemTransaction => {
                     None
                 }
+                block_subscription::BlockSubscriptionBlocksTransactionsOn::BridgeClaimTransaction => {
+                    None
+                }
             });
         for transaction in regular_transactions {
             // Verify transaction segment results.

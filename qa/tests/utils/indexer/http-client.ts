@@ -38,20 +38,50 @@ import type {
   DustGenerationMerkleTreeUpdateResponse,
   ZswapMerkleTreeCollapsedUpdateResponse,
   ZswapMerkleTreeCollapsedUpdateResult,
+  ContractEvent,
+  ContractEventFilter,
+  ContractEventResponse,
+  BridgeEvent,
+  BridgeEventsResponse,
+  BridgeDepositsResponse,
+  BridgeBalanceResponse,
+  BridgePoolSummaryResponse,
+  BridgeReserveInflowsResponse,
+  BridgeTreasuryInflowsResponse,
+  BridgeTreasuryReason,
+  BlockContractZswapStateResponse,
+  ExecutionInputsResponse,
+  ContractType,
+  ContractActionTypeEnum,
+  ContractResponse,
 } from './indexer-types';
 import {
   GET_LATEST_BLOCK,
   GET_BLOCK_BY_OFFSET,
   GET_ZSWAP_MERKLE_TREE_COLLAPSED_UPDATE,
+  GET_BLOCK_CONTRACT_ZSWAP_STATE,
+  GET_EXECUTION_INPUTS,
 } from './graphql/block-queries';
 import { GET_TRANSACTION_BY_OFFSET } from './graphql/transaction-queries';
+import { GET_CONTRACT_EVENTS } from './graphql/contract-event-queries';
 import { GET_CONTRACT_ACTION, GET_CONTRACT_ACTION_BY_OFFSET } from './graphql/contract-queries';
+import { GET_CONTRACT } from './graphql/contract-type-queries';
 import {
   GET_DUST_GENERATION_STATUS,
   GET_DUST_GENERATIONS,
   GET_DUST_COMMITMENT_MERKLE_TREE_UPDATE,
   GET_DUST_GENERATION_MERKLE_TREE_UPDATE,
 } from './graphql/dust-queries';
+import {
+  GET_BRIDGE_EVENTS,
+  GET_BRIDGE_BALANCE,
+  GET_BRIDGE_DEPOSITS,
+} from './graphql/bridge-queries';
+import {
+  GET_BRIDGE_POOL_SUMMARY,
+  GET_BRIDGE_RESERVE_INFLOWS,
+  GET_BRIDGE_TREASURY_INFLOWS,
+} from './graphql/bridge-pool-queries';
 
 /**
  * Recognise operation-level GraphQL errors that look like *server* failures
@@ -398,6 +428,244 @@ export class IndexerHttpClient {
     const response = await this.rawRequestWithRetry<{
       dustGenerationMerkleTreeUpdate: DustGenerationMerkleTreeUpdateResult;
     }>(query, variables);
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  /**
+   * Retrieves public contract events matching a filter from the indexer.
+   *
+   * @param filter - The contract event filter (contractAddress is required; types,
+   *                 fieldPrefixes, fromBlock, toBlock, transactionHash are optional)
+   * @param limit - Optional maximum number of events to return
+   * @param offset - Optional number of events to skip
+   * @param queryOverride - Optional custom GraphQL query to override the default
+   *
+   * @returns Promise resolving to the contract events response
+   */
+  async getContractEvents(
+    filter: ContractEventFilter,
+    limit?: number,
+    offset?: number,
+    queryOverride?: string,
+  ): Promise<ContractEventResponse> {
+    log.debug(`Target URL endpoint ${this.getTargetUrl()}`);
+
+    const query = queryOverride || GET_CONTRACT_EVENTS;
+    const variables = { FILTER: filter, LIMIT: limit, OFFSET: offset };
+
+    log.debug(`Using query\n${query}`);
+    log.debug(`Using variables\n${JSON.stringify(variables, null, 2)}`);
+
+    const response = await this.rawRequestWithRetry<{ contractEvents: ContractEvent[] }>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getBridgeEvents(
+    filters: {
+      recipient?: string;
+      variant?: string;
+      blockHeightFrom?: number;
+      blockHeightTo?: number;
+      offset?: number;
+      limit?: number;
+    } = {},
+    queryOverride?: string,
+  ): Promise<BridgeEventsResponse> {
+    const query = queryOverride || GET_BRIDGE_EVENTS;
+    const variables = {
+      RECIPIENT: filters.recipient,
+      VARIANT: filters.variant,
+      BLOCK_HEIGHT_FROM: filters.blockHeightFrom,
+      BLOCK_HEIGHT_TO: filters.blockHeightTo,
+      OFFSET: filters.offset,
+      LIMIT: filters.limit,
+    };
+
+    const response = await this.rawRequestWithRetry<{ bridgeEvents: BridgeEvent[] }>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getBlockContractZswapState(
+    address: string,
+    offset?: BlockOffset,
+    queryOverride?: string,
+  ): Promise<BlockContractZswapStateResponse> {
+    const query = queryOverride || GET_BLOCK_CONTRACT_ZSWAP_STATE;
+    const variables = { ADDRESS: address, OFFSET: offset };
+
+    const response = await this.rawRequestWithRetry<BlockContractZswapStateResponse['data']>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getBridgeBalance(address: string, queryOverride?: string): Promise<BridgeBalanceResponse> {
+    const query = queryOverride || GET_BRIDGE_BALANCE;
+    const variables = { ADDRESS: address };
+
+    const response = await this.rawRequestWithRetry<BridgeBalanceResponse['data']>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getBridgeDeposits(
+    recipient: string,
+    options: { includeUnapproved?: boolean; offset?: number; limit?: number } = {},
+    queryOverride?: string,
+  ): Promise<BridgeDepositsResponse> {
+    const query = queryOverride || GET_BRIDGE_DEPOSITS;
+    const variables = {
+      RECIPIENT: recipient,
+      INCLUDE_UNAPPROVED: options.includeUnapproved,
+      OFFSET: options.offset,
+      LIMIT: options.limit,
+    };
+
+    const response = await this.rawRequestWithRetry<{ bridgeDeposits: BridgeEvent[] }>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getBridgePoolSummary(
+    atBlock?: number,
+    queryOverride?: string,
+  ): Promise<BridgePoolSummaryResponse> {
+    const query = queryOverride || GET_BRIDGE_POOL_SUMMARY;
+    const variables = { AT_BLOCK: atBlock };
+
+    const response = await this.rawRequestWithRetry<BridgePoolSummaryResponse['data']>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getBridgeReserveInflows(
+    range: {
+      blockHeightFrom?: number;
+      blockHeightTo?: number;
+      offset?: number;
+      limit?: number;
+    } = {},
+    queryOverride?: string,
+  ): Promise<BridgeReserveInflowsResponse> {
+    const query = queryOverride || GET_BRIDGE_RESERVE_INFLOWS;
+    const variables = {
+      BLOCK_HEIGHT_FROM: range.blockHeightFrom,
+      BLOCK_HEIGHT_TO: range.blockHeightTo,
+      OFFSET: range.offset,
+      LIMIT: range.limit,
+    };
+
+    const response = await this.rawRequestWithRetry<{ bridgeReserveInflows: BridgeEvent[] }>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getBridgeTreasuryInflows(
+    options: {
+      reason?: BridgeTreasuryReason;
+      blockHeightFrom?: number;
+      blockHeightTo?: number;
+      offset?: number;
+      limit?: number;
+    } = {},
+    queryOverride?: string,
+  ): Promise<BridgeTreasuryInflowsResponse> {
+    const query = queryOverride || GET_BRIDGE_TREASURY_INFLOWS;
+    const variables = {
+      REASON: options.reason,
+      BLOCK_HEIGHT_FROM: options.blockHeightFrom,
+      BLOCK_HEIGHT_TO: options.blockHeightTo,
+      OFFSET: options.offset,
+      LIMIT: options.limit,
+    };
+
+    const response = await this.rawRequestWithRetry<{ bridgeTreasuryInflows: BridgeEvent[] }>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getExecutionInputs(
+    address: string,
+    queryOverride?: string,
+  ): Promise<ExecutionInputsResponse> {
+    const query = queryOverride || GET_EXECUTION_INPUTS;
+    const variables = { ADDRESS: address };
+
+    const response = await this.rawRequestWithRetry<ExecutionInputsResponse['data']>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getContract(
+    address: string,
+    options: {
+      offset?: BlockOffset;
+      actionsLimit?: number;
+      actionsType?: ContractActionTypeEnum;
+    } = {},
+    queryOverride?: string,
+  ): Promise<ContractResponse> {
+    const query = queryOverride || GET_CONTRACT;
+    const variables = {
+      ADDRESS: address,
+      OFFSET: options.offset,
+      ACTIONS_LIMIT: options.actionsLimit,
+      ACTIONS_TYPE: options.actionsType,
+    };
+
+    const response = await this.rawRequestWithRetry<{ contract: ContractType | null }>(
+      query,
+      variables,
+    );
 
     log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
 

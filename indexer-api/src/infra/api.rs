@@ -21,7 +21,8 @@ use crate::{
         progress_cache::{ProgressCache, ProgressCacheConfig},
         quota::{PerConnectionCounter, QuotaConfig, SubscriptionQuotas},
         v4::dataloader::{
-            BlockByHashLoader, ContractActionsByTransactionIdLoader, TransactionByIdLoader,
+            BlockByHashLoader, ContractActionsByTransactionIdLoader,
+            ContractEventsByContractActionIdLoader, TransactionByIdLoader,
             TransactionsByBlockIdLoader,
         },
     },
@@ -156,6 +157,7 @@ pub struct Config {
 pub struct SubscriptionConfig {
     blocks: BlocksSubscriptionConfig,
     contract_actions: ContractActionsSubscriptionConfig,
+    contract_events: ContractEventsSubscriptionConfig,
     pub dust_generations: DustGenerationsSubscriptionConfig,
     dust_ledger_events: DustLedgerEventsSubscriptionConfig,
     pub dust_nullifier_transactions: DustNullifierTransactionsSubscriptionConfig,
@@ -177,8 +179,23 @@ pub struct ContractActionsSubscriptionConfig {
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
+pub struct ContractEventsSubscriptionConfig {
+    batch_size: NonZeroU32,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
 pub struct DustGenerationsSubscriptionConfig {
     pub batch_size: NonZeroU32,
+
+    /// Maximum age in blocks of the snapshot `block_hash`; older ones are rejected with a
+    /// re-subscribe hint. Must stay well below chain-indexer's ledger_state_retention, which
+    /// bounds how long a block's ledger state remains loadable.
+    #[serde(default = "max_snapshot_age_default")]
+    pub max_snapshot_age: u32,
+}
+
+fn max_snapshot_age_default() -> u32 {
+    500
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -395,6 +412,12 @@ trait ContextExt {
     where
         S: Storage;
 
+    fn get_contract_events_by_contract_action_id_loader<S>(
+        &self,
+    ) -> &DataLoader<ContractEventsByContractActionIdLoader<S>>
+    where
+        S: Storage;
+
     fn get_subscriber<B>(&self) -> &B
     where
         B: Subscriber;
@@ -457,6 +480,16 @@ impl ContextExt for Context<'_> {
     {
         self.data::<DataLoader<ContractActionsByTransactionIdLoader<S>>>()
             .expect("ContractActionsByTransactionIdLoader is stored in Context")
+    }
+
+    fn get_contract_events_by_contract_action_id_loader<S>(
+        &self,
+    ) -> &DataLoader<ContractEventsByContractActionIdLoader<S>>
+    where
+        S: Storage,
+    {
+        self.data::<DataLoader<ContractEventsByContractActionIdLoader<S>>>()
+            .expect("ContractEventsByContractActionIdLoader is stored in Context")
     }
 
     fn get_subscriber<B>(&self) -> &B

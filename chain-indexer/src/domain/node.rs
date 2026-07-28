@@ -69,6 +69,7 @@ pub struct Block {
     pub ledger_state_root: Option<ByteVec>,
     pub transactions: Vec<Transaction>,
     pub dust_registration_events: Vec<DustRegistrationEvent>,
+    pub bridge_events: Vec<indexer_common::domain::bridge::BridgeEvent>,
 }
 
 impl TryFrom<Block> for (domain::Block, Vec<Transaction>) {
@@ -89,6 +90,7 @@ impl TryFrom<Block> for (domain::Block, Vec<Transaction>) {
             zswap_merkle_tree_root,
             ledger_state_root: block.ledger_state_root,
             dust_registration_events: block.dust_registration_events,
+            bridge_events: block.bridge_events,
             ledger_parameters: Default::default(),
             zswap_end_index: 0,
             dust_commitment_end_index: 0,

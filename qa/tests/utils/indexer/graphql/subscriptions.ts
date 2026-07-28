@@ -348,8 +348,8 @@ export const ZSWAP_LEDGER_EVENTS_SUBSCRIPTION_FROM_ID = `
 `;
 
 export const DUST_GENERATIONS_SUBSCRIPTION = `
-  subscription DustGenerations($dustAddress: DustAddress!, $startIndex: Int!, $endIndex: Int!) {
-    dustGenerations(dustAddress: $dustAddress, startIndex: $startIndex, endIndex: $endIndex) {
+  subscription DustGenerations($dustAddress: DustAddress!, $blockHash: HexEncoded!, $dtimeCutoffHeight: Int!) {
+    dustGenerations(dustAddress: $dustAddress, blockHash: $blockHash, dtimeCutoffHeight: $dtimeCutoffHeight) {
       ... on DustGenerationsItem {
         __typename
         commitmentMtIndex
@@ -418,6 +418,75 @@ export const SHIELDED_NULLIFIER_TRANSACTIONS_SUBSCRIPTION = `
       nullifier
       transaction {
         hash
+      }
+    }
+  }
+`;
+
+// c2m-bridge event stream (#942). `from` is an event-id cursor: the subscription
+// replays matching historical events with id > from, then live-tails. Omitting
+// `from` streams from the beginning. There is no completion sentinel.
+export const BRIDGE_EVENTS_SUBSCRIPTION_DEFAULT = `
+  subscription BridgeEvents($RECIPIENT: HexEncoded, $VARIANT: BridgeEventVariant) {
+    bridgeEvents(recipient: $RECIPIENT, variant: $VARIANT) {
+      __typename
+      ... on BridgeUserTransfer {
+        id
+        blockHeight
+        midnightTxHash
+        cardanoTxHash
+        amount
+        recipient
+      }
+    }
+  }
+`;
+
+export const BRIDGE_EVENTS_SUBSCRIPTION_FROM = `
+  subscription BridgeEventsFrom($FROM: Int, $RECIPIENT: HexEncoded, $VARIANT: BridgeEventVariant) {
+    bridgeEvents(from: $FROM, recipient: $RECIPIENT, variant: $VARIANT) {
+      __typename
+      ... on BridgeUserTransfer {
+        id
+        blockHeight
+        midnightTxHash
+        cardanoTxHash
+        amount
+        recipient
+      }
+    }
+  }
+`;
+
+// bridgeBalance emits the current balance immediately on connect, then re-emits
+// on every relevant event for the address.
+export const BRIDGE_BALANCE_SUBSCRIPTION = `
+  subscription BridgeBalance($ADDRESS: HexEncoded!) {
+    bridgeBalance(address: $ADDRESS) {
+      deposited
+      claimed
+      balance
+    }
+  }
+`;
+
+// c2m-bridge pool observability stream (#944). Emits an initial snapshot on
+// subscribe (newEvent = null), then a refreshed summary paired with each new
+// pool-affecting event.
+export const BRIDGE_POOL_UPDATES_SUBSCRIPTION = `
+  subscription BridgePoolUpdates {
+    bridgePoolUpdates {
+      newEvent {
+        __typename
+      }
+      pool {
+        reserveTotal
+        treasuryByReason {
+          reason
+          total
+        }
+        subminimumTxCount
+        lastEventBlockHeight
       }
     }
   }
