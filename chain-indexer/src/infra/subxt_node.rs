@@ -670,11 +670,10 @@ where
     author_from_digest_logs(&header.digest.logs, authorities, content_node_version)
 }
 
-/// Determine the block author from the pre-runtime digest logs: Aura carries the slot (the
-/// author is the slot modulo the authority-set length), BABE carries the authority index
-/// explicitly in all of its pre-digest variants. Should a header carry both digests (the
-/// planned Aura→BABE transition window), Aura wins until the authoritative rule is defined
-/// node-side (see #1313).
+/// Determine the block author from the pre-runtime digest logs, taking the first log with a
+/// recognized consensus engine that yields an author, in digest order (mirroring polkadot-js
+/// `extractAuthor`): Aura carries the slot (the author is the slot modulo the authority-set
+/// length), BABE carries the authority index explicitly in all of its pre-digest variants.
 fn author_from_digest_logs(
     logs: &[DigestItem],
     authorities: &[[u8; 32]],
@@ -684,30 +683,35 @@ fn author_from_digest_logs(
         return Ok(None);
     }
 
-    let pre_runtime_digest = |engine_id: ConsensusEngineId| {
-        logs.iter().find_map(move |log| match log {
-            DigestItem::PreRuntime(id, inner) if *id == engine_id => Some(inner.as_slice()),
+    for log in logs {
+        let DigestItem::PreRuntime(engine_id, pre_digest) = log else {
+            continue;
+        };
+
+        let author = match *engine_id {
+            AURA_ENGINE_ID => {
+                let slot = runtimes::decode_slot(pre_digest, content_node_version)?;
+                let index = slot % authorities.len() as u64;
+                authorities.get(index as usize).copied().map(Into::into)
+            }
+
+            BABE_ENGINE_ID => {
+                let index = decode_babe_authority_index(pre_digest)?;
+                // An out-of-range index means the cached authority set does not match the
+                // block's epoch; report an unknown author instead of failing block processing.
+                usize::try_from(index)
+                    .ok()
+                    .and_then(|index| authorities.get(index))
+                    .copied()
+                    .map(Into::into)
+            }
+
             _ => None,
-        })
-    };
+        };
 
-    if let Some(slot) = pre_runtime_digest(AURA_ENGINE_ID) {
-        let slot = runtimes::decode_slot(slot, content_node_version)?;
-        let index = slot % authorities.len() as u64;
-        let author = authorities.get(index as usize).copied().map(Into::into);
-        return Ok(author);
-    }
-
-    if let Some(pre_digest) = pre_runtime_digest(BABE_ENGINE_ID) {
-        let index = decode_babe_authority_index(pre_digest)?;
-        // An out-of-range index means the cached authority set does not match the block's
-        // epoch; report an unknown author instead of failing block processing.
-        let author = usize::try_from(index)
-            .ok()
-            .and_then(|index| authorities.get(index))
-            .copied()
-            .map(Into::into);
-        return Ok(author);
+        if author.is_some() {
+            return Ok(author);
+        }
     }
 
     Ok(None)
@@ -846,9 +850,29 @@ mod tests {
     }
 
     #[test]
-    fn aura_wins_over_babe_during_transition() {
+    fn first_pre_runtime_digest_in_digest_order_wins() {
         let logs = vec![
             DigestItem::PreRuntime(BABE_ENGINE_ID, babe_pre_digest(2, 2)),
+            DigestItem::PreRuntime(AURA_ENGINE_ID, 4u64.encode()),
+        ];
+        let author = author_from_digest_logs(&logs, &AUTHORITIES, NodeVersion::V2_0)
+            .expect("author can be determined");
+        assert_eq!(author, Some([3; 32].into()));
+
+        let logs = vec![
+            DigestItem::PreRuntime(AURA_ENGINE_ID, 4u64.encode()),
+            DigestItem::PreRuntime(BABE_ENGINE_ID, babe_pre_digest(2, 2)),
+        ];
+        let author = author_from_digest_logs(&logs, &AUTHORITIES, NodeVersion::V2_0)
+            .expect("author can be determined");
+        assert_eq!(author, Some([2; 32].into()));
+    }
+
+    #[test]
+    fn unrecognized_engine_and_authorless_digest_are_skipped() {
+        let logs = vec![
+            DigestItem::PreRuntime(*b"test", vec![0xaa]),
+            DigestItem::PreRuntime(BABE_ENGINE_ID, babe_pre_digest(2, 7)),
             DigestItem::PreRuntime(AURA_ENGINE_ID, 4u64.encode()),
         ];
 
