@@ -15,14 +15,23 @@ all-features = true
 rustdoc-args = [ "--cfg", "docsrs" ]
 
 [dependencies]
+# ledger v8 + shared
 midnight-base-crypto_v1      = { workspace = true }
 midnight-coin-structure_v2   = { workspace = true }
 midnight-ledger_v8           = { workspace = true }
 midnight-onchain-runtime_v3  = { workspace = true }
 midnight-serialize_v1        = { workspace = true }
-midnight-storage-core_v1     = { workspace = true, features = [ "layout-v2" ] }
+midnight-storage-core_v1     = { workspace = true, features = [ "layout-v2", "gc-v1" ] }
 midnight-transient-crypto_v2 = { workspace = true }
 midnight-zswap_v8            = { workspace = true }
+# ledger v9 rc (base-crypto, serialize and storage-core stay unified across v8
+# and v9; coin-structure and transient-crypto are cross-major at this rc, hence
+# their own v9 aliases)
+midnight-coin-structure_v3   = { workspace = true }
+midnight-ledger_v9           = { workspace = true }
+midnight-onchain-runtime_v4  = { workspace = true }
+midnight-transient-crypto_v3 = { workspace = true }
+midnight-zswap_v9            = { workspace = true }
 async-nats                   = { workspace = true, optional = true }
 byte-unit-serde              = { workspace = true }
 chacha20poly1305             = { workspace = true, features = [ "std" ] }
@@ -77,6 +86,3 @@ standalone = [ "sqlx/sqlite" ]
 name              = "ledger_transaction"
 harness           = false
 required-features = [ "standalone" ]
-
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = [ 'cfg(coverage_nightly)' ] }

@@ -59,6 +59,7 @@ The Midnight Indexer (midnight-indexer) is a set of components designed to optim
 - [Chain Indexer](chain-indexer/README.md): Connects to the Midnight Node, fetches blocks and transactions, and stores indexed data.
 - [Wallet Indexer](wallet-indexer/README.md): Associates connected wallets with relevant transactions, enabling personalized queries and subscriptions.
 - [Indexer API](indexer-api/README.md): Exposes a GraphQL API for queries, mutations, and subscriptions.
+- [SPO Indexer](spo-indexer/README.md): Indexes stake-pool operator data - committee membership, epoch and D-parameter changes, and Cardano stake distribution (via Blockfrost).
 
 ## Features
 
@@ -75,7 +76,7 @@ To run the Midnight Indexer Docker images are provided under the [`midnightntwrk
 
 ### Standalone Mode
 
-The standalone Indexer combines the Chain Indexer, Indexer API and Wallet Indexer components in a single executable alongside an in-process SQLite database. Therefore the only Docker image to be run is [`indexer-standalone`](https://hub.docker.com/r/midnightntwrk/indexer-standalone).
+The standalone Indexer combines the Chain Indexer, Indexer API, Wallet Indexer and SPO Indexer components in a single executable alongside an in-process SQLite database. Therefore the only Docker image to be run is [`indexer-standalone`](https://hub.docker.com/r/midnightntwrk/indexer-standalone).
 
 By default it connects to a local Midnight Node at `ws://localhost:9944` and exposes its GraphQL API at `0.0.0.0:8088`. All configuration has defaults except for the secret used to encrypt stored sensitive data which must be provided via the `APP__INFRA__SECRET` environment variable as valid hex-encoded 32 bytes.
 
@@ -232,14 +233,6 @@ Create a classic PAT with:
 - `repo` (all)
 - `read:packages`
 - `read:org`
-
-#### ~/.netrc Setup
-
-```bash
-machine github.com
-login <YOUR_GITHUB_ID>
-password <YOUR_GITHUB_PAT>
-```
 
 #### Docker Authentication
 

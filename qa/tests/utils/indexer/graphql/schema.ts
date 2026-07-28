@@ -220,10 +220,11 @@ export const ContractActionSchema = z.discriminatedUnion('type', [
   ContractUpdateSchema,
 ]);
 
-// Contract balance schema
+// Contract balance schema. tokenType is a 32-byte hex string and amount a decimal
+// u128 string; enforcing the shape here makes every parse a format assertion.
 export const ContractBalanceSchema = z.object({
-  tokenType: z.string(),
-  amount: z.string(),
+  tokenType: z.string().regex(/^[0-9a-fA-F]{64}$/),
+  amount: z.string().regex(/^[0-9]+$/),
 });
 
 // Updated contract action schemas to match current API
@@ -260,6 +261,124 @@ export const ContractActionUnionSchema = z.discriminatedUnion('__typename', [
   ContractDeployActionSchema,
   ContractCallActionSchema,
   ContractUpdateActionSchema,
+]);
+
+// Contract event schemas (MIP-0002 public contract log emission). HexEncoded
+// fields are hex strings (optional `0x` prefix); `amount` is a decimal u128
+// string. `transaction` is left as `z.any()` like the contract-action schemas
+// — its shape is asserted by the transaction schemas, not here.
+const HexEncoded = z.string().regex(/^(0x)?[0-9a-fA-F]+$/);
+const U128Decimal = z.string().regex(/^[0-9]+$/);
+
+const ContractEventBaseFields = {
+  id: z.number(),
+  raw: HexEncoded,
+  maxId: z.number(),
+  protocolVersion: z.number(),
+  version: z.number(),
+  contractAddress: HexEncoded,
+  transactionId: z.number(),
+  transaction: z.any(),
+};
+
+export const AddressOrContractSchema = z.object({
+  kind: z.enum(['USER', 'CONTRACT']),
+  userAddress: HexEncoded.nullable().optional(),
+  contractAddress: HexEncoded.nullable().optional(),
+});
+
+export const ShieldedSpendEventSchema = z.object({
+  __typename: z.literal('ShieldedSpendEvent'),
+  ...ContractEventBaseFields,
+  nullifier: HexEncoded,
+});
+
+export const ShieldedReceiveEventSchema = z.object({
+  __typename: z.literal('ShieldedReceiveEvent'),
+  ...ContractEventBaseFields,
+  commitment: HexEncoded,
+  ciphertext: HexEncoded.nullable().optional(),
+  receivingContractAddress: HexEncoded.nullable().optional(),
+});
+
+export const ShieldedMintEventSchema = z.object({
+  __typename: z.literal('ShieldedMintEvent'),
+  ...ContractEventBaseFields,
+  commitment: HexEncoded,
+  domainSep: HexEncoded,
+  amount: U128Decimal.nullable().optional(),
+});
+
+export const ShieldedBurnEventSchema = z.object({
+  __typename: z.literal('ShieldedBurnEvent'),
+  ...ContractEventBaseFields,
+  nullifier: HexEncoded,
+  amount: U128Decimal.nullable().optional(),
+});
+
+export const UnshieldedSpendEventSchema = z.object({
+  __typename: z.literal('UnshieldedSpendEvent'),
+  ...ContractEventBaseFields,
+  sender: AddressOrContractSchema,
+  domainSep: HexEncoded,
+  tokenType: HexEncoded,
+  amount: U128Decimal,
+});
+
+export const UnshieldedReceiveEventSchema = z.object({
+  __typename: z.literal('UnshieldedReceiveEvent'),
+  ...ContractEventBaseFields,
+  recipient: AddressOrContractSchema,
+  domainSep: HexEncoded,
+  tokenType: HexEncoded,
+  amount: U128Decimal,
+});
+
+export const UnshieldedMintEventSchema = z.object({
+  __typename: z.literal('UnshieldedMintEvent'),
+  ...ContractEventBaseFields,
+  domainSep: HexEncoded,
+  tokenType: HexEncoded,
+  amount: U128Decimal,
+});
+
+export const UnshieldedBurnEventSchema = z.object({
+  __typename: z.literal('UnshieldedBurnEvent'),
+  ...ContractEventBaseFields,
+  sender: AddressOrContractSchema,
+  tokenType: HexEncoded,
+  amount: U128Decimal,
+});
+
+export const PausedEventSchema = z.object({
+  __typename: z.literal('PausedEvent'),
+  ...ContractEventBaseFields,
+});
+
+export const UnpausedEventSchema = z.object({
+  __typename: z.literal('UnpausedEvent'),
+  ...ContractEventBaseFields,
+});
+
+export const MiscContractEventSchema = z.object({
+  __typename: z.literal('MiscContractEvent'),
+  ...ContractEventBaseFields,
+  name: HexEncoded,
+  payload: HexEncoded,
+});
+
+export const ContractEventUnionSchema = z.discriminatedUnion('__typename', [
+  ShieldedSpendEventSchema,
+  ShieldedReceiveEventSchema,
+  ShieldedMintEventSchema,
+  ShieldedBurnEventSchema,
+  UnshieldedSpendEventSchema,
+  UnshieldedReceiveEventSchema,
+  UnshieldedMintEventSchema,
+  UnshieldedBurnEventSchema,
+  PausedEventSchema,
+  UnpausedEventSchema,
+  MiscContractEventSchema,
 ]);
 
 // DUST Generation Status schema

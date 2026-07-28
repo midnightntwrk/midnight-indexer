@@ -1,5 +1,6 @@
 *.check
-.claude
+.claude/*
+!.claude/skills/
 .DS_Store
 .envrc.local
 .idea

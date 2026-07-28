@@ -16,7 +16,7 @@
 import fs from "fs";
 import path from "path";
 import * as commentJson from "comment-json";
-import { TARGET_ENV } from "./env.js";
+import { TARGET_ENV, INDEXER_HTTP_URL, INDEXER_API_VERSION } from "./env.js";
 import { Transaction } from "./indexer-types.js";
 
 // ============================================================================
@@ -170,6 +170,38 @@ interface ContractActionsMap {
   [address: string]: ContractActionEntry[];
 }
 
+/**
+ * Structure for a contract with the event types it emitted
+ */
+interface ContractWithEvents {
+  "contract-address": string;
+  "event-types": string[];
+}
+
+/**
+ * Structure for contract-events.jsonc file (array of contracts)
+ */
+type ContractEventsDataFile = ContractWithEvents[];
+
+/**
+ * Maps the concrete ContractEvent GraphQL typenames to the
+ * ContractEventType enum values used by the test fixtures and the
+ * contractEvents(filter: { eventTypes: ... }) argument.
+ */
+const EVENT_TYPENAME_TO_EVENT_TYPE: Record<string, string> = {
+  ShieldedSpendEvent: "SHIELDED_SPEND",
+  ShieldedReceiveEvent: "SHIELDED_RECEIVE",
+  ShieldedMintEvent: "SHIELDED_MINT",
+  ShieldedBurnEvent: "SHIELDED_BURN",
+  UnshieldedSpendEvent: "UNSHIELDED_SPEND",
+  UnshieldedReceiveEvent: "UNSHIELDED_RECEIVE",
+  UnshieldedMintEvent: "UNSHIELDED_MINT",
+  UnshieldedBurnEvent: "UNSHIELDED_BURN",
+  PausedEvent: "PAUSED",
+  UnpausedEvent: "UNPAUSED",
+  MiscContractEvent: "MISC",
+};
+
 // ============================================================================
 // Validation Functions
 // ============================================================================
@@ -220,10 +252,10 @@ function validateNonEmptyArray<T>(array: T[], arrayName: string): void {
  * @param folderPath - Path to the test data folder
  * @param dataFile - Path to the data file containing blocks
  */
-export function updateTestDataFiles(
+export async function updateTestDataFiles(
   folderPath: string,
   sourceBlockDataFile: string,
-): void {
+): Promise<void> {
   try {
     // Validate input parameters
     if (!folderPath || typeof folderPath !== "string") {
@@ -242,9 +274,18 @@ export function updateTestDataFiles(
     // Read source block data file
     const sourceBlockData = readFileContent(sourceBlockDataFile);
 
+    // Harvest the contract-events data (the only step with remote I/O)
+    // BEFORE any file is written: a probe or query failure then aborts the
+    // refresh with the previous snapshot fully intact, instead of leaving a
+    // mix of refreshed and stale files behind.
+    const contractsWithEvents = await harvestContractEvents(sourceBlockData);
+
     updateBlockDataFile(folderPath, sourceBlockData);
     updateTransactionDataFile(folderPath, sourceBlockData);
     updateContractDataFile(folderPath, sourceBlockData);
+    if (contractsWithEvents !== null) {
+      writeContractEventsDataFile(folderPath, contractsWithEvents);
+    }
 
     console.info("[INFO ] - All test data files updated successfully");
   } catch (error) {
@@ -709,6 +750,324 @@ function updateContractDataFile(
     }
     throw new TestDataHandlerError(
       "Failed to update contract actions data file",
+      { destinationPath, originalError: error },
+    );
+  }
+}
+
+// Retry policy for the GraphQL requests issued during data generation
+const GRAPHQL_MAX_ATTEMPTS = 3;
+const GRAPHQL_RETRY_DELAY_MS = 1_000;
+
+// Page size for the contract-events harvest; events are fetched page by page
+// until a short page signals the end of the contract's history.
+const CONTRACT_EVENTS_PAGE_SIZE = 100;
+
+/**
+ * Sends a GraphQL POST request and returns the parsed body.
+ *
+ * @param graphqlUrl - The indexer GraphQL HTTP endpoint
+ * @param query - The GraphQL document to send
+ * @param variables - Optional variables for the document
+ * @returns The parsed GraphQL response body
+ * @throws on transport errors, timeouts, and non-2xx responses
+ */
+async function postGraphQL<T>(
+  graphqlUrl: string,
+  query: string,
+  variables?: Record<string, unknown>,
+): Promise<{ data?: T; errors?: { message: string }[] }> {
+  const response = await fetch(graphqlUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, variables }),
+    signal: AbortSignal.timeout(10_000),
+  });
+
+  if (!response.ok) {
+    throw new Error(`GraphQL request got HTTP ${response.status}`);
+  }
+
+  return (await response.json()) as {
+    data?: T;
+    errors?: { message: string }[];
+  };
+}
+
+/**
+ * Runs an async operation with retries and throws once the attempts are
+ * exhausted, so a persistent failure surfaces instead of degrading silently.
+ *
+ * @param operation - The operation to run
+ * @param label - Label used in warnings and the final error
+ * @returns The operation's result
+ * @throws TestDataHandlerError when all attempts fail
+ */
+async function withRetries<T>(
+  operation: () => Promise<T>,
+  label: string,
+): Promise<T> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= GRAPHQL_MAX_ATTEMPTS; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      console.warn(
+        `[WARN ] - ${label} failed (attempt ${attempt}/${GRAPHQL_MAX_ATTEMPTS}): ${String(error)}`,
+      );
+      if (attempt < GRAPHQL_MAX_ATTEMPTS) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, GRAPHQL_RETRY_DELAY_MS),
+        );
+      }
+    }
+  }
+
+  throw new TestDataHandlerError(
+    `${label} failed after ${GRAPHQL_MAX_ATTEMPTS} attempts`,
+    { originalError: lastError },
+  );
+}
+
+/**
+ * Probes whether the deployed indexer exposes the public contract-events
+ * surface, mirroring qa/tests utils/indexer/contract-events-support.ts: a
+ * healthy schema response that lacks the ContractEvent type returns false,
+ * while a probe that cannot get a healthy answer is retried and then throws —
+ * a transient blip must not be indistinguishable from "feature absent", or a
+ * stale fixture would silently survive a refresh.
+ *
+ * @param graphqlUrl - The indexer GraphQL HTTP endpoint
+ * @returns true when the ContractEvent type is present in the schema
+ * @throws if the surface cannot be determined after retries
+ */
+async function isContractEventsSupported(graphqlUrl: string): Promise<boolean> {
+  return withRetries(async () => {
+    const body = await postGraphQL<{ __type: { name: string } | null }>(
+      graphqlUrl,
+      `query { __type(name: "ContractEvent") { name } }`,
+    );
+
+    // An HTTP 200 carrying GraphQL errors (or no data at all) is an unhealthy
+    // response, not evidence of absence — only a healthy introspection answer
+    // may decide between supported and unsupported.
+    if (body.errors || body.data === undefined) {
+      throw new Error(body.errors?.[0]?.message ?? "no data in probe response");
+    }
+
+    return body.data.__type?.name === "ContractEvent";
+  }, "contract events surface probe");
+}
+
+/**
+ * Queries the indexer for the contract events emitted by a single contract
+ * address and returns the distinct event types (ContractEventType enum
+ * values). The events are fetched with limit/offset pagination until a short
+ * page, so a contract with a long history contributes its full set of event
+ * types rather than the first page only. Only called once the contract-events
+ * surface is known to be present, so GraphQL errors and transport failures
+ * are real failures here: they are retried and then thrown, never treated as
+ * "no events".
+ *
+ * @param graphqlUrl - The indexer GraphQL HTTP endpoint
+ * @param address - The contract address to query events for
+ * @returns Distinct event types emitted by the contract
+ * @throws TestDataHandlerError when a page query keeps failing
+ * @throws ValidationError on a typename missing from EVENT_TYPENAME_TO_EVENT_TYPE
+ */
+async function fetchContractEventTypes(
+  graphqlUrl: string,
+  address: string,
+): Promise<string[]> {
+  const query = `query ContractEventsForAddress($ADDRESS: HexEncoded!, $LIMIT: Int, $OFFSET: Int) {
+    contractEvents(filter: { contractAddress: $ADDRESS }, limit: $LIMIT, offset: $OFFSET) {
+      __typename
+    }
+  }`;
+
+  const eventTypes: Set<string> = new Set();
+
+  for (let offset = 0; ; offset += CONTRACT_EVENTS_PAGE_SIZE) {
+    const page = await withRetries(async () => {
+      const body = await postGraphQL<{
+        contractEvents?: { __typename: string }[];
+      }>(graphqlUrl, query, {
+        ADDRESS: address,
+        LIMIT: CONTRACT_EVENTS_PAGE_SIZE,
+        OFFSET: offset,
+      });
+
+      if (body.errors || !body.data?.contractEvents) {
+        throw new Error(body.errors?.[0]?.message ?? "no data in response");
+      }
+
+      return body.data.contractEvents;
+    }, `contractEvents query for ${address} (offset ${offset})`);
+
+    for (const event of page) {
+      const eventType = EVENT_TYPENAME_TO_EVENT_TYPE[event.__typename];
+      if (!eventType) {
+        // Fail closed: writing a raw typename would put a non-enum value into
+        // a fixture whose consumers only understand ContractEventType values.
+        throw new ValidationError(
+          `Unknown contract event typename "${event.__typename}" for ` +
+            `${address}; add it to EVENT_TYPENAME_TO_EVENT_TYPE before ` +
+            `regenerating contract-events data`,
+          { address, typename: event.__typename },
+        );
+      }
+      eventTypes.add(eventType);
+    }
+
+    if (page.length < CONTRACT_EVENTS_PAGE_SIZE) {
+      break;
+    }
+  }
+
+  return [...eventTypes];
+}
+
+/**
+ * Harvests the contract-events data from the indexer without touching any
+ * file: the contract addresses discovered in the scanned blocks are enriched
+ * via the contractEvents query, and every contract with at least one
+ * persisted event is returned with the distinct event types it emitted.
+ *
+ * Returns null when the deployed indexer does not support the
+ * contract-events surface (determined by an explicit schema probe), so the
+ * caller leaves an existing curated fixture untouched. Transient query
+ * failures are retried and then fail the generation run instead of being
+ * mistaken for missing support — a stale fixture must not silently survive a
+ * refresh. Because this is the only remote-I/O step of the refresh, the
+ * caller runs it before writing any file, keeping the previous snapshot
+ * fully intact when the harvest fails.
+ *
+ * @param sourceBlockData - The data containing the scanned blocks
+ * @returns The contracts with their emitted event types, or null when the
+ *          contract-events surface is not present
+ */
+async function harvestContractEvents(
+  sourceBlockData: string,
+): Promise<ContractWithEvents[] | null> {
+  try {
+    // Parse blocks and collect the distinct contract addresses seen on chain
+    const blocks: Block[] = parseBlockData(sourceBlockData);
+    validateNonEmptyArray(blocks, "Blocks array");
+
+    const addresses: Set<string> = new Set();
+    for (const block of blocks) {
+      for (const transaction of block.transactions) {
+        if (
+          transaction.__typename === "RegularTransaction" &&
+          transaction.contractActions
+        ) {
+          for (const contractAction of transaction.contractActions) {
+            addresses.add(contractAction.address);
+          }
+        }
+      }
+    }
+
+    const graphqlUrl = `${INDEXER_HTTP_URL}/api/${INDEXER_API_VERSION}/graphql`;
+
+    if (!(await isContractEventsSupported(graphqlUrl))) {
+      console.info(
+        "[INFO ] - contract-events surface not present on this environment; " +
+          "leaving any existing contract events data file untouched",
+      );
+      return null;
+    }
+
+    // On a supported environment the fixture must reflect the scanned chain
+    // even when nothing was found — an empty file is a valid refresh, while
+    // skipping the write would let a stale fixture from a previous chain
+    // state (e.g. before a reset) survive.
+    const contractsWithEvents: ContractWithEvents[] = [];
+
+    if (addresses.size === 0) {
+      console.info(
+        "[INFO ] - No contract addresses found in the scanned blocks; " +
+          "writing an empty contract events data file",
+      );
+      return contractsWithEvents;
+    }
+
+    console.info(
+      `[INFO ] - Querying contract events for ${addresses.size} contract(s)`,
+    );
+
+    for (const address of addresses) {
+      const eventTypes = await fetchContractEventTypes(graphqlUrl, address);
+
+      if (eventTypes.length > 0) {
+        contractsWithEvents.push({
+          "contract-address": address,
+          "event-types": eventTypes,
+        });
+      }
+    }
+
+    if (contractsWithEvents.length === 0) {
+      console.info(
+        "[INFO ] - No contracts with emitted events found on this chain",
+      );
+    }
+
+    return contractsWithEvents;
+  } catch (error) {
+    if (error instanceof TestDataHandlerError) {
+      throw error;
+    }
+    throw new TestDataHandlerError("Failed to harvest contract events data", {
+      originalError: error,
+    });
+  }
+}
+
+/**
+ * Writes the harvested contract-events data to the contract events data file.
+ *
+ * @param destinationPath - Path to the test data folder
+ * @param contractsWithEvents - The harvested contracts with their event types
+ */
+function writeContractEventsDataFile(
+  destinationPath: string,
+  contractsWithEvents: ContractWithEvents[],
+): void {
+  try {
+    // Ensure the target directory exists
+    const targetDir: string = ensureTargetDirectory(destinationPath);
+
+    // Build file paths
+    const targetFileName = `contract-events.jsonc`;
+    const { targetFilePath, templateFilePath } = buildFilePaths(
+      targetDir,
+      targetFileName,
+    );
+
+    // Load template and populate with data to preserve comments
+    const templateArray: ContractEventsDataFile =
+      loadTemplateFile<ContractEventsDataFile>(templateFilePath);
+
+    templateArray.length = 0;
+    if (contractsWithEvents.length > 0) {
+      templateArray.push(...contractsWithEvents);
+    }
+
+    // Write the data to the target folder
+    writeJsonFile<ContractEventsDataFile>(
+      targetFilePath,
+      templateArray,
+      `Contract events data file updated: ${destinationPath}/${TARGET_ENV}/contract-events.jsonc`,
+    );
+  } catch (error) {
+    if (error instanceof TestDataHandlerError) {
+      throw error;
+    }
+    throw new TestDataHandlerError(
+      "Failed to update contract events data file",
       { destinationPath, originalError: error },
     );
   }

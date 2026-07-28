@@ -21,6 +21,7 @@ use thiserror::Error;
 pub enum ProtocolVersion {
     V0_22(u32),
     V1_0(u32),
+    V2_0(u32),
 }
 
 impl ProtocolVersion {
@@ -28,6 +29,7 @@ impl ProtocolVersion {
         match self {
             ProtocolVersion::V0_22(_) => LedgerVersion::V8,
             ProtocolVersion::V1_0(_) => LedgerVersion::V8,
+            ProtocolVersion::V2_0(_) => LedgerVersion::V9,
         }
     }
 
@@ -35,6 +37,7 @@ impl ProtocolVersion {
         match self {
             ProtocolVersion::V0_22(_) => NodeVersion::V0_22,
             ProtocolVersion::V1_0(_) => NodeVersion::V1_0,
+            ProtocolVersion::V2_0(_) => NodeVersion::V2_0,
         }
     }
 
@@ -48,6 +51,7 @@ impl From<ProtocolVersion> for u32 {
         match version {
             ProtocolVersion::V0_22(n) => n,
             ProtocolVersion::V1_0(n) => n,
+            ProtocolVersion::V2_0(n) => n,
         }
     }
 }
@@ -69,6 +73,8 @@ impl TryFrom<u32> for ProtocolVersion {
             Ok(Self::V0_22(version))
         } else if (1_000_000..1_001_000).contains(&version) {
             Ok(Self::V1_0(version))
+        } else if (2_000_000..2_001_000).contains(&version) {
+            Ok(Self::V2_0(version))
         } else {
             Err(ProtocolVersionError::Unsupported(version))
         }
@@ -100,17 +106,22 @@ pub enum ProtocolVersionError {
 #[derive(Debug, Display, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LedgerVersion {
     V8,
+    V9,
 }
 
 impl LedgerVersion {
     pub const OLDEST: Self = Self::V8;
-    pub const LATEST: Self = Self::V8;
+    // Dust-query decode version. This build serves ledger-9 chains (devnet and
+    // stagenet under the node 2.0 rollout). Deriving the version per chain
+    // rather than from this constant is the tracked follow-up.
+    pub const LATEST: Self = Self::V9;
 }
 
 #[derive(Debug, Display, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum NodeVersion {
     V0_22,
     V1_0,
+    V2_0,
 }
 
 #[cfg(test)]
@@ -129,6 +140,12 @@ mod tests {
         let version = ProtocolVersion::try_from(0_023_000_u32);
         assert_matches!(version, Err(ProtocolVersionError::Unsupported(v)) if v == 0_023_000);
 
+        let version = ProtocolVersion::try_from(1_001_000_u32);
+        assert_matches!(version, Err(ProtocolVersionError::Unsupported(v)) if v == 1_001_000);
+
+        let version = ProtocolVersion::try_from(2_001_000_u32);
+        assert_matches!(version, Err(ProtocolVersionError::Unsupported(v)) if v == 2_001_000);
+
         let version =
             ProtocolVersion::try_from(0_022_666_u32).expect("0_022_666 is valid protocol version");
         assert_eq!(version.ledger_version(), LedgerVersion::V8);
@@ -138,5 +155,10 @@ mod tests {
             ProtocolVersion::try_from(1_000_000_u32).expect("1_000_000 is valid protocol version");
         assert_eq!(version.ledger_version(), LedgerVersion::V8);
         assert_eq!(version.node_version(), NodeVersion::V1_0);
+
+        let version =
+            ProtocolVersion::try_from(2_000_000_u32).expect("2_000_000 is valid protocol version");
+        assert_eq!(version.ledger_version(), LedgerVersion::V9);
+        assert_eq!(version.node_version(), NodeVersion::V2_0);
     }
 }

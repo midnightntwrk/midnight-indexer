@@ -239,6 +239,160 @@ export interface ContractBalance {
   amount: string;
 }
 
+export type ContractEventResponse = GraphQLResponse<{ contractEvents: ContractEvent[] }>;
+
+/**
+ * The 11 standard contract-event variants per MIP-0002 Appendix A. Mirrors the
+ * `ContractEventType` GraphQL enum used by `ContractEventFilter.types`.
+ */
+export type ContractEventType =
+  | 'SHIELDED_SPEND'
+  | 'SHIELDED_RECEIVE'
+  | 'SHIELDED_MINT'
+  | 'SHIELDED_BURN'
+  | 'UNSHIELDED_SPEND'
+  | 'UNSHIELDED_RECEIVE'
+  | 'UNSHIELDED_MINT'
+  | 'UNSHIELDED_BURN'
+  | 'PAUSED'
+  | 'UNPAUSED'
+  | 'MISC';
+
+export const CONTRACT_EVENT_TYPES: ContractEventType[] = [
+  'SHIELDED_SPEND',
+  'SHIELDED_RECEIVE',
+  'SHIELDED_MINT',
+  'SHIELDED_BURN',
+  'UNSHIELDED_SPEND',
+  'UNSHIELDED_RECEIVE',
+  'UNSHIELDED_MINT',
+  'UNSHIELDED_BURN',
+  'PAUSED',
+  'UNPAUSED',
+  'MISC',
+];
+
+/** Prefix filter on an indexed contract-event field (e.g. nullifier, tokenType). */
+export interface FieldPrefixFilter {
+  fieldName: string;
+  prefix: string;
+}
+
+export interface ContractEventFilter {
+  contractAddress: string;
+  types?: ContractEventType[];
+  fieldPrefixes?: FieldPrefixFilter[];
+  fromBlock?: number;
+  toBlock?: number;
+  transactionHash?: string;
+}
+
+/**
+ * Tagged union for `Either<ZswapCoinPublicKey, ContractAddress>` fields
+ * (UnshieldedSpend/Receive `sender`/`recipient`, UnshieldedBurn `sender`).
+ * Exactly one of `userAddress` / `contractAddress` is populated per `kind`.
+ */
+export interface AddressOrContract {
+  kind: 'USER' | 'CONTRACT';
+  userAddress?: string;
+  contractAddress?: string;
+}
+
+/** Fields common to every concrete contract event (the `ContractEvent` interface). */
+export interface ContractEventBase {
+  __typename: string;
+  id: number;
+  raw: string;
+  maxId: number;
+  protocolVersion: number;
+  version: number;
+  contractAddress: string;
+  transactionId: number;
+  transaction: Transaction;
+}
+
+export interface ShieldedSpendEvent extends ContractEventBase {
+  __typename: 'ShieldedSpendEvent';
+  nullifier: string;
+}
+
+export interface ShieldedReceiveEvent extends ContractEventBase {
+  __typename: 'ShieldedReceiveEvent';
+  commitment: string;
+  ciphertext?: string | null;
+  receivingContractAddress?: string | null;
+}
+
+export interface ShieldedMintEvent extends ContractEventBase {
+  __typename: 'ShieldedMintEvent';
+  commitment: string;
+  domainSep: string;
+  amount?: string | null;
+}
+
+export interface ShieldedBurnEvent extends ContractEventBase {
+  __typename: 'ShieldedBurnEvent';
+  nullifier: string;
+  amount?: string | null;
+}
+
+export interface UnshieldedSpendEvent extends ContractEventBase {
+  __typename: 'UnshieldedSpendEvent';
+  sender: AddressOrContract;
+  domainSep: string;
+  tokenType: string;
+  amount: string;
+}
+
+export interface UnshieldedReceiveEvent extends ContractEventBase {
+  __typename: 'UnshieldedReceiveEvent';
+  recipient: AddressOrContract;
+  domainSep: string;
+  tokenType: string;
+  amount: string;
+}
+
+export interface UnshieldedMintEvent extends ContractEventBase {
+  __typename: 'UnshieldedMintEvent';
+  domainSep: string;
+  tokenType: string;
+  amount: string;
+}
+
+export interface UnshieldedBurnEvent extends ContractEventBase {
+  __typename: 'UnshieldedBurnEvent';
+  sender: AddressOrContract;
+  tokenType: string;
+  amount: string;
+}
+
+export interface PausedEvent extends ContractEventBase {
+  __typename: 'PausedEvent';
+}
+
+export interface UnpausedEvent extends ContractEventBase {
+  __typename: 'UnpausedEvent';
+}
+
+export interface MiscContractEvent extends ContractEventBase {
+  __typename: 'MiscContractEvent';
+  name: string;
+  payload: string;
+}
+
+export type ContractEvent =
+  | ShieldedSpendEvent
+  | ShieldedReceiveEvent
+  | ShieldedMintEvent
+  | ShieldedBurnEvent
+  | UnshieldedSpendEvent
+  | UnshieldedReceiveEvent
+  | UnshieldedMintEvent
+  | UnshieldedBurnEvent
+  | PausedEvent
+  | UnpausedEvent
+  | MiscContractEvent;
+
 export interface DustGenerationStatus {
   cardanoRewardAddress: string;
   dustAddress?: string;
@@ -312,6 +466,127 @@ export type DustGenerationsResponse = GraphQLResponse<{
   dustGenerations: DustGenerations[];
 }>;
 
+// c2m-bridge query surface (#941). Only BridgeUserTransfer carries fully-populated
+// fields today; other variants are discriminated by __typename until data exists.
+export interface BridgeUserTransfer {
+  __typename: 'BridgeUserTransfer';
+  id: number;
+  blockHeight: number;
+  midnightTxHash: string;
+  cardanoTxHash: string;
+  amount: string;
+  recipient: string;
+}
+
+// c2m-bridge pool observability surface (#944).
+export type BridgeTreasuryReason = 'INVALID' | 'UNAPPROVED' | 'SUBMINIMAL_FLUSH';
+
+export const BRIDGE_TREASURY_REASONS: BridgeTreasuryReason[] = [
+  'INVALID',
+  'UNAPPROVED',
+  'SUBMINIMAL_FLUSH',
+];
+
+export interface BridgeTreasuryAggregate {
+  reason: BridgeTreasuryReason;
+  total: string;
+}
+
+export interface BridgePoolSummary {
+  reserveTotal: string;
+  treasuryByReason: BridgeTreasuryAggregate[];
+  subminimumTxCount: number;
+  lastEventBlockHeight: number | null;
+}
+
+export type BridgePoolSummaryResponse = GraphQLResponse<{ bridgePoolSummary: BridgePoolSummary }>;
+
+// Inflow event lists. Only BridgeReserveTransfer carries populated fields today;
+// treasury variants are discriminated by __typename until data exists.
+export interface BridgeReserveTransfer {
+  __typename: 'BridgeReserveTransfer';
+  id: number;
+  blockHeight: number;
+  midnightTxHash: string;
+  cardanoTxHash: string;
+  amount: string;
+}
+
+export interface BridgeEventOther {
+  __typename: string;
+  id?: number;
+  recipient?: string;
+  amount?: string;
+}
+
+export type BridgeEvent = BridgeUserTransfer | BridgeReserveTransfer | BridgeEventOther;
+
+export type BridgeEventsResponse = GraphQLResponse<{ bridgeEvents: BridgeEvent[] }>;
+
+export type BridgeDepositsResponse = GraphQLResponse<{ bridgeDeposits: BridgeEvent[] }>;
+
+export interface BridgeBalance {
+  deposited: string;
+  claimed: string;
+  balance: string;
+}
+
+export type BridgeBalanceResponse = GraphQLResponse<{ bridgeBalance: BridgeBalance }>;
+
+export type BridgeReserveInflowsResponse = GraphQLResponse<{ bridgeReserveInflows: BridgeEvent[] }>;
+
+export type BridgeTreasuryInflowsResponse = GraphQLResponse<{
+  bridgeTreasuryInflows: BridgeEvent[];
+}>;
+
+// #1304: Block.contractZswapState and the composed CCC execution-inputs read.
+export type BlockContractZswapStateResponse = GraphQLResponse<{
+  block: {
+    hash: string;
+    height: number;
+    contractZswapState: string | null;
+  } | null;
+}>;
+
+export type ExecutionInputsResponse = GraphQLResponse<{
+  block: {
+    hash: string;
+    ledgerParameters: string;
+    contractZswapState: string | null;
+  } | null;
+  contract: { state: string } | null;
+}>;
+
+// #1275: top-level Contract type and contract(address, offset) query.
+export type ContractMaintenanceVerifyingKeyKind = 'SCHNORR' | 'ECDSA';
+
+export interface ContractMaintenanceVerifyingKey {
+  kind: ContractMaintenanceVerifyingKeyKind;
+  key: string;
+}
+
+export interface ContractMaintenanceAuthority {
+  committee: ContractMaintenanceVerifyingKey[];
+  threshold: number;
+  counter: number;
+}
+
+export type ContractActionTypeEnum = 'DEPLOY' | 'CALL' | 'UPDATE';
+
+export interface ContractTypeActionRef {
+  __typename: string;
+  address: string;
+}
+
+export interface ContractType {
+  address: string;
+  state: string;
+  maintenanceAuthority: ContractMaintenanceAuthority;
+  actions: ContractTypeActionRef[];
+}
+
+export type ContractResponse = GraphQLResponse<{ contract: ContractType | null }>;
+
 export interface DustCommitmentMerkleTreeUpdateResult {
   startIndex: number;
   endIndex: number;
@@ -373,9 +648,7 @@ export interface DustGenerationDtimeUpdateItem {
 }
 
 export type DustGenerationsEvent =
-  | DustGenerationsItem
-  | DustGenerationsProgress
-  | DustGenerationDtimeUpdateItem;
+  DustGenerationsItem | DustGenerationsProgress | DustGenerationDtimeUpdateItem;
 
 export interface DustNullifierTransaction {
   nullifierLeBytes: string;

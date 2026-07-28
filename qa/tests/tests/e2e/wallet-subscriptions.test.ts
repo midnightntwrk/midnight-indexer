@@ -165,6 +165,11 @@ describe.sequential('wallet event subscriptions', { timeout: 200_000 }, () => {
         const stabilized = await waitForEventsStabilization(emptyEvents, 1000);
         log.debug(`Received ${stabilized.length} events for empty wallet.`);
 
+        // The subscription emits its first progress update immediately (also under the
+        // idle backoff introduced in indexer 4.4.0), so at least one event must have been
+        // captured — without this check `every` would pass vacuously on an empty array.
+        expect(stabilized.length).toBeGreaterThan(0);
+
         const onlyProgressUpdates = stabilized.every((e) => {
           const data = e.data?.unshieldedTransactions;
           return (

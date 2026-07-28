@@ -14,15 +14,33 @@
 // limitations under the License.
 
 import log from '@utils/logging/logger';
+import { env } from 'environment/model';
 import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
 import {
+  ContractBalanceSchema,
   ContractDeployActionSchema,
   ContractCallActionSchema,
   ContractUpdateActionSchema,
 } from '@utils/indexer/graphql/schema';
-import dataProvider from '@utils/testdata-provider';
+import dataProvider, { type TokenHoldingContractInfo } from '@utils/testdata-provider';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
+import { contractEventsSurfacePresent } from '@utils/indexer/contract-events-support';
+
+/** Introspect the field names on a GraphQL type (null when the type is absent). */
+async function introspectFieldNames(typeName: string): Promise<string[] | null> {
+  const query = `query Fields($name: String!) { __type(name: $name) { fields { name } } }`;
+  const response = await fetch(env.getIndexerHttpBaseURL() + '/api/v4/graphql', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, variables: { name: typeName } }),
+  });
+  const json = (await response.json()) as {
+    data?: { __type: { fields: { name: string }[] } | null };
+  };
+  const fields = json.data?.__type?.fields;
+  return fields ? fields.map((f) => f.name) : null;
+}
 
 const indexerHttpClient = new IndexerHttpClient();
 
@@ -106,6 +124,54 @@ describe('contract queries', () => {
         const response = await indexerHttpClient.getContractAction(malformedAddress);
 
         expect.soft(response).toBeError();
+      }
+    });
+
+    /**
+     * A contract known to hold unshielded tokens reports non-empty unshieldedBalances
+     *
+     * Regression test for #1245: unshieldedBalances silently returned an empty array for
+     * every contract from 3.0.0 to 4.3.3, which format-only assertions could not catch.
+     * Requires an indexer with the #1246 fix and repaired history (backfill or re-index);
+     * skipped on environments without configured token-holding contracts.
+     *
+     * @given we have contracts known to hold non-zero unshielded token balances
+     * @when we send a contract query for each of them
+     * @then unshieldedBalances is non-empty, well-formed, has positive amounts, and
+     *       contains the expected token type
+     */
+    test('should return non-empty unshieldedBalances for contracts known to hold tokens', async (ctx: TestContext) => {
+      let tokenHoldingContracts: TokenHoldingContractInfo[];
+      try {
+        tokenHoldingContracts = dataProvider.getTokenHoldingContracts();
+      } catch (error) {
+        log.warn(error);
+        ctx.skip?.(true, (error as Error).message);
+        return;
+      }
+      if (tokenHoldingContracts.length === 0) {
+        ctx.skip?.(true, 'no token-holding contracts configured for this environment');
+        return;
+      }
+
+      for (const contract of tokenHoldingContracts) {
+        const response = await indexerHttpClient.getContractAction(contract['contract-address']);
+
+        expect(response).toBeSuccess();
+        const balances = response.data?.contractAction?.unshieldedBalances;
+        expect(balances).toBeDefined();
+        expect(balances!.length).toBeGreaterThan(0);
+
+        for (const balance of balances!) {
+          expect(ContractBalanceSchema.safeParse(balance).success).toBe(true);
+          expect(BigInt(balance.amount)).toBeGreaterThan(0n);
+        }
+
+        if (contract['token-type'] !== undefined) {
+          expect(balances!.map((balance) => balance.tokenType.toLowerCase())).toContain(
+            contract['token-type'].toLowerCase(),
+          );
+        }
       }
     });
   });
@@ -546,6 +612,55 @@ describe('contract queries', () => {
 
       expect(response).toBeSuccess();
       expect(response.data?.contractAction).toBeNull();
+    });
+  });
+
+  describe('the contractEvents field on contract actions', () => {
+    let surfacePresent = false;
+
+    beforeAll(async () => {
+      surfacePresent = await contractEventsSurfacePresent();
+    }, 30_000);
+
+    /**
+     * ContractCall exposes the nested contractEvents field.
+     *
+     * Only ContractCall executes circuits and can therefore emit events, so the
+     * field is exposed there. Gated on the contract events surface being present.
+     *
+     * @given a deployed indexer exposing the contract events surface
+     * @when the ContractCall type is introspected
+     * @then it exposes a contractEvents field
+     */
+    test('should expose contractEvents on ContractCall', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Query', 'ContractEvents', 'SchemaValidation'] };
+      if (!surfacePresent) return ctx.skip?.(true, 'contract events surface not present');
+
+      const fields = await introspectFieldNames('ContractCall');
+      expect(fields, 'ContractCall type not found in schema').not.toBeNull();
+      expect(fields).toContain('contractEvents');
+    });
+
+    /**
+     * ContractDeploy and ContractUpdate never expose the contractEvents field.
+     *
+     * They do not execute circuits and therefore emit no events; the nested field
+     * must not leak onto them. This invariant holds on every environment.
+     *
+     * @given the deployed indexer GraphQL schema
+     * @when the ContractDeploy and ContractUpdate types are introspected
+     * @then neither exposes a contractEvents field
+     */
+    test('should not expose contractEvents on ContractDeploy or ContractUpdate', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Query', 'ContractEvents', 'SchemaValidation'] };
+
+      for (const typeName of ['ContractDeploy', 'ContractUpdate']) {
+        const fields = await introspectFieldNames(typeName);
+        expect(fields, `${typeName} type not found in schema`).not.toBeNull();
+        expect(fields, `${typeName} must not expose contractEvents`).not.toContain(
+          'contractEvents',
+        );
+      }
     });
   });
 });

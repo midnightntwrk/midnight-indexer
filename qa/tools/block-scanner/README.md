@@ -100,7 +100,11 @@ The scanner creates:
   - `contractActionsFound` — Number of blocks with contract actions
   - `totalScanDurationSeconds` — Cumulative scan duration in seconds
   - `lastUpdated` — ISO timestamp of last update
-- `*.jsonc` — A number of jsonc files created from the templates which are needed as Indexer test data (when a test data folder path is provided)
+- `*.jsonc` — A number of jsonc files created from the templates which are needed as Indexer test data (when a test data folder path is provided):
+  - `blocks.jsonc` — genesis/latest and up to 100 recent block hashes
+  - `transactions.jsonc` — regular and system transaction hashes/identifiers
+  - `contract-actions.jsonc` — contracts having both a deploy and a call, with per-action block references
+  - `contract-events.jsonc` — contracts that emitted public contract events (MIP-0002), with the distinct event types each emitted. The contract addresses discovered in the scan are enriched via the indexer's `contractEvents` query; a schema probe decides support, so on environments whose indexer predates that query the file is left untouched (a curated fixture is not destroyed), while transient query failures are retried and then fail the run rather than being mistaken for missing support. Because contract addresses do not survive a chain reset, re-running `bun run generate:data` after a reset refreshes this file (and the others) to the live chain.
 
 ## Troubleshooting
 

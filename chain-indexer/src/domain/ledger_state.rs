@@ -19,8 +19,14 @@ use indexer_common::domain::{
     NetworkId, SerializedContractAddress, SerializedLedgerStateKey, TransactionHash,
     ledger::{self, LedgerParameters},
 };
-use std::ops::DerefMut;
+use std::{collections::HashSet, ops::DerefMut};
 use thiserror::Error;
+
+/// Amount, in milliseconds, by which the first regular transaction's dust-validity `tblock` is
+/// bumped ahead of block time. The node validates mempool transactions against a `tblock` bumped
+/// `slot_duration_secs + skipped_slots_margin` (one slot each, two slots by default) ahead of block
+/// time. Midnight slots are 6s, so the default bump is two slots. Block timestamps are milliseconds.
+const MEMPOOL_TBLOCK_BUMP_MILLIS: u64 = 2 * 6_000;
 
 /// New type for ledger state from indexer_common.
 #[derive(Debug, Clone, From, Deref)]
@@ -64,7 +70,45 @@ impl LedgerState {
             .map(Into::into)
     }
 
+    /// Unpersist a previously-persisted ledger state by its serialized key.
+    /// Balances a prior `persist()` call so storage-core's gc-v1 can reclaim
+    /// the now-unreachable arena nodes on a subsequent `gc()` pass.
+    pub fn unpersist(
+        key: &SerializedLedgerStateKey,
+        ledger_version: LedgerVersion,
+    ) -> Result<(), Error> {
+        indexer_common::domain::ledger::LedgerState::unpersist(key, ledger_version)
+            .map_err(Error::Unpersist)
+    }
+
+    /// The raw arena hash bytes of a serialized ledger state key, e.g. to check membership in
+    /// [Self::persisted_root_hashes].
+    pub fn root_hash_bytes(
+        key: &SerializedLedgerStateKey,
+        ledger_version: LedgerVersion,
+    ) -> Result<Vec<u8>, indexer_common::domain::ledger::Error> {
+        indexer_common::domain::ledger::LedgerState::root_hash_bytes(key, ledger_version)
+    }
+
+    /// The raw arena hash bytes of all currently persisted gc roots, fetched from the ledger DB.
+    pub fn persisted_root_hashes() -> HashSet<Vec<u8>> {
+        indexer_common::domain::ledger::LedgerState::persisted_root_hashes()
+    }
+
+    /// Run a time-bounded mark-and-sweep gc on the ledger DB and return the
+    /// number of arena nodes culled.
+    pub fn gc(bound: std::time::Duration) -> usize {
+        indexer_common::domain::ledger::LedgerState::gc(bound)
+    }
+
     /// Apply the given node transactions to this ledger state and return domain transactions.
+    ///
+    /// `bump_first_regular_tblock` selects whether the node's mempool-cached validity result is
+    /// reproduced for the first regular transaction (see below). It must be `false` for the genesis
+    /// block (height 0): the transactions embedded in genesis never transited the mempool, so the
+    /// node never cached a bumped result for them and validated them against the real block time.
+    /// Bumping them would push the well-formed `tblock` past a bootstrap transaction's intent TTL
+    /// and wrongly reject it.
     #[trace(properties = { "parent_block_hash": "{parent_block_hash}" })]
     pub fn apply_transactions(
         &mut self,
@@ -72,16 +116,43 @@ impl LedgerState {
         parent_block_hash: BlockHash,
         block_timestamp: u64,
         parent_block_timestamp: u64,
+        bump_first_regular_tblock: bool,
     ) -> Result<(Vec<Transaction>, LedgerParameters), Error> {
+        // The node validates a mempool transaction against a `tblock` bumped two slots ahead of the
+        // *parent* (last produced) block's time, then caches the well-formed result keyed on
+        // (tx_hash, ledger_state_key). At block inclusion only the first regular transaction still
+        // matches that key, so the node reuses the cached (bumped) validity result and skips
+        // re-checking it against the real block time; later transactions get a fresh check against
+        // block time. The bump base is the parent block time (`get_block_context().tblock` during
+        // pool validation still holds the last produced block's timestamp; see the node's
+        // `pallet-midnight` `validate_unsigned`), NOT the current block time — bumping from the
+        // current block overshoots by the inter-block gap and can push `tblock` past a
+        // transaction's intent TTL, wrongly rejecting a tx the node accepted.
+        //
+        // Reproduce that by bumping only the first regular transaction's well-formed `tblock` off
+        // the parent block time. `apply` always runs against the real block time, so the resulting
+        // state matches the node.
+        let mut first_regular_transaction = true;
         let transactions = transactions
             .into_iter()
             .map(|transaction| match transaction {
-                node::Transaction::Regular(transaction) => self.apply_regular_transaction(
-                    transaction,
-                    parent_block_hash,
-                    block_timestamp,
-                    parent_block_timestamp,
-                ),
+                node::Transaction::Regular(transaction) => {
+                    let well_formed_timestamp =
+                        if first_regular_transaction && bump_first_regular_tblock {
+                            parent_block_timestamp + MEMPOOL_TBLOCK_BUMP_MILLIS
+                        } else {
+                            block_timestamp
+                        };
+                    first_regular_transaction = false;
+
+                    self.apply_regular_transaction(
+                        transaction,
+                        parent_block_hash,
+                        block_timestamp,
+                        parent_block_timestamp,
+                        well_formed_timestamp,
+                    )
+                }
 
                 node::Transaction::System(transaction) => {
                     self.apply_system_transaction(transaction, block_timestamp)
@@ -103,7 +174,8 @@ impl LedgerState {
 
     #[trace(properties = {
         "parent_block_hash": "{parent_block_hash}",
-        "block_timestamp": "{block_timestamp}"
+        "block_timestamp": "{block_timestamp}",
+        "well_formed_timestamp": "{well_formed_timestamp}"
     })]
     fn apply_regular_transaction(
         &mut self,
@@ -111,6 +183,7 @@ impl LedgerState {
         parent_block_hash: BlockHash,
         block_timestamp: u64,
         parent_block_timestamp: u64,
+        well_formed_timestamp: u64,
     ) -> Result<Transaction, Error> {
         let mut transaction = RegularTransaction::from(transaction);
 
@@ -124,6 +197,7 @@ impl LedgerState {
             spent_unshielded_utxos,
             ledger_events,
             fees,
+            bridge_claim,
         } = self
             .0
             .apply_regular_transaction(
@@ -131,6 +205,7 @@ impl LedgerState {
                 parent_block_hash,
                 block_timestamp,
                 parent_block_timestamp,
+                well_formed_timestamp,
             )
             .map_err(|error| Error::ApplyRegularTransaction(Some(transaction.hash), error))?;
 
@@ -151,6 +226,7 @@ impl LedgerState {
         transaction.ledger_events = ledger_events;
         transaction.paid_fees = fees;
         transaction.estimated_fees = fees;
+        transaction.bridge_claim = bridge_claim;
 
         // Update contract actions.
         for contract_action in transaction.contract_actions.iter_mut() {
@@ -223,6 +299,9 @@ pub enum Error {
 
     #[error(transparent)]
     Translate(indexer_common::domain::ledger::Error),
+
+    #[error(transparent)]
+    Unpersist(indexer_common::domain::ledger::Error),
 
     #[error("cannot apply regular transaction {hash}", hash = stringify_hash(.0))]
     ApplyRegularTransaction(

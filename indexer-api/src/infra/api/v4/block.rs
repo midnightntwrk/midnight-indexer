@@ -14,7 +14,7 @@
 use crate::{
     domain::{self, storage::Storage},
     infra::api::{
-        ApiResult, ContextExt, ResultExt,
+        ApiResult, ContextExt, OptionExt, ResultExt,
         v4::{
             HexEncodable, HexEncoded,
             directives::beta,
@@ -68,8 +68,19 @@ where
     #[graphql(directive = beta::apply())]
     dust_generation_end_index: u64,
 
+    /// The hex-encoded dust commitment Merkle tree root at this block.
+    #[graphql(directive = beta::apply())]
+    dust_commitment_merkle_tree_root: Option<HexEncoded>,
+
+    /// The hex-encoded dust generation Merkle tree root at this block.
+    #[graphql(directive = beta::apply())]
+    dust_generation_merkle_tree_root: Option<HexEncoded>,
+
     #[graphql(skip)]
     id: u64,
+
+    #[graphql(skip)]
+    raw_hash: BlockHash,
 
     #[graphql(skip)]
     parent_hash: BlockHash,
@@ -134,32 +145,64 @@ where
         })
     }
 
-    /// The hex-encoded dust commitment Merkle tree root at the latest indexed state.
-    async fn dust_commitment_merkle_tree_root(
+    /// The zswap commitment tree filtered to the given contract address, resolved from this
+    /// block's ledger state; null if the contract does not exist at this block. Hex-encoded.
+    /// For building transactions, compose with `ledgerParameters` and `contract { state }` in
+    /// one request, anchored to the same block; use the latest block: older trees age out of
+    /// the ledger's root window, and blocks beyond the chain-indexer's ledger state retention
+    /// window no longer have a loadable ledger state and yield an error.
+    #[graphql(directive = beta::apply())]
+    async fn contract_zswap_state(
         &self,
         cx: &Context<'_>,
+        address: HexEncoded,
     ) -> ApiResult<Option<HexEncoded>> {
-        let ledger_state_cache = cx.get_ledger_state_cache();
         let storage = cx.get_storage::<S>();
 
-        match ledger_state_cache.dust_merkle_tree_roots(storage).await {
-            Ok(roots) => Ok(Some(roots.commitment_root.hex_encode())),
-            Err(_) => Ok(None),
-        }
-    }
+        let address = &address
+            .hex_decode()
+            .map_err_into_client_error(|| "invalid address")?;
 
-    /// The hex-encoded dust generation Merkle tree root at the latest indexed state.
-    async fn dust_generation_merkle_tree_root(
-        &self,
-        cx: &Context<'_>,
-    ) -> ApiResult<Option<HexEncoded>> {
-        let ledger_state_cache = cx.get_ledger_state_cache();
-        let storage = cx.get_storage::<S>();
-
-        match ledger_state_cache.dust_merkle_tree_roots(storage).await {
-            Ok(roots) => Ok(Some(roots.generation_root.hex_encode())),
-            Err(_) => Ok(None),
+        // Null when the contract does not exist as of this block.
+        if !storage
+            .contract_action_exists_by_address_as_of_block_hash(address, self.raw_hash)
+            .await
+            .map_err_into_server_error(|| {
+                format!(
+                    "check contract existence for address {address} as of block {}",
+                    self.hash
+                )
+            })?
+        {
+            return Ok(None);
         }
+
+        let (_, _, protocol_version, ledger_state_key) = storage
+            .get_ledger_state_at(self.raw_hash)
+            .await
+            .map_err_into_server_error(|| format!("get ledger state at block {}", self.hash))?
+            .some_or_server_error(|| format!("no ledger state for block {}", self.hash))?;
+
+        // Verify the root node is still in the ledger DB before loading: loading culled state
+        // panics inside storage-core rather than returning an error, so this check is what
+        // turns a block beyond the chain-indexer's ledger_state_retention into a clean client
+        // error.
+        domain::LedgerState::root_loadable(&ledger_state_key, protocol_version.ledger_version())
+            .map_err_into_server_error(|| "check ledger state availability")?
+            .then_some(())
+            .some_or_client_error(
+                || "ledger state for this block is no longer available, query a more recent block",
+            )?;
+
+        let ledger_state =
+            domain::LedgerState::load(&ledger_state_key, protocol_version.ledger_version())
+                .map_err_into_server_error(|| "load ledger state")?;
+
+        let zswap_state = ledger_state
+            .extract_contract_zswap_state(address)
+            .map_err_into_server_error(|| format!("extract zswap state for contract {address}"))?;
+
+        Ok(Some(zswap_state.hex_encode()))
     }
 }
 
@@ -181,6 +224,8 @@ where
             zswap_end_index,
             dust_commitment_end_index,
             dust_generation_end_index,
+            dust_commitment_merkle_tree_root,
+            dust_generation_merkle_tree_root,
         } = value;
 
         Block {
@@ -194,7 +239,12 @@ where
             zswap_end_index,
             dust_commitment_end_index,
             dust_generation_end_index,
+            dust_commitment_merkle_tree_root: dust_commitment_merkle_tree_root
+                .map(|root| root.hex_encode()),
+            dust_generation_merkle_tree_root: dust_generation_merkle_tree_root
+                .map(|root| root.hex_encode()),
             id,
+            raw_hash: hash,
             parent_hash,
             _s: PhantomData,
         }

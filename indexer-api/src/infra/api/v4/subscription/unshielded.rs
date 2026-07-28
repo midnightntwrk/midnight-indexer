@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use super::polling::{jittered, next_poll_interval};
 use crate::{
     domain::{self, storage::Storage},
     infra::api::{
@@ -26,13 +27,12 @@ use async_stream::try_stream;
 use derive_more::Debug;
 use drop_stream::DropStreamExt;
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
-use futures::{Stream, StreamExt, TryStreamExt};
+use futures::{Stream, TryStreamExt};
 use indexer_common::domain::{NetworkId, Subscriber, UnshieldedUtxoIndexed};
 use log::{debug, warn};
 use std::{future::ready, marker::PhantomData, pin::pin};
 use stream_cancel::{StreamExt as _, Trigger, Tripwire};
-use tokio::time::interval;
-use tokio_stream::wrappers::IntervalStream;
+use tokio::time::sleep;
 
 /// An event of the unshielded transactions subscription.
 #[derive(Debug, Union)]
@@ -270,33 +270,41 @@ where
     S: Storage,
 {
     let storage = cx.get_storage::<S>();
-    let progress_update_interval = cx
+    let progress_cache = cx.get_progress_cache();
+    let base = cx
         .get_subscription_config()
         .unshielded_transactions
         .progress_update_interval;
 
-    let intervals = IntervalStream::new(interval(progress_update_interval));
-    intervals.then(move |_| make_progress_update(address, storage))
-}
-
-async fn make_progress_update<S>(
-    address: indexer_common::domain::UnshieldedAddress,
-    storage: &S,
-) -> ApiResult<UnshieldedTransactionsProgress>
-where
-    S: Storage,
-{
-    // Calculate progress information using transaction IDs.
-    let highest_transaction_id = storage
-        .get_highest_transaction_id_for_unshielded_address(address)
-        .await
-        .map_err_into_server_error(|| "get highest transaction ID for address")?;
-
-    let highest_transaction_id = highest_transaction_id.unwrap_or(0);
-
-    Ok(UnshieldedTransactionsProgress {
-        highest_transaction_id,
-    })
+    // Emit progress immediately, then re-poll after a jittered interval that
+    // backs off while the highest transaction ID is unchanged (idle) and resets
+    // when it moves. The cache lets concurrent subscribers for the same address
+    // share one query.
+    let mut current_interval = base;
+    let mut last_highest_transaction_id = None;
+    try_stream! {
+        loop {
+            let highest_transaction_id = progress_cache
+                .unshielded_highest_transaction_id(address, async {
+                    storage
+                        .get_highest_transaction_id_for_unshielded_address(address)
+                        .await
+                        .map_err_into_server_error(|| "get highest transaction ID for address")
+                })
+                .await?
+                .unwrap_or(0);
+            current_interval = next_poll_interval(
+                current_interval,
+                base,
+                last_highest_transaction_id != Some(highest_transaction_id),
+            );
+            last_highest_transaction_id = Some(highest_transaction_id);
+            yield UnshieldedTransactionsProgress {
+                highest_transaction_id,
+            };
+            sleep(jittered(current_interval)).await;
+        }
+    }
 }
 
 async fn get_next_transaction<E>(

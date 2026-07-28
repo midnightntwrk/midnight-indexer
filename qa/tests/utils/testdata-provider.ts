@@ -33,6 +33,34 @@ export interface ContractInfo {
 }
 
 /**
+ * A contract known to have emitted public contract events (MIP-0002) on the
+ * current environment's chain. Used by the contract-event integration tests to
+ * assert real emitted-event payloads. Sourced from
+ * `data/static/<env>/contract-events.jsonc`; absent until a test-data path that
+ * deploys and calls an emit-bearing contract is wired for the environment, so
+ * the data-dependent assertions skip until then.
+ */
+export interface EventEmittingContractInfo {
+  /** Hex-encoded contract address that emitted at least one contract event. */
+  'contract-address': string;
+  /** Optional contract-event type names expected among the emitted events. */
+  'event-types'?: string[];
+}
+
+/**
+ * A contract known to hold a non-zero unshielded token balance on the current
+ * environment's chain. Used by the unshieldedBalances regression tests (#1245):
+ * the field silently returned an empty array for every contract from 3.0.0 to
+ * 4.3.3, which format-only assertions could not catch.
+ */
+export interface TokenHoldingContractInfo {
+  /** Hex-encoded contract address. */
+  'contract-address': string;
+  /** Hex-encoded unshielded token type expected among the contract's balances. */
+  'token-type'?: string;
+}
+
+/**
  * Snapshot of a Cardano stake credential whose wallet has multiple backing
  * cNIGHT UTXOs. Used by the `dustGenerationStatus` aggregation test (#926):
  * the test asserts the indexer's reported `nightBalance` matches
@@ -149,9 +177,10 @@ class TestDataProvider {
     let contracts: ContractInfo[];
     try {
       contracts = importJsoncData(`${baseDir}/contract-actions.jsonc`) as unknown as ContractInfo[];
-    } catch (_) {
+    } catch (error) {
       throw new Error(
         `Test data provider is missing the contract actions file for ${envName} environment`,
+        { cause: error },
       );
     }
 
@@ -230,9 +259,10 @@ class TestDataProvider {
     let contracts: ContractInfo[];
     try {
       contracts = importJsoncData(`${baseDir}/contract-actions.jsonc`) as unknown as ContractInfo[];
-    } catch (_) {
+    } catch (error) {
       throw new Error(
         `Test data provider is missing the contract actions file for ${envName} environment`,
+        { cause: error },
       );
     }
     for (const contract of contracts) {
@@ -329,9 +359,10 @@ class TestDataProvider {
     let contracts: ContractInfo[];
     try {
       contracts = importJsoncData(`${baseDir}/contract-actions.jsonc`) as unknown as ContractInfo[];
-    } catch (_) {
+    } catch (error) {
       throw new Error(
         `Test data provider is missing the contract actions file for ${envName} environment`,
+        { cause: error },
       );
     }
     if (contracts.length === 0 || !contracts[0]['contract-address']) {
@@ -340,6 +371,35 @@ class TestDataProvider {
       );
     }
     return contracts[0]['contract-address'];
+  }
+
+  /**
+   * Returns the contracts known to have emitted public contract events on the
+   * current environment's chain, for the contract-event integration tests.
+   * @returns A non-empty list of event-emitting contracts.
+   * @throws Error if the fixture file is missing or empty for the current
+   *         environment, so the data-dependent event assertions skip cleanly.
+   */
+  getEventEmittingContracts(): EventEmittingContractInfo[] {
+    const envName = env.getCurrentEnvironmentName();
+    const baseDir = `data/static/${envName}`;
+    let contracts: EventEmittingContractInfo[];
+    try {
+      contracts = importJsoncData(
+        `${baseDir}/contract-events.jsonc`,
+      ) as unknown as EventEmittingContractInfo[];
+    } catch (error) {
+      throw new Error(
+        `Test data provider is missing the contract events file for ${envName} environment`,
+        { cause: error },
+      );
+    }
+    if (contracts.length === 0 || !contracts[0]['contract-address']) {
+      throw new Error(
+        `Test data provider is missing event-emitting contract data for ${envName} environment`,
+      );
+    }
+    return contracts;
   }
 
   /**
@@ -416,9 +476,10 @@ class TestDataProvider {
         this.cardanoRewardAddresses = importJsoncData(
           `${baseDir}/cardano-stake-addresses.jsonc`,
         ) as Record<string, string>;
-      } catch (_) {
+      } catch (error) {
         throw new Error(
           `Test data provider is missing the cardano stake address file for ${envName} environment`,
+          { cause: error },
         );
       }
     }
@@ -448,9 +509,10 @@ class TestDataProvider {
       let parsed: JsonValue;
       try {
         parsed = importJsoncData(`${baseDir}/cardano-stake-addresses.jsonc`);
-      } catch (_) {
+      } catch (error) {
         throw new Error(
           `Test data provider is missing the cardano stake address file for ${envName} environment`,
+          { cause: error },
         );
       }
       const candidates = (parsed as JsonObject)['multi-utxo'];
@@ -459,6 +521,27 @@ class TestDataProvider {
         : [];
     }
     return this.multiUtxoCandidates;
+  }
+
+  /**
+   * Gets the contracts known to hold non-zero unshielded token balances on the current
+   * environment's chain. Used by the unshieldedBalances regression tests (#1245).
+   * @returns An array of token-holding contract entries.
+   * @throws Error if the current environment has no token-holding contracts file.
+   */
+  getTokenHoldingContracts(): TokenHoldingContractInfo[] {
+    const envName = env.getCurrentEnvironmentName();
+    const baseDir = `data/static/${envName}`;
+    let contracts: JsonValue;
+    try {
+      contracts = importJsoncData(`${baseDir}/token-holding-contracts.jsonc`);
+    } catch (error) {
+      throw new Error(
+        `Test data provider is missing the token holding contracts file for ${envName} environment`,
+        { cause: error },
+      );
+    }
+    return Array.isArray(contracts) ? (contracts as unknown as TokenHoldingContractInfo[]) : [];
   }
 
   /**

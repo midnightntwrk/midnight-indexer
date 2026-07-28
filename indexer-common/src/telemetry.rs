@@ -37,7 +37,7 @@ use fastrace_tracing::FastraceCompatLayer;
 use logforth::{
     append::{FastraceEvent, Stdout},
     diagnostic::FastraceDiagnostic,
-    filter::env_filter::EnvFilterBuilder,
+    filter::rustlog::RustLogFilterBuilder,
     layout::JsonLayout,
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
@@ -108,7 +108,7 @@ pub fn init_logging() {
     logforth::starter_log::builder()
         .dispatch(|dispatch| {
             dispatch
-                .filter(EnvFilterBuilder::from_default_env().build())
+                .filter(RustLogFilterBuilder::from_default_env().build())
                 .diagnostic(FastraceDiagnostic::default())
                 .append(Stdout::default().with_layout(JsonLayout::default()))
                 .append(FastraceEvent::default())

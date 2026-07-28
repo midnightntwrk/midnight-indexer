@@ -13,6 +13,7 @@
 
 mod v0_22_0;
 mod v1_0_0;
+mod v2_0_0;
 
 // To see how this is generated, look in build.rs
 include!(concat!(env!("OUT_DIR"), "/generated_runtime.rs"));
@@ -30,6 +31,10 @@ pub struct BlockDetails {
     pub timestamp: Option<u64>,
     pub transactions: Vec<Transaction>,
     pub dust_registration_events: Vec<DustRegistrationEvent>,
+    /// c2m-bridge events. Only populated for node 2.0+, where the
+    /// `c2m-bridge` pallet exists in the runtime metadata. Empty for earlier
+    /// node versions (the pallet did not yet exist there).
+    pub bridge_events: Vec<indexer_common::domain::bridge::BridgeEvent>,
 }
 
 /// Runtime specific (serialized) transaction.
@@ -48,6 +53,7 @@ pub async fn make_block_details(
     match node_version {
         NodeVersion::V0_22 => v0_22_0::make_block_details(authorities, block).await,
         NodeVersion::V1_0 => v1_0_0::make_block_details(authorities, block).await,
+        NodeVersion::V2_0 => v2_0_0::make_block_details(authorities, block).await,
     }
 }
 
@@ -59,6 +65,7 @@ pub async fn fetch_authorities(
     match node_version {
         NodeVersion::V0_22 => v0_22_0::fetch_authorities(block).await,
         NodeVersion::V1_0 => v1_0_0::fetch_authorities(block).await,
+        NodeVersion::V2_0 => v2_0_0::fetch_authorities(block).await,
     }
 }
 
@@ -67,6 +74,7 @@ pub fn decode_slot(slot: &[u8], node_version: NodeVersion) -> Result<u64, SubxtN
     match node_version {
         NodeVersion::V0_22 => v0_22_0::decode_slot(slot),
         NodeVersion::V1_0 => v1_0_0::decode_slot(slot),
+        NodeVersion::V2_0 => v2_0_0::decode_slot(slot),
     }
 }
 
@@ -79,6 +87,7 @@ pub async fn get_contract_state(
     match node_version {
         NodeVersion::V0_22 => v0_22_0::get_contract_state(address, block).await,
         NodeVersion::V1_0 => v1_0_0::get_contract_state(address, block).await,
+        NodeVersion::V2_0 => v2_0_0::get_contract_state(address, block).await,
     }
 }
 
@@ -89,6 +98,7 @@ pub async fn get_zswap_merkle_tree_root(
     match node_version {
         NodeVersion::V0_22 => v0_22_0::get_zswap_merkle_tree_root(block).await,
         NodeVersion::V1_0 => v1_0_0::get_zswap_merkle_tree_root(block).await,
+        NodeVersion::V2_0 => v2_0_0::get_zswap_merkle_tree_root(block).await,
     }
 }
 
@@ -100,6 +110,7 @@ pub async fn get_ledger_state_root(
     match node_version {
         NodeVersion::V0_22 => v0_22_0::get_ledger_state_root(block).await,
         NodeVersion::V1_0 => v1_0_0::get_ledger_state_root(block).await,
+        NodeVersion::V2_0 => v2_0_0::get_ledger_state_root(block).await,
     }
 }
 
@@ -111,6 +122,7 @@ pub async fn get_d_parameter(
     match node_version {
         NodeVersion::V0_22 => v0_22_0::get_d_parameter(block).await,
         NodeVersion::V1_0 => v1_0_0::get_d_parameter(block).await,
+        NodeVersion::V2_0 => v2_0_0::get_d_parameter(block).await,
     }
 }
 
@@ -124,6 +136,7 @@ pub async fn fetch_genesis_cnight_registrations(
     match node_version {
         NodeVersion::V0_22 => v0_22_0::fetch_genesis_cnight_registrations(block).await,
         NodeVersion::V1_0 => v1_0_0::fetch_genesis_cnight_registrations(block).await,
+        NodeVersion::V2_0 => v2_0_0::fetch_genesis_cnight_registrations(block).await,
     }
 }
 
@@ -135,5 +148,6 @@ pub async fn get_terms_and_conditions(
     match node_version {
         NodeVersion::V0_22 => v0_22_0::get_terms_and_conditions(block).await,
         NodeVersion::V1_0 => v1_0_0::get_terms_and_conditions(block).await,
+        NodeVersion::V2_0 => v2_0_0::get_terms_and_conditions(block).await,
     }
 }

@@ -14,7 +14,7 @@
   "dependencies": {
     "comment-json": "^4.4.1",
     "graphql-ws": "^6.0.5",
-    "ws": "^8.18.2"
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@types/bun": "^1.2.23",

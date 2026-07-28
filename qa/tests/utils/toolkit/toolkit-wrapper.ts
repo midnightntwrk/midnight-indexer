@@ -87,8 +87,20 @@ export interface DeployContractResult {
 const TOOLKIT_BIN = '/midnight-node-toolkit';
 const CONTRACT_SIMPLE = 'contract-simple';
 const DEFAULT_RNG_SEED = '0000000000000000000000000000000000000000000000000000000000000037';
+// Default coin/funding seed used by the toolkit minter e2e (matches the node-repo
+// scripts/tests/toolkit-tokens-minter-e2e.sh). Used by deployMintSendUnshielded (#1253).
+const DEFAULT_FUNDING_SEED = '0000000000000000000000000000000000000000000000000000000000000001';
 const DEFAULT_NEW_AUTHORITY_SEED =
   '1000000000000000000000000000000000000000000000000000000000000001';
+
+// Human-readable description of the schema `getDustBalance` accepts, reused in its error
+// messages so a mismatch reports expected-vs-actual rather than a cryptic "structure not found".
+const DUST_BALANCE_EXPECTED = [
+  'Expected one of:',
+  '  (1) full DustBalance object: { generation_infos: Array<…>, source: Record<hexKey, number>, total: number }',
+  '  (2) source-only object:      Record<hexKey, number>',
+  '  where hexKey is an even-length lowercase hex string (whole bytes, any length).',
+].join('\n');
 
 class ToolkitWrapper {
   private container: GenericContainer;
@@ -467,6 +479,7 @@ class ToolkitWrapper {
           throw new Error(
             `[SETUP] Cache warmup exhausted ${MAX_ATTEMPTS} RPC-timeout retries; ` +
               `node RPC appears unreachable. Last error: ${error}`,
+            { cause: error },
           );
         }
         // Any non-timeout error means the sync completed and the tx failed for an expected
@@ -664,20 +677,34 @@ class ToolkitWrapper {
 
     if (jsonObjects.length === 0) {
       throw new Error(
-        `Could not find any JSON objects in dust-balance output. Output: ${output.substring(0, 500)}...`,
+        'Could not parse dust-balance output: no JSON object found ' +
+          '(the toolkit usually emits this when it could not reach the node / produce a balance).\n' +
+          `${DUST_BALANCE_EXPECTED}\n` +
+          `Actual toolkit output:\n${output.substring(0, 1000)}`,
       );
     }
 
-    // Try to find the JSON object with the expected structure using schema validation
-    const fullObject = this.parseFirstValid(jsonObjects, DustBalanceSchema);
-
-    if (fullObject) {
-      return fullObject;
+    // Try to find the JSON object matching the full schema, capturing per-object validation
+    // errors so a mismatch can be reported precisely (expected vs actual) instead of cryptically.
+    const fullSchemaErrors: string[] = [];
+    for (const jsonString of jsonObjects) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(jsonString);
+      } catch {
+        continue; // not valid JSON (e.g. a Rust Debug-formatted struct), skip
+      }
+      const validation = DustBalanceSchema.safeParse(parsed);
+      if (validation.success) {
+        return validation.data;
+      }
+      fullSchemaErrors.push(this.formatZodIssues(validation.error));
     }
 
-    // If we didn't find the full structure, check if we have just the source object
-    // The toolkit may output only the source object, in which case we construct the response
+    // Fallback: the toolkit may emit only the `source` map. Accept that shape and synthesise
+    // the rest. Capture why it failed too, for the error message below.
     const lastJsonString = jsonObjects[jsonObjects.length - 1];
+    let sourceOnlyError = 'last JSON object was not parseable as JSON';
     try {
       const parsed: unknown = JSON.parse(lastJsonString);
       const sourceValidation = DustBalanceSchema.shape.source.safeParse(parsed);
@@ -690,15 +717,36 @@ class ToolkitWrapper {
           total: total,
         };
       }
+      sourceOnlyError = this.formatZodIssues(sourceValidation.error);
     } catch {
-      log.error(
-        `Could not find expected dust balance structure in output. Found ${jsonObjects.length} JSON object(s).`,
-      );
+      // keep the default sourceOnlyError
     }
 
+    // Nothing matched — build an actionable expected-vs-actual error.
+    const actual = jsonObjects
+      .map((j, i) => `  [${i}] ${j.length > 1000 ? `${j.slice(0, 1000)}… (truncated)` : j}`)
+      .join('\n');
+    const fullErrText = fullSchemaErrors.length
+      ? fullSchemaErrors.map((e, i) => `    object[${i}]: ${e}`).join('\n')
+      : '    (no JSON object was parseable)';
     throw new Error(
-      `Could not find expected dust balance structure in output. Found ${jsonObjects.length} JSON object(s).`,
+      `dust-balance output did not match the expected schema (found ${jsonObjects.length} JSON object(s)).\n` +
+        `${DUST_BALANCE_EXPECTED}\n` +
+        `Why it failed:\n` +
+        `  - full-schema validation errors (per object):\n${fullErrText}\n` +
+        `  - source-only fallback error: ${sourceOnlyError}\n` +
+        `Actual JSON object(s) received:\n${actual}`,
     );
+  }
+
+  /**
+   * Format Zod validation issues as a compact, readable `path: message` list, e.g.
+   * `source.6fa1…: Invalid`.
+   */
+  private formatZodIssues(error: z.ZodError): string {
+    return error.issues
+      .map((issue) => `${issue.path.length ? issue.path.join('.') : '<root>'}: ${issue.message}`)
+      .join('; ');
   }
 
   /**
@@ -951,7 +999,237 @@ class ToolkitWrapper {
 
     return deploymentResult;
   }
+
+  // SCAFFOLD for #1253 (for @whankinsiv). Mirrors midnight-node toolkit-tokens-minter-e2e.sh
+  // + minter.compact (mintUnshieldedToSelfTest = the #1245 reporter's scenario).
+  // TODO(#1253): make the compiled minter contract reachable in the container (set the
+  // MinterContract paths) and validate on ledger-8 (ledger-9 needs a v9 compactc).
+
+  /** Deploy minter, mint `mintAmount` to self, send `sendAmount` (< mintAmount) out; the
+   * contract keeps `mintAmount - sendAmount`. */
+  async deployMintSendUnshielded(opts: MinterFlowOptions): Promise<MinterFlowResult> {
+    if (!this.startedContainer) {
+      throw new Error('Container is not started. Call start() first.');
+    }
+    if (opts.sendAmount >= opts.mintAmount) {
+      throw new Error('sendAmount must be < mintAmount to leave a non-zero contract remainder');
+    }
+
+    const seed = opts.fundingSeed ?? DEFAULT_FUNDING_SEED;
+    const network = opts.network ?? 'undeployed'; // TODO(#1253): use the env's network for deployed runs.
+    const { compiledContractDir, configFile, toolkitJsPath } = opts.contract;
+    const out = (file: string) => `/out/${file}`;
+    const rpcUrl = this.getRpcUrl();
+
+    const { coinPublic } = await this.showAddress(seed);
+
+    // 1. Deploy the minter: generate deploy intent → send-intent → submit.
+    await this.execToolkit(
+      [
+        TOOLKIT_BIN,
+        'generate-intent',
+        'deploy',
+        '-c',
+        configFile,
+        '--toolkit-js-path',
+        toolkitJsPath,
+        '--coin-public',
+        coinPublic,
+        '--output-intent',
+        out('deploy.bin'),
+        '--output-private-state',
+        out('initial_state.json'),
+        '--output-zswap-state',
+        out('deploy_zswap.json'),
+      ],
+      'minter generate-intent deploy failed',
+    );
+    await this.execToolkit(
+      [
+        TOOLKIT_BIN,
+        'send-intent',
+        '--intent-file',
+        out('deploy.bin'),
+        '--compiled-contract-dir',
+        compiledContractDir,
+        '--dest-file',
+        out('deploy.mn'),
+      ],
+      'minter send-intent (deploy) failed',
+    );
+    await this.execToolkit(
+      [TOOLKIT_BIN, 'generate-txs', '--src-file', out('deploy.mn'), 'send', '-d', rpcUrl],
+      'minter deploy submit failed',
+    );
+
+    // 2. Resolve the contract address, its on-chain state, and the unshielded token type.
+    const contractAddress = (
+      await this.execToolkit(
+        [TOOLKIT_BIN, 'contract-address', '--src-file', out('deploy.mn')],
+        'minter contract-address failed',
+      )
+    ).output.trim();
+    await this.execToolkit(
+      [
+        TOOLKIT_BIN,
+        'contract-state',
+        '--contract-address',
+        contractAddress,
+        '--dest-file',
+        out('state.mn'),
+      ],
+      'minter contract-state failed',
+    );
+    const tokenType = (
+      await this.execToolkit(
+        [
+          TOOLKIT_BIN,
+          'show-token-type',
+          '--contract-address',
+          contractAddress,
+          '--domain-sep',
+          opts.domainSep,
+          '--unshielded',
+        ],
+        'minter show-token-type failed',
+      )
+    ).output.trim();
+    const userAddress = (
+      await this.execToolkit(
+        [TOOLKIT_BIN, 'show-address', '--network', network, '--seed', seed, '--unshielded'],
+        'minter show-address (unshielded) failed',
+      )
+    ).output.trim();
+
+    // 3. Mint to self, then send a portion out — threading on-chain/private state across
+    //    the two intents exactly as the shell script does.
+    await this.execToolkit(
+      [
+        TOOLKIT_BIN,
+        'generate-intent',
+        'circuit',
+        '-c',
+        configFile,
+        '--toolkit-js-path',
+        toolkitJsPath,
+        '--coin-public',
+        coinPublic,
+        '--input-onchain-state',
+        out('state.mn'),
+        '--input-private-state',
+        out('initial_state.json'),
+        '--contract-address',
+        contractAddress,
+        '--output-intent',
+        out('mint_unshielded.bin'),
+        '--output-onchain-state',
+        out('state_after_mint.mn'),
+        '--output-private-state',
+        out('private_after_mint.json'),
+        '--output-zswap-state',
+        out('mint_zswap.json'),
+        'mintUnshieldedToSelfTest',
+        opts.domainSep,
+        String(opts.mintAmount),
+      ],
+      'minter mintUnshieldedToSelfTest failed',
+    );
+    await this.execToolkit(
+      [
+        TOOLKIT_BIN,
+        'generate-intent',
+        'circuit',
+        '-c',
+        configFile,
+        '--toolkit-js-path',
+        toolkitJsPath,
+        '--coin-public',
+        coinPublic,
+        '--input-onchain-state',
+        out('state_after_mint.mn'),
+        '--input-private-state',
+        out('private_after_mint.json'),
+        '--contract-address',
+        contractAddress,
+        '--output-intent',
+        out('send_unshielded.bin'),
+        '--output-onchain-state',
+        out('state_after_send.mn'),
+        '--output-private-state',
+        out('private_after_send.json'),
+        '--output-zswap-state',
+        out('send_zswap.json'),
+        'sendUnshieldedToUser',
+        tokenType,
+        userAddress,
+        String(opts.sendAmount),
+      ],
+      'minter sendUnshieldedToUser failed',
+    );
+
+    // 4. Submit the combined mint+send tx; reuse the existing parser for hash/block.
+    const submit = await this.execToolkit(
+      [
+        TOOLKIT_BIN,
+        'send-intent',
+        '--intent-file',
+        out('mint_unshielded.bin'),
+        '--intent-file',
+        out('send_unshielded.bin'),
+        '--compiled-contract-dir',
+        compiledContractDir,
+        '--dest-url',
+        rpcUrl,
+      ],
+      'minter send-intent (mint+send) failed',
+    );
+    const mintSendTx = this.parseTransactionOutput(submit.output.trim());
+
+    return {
+      contractAddress,
+      tokenType,
+      mintAmount: opts.mintAmount,
+      sendAmount: opts.sendAmount,
+      expectedRemainder: opts.mintAmount - opts.sendAmount,
+      mintSendTx,
+    };
+  }
+}
+
+/** Paths (as seen inside the toolkit container) to the compiled minter contract assets. */
+interface MinterContract {
+  compiledContractDir: string;
+  configFile: string;
+  toolkitJsPath: string;
+}
+
+interface MinterFlowOptions {
+  contract: MinterContract;
+  domainSep: string;
+  mintAmount: number;
+  sendAmount: number;
+  fundingSeed?: string;
+  network?: string;
+}
+
+interface MinterFlowResult {
+  contractAddress: string;
+  tokenType: string;
+  mintAmount: number;
+  sendAmount: number;
+  expectedRemainder: number;
+  mintSendTx: ToolkitTransactionResult;
 }
 
 export { ToolkitWrapper, ToolkitConfig };
-export type { Coin, DustBalance, DustOutput, PrivateWalletState, PublicWalletState, Utxo };
+export type {
+  Coin,
+  DustBalance,
+  DustOutput,
+  PrivateWalletState,
+  PublicWalletState,
+  Utxo,
+  MinterContract,
+  MinterFlowOptions,
+  MinterFlowResult,
+};

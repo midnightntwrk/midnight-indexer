@@ -73,12 +73,12 @@ fn bench_transaction_deserialize(c: &mut Criterion) {
     let mut group = c.benchmark_group("Transaction::deserialize");
     group.bench_function("tx_1_2_2", |b| {
         b.iter(|| {
-            Transaction::deserialize(black_box(&tx_1_2_2), LedgerVersion::V8).expect("deserialize")
+            Transaction::deserialize(black_box(&tx_1_2_2), LedgerVersion::V9).expect("deserialize")
         })
     });
     group.bench_function("tx_1_2_3", |b| {
         b.iter(|| {
-            Transaction::deserialize(black_box(&tx_1_2_3), LedgerVersion::V8).expect("deserialize")
+            Transaction::deserialize(black_box(&tx_1_2_3), LedgerVersion::V9).expect("deserialize")
         })
     });
     group.finish();
@@ -91,12 +91,12 @@ fn bench_transaction_relevant(c: &mut Criterion) {
     let tx_1_2_2_bytes = fs::read(format!("{}/tests/tx_1_2_2.raw", env!("CARGO_MANIFEST_DIR")))
         .expect("read tx_1_2_2.raw");
     let tx_1_2_2 =
-        Transaction::deserialize(&tx_1_2_2_bytes, LedgerVersion::V8).expect("deserialize tx_1_2_2");
+        Transaction::deserialize(&tx_1_2_2_bytes, LedgerVersion::V9).expect("deserialize tx_1_2_2");
 
     let tx_1_2_3_bytes = fs::read(format!("{}/tests/tx_1_2_3.raw", env!("CARGO_MANIFEST_DIR")))
         .expect("read tx_1_2_3.raw");
     let tx_1_2_3 =
-        Transaction::deserialize(&tx_1_2_3_bytes, LedgerVersion::V8).expect("deserialize tx_1_2_3");
+        Transaction::deserialize(&tx_1_2_3_bytes, LedgerVersion::V9).expect("deserialize tx_1_2_3");
 
     let vk_1 = viewing_key(1);
     let vk_2 = viewing_key(2);

@@ -11,15 +11,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod progress_cache;
 pub mod quota;
 pub mod v4;
 
 use crate::{
     domain::{Api, LedgerStateCache, storage::Storage},
     infra::api::{
+        progress_cache::{ProgressCache, ProgressCacheConfig},
         quota::{PerConnectionCounter, QuotaConfig, SubscriptionQuotas},
         v4::dataloader::{
-            BlockByHashLoader, ContractActionsByTransactionIdLoader, TransactionByIdLoader,
+            BlockByHashLoader, ContractActionsByTransactionIdLoader,
+            ContractEventsByContractActionIdLoader, TransactionByIdLoader,
             TransactionsByBlockIdLoader,
         },
     },
@@ -61,7 +64,7 @@ use tokio::{
     signal::unix::{SignalKind, signal},
 };
 use tower::ServiceBuilder;
-use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer};
+use tower_http::{compression::CompressionLayer, cors::CorsLayer, limit::RequestBodyLimitLayer};
 
 /// Attention: This could change if the used libraries change!
 /// See https://docs.rs/http-body-util/0.1.2/src/http_body_util/limited.rs.html#93.
@@ -154,9 +157,11 @@ pub struct Config {
 pub struct SubscriptionConfig {
     blocks: BlocksSubscriptionConfig,
     contract_actions: ContractActionsSubscriptionConfig,
+    contract_events: ContractEventsSubscriptionConfig,
     pub dust_generations: DustGenerationsSubscriptionConfig,
     dust_ledger_events: DustLedgerEventsSubscriptionConfig,
     pub dust_nullifier_transactions: DustNullifierTransactionsSubscriptionConfig,
+    progress_cache: ProgressCacheConfig,
     pub shielded_nullifier_transactions: ShieldedNullifierTransactionsSubscriptionConfig,
     shielded_transactions: ShieldedTransactionsSubscriptionConfig,
     unshielded_transactions: UnshieldedTransactionsSubscriptionConfig,
@@ -174,8 +179,23 @@ pub struct ContractActionsSubscriptionConfig {
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
+pub struct ContractEventsSubscriptionConfig {
+    batch_size: NonZeroU32,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
 pub struct DustGenerationsSubscriptionConfig {
     pub batch_size: NonZeroU32,
+
+    /// Maximum age in blocks of the snapshot `block_hash`; older ones are rejected with a
+    /// re-subscribe hint. Must stay well below chain-indexer's ledger_state_retention, which
+    /// bounds how long a block's ledger state remains loadable.
+    #[serde(default = "max_snapshot_age_default")]
+    pub max_snapshot_age: u32,
+}
+
+fn max_snapshot_age_default() -> u32 {
+    500
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -259,6 +279,7 @@ where
 {
     let ledger_state_cache = LedgerStateCache::default();
     let quotas = SubscriptionQuotas::new(quota_config);
+    let progress_cache = ProgressCache::new(subscription_config.progress_cache);
 
     let v4_app = v4::make_app(
         network_id,
@@ -269,6 +290,7 @@ where
         max_depth,
         subscription_config,
         quotas,
+        progress_cache,
     );
 
     // For some reason the FastraceLayer and RequestBodyLimitLayer cannot be put into a
@@ -287,6 +309,7 @@ where
                 .and_then(transform_lentgh_limit_exceeded),
         )
         .layer(CorsLayer::permissive())
+        .layer(CompressionLayer::new())
 }
 
 // Returns 200 when reachable. If the runtime is parked (e.g. storage-core deadlock during
@@ -389,6 +412,12 @@ trait ContextExt {
     where
         S: Storage;
 
+    fn get_contract_events_by_contract_action_id_loader<S>(
+        &self,
+    ) -> &DataLoader<ContractEventsByContractActionIdLoader<S>>
+    where
+        S: Storage;
+
     fn get_subscriber<B>(&self) -> &B
     where
         B: Subscriber;
@@ -400,6 +429,8 @@ trait ContextExt {
     fn get_subscription_config(&self) -> &SubscriptionConfig;
 
     fn get_subscription_quotas(&self) -> &SubscriptionQuotas;
+
+    fn get_progress_cache(&self) -> &ProgressCache;
 
     fn get_per_connection_counter(&self) -> &Arc<AtomicUsize>;
 }
@@ -451,6 +482,16 @@ impl ContextExt for Context<'_> {
             .expect("ContractActionsByTransactionIdLoader is stored in Context")
     }
 
+    fn get_contract_events_by_contract_action_id_loader<S>(
+        &self,
+    ) -> &DataLoader<ContractEventsByContractActionIdLoader<S>>
+    where
+        S: Storage,
+    {
+        self.data::<DataLoader<ContractEventsByContractActionIdLoader<S>>>()
+            .expect("ContractEventsByContractActionIdLoader is stored in Context")
+    }
+
     fn get_subscriber<B>(&self) -> &B
     where
         B: Subscriber,
@@ -476,6 +517,11 @@ impl ContextExt for Context<'_> {
     fn get_subscription_quotas(&self) -> &SubscriptionQuotas {
         self.data::<SubscriptionQuotas>()
             .expect("SubscriptionQuotas is stored in Context")
+    }
+
+    fn get_progress_cache(&self) -> &ProgressCache {
+        self.data::<ProgressCache>()
+            .expect("ProgressCache is stored in Context")
     }
 
     fn get_per_connection_counter(&self) -> &Arc<AtomicUsize> {
