@@ -145,7 +145,9 @@ async function ensureContainer(): Promise<number> {
       if (raced) {
         if (!raced.running) await execFileAsync('docker', ['start', CONTAINER_NAME]);
         if (!raced.port) {
-          throw new Error(`Lost ${CONTAINER_NAME} startup race but could not read its host port`);
+          throw new Error(`Lost ${CONTAINER_NAME} startup race but could not read its host port`, {
+            cause: err,
+          });
         }
         console.log(`[CACHE] Adopted ${CONTAINER_NAME} on host port ${raced.port} after race`);
         return raced.port;
