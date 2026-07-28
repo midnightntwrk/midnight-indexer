@@ -124,6 +124,17 @@ pub enum NodeVersion {
     V2_0,
 }
 
+impl NodeVersion {
+    /// Whether the node runtime can author blocks under BABE: the Aura to BABE transition is
+    /// planned for node 2.1, so every currently supported version authors under Aura only.
+    /// Deliberately matched exhaustively so that adding a new version forces this decision.
+    pub fn supports_babe(self) -> bool {
+        match self {
+            NodeVersion::V0_22 | NodeVersion::V1_0 | NodeVersion::V2_0 => false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::domain::{LedgerVersion, NodeVersion, ProtocolVersion, ProtocolVersionError};

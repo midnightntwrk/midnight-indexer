@@ -673,7 +673,10 @@ where
 /// Determine the block author from the pre-runtime digest logs, taking the first log with a
 /// recognized consensus engine that yields an author, in digest order (mirroring polkadot-js
 /// `extractAuthor`): Aura carries the slot (the author is the slot modulo the authority-set
-/// length), BABE carries the authority index explicitly in all of its pre-digest variants.
+/// length), BABE carries the authority index explicitly in all of its pre-digest variants. BABE
+/// digests are only recognized on node versions that author under BABE (see
+/// [NodeVersion::supports_babe]); on older versions they are skipped like any unrecognized
+/// engine.
 fn author_from_digest_logs(
     logs: &[DigestItem],
     authorities: &[[u8; 32]],
@@ -695,15 +698,8 @@ fn author_from_digest_logs(
                 authorities.get(index as usize).copied().map(Into::into)
             }
 
-            BABE_ENGINE_ID => {
-                let index = decode_babe_authority_index(pre_digest)?;
-                // An out-of-range index means the cached authority set does not match the
-                // block's epoch; report an unknown author instead of failing block processing.
-                usize::try_from(index)
-                    .ok()
-                    .and_then(|index| authorities.get(index))
-                    .copied()
-                    .map(Into::into)
+            BABE_ENGINE_ID if content_node_version.supports_babe() => {
+                babe_author(pre_digest, authorities)?
             }
 
             _ => None,
@@ -715,6 +711,24 @@ fn author_from_digest_logs(
     }
 
     Ok(None)
+}
+
+/// Determine the block author from a BABE pre-runtime digest. An out-of-range authority index
+/// means the cached authority set does not match the block's epoch; report an unknown author
+/// instead of failing block processing.
+fn babe_author(
+    pre_digest: &[u8],
+    authorities: &[[u8; 32]],
+) -> Result<Option<BlockAuthor>, SubxtNodeError> {
+    let index = decode_babe_authority_index(pre_digest)?;
+
+    let author = usize::try_from(index)
+        .ok()
+        .and_then(|index| authorities.get(index))
+        .copied()
+        .map(Into::into);
+
+    Ok(author)
 }
 
 /// Extract the authority index from a BABE pre-runtime digest. All `PreDigest` variants
@@ -835,14 +849,9 @@ mod tests {
     }
 
     #[test]
-    fn author_from_babe_digest_for_all_variants() {
+    fn babe_author_for_all_variants() {
         for tag in 1..=3 {
-            let logs = vec![DigestItem::PreRuntime(
-                BABE_ENGINE_ID,
-                babe_pre_digest(tag, 2),
-            )];
-
-            let author = author_from_digest_logs(&logs, &AUTHORITIES, NodeVersion::V2_0)
+            let author = babe_author(&babe_pre_digest(tag, 2), &AUTHORITIES)
                 .expect("author can be determined");
 
             assert_eq!(author, Some([3; 32].into()));
@@ -850,29 +859,30 @@ mod tests {
     }
 
     #[test]
-    fn first_pre_runtime_digest_in_digest_order_wins() {
-        let logs = vec![
-            DigestItem::PreRuntime(BABE_ENGINE_ID, babe_pre_digest(2, 2)),
-            DigestItem::PreRuntime(AURA_ENGINE_ID, 4u64.encode()),
-        ];
-        let author = author_from_digest_logs(&logs, &AUTHORITIES, NodeVersion::V2_0)
-            .expect("author can be determined");
-        assert_eq!(author, Some([3; 32].into()));
+    fn babe_digest_is_skipped_on_versions_without_babe() {
+        for node_version in [NodeVersion::V0_22, NodeVersion::V1_0, NodeVersion::V2_0] {
+            let logs = vec![DigestItem::PreRuntime(
+                BABE_ENGINE_ID,
+                babe_pre_digest(2, 2),
+            )];
+            let author = author_from_digest_logs(&logs, &AUTHORITIES, node_version)
+                .expect("skipped digest is not an error");
+            assert_eq!(author, None);
 
-        let logs = vec![
-            DigestItem::PreRuntime(AURA_ENGINE_ID, 4u64.encode()),
-            DigestItem::PreRuntime(BABE_ENGINE_ID, babe_pre_digest(2, 2)),
-        ];
-        let author = author_from_digest_logs(&logs, &AUTHORITIES, NodeVersion::V2_0)
-            .expect("author can be determined");
-        assert_eq!(author, Some([2; 32].into()));
+            let logs = vec![
+                DigestItem::PreRuntime(BABE_ENGINE_ID, babe_pre_digest(2, 2)),
+                DigestItem::PreRuntime(AURA_ENGINE_ID, 4u64.encode()),
+            ];
+            let author = author_from_digest_logs(&logs, &AUTHORITIES, node_version)
+                .expect("author can be determined");
+            assert_eq!(author, Some([2; 32].into()));
+        }
     }
 
     #[test]
-    fn unrecognized_engine_and_authorless_digest_are_skipped() {
+    fn unrecognized_engine_is_skipped() {
         let logs = vec![
             DigestItem::PreRuntime(*b"test", vec![0xaa]),
-            DigestItem::PreRuntime(BABE_ENGINE_ID, babe_pre_digest(2, 7)),
             DigestItem::PreRuntime(AURA_ENGINE_ID, 4u64.encode()),
         ];
 
@@ -884,12 +894,7 @@ mod tests {
 
     #[test]
     fn babe_out_of_range_authority_index_yields_no_author() {
-        let logs = vec![DigestItem::PreRuntime(
-            BABE_ENGINE_ID,
-            babe_pre_digest(2, 7),
-        )];
-
-        let author = author_from_digest_logs(&logs, &AUTHORITIES, NodeVersion::V2_0)
+        let author = babe_author(&babe_pre_digest(2, 7), &AUTHORITIES)
             .expect("out-of-range index is not an error");
 
         assert_eq!(author, None);
@@ -898,12 +903,7 @@ mod tests {
     #[test]
     fn invalid_babe_pre_digest_tag_is_an_error() {
         for tag in [0, 4] {
-            let logs = vec![DigestItem::PreRuntime(
-                BABE_ENGINE_ID,
-                babe_pre_digest(tag, 2),
-            )];
-
-            let author = author_from_digest_logs(&logs, &AUTHORITIES, NodeVersion::V2_0);
+            let author = babe_author(&babe_pre_digest(tag, 2), &AUTHORITIES);
 
             assert!(matches!(
                 author,
@@ -914,9 +914,7 @@ mod tests {
 
     #[test]
     fn truncated_babe_pre_digest_is_an_error() {
-        let logs = vec![DigestItem::PreRuntime(BABE_ENGINE_ID, vec![1, 0xaa])];
-
-        let author = author_from_digest_logs(&logs, &AUTHORITIES, NodeVersion::V2_0);
+        let author = babe_author(&[1, 0xaa], &AUTHORITIES);
 
         assert!(matches!(author, Err(SubxtNodeError::ScaleDecode(_))));
     }
