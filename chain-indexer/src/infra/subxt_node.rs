@@ -174,22 +174,40 @@ impl SubxtNode {
         let protocol_version = header
             .protocol_version()?
             .ok_or(SubxtNodeError::MissingProtocolVersionHeader)?;
-        let node_version = protocol_version.node_version();
+        // Two runtime versions are in play at a runtime-upgrade enactment block, and every call
+        // below must pick the one matching what it touches:
+        //
+        // - `content_node_version` decodes bytes produced by the runtime that BUILT this block, as
+        //   recorded in the MNSV digest: extrinsics, events and header digests.
+        // - `state_node_version` addresses the runtime present in this block's STATE. At an
+        //   enactment block `set_code` landed inside this very block, so every RPC at this hash
+        //   (runtime API, storage, metadata) already executes against the next runtime, whose
+        //   version is therefore newer than the MNSV digest's.
+        //
+        // Away from enactment blocks the two are equal; getting the pairing wrong there is
+        // invisible, which is exactly why each call site names the version it needs.
+        let content_node_version = protocol_version.node_version();
+        let state_node_version = ProtocolVersion::try_from(block.spec_version())?.node_version();
         let ledger_version = protocol_version.ledger_version();
 
-        // Runtime API calls and storage queries execute against the block's state. At a
-        // runtime-upgrade enactment block the state already contains the next runtime, so its
-        // version can be newer than the protocol version in the MNSV digest (the runtime that
-        // built the block). Block contents (extrinsics, events, transactions) are still decoded
-        // with the MNSV based `node_version`.
-        let state_node_version = ProtocolVersion::try_from(block.spec_version())?.node_version();
+        if content_node_version != state_node_version {
+            info!(
+                hash:%,
+                height,
+                content_node_version:%,
+                state_node_version:%;
+                "runtime upgrade enacted in this block; block contents and block state are on \
+                 different runtimes"
+            );
+        }
 
         debug!(
             hash:%,
             height,
             parent_hash:%,
             protocol_version:?,
-            node_version:%,
+            content_node_version:%,
+            state_node_version:%,
             ledger_version:%;
             "making block"
         );
@@ -200,7 +218,7 @@ impl SubxtNode {
         }
         let author = authorities
             .as_ref()
-            .map(|authorities| extract_block_author(&header, authorities, node_version))
+            .map(|authorities| extract_block_author(&header, authorities, content_node_version))
             .transpose()?
             .flatten();
 
@@ -213,17 +231,17 @@ impl SubxtNode {
             timestamp,
             transactions,
             mut dust_registration_events,
-        } = runtimes::make_block_details(authorities, node_version, &block).await?;
+        } = runtimes::make_block_details(authorities, content_node_version, &block).await?;
 
         // At genesis, Substrate does not emit events (Parity PR #5463). Fetch cNight
         // registrations from pallet storage instead.
         // Also fetch the ledger state root for genesis ledger state detection.
         let ledger_state_root = if height == 0 {
             let genesis_registrations =
-                runtimes::fetch_genesis_cnight_registrations(node_version, &block).await?;
+                runtimes::fetch_genesis_cnight_registrations(state_node_version, &block).await?;
             dust_registration_events.extend(genesis_registrations);
 
-            runtimes::get_ledger_state_root(node_version, &block)
+            runtimes::get_ledger_state_root(state_node_version, &block)
                 .await?
                 .map(Into::into)
         } else {
@@ -444,13 +462,14 @@ impl Node for SubxtNode {
     ) -> Result<SystemParametersChange, Self::Error> {
         let block = self.block_at(H256(block_hash.0)).await?;
 
-        // Storage queries execute against the block's state, whose runtime can be newer than
-        // the one that built the block (MNSV) at a runtime-upgrade enactment block.
-        let node_version = ProtocolVersion::try_from(block.spec_version())?.node_version();
+        // Both are storage/runtime-API reads, so both need the runtime in this block's state,
+        // which at an enactment block is already the next one; see `make_block`. The
+        // `_node_version` parameter carries the MNSV based version and is deliberately unused.
+        let state_node_version = ProtocolVersion::try_from(block.spec_version())?.node_version();
 
         let (d_parameter, terms_and_conditions) = tokio::try_join!(
-            runtimes::get_d_parameter(node_version, &block),
-            runtimes::get_terms_and_conditions(node_version, &block),
+            runtimes::get_d_parameter(state_node_version, &block),
+            runtimes::get_terms_and_conditions(state_node_version, &block),
         )?;
 
         Ok(SystemParametersChange {
@@ -630,7 +649,7 @@ async fn receive_block(
 fn extract_block_author<H>(
     header: &SubstrateHeader<H>,
     authorities: &[[u8; 32]],
-    node_version: NodeVersion,
+    content_node_version: NodeVersion,
 ) -> Result<Option<BlockAuthor>, SubxtNodeError>
 where
     H: Hash,
@@ -647,7 +666,7 @@ where
             DigestItem::PreRuntime(AURA_ENGINE_ID, inner) => Some(inner.as_slice()),
             _ => None,
         })
-        .map(|slot| runtimes::decode_slot(slot, node_version))
+        .map(|slot| runtimes::decode_slot(slot, content_node_version))
         .transpose()?
         .and_then(|slot| {
             let index = slot % authorities.len() as u64;
