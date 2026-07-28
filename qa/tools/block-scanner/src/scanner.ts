@@ -759,7 +759,7 @@ async function main(): Promise<boolean> {
       `[INFO ] - Updating test data files in: ${testDataFolder}/${TARGET_ENV}`,
     );
 
-    updateTestDataFiles(testDataFolder, sourceBlockDataFile);
+    await updateTestDataFiles(testDataFolder, sourceBlockDataFile);
   }
 
   return true;

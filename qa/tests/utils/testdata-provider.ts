@@ -177,9 +177,10 @@ class TestDataProvider {
     let contracts: ContractInfo[];
     try {
       contracts = importJsoncData(`${baseDir}/contract-actions.jsonc`) as unknown as ContractInfo[];
-    } catch (_) {
+    } catch (error) {
       throw new Error(
         `Test data provider is missing the contract actions file for ${envName} environment`,
+        { cause: error },
       );
     }
 
@@ -258,9 +259,10 @@ class TestDataProvider {
     let contracts: ContractInfo[];
     try {
       contracts = importJsoncData(`${baseDir}/contract-actions.jsonc`) as unknown as ContractInfo[];
-    } catch (_) {
+    } catch (error) {
       throw new Error(
         `Test data provider is missing the contract actions file for ${envName} environment`,
+        { cause: error },
       );
     }
     for (const contract of contracts) {
@@ -357,9 +359,10 @@ class TestDataProvider {
     let contracts: ContractInfo[];
     try {
       contracts = importJsoncData(`${baseDir}/contract-actions.jsonc`) as unknown as ContractInfo[];
-    } catch (_) {
+    } catch (error) {
       throw new Error(
         `Test data provider is missing the contract actions file for ${envName} environment`,
+        { cause: error },
       );
     }
     if (contracts.length === 0 || !contracts[0]['contract-address']) {
@@ -385,9 +388,10 @@ class TestDataProvider {
       contracts = importJsoncData(
         `${baseDir}/contract-events.jsonc`,
       ) as unknown as EventEmittingContractInfo[];
-    } catch (_) {
+    } catch (error) {
       throw new Error(
         `Test data provider is missing the contract events file for ${envName} environment`,
+        { cause: error },
       );
     }
     if (contracts.length === 0 || !contracts[0]['contract-address']) {
@@ -472,9 +476,10 @@ class TestDataProvider {
         this.cardanoRewardAddresses = importJsoncData(
           `${baseDir}/cardano-stake-addresses.jsonc`,
         ) as Record<string, string>;
-      } catch (_) {
+      } catch (error) {
         throw new Error(
           `Test data provider is missing the cardano stake address file for ${envName} environment`,
+          { cause: error },
         );
       }
     }
@@ -504,9 +509,10 @@ class TestDataProvider {
       let parsed: JsonValue;
       try {
         parsed = importJsoncData(`${baseDir}/cardano-stake-addresses.jsonc`);
-      } catch (_) {
+      } catch (error) {
         throw new Error(
           `Test data provider is missing the cardano stake address file for ${envName} environment`,
+          { cause: error },
         );
       }
       const candidates = (parsed as JsonObject)['multi-utxo'];
@@ -529,9 +535,10 @@ class TestDataProvider {
     let contracts: JsonValue;
     try {
       contracts = importJsoncData(`${baseDir}/token-holding-contracts.jsonc`);
-    } catch (_) {
+    } catch (error) {
       throw new Error(
         `Test data provider is missing the token holding contracts file for ${envName} environment`,
+        { cause: error },
       );
     }
     return Array.isArray(contracts) ? (contracts as unknown as TokenHoldingContractInfo[]) : [];

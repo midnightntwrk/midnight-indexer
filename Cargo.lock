@@ -1198,7 +1198,7 @@ dependencies = [
 
 [[package]]
 name = "chain-indexer"
-version = "4.3.3"
+version = "4.3.5"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -1209,6 +1209,7 @@ dependencies = [
  "derive_more 2.1.1",
  "fake",
  "fastrace",
+ "fs_extra",
  "futures",
  "http",
  "humantime-serde",
@@ -1225,9 +1226,12 @@ dependencies = [
  "sqlx",
  "subxt",
  "tempfile",
+ "testcontainers",
+ "testcontainers-modules",
  "thiserror 2.0.18",
  "tokio",
  "trait-variant",
+ "walkdir",
 ]
 
 [[package]]
@@ -3374,7 +3378,7 @@ dependencies = [
 
 [[package]]
 name = "indexer-api"
-version = "4.3.3"
+version = "4.3.5"
 dependencies = [
  "anyhow",
  "async-graphql",
@@ -3477,7 +3481,7 @@ dependencies = [
 
 [[package]]
 name = "indexer-standalone"
-version = "4.3.3"
+version = "4.3.5"
 dependencies = [
  "anyhow",
  "byte-unit-serde",
@@ -3495,7 +3499,7 @@ dependencies = [
 
 [[package]]
 name = "indexer-tests"
-version = "4.3.3"
+version = "4.3.5"
 dependencies = [
  "anyhow",
  "clap",
@@ -7516,7 +7520,7 @@ dependencies = [
 
 [[package]]
 name = "spo-indexer"
-version = "4.3.3"
+version = "4.3.5"
 dependencies = [
  "anyhow",
  "blake2",
@@ -9060,7 +9064,7 @@ dependencies = [
 
 [[package]]
 name = "wallet-indexer"
-version = "4.3.3"
+version = "4.3.5"
 dependencies = [
  "anyhow",
  "async-stream",

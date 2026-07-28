@@ -407,61 +407,71 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
      * @then we should receive a progress update event from indexer
      * @and the progress count should be incremented by 1
      */
-    test('should be reported by the indexer through a progress update event for the source address', async () => {
-      const progressUpdatesBeforeTransaction = walletFixture.source.historicalEvents.filter(
-        (event) => {
+    test(
+      'should be reported by the indexer through a progress update event for the source address',
+      { timeout: 400_000 },
+      async () => {
+        const progressUpdatesBeforeTransaction = walletFixture.source.historicalEvents.filter(
+          (event) => {
+            return (
+              event.data?.unshieldedTransactions.__typename === 'UnshieldedTransactionsProgress'
+            );
+          },
+        );
+
+        log.debug('Progress updates before transaction:');
+        progressUpdatesBeforeTransaction.forEach((update) => {
+          log.debug(`${JSON.stringify(update, null, 2)}`);
+        });
+
+        const highestTransactionIdBeforeTransaction = (
+          progressUpdatesBeforeTransaction.at(-1)?.data
+            ?.unshieldedTransactions as UnshieldedTransactionsProgress
+        ).highestTransactionId;
+        log.info(
+          `Highest transaction ID before transaction: ${highestTransactionIdBeforeTransaction}`,
+        );
+
+        const progressUpdatesAfterTransaction = walletFixture.source.events.filter((event) => {
           return event.data?.unshieldedTransactions.__typename === 'UnshieldedTransactionsProgress';
-        },
-      );
+        });
 
-      log.debug('Progress updates before transaction:');
-      progressUpdatesBeforeTransaction.forEach((update) => {
-        log.debug(`${JSON.stringify(update, null, 2)}`);
-      });
+        log.debug('Progress updates after transaction:');
+        progressUpdatesAfterTransaction.forEach((update) => {
+          log.debug(`${JSON.stringify(update, null, 2)}`);
+        });
 
-      const highestTransactionIdBeforeTransaction = (
-        progressUpdatesBeforeTransaction.at(-1)?.data
-          ?.unshieldedTransactions as UnshieldedTransactionsProgress
-      ).highestTransactionId;
-      log.info(
-        `Highest transaction ID before transaction: ${highestTransactionIdBeforeTransaction}`,
-      );
+        // Wait for the progress update event for the source address to be reported by the indexer
+        // through the unshielded transaction subscription. Since indexer 4.4.0 progress polling
+        // backs off while a subscription is idle (30s doubling up to 240s, ±20% jitter), a
+        // subscription opened well before the transaction may only report the change after the full
+        // backed-off gap (~5 minutes worst case) — hence the wide retry window.
+        const sourceAddressEvent = await retry(
+          async () =>
+            findProgressUpdateEvent(
+              walletFixture.source.events,
+              highestTransactionIdBeforeTransaction,
+              'source',
+            ),
+          {
+            maxRetries: 60,
+            delayMs: 5000,
+            retryLabel: 'find source address progress update event',
+          },
+        );
 
-      const progressUpdatesAfterTransaction = walletFixture.source.events.filter((event) => {
-        return event.data?.unshieldedTransactions.__typename === 'UnshieldedTransactionsProgress';
-      });
-
-      log.debug('Progress updates after transaction:');
-      progressUpdatesAfterTransaction.forEach((update) => {
-        log.debug(`${JSON.stringify(update, null, 2)}`);
-      });
-
-      // Wait for the progress update event for the source address to be reported by the indexer
-      // through the unshielded transaction subscription. Note this is an async operation, so we need
-      // to retry a few times.
-      const sourceAddressEvent = await retry(
-        async () =>
-          findProgressUpdateEvent(
-            walletFixture.source.events,
-            highestTransactionIdBeforeTransaction,
-            'source',
-          ),
-        {
-          maxRetries: 10,
-          delayMs: 3000,
-          retryLabel: 'find source address progress update event',
-        },
-      );
-
-      expect(sourceAddressEvent).toBeDefined();
-      const highestTransactionIdAfterTransaction = (
-        sourceAddressEvent.data?.unshieldedTransactions as UnshieldedTransactionsProgress
-      ).highestTransactionId;
-      log.info(`Highest transaction ID after transaction: ${highestTransactionIdAfterTransaction}`);
-      expect(highestTransactionIdAfterTransaction).toBeGreaterThan(
-        highestTransactionIdBeforeTransaction,
-      );
-    });
+        expect(sourceAddressEvent).toBeDefined();
+        const highestTransactionIdAfterTransaction = (
+          sourceAddressEvent.data?.unshieldedTransactions as UnshieldedTransactionsProgress
+        ).highestTransactionId;
+        log.info(
+          `Highest transaction ID after transaction: ${highestTransactionIdAfterTransaction}`,
+        );
+        expect(highestTransactionIdAfterTransaction).toBeGreaterThan(
+          highestTransactionIdBeforeTransaction,
+        );
+      },
+    );
 
     /**
      * Once an unshielded transaction has been submitted to node and confirmed, the indexer should report
@@ -472,62 +482,73 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
      * @then we should receive a progress update event from indexer
      * @and the progress count should be incremented by 1
      */
-    test('should be reported by the indexer through a progress update event for the destination address', async () => {
-      const progressUpdatesBeforeTransaction =
-        walletFixture.destinations[0].historicalDestinationEvents.filter((event) => {
-          return event.data?.unshieldedTransactions.__typename === 'UnshieldedTransactionsProgress';
+    test(
+      'should be reported by the indexer through a progress update event for the destination address',
+      { timeout: 400_000 },
+      async () => {
+        const progressUpdatesBeforeTransaction =
+          walletFixture.destinations[0].historicalDestinationEvents.filter((event) => {
+            return (
+              event.data?.unshieldedTransactions.__typename === 'UnshieldedTransactionsProgress'
+            );
+          });
+
+        log.debug('Progress updates before transaction:');
+        progressUpdatesBeforeTransaction.forEach((update) => {
+          log.debug(`${JSON.stringify(update, null, 2)}`);
         });
 
-      log.debug('Progress updates before transaction:');
-      progressUpdatesBeforeTransaction.forEach((update) => {
-        log.debug(`${JSON.stringify(update, null, 2)}`);
-      });
+        const highestTransactionIdBeforeTransaction = (
+          progressUpdatesBeforeTransaction.at(-1)?.data
+            ?.unshieldedTransactions as UnshieldedTransactionsProgress
+        ).highestTransactionId;
+        log.info(
+          `Highest transaction ID before transaction: ${highestTransactionIdBeforeTransaction}`,
+        );
 
-      const highestTransactionIdBeforeTransaction = (
-        progressUpdatesBeforeTransaction.at(-1)?.data
-          ?.unshieldedTransactions as UnshieldedTransactionsProgress
-      ).highestTransactionId;
-      log.info(
-        `Highest transaction ID before transaction: ${highestTransactionIdBeforeTransaction}`,
-      );
+        const progressUpdatesAfterTransaction = walletFixture.destinations[0].events.filter(
+          (event) => {
+            return (
+              event.data?.unshieldedTransactions.__typename === 'UnshieldedTransactionsProgress'
+            );
+          },
+        );
 
-      const progressUpdatesAfterTransaction = walletFixture.destinations[0].events.filter(
-        (event) => {
-          return event.data?.unshieldedTransactions.__typename === 'UnshieldedTransactionsProgress';
-        },
-      );
+        log.debug('Progress updates after transaction:');
+        progressUpdatesAfterTransaction.forEach((update) => {
+          log.debug(`${JSON.stringify(update, null, 2)}`);
+        });
 
-      log.debug('Progress updates after transaction:');
-      progressUpdatesAfterTransaction.forEach((update) => {
-        log.debug(`${JSON.stringify(update, null, 2)}`);
-      });
+        // Wait for the progress update event for the destination address to be reported by the
+        // indexer through the unshielded transaction subscription. Same wide retry window as the
+        // source-address test above: idle backoff (since indexer 4.4.0) can delay the change-
+        // reporting progress update by up to the full backed-off gap (~5 minutes worst case).
+        const destinationAddressEvent = await retry(
+          async () =>
+            findProgressUpdateEvent(
+              walletFixture.destinations[0].events,
+              highestTransactionIdBeforeTransaction,
+              'destination',
+            ),
+          {
+            maxRetries: 60,
+            delayMs: 5000,
+            retryLabel: 'find destination address progress update event',
+          },
+        );
 
-      // Wait for the progress update event for the destination address to be reported by the indexer
-      // through the unshielded transaction subscription. Note this is an async operation, so we need
-      // to retry a few times.
-      const destinationAddressEvent = await retry(
-        async () =>
-          findProgressUpdateEvent(
-            walletFixture.destinations[0].events,
-            highestTransactionIdBeforeTransaction,
-            'destination',
-          ),
-        {
-          maxRetries: 10,
-          delayMs: 3000,
-          retryLabel: 'find destination address progress update event',
-        },
-      );
-
-      expect(destinationAddressEvent).toBeDefined();
-      const highestTransactionIdAfterTransaction = (
-        destinationAddressEvent.data?.unshieldedTransactions as UnshieldedTransactionsProgress
-      ).highestTransactionId;
-      log.info(`Highest transaction ID after transaction: ${highestTransactionIdAfterTransaction}`);
-      expect(highestTransactionIdAfterTransaction).toBeGreaterThan(
-        highestTransactionIdBeforeTransaction,
-      );
-    });
+        expect(destinationAddressEvent).toBeDefined();
+        const highestTransactionIdAfterTransaction = (
+          destinationAddressEvent.data?.unshieldedTransactions as UnshieldedTransactionsProgress
+        ).highestTransactionId;
+        log.info(
+          `Highest transaction ID after transaction: ${highestTransactionIdAfterTransaction}`,
+        );
+        expect(highestTransactionIdAfterTransaction).toBeGreaterThan(
+          highestTransactionIdBeforeTransaction,
+        );
+      },
+    );
 
     /**
      * After an unshielded transaction is confirmed, the dust commitment Merkle tree should grow.

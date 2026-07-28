@@ -348,8 +348,8 @@ export const ZSWAP_LEDGER_EVENTS_SUBSCRIPTION_FROM_ID = `
 `;
 
 export const DUST_GENERATIONS_SUBSCRIPTION = `
-  subscription DustGenerations($dustAddress: DustAddress!, $startIndex: Int!, $endIndex: Int!) {
-    dustGenerations(dustAddress: $dustAddress, startIndex: $startIndex, endIndex: $endIndex) {
+  subscription DustGenerations($dustAddress: DustAddress!, $blockHash: HexEncoded!, $dtimeCutoffHeight: Int!) {
+    dustGenerations(dustAddress: $dustAddress, blockHash: $blockHash, dtimeCutoffHeight: $dtimeCutoffHeight) {
       ... on DustGenerationsItem {
         __typename
         commitmentMtIndex
@@ -466,6 +466,28 @@ export const BRIDGE_BALANCE_SUBSCRIPTION = `
       deposited
       claimed
       balance
+    }
+  }
+`;
+
+// c2m-bridge pool observability stream (#944). Emits an initial snapshot on
+// subscribe (newEvent = null), then a refreshed summary paired with each new
+// pool-affecting event.
+export const BRIDGE_POOL_UPDATES_SUBSCRIPTION = `
+  subscription BridgePoolUpdates {
+    bridgePoolUpdates {
+      newEvent {
+        __typename
+      }
+      pool {
+        reserveTotal
+        treasuryByReason {
+          reason
+          total
+        }
+        subminimumTxCount
+        lastEventBlockHeight
+      }
     }
   }
 `;
