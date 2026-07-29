@@ -17,6 +17,8 @@ Maintainer and contributor guides. For local setup see the top-level
   metadata, per-version runtime modules.
 - [Upgrading the ledger](./upgrading-ledger.md) - the `v8`/`v9` coexistence and
   the `[patch.crates-io]` git-tag pins.
+- [Re-indexing from genesis](./re-indexing.md) - which changes require it, and
+  why both stores must be wiped together.
 
 ## Other
 
