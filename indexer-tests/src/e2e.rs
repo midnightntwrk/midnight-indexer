@@ -285,7 +285,14 @@ impl IndexerData {
         // Verify that there are contract actions.
         assert!(!contract_actions.is_empty());
 
-        // Verify that the contract action zswap state is non-empty.
+        // Verify that the contract action state and zswap state are non-empty. Both are resolved
+        // out of the ledger arena from the keys stored on the action, so this is the end-to-end
+        // guard that the key round trip actually serves bytes.
+        assert!(
+            contract_actions
+                .iter()
+                .all(|contract_action| !contract_action.state.as_ref().is_empty())
+        );
         assert!(
             contract_actions
                 .iter()
