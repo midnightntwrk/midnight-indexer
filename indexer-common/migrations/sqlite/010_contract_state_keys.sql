@@ -1,0 +1,28 @@
+-- Store contract state as ledger-arena keys instead of blobs.
+--
+-- `state` held a full serialized contract state per action and `zswap_state` a full serialized
+-- filtered commitment tree. Both are already in the ledger arena (`ledger_db_nodes`),
+-- content-addressed and structurally shared, so an action only needs to reference the node rather
+-- than carry a copy of it. On preprod these two columns were 301 GB of a 292 GB `indexer.sqlite`,
+-- growing quadratically in the number of actions per contract.
+--
+-- BREAKING: the old blobs cannot be converted here. Their arena nodes were garbage collected long
+-- ago and a SQL migration cannot replay the chain to recreate them, so both stores must be wiped
+-- and re-indexed together. See docs/re-indexing.md.
+--
+-- The key columns are nullable because a failed action has no contract state to reference; the API
+-- resolves NULL to the empty string, which is exactly what an empty `state` blob resolves to today.
+-- They are variable-width rather than a fixed 33 bytes because an arena key is either a reference
+-- or, for a small enough payload, a direct encoding — the same reason `blocks.ledger_state_key` is
+-- stored variable-width.
+--
+-- Unlike 008_contract_events.sql this needs no table rebuild: SQLite has supported
+-- `ALTER TABLE ... DROP COLUMN` since 3.35, and it is only refused for columns that are indexed or
+-- referenced by a view or trigger. The three indexes on `contract_actions` are on `transaction_id`,
+-- `address` and `(id, address)`, so neither dropped column is indexed. Avoiding the rebuild also
+-- avoids dropping a table that `contract_balances` and `ledger_events` hold foreign keys into.
+
+ALTER TABLE contract_actions DROP COLUMN state;
+ALTER TABLE contract_actions DROP COLUMN zswap_state;
+ALTER TABLE contract_actions ADD COLUMN state_key BLOB;
+ALTER TABLE contract_actions ADD COLUMN zswap_state_key BLOB;

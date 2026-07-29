@@ -103,6 +103,23 @@ pub async fn run(
         .context("get highest block timestamp")?
         .unwrap_or(0);
 
+    // Refuse to resume a database written before contract states were referenced by ledger-arena
+    // key. Those rows carried the state as a blob in columns that no longer exist, and the blobs
+    // cannot be recreated: their arena nodes were garbage collected and nothing can replay the
+    // chain for them. Failing here turns "you must re-index" into an actionable message instead of
+    // contract states silently reading back empty.
+    if storage
+        .contract_actions_without_state_keys_exist()
+        .await
+        .context("check for contract actions without state keys")?
+    {
+        bail!(
+            "found contract actions with no contract state key; they were indexed by a version \
+             that stored contract states as blobs, which cannot be converted. Wipe both the \
+             indexer database and the ledger DB and re-index from genesis; see docs/re-indexing.md"
+        );
+    }
+
     // Initialize metrics.
     let transaction_count = storage
         .get_transaction_count()
@@ -462,7 +479,7 @@ where
     };
 
     // Apply transactions to ledger state with special handling for genesis block.
-    let (transactions, ledger_parameters) = if block.height == 0 {
+    let (mut transactions, ledger_parameters) = if block.height == 0 {
         // At genesis compare ledger state roots of genesis and block from node to detect whether
         // genesis already includes transactions (post-block-0) or not (pre-block-0).
 
@@ -537,6 +554,25 @@ where
             block.height
         );
     }
+
+    // Capture the ledger-arena key and balances of each contract action's contract state. This
+    // happens once per block, deliberately after the root validations above and after the genesis
+    // branch (which replaces `ledger_state`), and before the `persist()` below whose
+    // `flush_all_changes_to_db` gets the newly rooted nodes into SQL ahead of `save_block`. There
+    // is no per-action flush to add: that call flushes the whole write cache.
+    //
+    // Ordering arena-flush before SQL-commit means a crash between them can never leave a key in
+    // SQL without its node; the benign inverse — a rooted node with no row referencing it — is
+    // possible and permanent. Re-indexing a block yields the *same* content-addressed key and a
+    // second `persist()`, taking the root count from 1 to 2. That is semantically free because
+    // these roots are never unpersisted, so the write path needs no dedup logic. Note this is the
+    // exact inverse of the ledger-state retention invariant above, where a double persist *would*
+    // corrupt the root count balance.
+    let uncaptured = ledger_state
+        .capture_contract_state_keys(&mut transactions)
+        .context("capture contract state keys")?;
+    metrics.record_uncaptured_contract_states(uncaptured);
+    let transactions = transactions;
 
     // Determine whether caught up, also allowing to fall back a little in that state.
     // Use saturating subtraction to handle the case where streams are temporarily out of order.

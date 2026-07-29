@@ -22,9 +22,7 @@ use crate::{
     domain::{DParameter, DustRegistrationEvent, TermsAndConditions},
     infra::subxt_node::{OnlineClientAtBlock, SubxtNodeError},
 };
-use indexer_common::domain::{
-    ByteVec, NodeVersion, SerializedContractAddress, SerializedContractState,
-};
+use indexer_common::domain::{ByteVec, NodeVersion};
 
 /// Runtime specific block details.
 pub struct BlockDetails {
@@ -75,19 +73,6 @@ pub fn decode_slot(slot: &[u8], node_version: NodeVersion) -> Result<u64, SubxtN
         NodeVersion::V0_22 => v0_22_0::decode_slot(slot),
         NodeVersion::V1_0 => v1_0_0::decode_slot(slot),
         NodeVersion::V2_0 => v2_0_0::decode_slot(slot),
-    }
-}
-
-/// Get contract state depending on the given protocol version.
-pub async fn get_contract_state(
-    address: SerializedContractAddress,
-    node_version: NodeVersion,
-    block: &OnlineClientAtBlock,
-) -> Result<SerializedContractState, SubxtNodeError> {
-    match node_version {
-        NodeVersion::V0_22 => v0_22_0::get_contract_state(address, block).await,
-        NodeVersion::V1_0 => v1_0_0::get_contract_state(address, block).await,
-        NodeVersion::V2_0 => v2_0_0::get_contract_state(address, block).await,
     }
 }
 
