@@ -39,6 +39,11 @@ on:
         required: true
         description: Indexer tag
         default: latest
+      node_toolkit_tag:
+        type: string
+        required: false
+        description: Node toolkit tag (leave empty for the startup script default)
+        default: ""
   workflow_call:
     inputs:
       target_env:
@@ -65,6 +70,11 @@ on:
         description: Indexer tag
         required: false
         default: latest
+      node_toolkit_tag:
+        type: string
+        description: Node toolkit tag (leave empty for the startup script default)
+        required: false
+        default: ""
     secrets:
       MIDNIGHTCI_PACKAGES_READ:
         required: true
@@ -127,6 +137,7 @@ jobs:
         env:
           NODE_TAG: ${{ inputs.node_tag }}
           INDEXER_TAG: ${{ inputs.indexer_tag }}
+          NODE_TOOLKIT_TAG: ${{ inputs.node_toolkit_tag }}
           APP__INFRA__SECRET: ${{ secrets.APP__INFRA__SECRET }}
           APP__INFRA__STORAGE__PASSWORD: ${{ secrets.APP__INFRA__STORAGE__PASSWORD }}
           APP__INFRA__PUB_SUB__PASSWORD: ${{ secrets.APP__INFRA__PUB_SUB__PASSWORD }}
