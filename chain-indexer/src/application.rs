@@ -139,6 +139,21 @@ pub async fn run(
         .collect::<Result<Vec<_>, _>>()
         .context("get ledger state root hashes")?;
     let newest_count = newest_ledger_state_keys.len();
+
+    // Must precede the seeding below, and is idempotent, hence unconditional; see
+    // `LedgerState::repair_root_counts`.
+    let repair = LedgerState::repair_root_counts(
+        newest_ledger_state_keys
+            .iter()
+            .map(|(key, ledger_version, _)| (key, *ledger_version)),
+    )
+    .context("repair ledger state root counts")?;
+    if repair.raised_roots > 0 || repair.culled_roots > 0 {
+        warn!(repair:?; "repaired under-counted ledger state gc roots");
+    } else {
+        info!(repair:?; "ledger state gc root counts are consistent");
+    }
+
     let persisted_root_hashes = LedgerState::persisted_root_hashes();
     let mut persisted_ledger_state_keys = newest_ledger_state_keys
         .into_iter()

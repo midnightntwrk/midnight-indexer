@@ -17,7 +17,7 @@ use fastrace::trace;
 use indexer_common::domain::{
     ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, BlockHash, LedgerVersion,
     NetworkId, SerializedContractAddress, SerializedLedgerStateKey, TransactionHash,
-    ledger::{self, LedgerParameters},
+    ledger::{self, LedgerParameters, RootCountRepair},
 };
 use std::{collections::HashSet, ops::DerefMut};
 use thiserror::Error;
@@ -93,6 +93,13 @@ impl LedgerState {
     /// The raw arena hash bytes of all currently persisted gc roots, fetched from the ledger DB.
     pub fn persisted_root_hashes() -> HashSet<Vec<u8>> {
         indexer_common::domain::ledger::LedgerState::persisted_root_hashes()
+    }
+
+    /// See [`indexer_common::domain::ledger::LedgerState::repair_root_counts`].
+    pub fn repair_root_counts<'a>(
+        window: impl IntoIterator<Item = (&'a SerializedLedgerStateKey, LedgerVersion)>,
+    ) -> Result<RootCountRepair, indexer_common::domain::ledger::Error> {
+        indexer_common::domain::ledger::LedgerState::repair_root_counts(window)
     }
 
     /// Run a time-bounded mark-and-sweep gc on the ledger DB and return the
