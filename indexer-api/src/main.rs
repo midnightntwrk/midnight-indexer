@@ -98,6 +98,13 @@ fn run() -> anyhow::Result<()> {
         let cipher = make_cipher(secret).context("make cipher")?;
         let storage = infra::storage::Storage::new(cipher, pool.clone());
 
+        // One pool serves both GraphQL queries and ledger-arena node reads. Arena reads are on the
+        // hot path now that contract states are resolved from keys, and each is many single-row
+        // queries, so an arena-heavy request can compete with ordinary queries for the pool's
+        // connections. Two things bound that: `pre_fetch` collapses a DAG into one batched query per
+        // level, and the contract state cache holds a semaphore across its loads. If those turn out
+        // not to be enough under load, the next step is a dedicated pool for the ledger DB here —
+        // standalone is unaffected either way, its ledger DB is a separate SQLite file.
         ledger_db::init(ledger_db_config, pool);
 
         let subscriber = pub_sub::nats::subscriber::NatsSubscriber::new(pub_sub_config).await?;
