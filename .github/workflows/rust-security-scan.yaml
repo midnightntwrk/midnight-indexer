@@ -48,5 +48,6 @@ jobs:
 
       - name: Run cargo-deny (gate CI on advisories)
         # Re-runs cargo-deny without `-f sarif` so it exits non-zero on findings, gating CI.
-        # `--disable-fetch` reuses the cached advisory DB; `-Aunlicensed` rationale as above.
-        run: cargo deny check --disable-fetch -Aduplicate -Aunmaintained -Alicense-not-encountered -Aparse-error -Asource-not-allowed -Aunlicensed
+        # `--offline` reuses the advisory DB cached by the step above without re-fetching
+        # (cargo-deny 0.20 removed the old `--disable-fetch` flag); `-Aunlicensed` rationale as above.
+        run: cargo deny --offline check -Aduplicate -Aunmaintained -Alicense-not-encountered -Aparse-error -Asource-not-allowed -Aunlicensed
