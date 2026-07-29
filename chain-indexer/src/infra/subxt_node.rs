@@ -61,6 +61,13 @@ type SubxtBlock = subxt::client::Block<SubstrateConfig>;
 
 const AURA_ENGINE_ID: ConsensusEngineId = [b'a', b'u', b'r', b'a'];
 const BABE_ENGINE_ID: ConsensusEngineId = [b'B', b'A', b'B', b'E'];
+
+/// Name of the node runtime API reporting the active block-production engine, declared in
+/// `midnight-primitives-consensus-engine` and implemented alongside the pallet driving the
+/// Aura→BABE transition. Its presence in a block's runtime guarantees the correctness of Aura
+/// and BABE pre-runtime digests during the transition, so BABE digests are only trusted for
+/// author derivation where it exists.
+const CONSENSUS_ENGINE_RUNTIME_API: &str = "ConsensusEngineApi";
 const CATCH_UP_LOG_INTERVAL: u64 = 1_000;
 
 /// One GRANDPA session worth of blocks. Blocks within this distance of the finalized tip are
@@ -220,7 +227,15 @@ impl SubxtNode {
         }
         let author = authorities
             .as_ref()
-            .map(|authorities| extract_block_author(&header, authorities, content_node_version))
+            .map(|authorities| {
+                // The state metadata can only be newer than the runtime that authored the
+                // block, so this can never enable BABE recognition too late.
+                let babe_supported = block
+                    .metadata_ref()
+                    .runtime_api_trait_by_name(CONSENSUS_ENGINE_RUNTIME_API)
+                    .is_some();
+                extract_block_author(&header, authorities, content_node_version, babe_supported)
+            })
             .transpose()?
             .flatten();
 
@@ -663,24 +678,31 @@ fn extract_block_author<H>(
     header: &SubstrateHeader<H>,
     authorities: &[[u8; 32]],
     content_node_version: NodeVersion,
+    babe_supported: bool,
 ) -> Result<Option<BlockAuthor>, SubxtNodeError>
 where
     H: Hash,
 {
-    author_from_digest_logs(&header.digest.logs, authorities, content_node_version)
+    author_from_digest_logs(
+        &header.digest.logs,
+        authorities,
+        content_node_version,
+        babe_supported,
+    )
 }
 
 /// Determine the block author from the pre-runtime digest logs, taking the first log with a
 /// recognized consensus engine that yields an author, in digest order (mirroring polkadot-js
 /// `extractAuthor`): Aura carries the slot (the author is the slot modulo the authority-set
 /// length), BABE carries the authority index explicitly in all of its pre-digest variants. BABE
-/// digests are only recognized on node versions that author under BABE (see
-/// [NodeVersion::supports_babe]); on older versions they are skipped like any unrecognized
-/// engine.
+/// digests are only recognized if `babe_supported`, i.e. if the block's runtime guarantees
+/// their correctness (see [CONSENSUS_ENGINE_RUNTIME_API]); otherwise they are skipped like any
+/// unrecognized engine.
 fn author_from_digest_logs(
     logs: &[DigestItem],
     authorities: &[[u8; 32]],
     content_node_version: NodeVersion,
+    babe_supported: bool,
 ) -> Result<Option<BlockAuthor>, SubxtNodeError> {
     if authorities.is_empty() {
         return Ok(None);
@@ -698,9 +720,7 @@ fn author_from_digest_logs(
                 authorities.get(index as usize).copied().map(Into::into)
             }
 
-            BABE_ENGINE_ID if content_node_version.supports_babe() => {
-                babe_author(pre_digest, authorities)?
-            }
+            BABE_ENGINE_ID if babe_supported => babe_author(pre_digest, authorities)?,
 
             _ => None,
         };
@@ -842,7 +862,7 @@ mod tests {
     fn author_from_aura_digest() {
         let logs = vec![DigestItem::PreRuntime(AURA_ENGINE_ID, 4u64.encode())];
 
-        let author = author_from_digest_logs(&logs, &AUTHORITIES, NodeVersion::V2_0)
+        let author = author_from_digest_logs(&logs, &AUTHORITIES, NodeVersion::V2_0, false)
             .expect("author can be determined");
 
         assert_eq!(author, Some([2; 32].into()));
@@ -859,24 +879,41 @@ mod tests {
     }
 
     #[test]
-    fn babe_digest_is_skipped_on_versions_without_babe() {
-        for node_version in [NodeVersion::V0_22, NodeVersion::V1_0, NodeVersion::V2_0] {
-            let logs = vec![DigestItem::PreRuntime(
-                BABE_ENGINE_ID,
-                babe_pre_digest(2, 2),
-            )];
-            let author = author_from_digest_logs(&logs, &AUTHORITIES, node_version)
-                .expect("skipped digest is not an error");
-            assert_eq!(author, None);
+    fn babe_digest_is_skipped_if_babe_not_supported() {
+        let logs = vec![DigestItem::PreRuntime(
+            BABE_ENGINE_ID,
+            babe_pre_digest(2, 2),
+        )];
+        let author = author_from_digest_logs(&logs, &AUTHORITIES, NodeVersion::V2_0, false)
+            .expect("skipped digest is not an error");
+        assert_eq!(author, None);
 
-            let logs = vec![
-                DigestItem::PreRuntime(BABE_ENGINE_ID, babe_pre_digest(2, 2)),
-                DigestItem::PreRuntime(AURA_ENGINE_ID, 4u64.encode()),
-            ];
-            let author = author_from_digest_logs(&logs, &AUTHORITIES, node_version)
-                .expect("author can be determined");
-            assert_eq!(author, Some([2; 32].into()));
-        }
+        let logs = vec![
+            DigestItem::PreRuntime(BABE_ENGINE_ID, babe_pre_digest(2, 2)),
+            DigestItem::PreRuntime(AURA_ENGINE_ID, 4u64.encode()),
+        ];
+        let author = author_from_digest_logs(&logs, &AUTHORITIES, NodeVersion::V2_0, false)
+            .expect("author can be determined");
+        assert_eq!(author, Some([2; 32].into()));
+    }
+
+    #[test]
+    fn first_pre_runtime_digest_in_digest_order_wins() {
+        let logs = vec![
+            DigestItem::PreRuntime(BABE_ENGINE_ID, babe_pre_digest(2, 2)),
+            DigestItem::PreRuntime(AURA_ENGINE_ID, 4u64.encode()),
+        ];
+        let author = author_from_digest_logs(&logs, &AUTHORITIES, NodeVersion::V2_0, true)
+            .expect("author can be determined");
+        assert_eq!(author, Some([3; 32].into()));
+
+        let logs = vec![
+            DigestItem::PreRuntime(AURA_ENGINE_ID, 4u64.encode()),
+            DigestItem::PreRuntime(BABE_ENGINE_ID, babe_pre_digest(2, 2)),
+        ];
+        let author = author_from_digest_logs(&logs, &AUTHORITIES, NodeVersion::V2_0, true)
+            .expect("author can be determined");
+        assert_eq!(author, Some([2; 32].into()));
     }
 
     #[test]
@@ -886,7 +923,7 @@ mod tests {
             DigestItem::PreRuntime(AURA_ENGINE_ID, 4u64.encode()),
         ];
 
-        let author = author_from_digest_logs(&logs, &AUTHORITIES, NodeVersion::V2_0)
+        let author = author_from_digest_logs(&logs, &AUTHORITIES, NodeVersion::V2_0, true)
             .expect("author can be determined");
 
         assert_eq!(author, Some([2; 32].into()));
@@ -921,7 +958,7 @@ mod tests {
 
     #[test]
     fn no_pre_runtime_digest_yields_no_author() {
-        let author = author_from_digest_logs(&[], &AUTHORITIES, NodeVersion::V2_0)
+        let author = author_from_digest_logs(&[], &AUTHORITIES, NodeVersion::V2_0, true)
             .expect("no digest is not an error");
 
         assert_eq!(author, None);
@@ -931,7 +968,7 @@ mod tests {
     fn empty_authorities_yield_no_author() {
         let logs = vec![DigestItem::PreRuntime(AURA_ENGINE_ID, 4u64.encode())];
 
-        let author = author_from_digest_logs(&logs, &[], NodeVersion::V2_0)
+        let author = author_from_digest_logs(&logs, &[], NodeVersion::V2_0, true)
             .expect("empty authorities are not an error");
 
         assert_eq!(author, None);
