@@ -27,6 +27,8 @@ pub struct Metrics {
     gc_run_count: Counter,
     gc_culled_node_count: Counter,
     gc_duration_seconds: Histogram,
+    gc_root_count: Gauge,
+    arena_node_count: Gauge,
     uncaptured_contract_state_count: Counter,
 }
 
@@ -47,6 +49,8 @@ impl Metrics {
             gc_run_count: counter!("indexer_gc_run_count"),
             gc_culled_node_count: counter!("indexer_gc_culled_node_count"),
             gc_duration_seconds: histogram!("indexer_gc_duration_seconds"),
+            gc_root_count: gauge!("indexer_gc_root_count"),
+            arena_node_count: gauge!("indexer_arena_node_count"),
             uncaptured_contract_state_count: counter!("indexer_uncaptured_contract_state_count"),
         };
 
@@ -144,11 +148,23 @@ impl Metrics {
         );
     }
 
-    /// Record one storage-core gc-v1 mark-and-sweep pass.
-    pub fn record_gc(&self, duration: Duration, nodes_culled: usize) {
+    /// Record one storage-core gc-v1 mark-and-sweep pass, along with the gc root count observed
+    /// after it.
+    ///
+    /// The root count is the growth number to watch: per-action contract state roots are never
+    /// unpersisted, so they accumulate with the number of *distinct* contract states. It is also the
+    /// only live-set proxy available from outside storage-core — the mark set that actually bounds
+    /// gc's memory is a `pub(crate)` field of `GcState`, so its size cannot be observed from here.
+    pub fn record_gc(&self, duration: Duration, nodes_culled: usize, root_count: usize) {
         self.gc_run_count.increment(1);
         self.gc_culled_node_count.increment(nodes_culled as u64);
         self.gc_duration_seconds.record(duration.as_secs_f64());
+        self.gc_root_count.set(root_count as f64);
+    }
+
+    /// Record the number of rows in `ledger_db_nodes`, i.e. the size of the arena.
+    pub fn record_arena_node_count(&self, node_count: usize) {
+        self.arena_node_count.set(node_count as f64);
     }
 
     /// Record contract addresses in a block for which no contract state could be captured from the

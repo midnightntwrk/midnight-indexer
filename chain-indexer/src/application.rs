@@ -25,9 +25,12 @@ use anyhow::{Context, bail};
 use async_stream::stream;
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{Stream, StreamExt, TryStreamExt, future::ok};
-use indexer_common::domain::{
-    BlockIndexed, BridgeEventIndexed, LedgerVersion, NetworkId, Publisher,
-    SerializedLedgerStateKey, UnshieldedUtxoIndexed,
+use indexer_common::{
+    domain::{
+        BlockIndexed, BridgeEventIndexed, LedgerVersion, NetworkId, Publisher,
+        SerializedLedgerStateKey, UnshieldedUtxoIndexed,
+    },
+    infra::ledger_db,
 };
 use log::{debug, info, warn};
 use parking_lot::RwLock;
@@ -36,7 +39,7 @@ use std::{
     collections::{HashSet, VecDeque},
     error::Error as StdError,
     future::ready,
-    num::NonZeroUsize,
+    num::{NonZeroU32, NonZeroUsize},
     pin::pin,
     sync::Arc,
     time::{Duration, Instant},
@@ -55,10 +58,24 @@ pub struct Config {
     pub caught_up_max_distance: u32,
     pub caught_up_leeway: u32,
 
-    /// Per-block time budget for the storage-core gc-v1 mark-and-sweep pass.
-    /// Set to "0s" to disable garbage collection.
+    /// Time budget for one storage-core gc-v1 mark-and-sweep pass, per block covered by that pass.
+    /// The pass gets `gc_bound * gc_interval`. Set to "0s" to disable garbage collection — but note
+    /// that is not safe during a long re-index, since retention-window unpersists keep producing
+    /// garbage that then never gets reclaimed.
     #[serde(with = "humantime_serde")]
     pub gc_bound: Duration,
+
+    /// Run gc every N blocks, with N times the budget, rather than every block. The duty cycle is
+    /// the same either way, but far fewer `GcState::run` entries means far fewer partial marks: gc
+    /// refuses to sweep until a mark completes, the budget is only checked between batches, and
+    /// `GcState` is memory-only, so a restart discards a partial mark entirely. `1` restores
+    /// per-block passes.
+    pub gc_interval: NonZeroU32,
+
+    /// Sample the arena size metrics every N blocks, or never if `0`. Each sample counts the rows in
+    /// `ledger_db_nodes`, which is a full scan proportional to the size of the arena, so this is
+    /// deliberately opt-in and deliberately not tied to the gc interval.
+    pub arena_metrics_interval: u32,
 
     /// How many recent blocks' ledger state keys stay persisted as gc roots before the oldest
     /// is unpersisted. Must comfortably exceed indexer-api's block-hash snapshot reads, e.g.
@@ -79,6 +96,8 @@ pub async fn run(
         caught_up_max_distance,
         caught_up_leeway,
         gc_bound,
+        gc_interval,
+        arena_metrics_interval,
         ledger_state_retention,
     } = config;
 
@@ -242,6 +261,8 @@ pub async fn run(
             let mut blocks = pin!(blocks);
             let mut caught_up = false;
             let mut parent_block_timestamp = initial_parent_block_timestamp;
+            let mut blocks_since_gc = 0;
+            let mut blocks_since_arena_metrics = 0;
 
             loop {
                 let (next_ledger_state, new_ledger_state_key) = get_and_index_block(
@@ -277,18 +298,41 @@ pub async fn run(
                     }
                 }
 
-                // Run a time-bounded mark-and-sweep pass; skip when disabled.
-                if !gc_bound.is_zero() {
+                blocks_since_gc += 1;
+                blocks_since_arena_metrics += 1;
+
+                // Run a time-bounded mark-and-sweep pass every gc_interval blocks, with the budget
+                // for all of them; skip when disabled.
+                if !gc_bound.is_zero() && blocks_since_gc >= gc_interval.get() {
                     let started = Instant::now();
-                    let nodes_culled = LedgerState::gc(gc_bound);
+                    let nodes_culled = LedgerState::gc(gc_bound * blocks_since_gc);
                     let elapsed = started.elapsed();
-                    metrics.record_gc(elapsed, nodes_culled);
+                    blocks_since_gc = 0;
+
+                    // Root rows grow with *distinct* contract states rather than with actions,
+                    // because per-action roots are content-addressed and refcounted. They are also
+                    // never unpersisted, so this only ever goes up and is the number to watch. The
+                    // scan is what gc itself does on every rescan, so it adds nothing asymptotically.
+                    let root_count = LedgerState::persisted_root_hashes().len();
+                    metrics.record_gc(elapsed, nodes_culled, root_count);
                     if nodes_culled > 0 {
                         debug!(
                             nodes_culled,
-                            elapsed:?;
+                            elapsed:?,
+                            root_count;
                             "gc pass culled orphan arena nodes"
                         );
+                    }
+                }
+
+                // Sample the arena size, which is a full scan, so only on its own opt-in interval.
+                if arena_metrics_interval > 0
+                    && blocks_since_arena_metrics >= arena_metrics_interval
+                {
+                    blocks_since_arena_metrics = 0;
+                    if let Some(node_count) = ledger_db::node_count() {
+                        metrics.record_arena_node_count(node_count);
+                        debug!(node_count; "sampled ledger DB node count");
                     }
                 }
             }
