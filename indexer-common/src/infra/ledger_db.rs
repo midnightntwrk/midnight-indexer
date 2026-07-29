@@ -21,6 +21,8 @@ use serde::Deserialize;
 pub fn init(config: Config, pool: crate::infra::pool::postgres::PostgresPool) {
     let Config { cache_max_nodes } = config;
 
+    let _ = OBSERVER.set(v1_1::LedgerDb::new(pool.clone()));
+
     let db = v1_1::LedgerDb::new(pool);
     let _ = midnight_storage_core_v1::storage::set_default_storage(|| {
         midnight_storage_core_v1::Storage::new(cache_max_nodes, db)
@@ -39,12 +41,34 @@ pub async fn init(config: Config) -> Result<(), Error> {
     let pool = sqlite::SqlitePool::new(sqlite::Config { cnn_url }).await?;
     migrations::sqlite::run_for_ledger_db(&pool).await?;
 
+    let _ = OBSERVER.set(v1_1::LedgerDb::new(pool.clone()));
+
     let db = v1_1::LedgerDb::new(pool);
     let _ = midnight_storage_core_v1::storage::set_default_storage(|| {
         midnight_storage_core_v1::Storage::new(cache_max_nodes, db)
     });
 
     Ok(())
+}
+
+/// A second handle on the ledger DB, held only for observability: storage-core keeps its own `DB`
+/// private behind `StorageBackend`, so there is no way to ask the arena how many rows its database
+/// has.
+#[cfg_attr(docsrs, doc(cfg(any(feature = "cloud", feature = "standalone"))))]
+#[cfg(any(feature = "cloud", feature = "standalone"))]
+static OBSERVER: std::sync::OnceLock<v1_1::LedgerDb> = std::sync::OnceLock::new();
+
+/// The number of rows in `ledger_db_nodes`, or `None` before [init] has run.
+///
+/// This is a full count, not an estimate, so it is proportional to the size of the arena and has no
+/// business running per block on a large network. Sample it on an interval; see chain-indexer's
+/// `arena_metrics_interval`.
+#[cfg_attr(docsrs, doc(cfg(any(feature = "cloud", feature = "standalone"))))]
+#[cfg(any(feature = "cloud", feature = "standalone"))]
+pub fn node_count() -> Option<usize> {
+    use midnight_storage_core_v1::db::DB;
+
+    OBSERVER.get().map(|db| db.size())
 }
 
 #[derive(Debug, Clone, Deserialize)]
