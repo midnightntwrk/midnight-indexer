@@ -25,7 +25,7 @@ pub use protocol_version::*;
 pub use pub_sub::*;
 pub use viewing_key::*;
 
-use derive_more::{Deref, Display, Into};
+use derive_more::{AsRef, Deref, Display, From, Into};
 use serde::{Deserialize, Serialize};
 use sqlx::Type;
 use std::str::FromStr;
@@ -64,6 +64,58 @@ pub type SerializedLedgerEvent = ByteVec;
 pub type SerializedLedgerParameters = ByteVec;
 pub type SerializedTransaction = ByteVec;
 pub type SerializedZswapState = ByteVec;
+
+/// Tagged-serialized `TypedArenaKey` of a contract state node in the ledger arena, i.e. a
+/// reference to a contract state rather than the state itself.
+///
+/// A real newtype, not another `ByteVec` alias: a key and a state are both bytes, so aliases
+/// would let a blob and a reference to a blob be swapped for each other silently. The tag makes
+/// the key self-describing about its ledger version — `storage-key(contract-state[v6])` versus
+/// `storage-key(contract-state[v8])` — which matters because arena node payloads carry no version
+/// tag of their own and the two `ContractState` layouts are not compatible.
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    AsRef,
+    Deref,
+    Display,
+    From,
+    Into,
+    Serialize,
+    Deserialize,
+    Type,
+)]
+#[as_ref([u8])]
+#[from(ByteVec, Vec<u8>)]
+#[sqlx(transparent)]
+pub struct SerializedContractStateKey(pub ByteVec);
+
+/// Tagged-serialized `TypedArenaKey` of a contract's filtered zswap state node in the ledger
+/// arena. See [SerializedContractStateKey] for why this is a newtype.
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    AsRef,
+    Deref,
+    Display,
+    From,
+    Into,
+    Serialize,
+    Deserialize,
+    Type,
+)]
+#[as_ref([u8])]
+#[from(ByteVec, Vec<u8>)]
+#[sqlx(transparent)]
+pub struct SerializedZswapStateKey(pub ByteVec);
 
 /// Network identifier.
 #[derive(Debug, Display, Clone, PartialEq, Eq, Hash, Deref, Into, Deserialize)]
