@@ -207,6 +207,21 @@ impl domain::storage::Storage for Storage {
     }
 
     #[trace]
+    async fn contract_actions_without_state_keys_exist(&self) -> Result<bool, sqlx::Error> {
+        let query = indoc! {"
+            SELECT 1
+            FROM contract_actions
+            WHERE state_key IS NULL AND zswap_state_key IS NULL
+            LIMIT 1
+        "};
+
+        sqlx::query(query)
+            .fetch_optional(&*self.pool)
+            .await
+            .map(|row| row.is_some())
+    }
+
+    #[trace]
     async fn get_latest_d_parameter(&self) -> Result<Option<DParameter>, sqlx::Error> {
         let query = indoc! {"
             SELECT num_permissioned_candidates, num_registered_candidates
@@ -570,8 +585,8 @@ async fn save_contract_actions(
             transaction_id,
             variant,
             address,
-            state,
-            zswap_state,
+            state_key,
+            zswap_state_key,
             attributes
         )
     "};
@@ -581,8 +596,8 @@ async fn save_contract_actions(
             q.push_bind(transaction_id)
                 .push_bind(ContractActionVariant::from(&action.attributes))
                 .push_bind(&action.address)
-                .push_bind(&action.state)
-                .push_bind(&action.zswap_state)
+                .push_bind(action.state_key.as_ref())
+                .push_bind(action.zswap_state_key.as_ref())
                 .push_bind(Json(&action.attributes));
         })
         .push(" RETURNING id")
@@ -1539,8 +1554,8 @@ mod contract_event_correlation_tests {
     fn call_action(address: &[u8], entry_point: &str) -> ContractAction {
         ContractAction {
             address: bv(address),
-            state: bv(b""),
-            zswap_state: bv(b""),
+            state_key: None,
+            zswap_state_key: None,
             extracted_balances: vec![],
             attributes: ContractAttributes::Call {
                 entry_point: entry_point.to_string(),
@@ -1551,8 +1566,8 @@ mod contract_event_correlation_tests {
     fn deploy_action(address: &[u8]) -> ContractAction {
         ContractAction {
             address: bv(address),
-            state: bv(b""),
-            zswap_state: bv(b""),
+            state_key: None,
+            zswap_state_key: None,
             extracted_balances: vec![],
             attributes: ContractAttributes::Deploy,
         }

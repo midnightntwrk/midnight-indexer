@@ -17,9 +17,12 @@ use fastrace::trace;
 use indexer_common::domain::{
     ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, BlockHash, LedgerVersion,
     NetworkId, SerializedContractAddress, SerializedLedgerStateKey, TransactionHash,
-    ledger::{self, LedgerParameters, RootCountRepair},
+    ledger::{LedgerParameters, RootCountRepair},
 };
-use std::{collections::HashSet, ops::DerefMut};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::DerefMut,
+};
 use thiserror::Error;
 
 /// Amount, in milliseconds, by which the first regular transaction's dust-validity `tblock` is
@@ -179,6 +182,86 @@ impl LedgerState {
         (self.zswap_first_free() != 0).then(|| self.zswap_first_free() - 1)
     }
 
+    /// Capture the ledger-arena key and the token balances of the contract state of every contract
+    /// action in the given block's transactions, and assign them to those actions.
+    ///
+    /// This must run **once per block, after every transaction has been applied**, and not inside
+    /// `apply_regular_transaction`. The blob this replaces came from a node runtime API called *at
+    /// the block*, i.e. the contract's end-of-block state, so every action on one address within a
+    /// block reported identical bytes; capturing per transaction would change both the stored state
+    /// and the denormalized `contract_balances` for multi-action blocks. It must also run after the
+    /// genesis branch in `get_and_index_block`, which *replaces* the ledger state after applying:
+    /// a key captured before that would point into a state that is not the one persisted.
+    ///
+    /// Keys are looked up once per distinct address, since content addressing makes K actions on
+    /// one address in one block share one key and one root increment. An address whose contract is
+    /// absent from the ledger state — a failed action — is left with no key, which reads back as
+    /// the empty state it reads back as today.
+    ///
+    /// Returns the number of distinct addresses for which no contract state could be captured, for
+    /// the caller to report: a rising count means states are silently not being captured.
+    #[trace]
+    pub fn capture_contract_state_keys(
+        &self,
+        transactions: &mut [Transaction],
+    ) -> Result<usize, Error> {
+        let mut captured = HashMap::new();
+
+        for transaction in transactions.iter_mut() {
+            let Transaction::Regular(transaction) = transaction else {
+                continue;
+            };
+
+            for contract_action in transaction.contract_actions.iter_mut() {
+                let (key, balances) = match captured.get(&contract_action.address) {
+                    Some(captured) => captured,
+
+                    None => {
+                        let contract_state = self
+                            .0
+                            .contract_state(&contract_action.address)
+                            .map_err(|error| {
+                                Error::GetContractStateKey(
+                                    transaction.hash,
+                                    contract_action.address.clone(),
+                                    error,
+                                )
+                            })?;
+
+                        // The balances come off the state the accessor hands back, so this replaces
+                        // the ~860 KB deserialize per action the indexing path used to do with one
+                        // read per address off a pointer that is already in hand.
+                        let captured_state = match contract_state {
+                            Some((key, contract_state)) => {
+                                let balances = contract_state.balances().map_err(|error| {
+                                    Error::GetContractBalances(
+                                        transaction.hash,
+                                        contract_action.address.clone(),
+                                        error,
+                                    )
+                                })?;
+
+                                (Some(key), balances)
+                            }
+
+                            None => (None, vec![]),
+                        };
+
+                        captured
+                            .entry(contract_action.address.clone())
+                            .insert_entry(captured_state)
+                            .into_mut()
+                    }
+                };
+
+                contract_action.state_key = key.clone();
+                contract_action.extracted_balances = balances.clone();
+            }
+        }
+
+        Ok(captured.values().filter(|(key, _)| key.is_none()).count())
+    }
+
     #[trace(properties = {
         "parent_block_hash": "{parent_block_hash}",
         "block_timestamp": "{block_timestamp}",
@@ -235,35 +318,16 @@ impl LedgerState {
         transaction.estimated_fees = fees;
         transaction.bridge_claim = bridge_claim;
 
-        // Update contract actions.
+        // Update contract actions. The zswap state is captured here rather than in the block-level
+        // pass because it is per transaction: it is filtered out of the global commitment tree,
+        // which grows with every transaction, so this reproduces exactly what is stored today.
+        // The contract state key and the balances derived from it are captured once per block, see
+        // `capture_contract_state_keys`.
         for contract_action in transaction.contract_actions.iter_mut() {
-            let zswap_state = self
-                .extract_contract_zswap_state(&contract_action.address)
-                .map_err(|error| Error::ExtractContractZswapState(transaction.hash, error))?;
-            contract_action.zswap_state = zswap_state;
-
-            // TODO: Workaround until we filter failed contract actions (empty state means failed).
-            if !contract_action.state.is_empty() {
-                let contract_state = ledger::ContractState::deserialize(
-                    &contract_action.state,
-                    transaction.protocol_version.ledger_version(),
-                )
-                .map_err(|error| {
-                    Error::DeserializeContractState(
-                        transaction.hash,
-                        contract_action.address.clone(),
-                        error,
-                    )
-                })?;
-                let balances = contract_state.balances().map_err(|error| {
-                    Error::GetContractBalances(
-                        transaction.hash,
-                        contract_action.address.clone(),
-                        error,
-                    )
-                })?;
-                contract_action.extracted_balances = balances;
-            }
+            let zswap_state_key = self
+                .contract_zswap_state_key(&contract_action.address)
+                .map_err(|error| Error::GetContractZswapStateKey(transaction.hash, error))?;
+            contract_action.zswap_state_key = Some(zswap_state_key);
         }
 
         Ok(Transaction::Regular(transaction.into()))
@@ -331,14 +395,14 @@ pub enum Error {
         #[source] indexer_common::domain::ledger::Error,
     ),
 
-    #[error("cannot extract contract zswap state for transaction {0}")]
-    ExtractContractZswapState(
+    #[error("cannot capture contract zswap state key for transaction {0}")]
+    GetContractZswapStateKey(
         TransactionHash,
         #[source] indexer_common::domain::ledger::Error,
     ),
 
-    #[error("cannot deserialize contract state for transaction {0} and contract address {1}")]
-    DeserializeContractState(
+    #[error("cannot capture contract state key for transaction {0} and contract address {1}")]
+    GetContractStateKey(
         TransactionHash,
         SerializedContractAddress,
         #[source] indexer_common::domain::ledger::Error,

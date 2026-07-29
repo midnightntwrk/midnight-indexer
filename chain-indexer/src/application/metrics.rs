@@ -27,6 +27,7 @@ pub struct Metrics {
     gc_run_count: Counter,
     gc_culled_node_count: Counter,
     gc_duration_seconds: Histogram,
+    uncaptured_contract_state_count: Counter,
 }
 
 impl Metrics {
@@ -46,6 +47,7 @@ impl Metrics {
             gc_run_count: counter!("indexer_gc_run_count"),
             gc_culled_node_count: counter!("indexer_gc_culled_node_count"),
             gc_duration_seconds: histogram!("indexer_gc_duration_seconds"),
+            uncaptured_contract_state_count: counter!("indexer_uncaptured_contract_state_count"),
         };
 
         if let Some(block_height) = block_height {
@@ -147,5 +149,12 @@ impl Metrics {
         self.gc_run_count.increment(1);
         self.gc_culled_node_count.increment(nodes_culled as u64);
         self.gc_duration_seconds.record(duration.as_secs_f64());
+    }
+
+    /// Record contract addresses in a block for which no contract state could be captured from the
+    /// ledger state. Expected to be non-zero only for failed actions, so a rising rate means states
+    /// are silently not being captured and `state` is reading back empty.
+    pub fn record_uncaptured_contract_states(&self, count: usize) {
+        self.uncaptured_contract_state_count.increment(count as u64);
     }
 }

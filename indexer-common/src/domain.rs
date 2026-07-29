@@ -247,11 +247,11 @@ pub enum TransactionVariant {
     System,
 }
 
-/// A contract action.
+/// A contract action, as extracted from a ledger transaction. The contract state it refers to is
+/// captured separately, once per block, from the indexer's own ledger state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContractAction {
     pub address: SerializedContractAddress,
-    pub state: SerializedContractState,
     pub attributes: ContractAttributes,
 }
 
