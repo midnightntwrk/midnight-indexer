@@ -2637,6 +2637,60 @@ mod tests {
         assert_eq!(translated_v9.ledger_version(), LedgerVersion::V9);
         assert!(ledger_state_v9.translate(LedgerVersion::V8).is_err());
 
+        // Characterization guard for the v8 -> v9 translation. `application.rs`
+        // compares exactly this serialized arena root against the node's
+        // `ledger_state_root` at every block, so pinning it locks the re-ported
+        // table's output — including the placeholder v9 parameters the migration
+        // seeds from `ledger_v9 INITIAL_PARAMETERS`. A diff means the table, a
+        // ledger-v9 type, or a seeded param drifted.
+        //
+        // This empty-state pin is a fast supplementary guard; the authoritative
+        // node cross-validation is the populated devnet fixture below (the node's
+        // own translation table produces the identical root over a real state).
+        let v9_root = translated_v9.root().expect("compute translated v9 root");
+        let golden = std::fs::read(format!(
+            "{}/tests/golden_v8_to_v9_empty_root.raw",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("read golden v9 root fixture");
+        assert_eq!(
+            v9_root.0, golden,
+            "v8 -> v9 empty-state root drifted from the golden fixture; if intentional, \
+             regenerate the fixture and re-check against the node"
+        );
+
+        // Populated, NODE-VALIDATED coverage: a devnet ledger-8 genesis
+        // (extracted from node-0.22.0, `ledger-state[v13]`, ~67 KB) exercises the
+        // table's MPT walking — contracts, bridge_receiving, treasury — that the
+        // empty state does not. The pinned v9 root below was produced by the
+        // node's own `StateTranslationTable` (midnight-node `fc39e708`, the 2.1.0
+        // migration runtime) over this same blob and matches byte-for-byte, so
+        // this fixture is authoritative for the translation itself. (The full
+        // live-fork `apply + 1` RPC-format check is still Phase 3.)
+        let v8_devnet = std::fs::read(format!(
+            "{}/tests/v8_genesis_devnet_0_22_0.raw",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("read v8 devnet genesis fixture");
+        let v8_devnet_state = LedgerState::from_genesis(&v8_devnet, LedgerVersion::V8)
+            .expect("deserialize v8 devnet genesis");
+        assert_eq!(v8_devnet_state.ledger_version(), LedgerVersion::V8);
+        let v9_devnet_state = v8_devnet_state
+            .translate(LedgerVersion::V9)
+            .expect("translate devnet v8 -> v9");
+        assert_eq!(v9_devnet_state.ledger_version(), LedgerVersion::V9);
+        let v9_devnet_root = v9_devnet_state.root().expect("compute devnet v9 root");
+        let golden_devnet = std::fs::read(format!(
+            "{}/tests/golden_v8_to_v9_devnet_root.raw",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("read devnet golden v9 root fixture");
+        assert_eq!(
+            v9_devnet_root.0, golden_devnet,
+            "v8 -> v9 devnet root drifted from the golden fixture; if intentional, \
+             regenerate the fixture and re-check against the node"
+        );
+
         Ok(())
     }
 
