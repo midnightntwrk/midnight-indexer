@@ -1,4 +1,40 @@
 """
+Tagged-union helper for fields like `Either<ZswapCoinPublicKey, ContractAddress>`
+used in standard unshielded events.
+
+Exactly one of `userAddress` or `contractAddress` is non-null; the `kind`
+discriminator says which.
+"""
+type AddressOrContract @beta {
+	"""
+	Which of the two address fields is populated.
+	"""
+	kind: AddressOrContractKind!
+	"""
+	The hex-encoded user address; populated when kind is USER.
+	"""
+	userAddress: HexEncoded
+	"""
+	The hex-encoded contract address; populated when kind is CONTRACT.
+	"""
+	contractAddress: HexEncoded
+}
+
+"""
+Discriminator for `AddressOrContract`.
+"""
+enum AddressOrContractKind {
+	"""
+	The address is a user (zswap coin public key) address.
+	"""
+	USER
+	"""
+	The address is a contract address.
+	"""
+	CONTRACT
+}
+
+"""
 A block with its relevant data.
 """
 type Block {
@@ -62,6 +98,15 @@ type Block {
 	The system parameters (governance) at this block height.
 	"""
 	systemParameters: SystemParameters!
+	"""
+	The zswap commitment tree filtered to the given contract address, resolved from this
+	block's ledger state; null if the contract does not exist at this block. Hex-encoded.
+	For building transactions, compose with `ledgerParameters` and `contract { state }` in
+	one request, anchored to the same block; use the latest block: older trees age out of
+	the ledger's root window, and blocks beyond the chain-indexer's ledger state retention
+	window no longer have a loadable ledger state and yield an error.
+	"""
+	contractZswapState(address: HexEncoded!): HexEncoded @beta
 }
 
 """
@@ -335,6 +380,32 @@ input ConnectOptions {
 }
 
 """
+A contract, identified by address, resolved as of a given block (or the latest state if no
+offset is given). The topmost contract concept; its actions are a sub-query.
+"""
+type Contract @beta {
+	"""
+	The hex-encoded contract address.
+	"""
+	address: HexEncoded!
+	"""
+	The hex-encoded serialized contract state as of the queried block (the latest contract
+	action at or before it).
+	"""
+	state: HexEncoded!
+	"""
+	The contract's maintenance authority as of the queried block.
+	"""
+	maintenanceAuthority: ContractMaintenanceAuthority! @beta
+	"""
+	Recent contract actions for this contract, newest first, optionally filtered by type;
+	`limit` defaults to 100 and is capped at 500. Use the `contractActions` subscription to
+	enumerate all actions.
+	"""
+	actions(limit: Int, type: ContractActionType): [ContractAction!]! @beta
+}
+
+"""
 A contract action.
 """
 interface ContractAction {
@@ -357,6 +428,15 @@ input ContractActionOffset @oneOf {
 	Either a transaction hash or a transaction identifier.
 	"""
 	transactionOffset: TransactionOffset
+}
+
+"""
+Contract action variant, used to filter `Contract.actions`.
+"""
+enum ContractActionType {
+	DEPLOY
+	CALL
+	UPDATE
 }
 
 """
@@ -407,6 +487,18 @@ type ContractCall implements ContractAction {
 	Unshielded token balances held by this contract.
 	"""
 	unshieldedBalances: [ContractBalance!]!
+	"""
+	Contract events emitted by this contract call.
+	
+	Only `ContractCall` exposes this field — `ContractDeploy` and
+	`ContractUpdate` don't execute circuits with the `emit` expression.
+	
+	Events are attributed to a call by matching contract address and entry
+	point within the transaction; if several calls in one transaction share
+	both, their events are not attributed here and remain reachable via the
+	top-level `contractEvents` query.
+	"""
+	contractEvents: [ContractEvent!]! @beta
 }
 
 """
@@ -433,6 +525,145 @@ type ContractDeploy implements ContractAction {
 	Unshielded token balances held by this contract.
 	"""
 	unshieldedBalances: [ContractBalance!]!
+}
+
+"""
+Common interface implemented by every concrete contract event type.
+"""
+interface ContractEvent {
+	id: Int!
+	raw: HexEncoded!
+	maxId: Int!
+	protocolVersion: Int!
+	version: Int!
+	contractAddress: HexEncoded!
+	transactionId: Int!
+	transaction: Transaction!
+}
+
+"""
+Filter for contract events queries and subscriptions; block-range bounds live here so the
+same shape works for both.
+"""
+input ContractEventFilter {
+	"""
+	The hex-encoded contract address to filter events for.
+	"""
+	contractAddress: HexEncoded!
+	"""
+	Event types to narrow to; must be non-empty when given.
+	"""
+	types: [ContractEventType!]
+	"""
+	Prefix matches on indexed event fields, combined with AND semantics; standard events
+	only.
+	"""
+	fieldPrefixes: [FieldPrefixFilter!]
+	"""
+	Lower bound on the block height an event was emitted in; on subscription this acts as
+	a starting cursor alongside `id`.
+	"""
+	fromBlock: Int
+	"""
+	Upper bound on the block height an event was emitted in; on subscription, the stream
+	completes once the chain has reached this block.
+	"""
+	toBlock: Int
+	"""
+	The hex-encoded transaction hash to narrow to events emitted by that transaction.
+	"""
+	transactionHash: HexEncoded
+}
+
+"""
+Closed enum of contract event types the indexer surfaces. Used in filter
+input only, response discrimination is via `__typename`.
+"""
+enum ContractEventType {
+	"""
+	A contract spends a shielded coin.
+	"""
+	SHIELDED_SPEND
+	"""
+	A contract or user receives a shielded coin.
+	"""
+	SHIELDED_RECEIVE
+	"""
+	A contract mints a shielded coin.
+	"""
+	SHIELDED_MINT
+	"""
+	A contract burns a shielded coin.
+	"""
+	SHIELDED_BURN
+	"""
+	A contract spends an unshielded coin.
+	"""
+	UNSHIELDED_SPEND
+	"""
+	A contract or user receives an unshielded coin.
+	"""
+	UNSHIELDED_RECEIVE
+	"""
+	A contract mints an unshielded coin.
+	"""
+	UNSHIELDED_MINT
+	"""
+	A contract burns an unshielded coin.
+	"""
+	UNSHIELDED_BURN
+	"""
+	A contract is paused.
+	"""
+	PAUSED
+	"""
+	A contract is unpaused.
+	"""
+	UNPAUSED
+	"""
+	A custom event emitted by a contract.
+	"""
+	MISC
+}
+
+"""
+The maintenance authority of a contract.
+"""
+type ContractMaintenanceAuthority @beta {
+	"""
+	The committee of verifying keys authorised to maintain the contract.
+	"""
+	committee: [ContractMaintenanceVerifyingKey!]!
+	"""
+	The number of committee signatures required to authorise maintenance.
+	"""
+	threshold: Int!
+	"""
+	Monotonic counter guarding against replay of maintenance operations.
+	"""
+	counter: Int!
+}
+
+"""
+A verifying key in a contract maintenance authority committee.
+"""
+type ContractMaintenanceVerifyingKey @beta {
+	"""
+	The signature scheme of the key.
+	"""
+	kind: ContractMaintenanceVerifyingKeyKind!
+	"""
+	The hex-encoded tagged-serialized verifying key.
+	"""
+	key: HexEncoded!
+}
+
+"""
+The signature scheme of a maintenance authority verifying key.
+"""
+enum ContractMaintenanceVerifyingKeyKind {
+	SCHNORR
+	ECDSA
 }
 
 """
@@ -838,6 +1069,22 @@ type EpochPerf {
 }
 
 """
+Prefix filter on an indexed field of a standard event; not supported on Misc events.
+"""
+input FieldPrefixFilter {
+	"""
+	The indexed field name; one of `nullifier`, `commitment`, `ciphertext`, `domainSep`,
+	`tokenType`, `sender` or `recipient`.
+	"""
+	fieldName: String!
+	"""
+	The hex-encoded field value prefix. An empty string matches all values; otherwise
+	events whose field value starts with this prefix are returned.
+	"""
+	prefix: HexEncoded!
+}
+
+"""
 First valid epoch for an SPO identity.
 """
 type FirstValidEpoch {
@@ -869,6 +1116,50 @@ type MerkleTreeCollapsedUpdate {
 	protocolVersion: Int!
 }
 
+type MiscContractEvent implements ContractEvent @beta {
+	"""
+	The ID of this contract event.
+	"""
+	id: Int!
+	"""
+	The hex-encoded serialized event payload.
+	"""
+	raw: HexEncoded!
+	"""
+	The maximum ID of all contract events.
+	"""
+	maxId: Int!
+	"""
+	The protocol version.
+	"""
+	protocolVersion: Int!
+	"""
+	The event schema version, as declared by the emitting contract's compiler.
+	"""
+	version: Int!
+	"""
+	The hex-encoded address of the emitting contract.
+	"""
+	contractAddress: HexEncoded!
+	"""
+	The ID of the transaction this event was emitted from.
+	"""
+	transactionId: Int!
+	"""
+	The hex-encoded contract-defined event name (32 bytes).
+	"""
+	name: HexEncoded!
+	"""
+	The hex-encoded opaque event payload, up to 256 bytes; consumers decode it with their
+	contract's descriptor.
+	"""
+	payload: HexEncoded!
+	"""
+	The transaction this event was emitted from.
+	"""
+	transaction: Transaction!
+}
+
 type Mutation {
 	"""
 	Connect the wallet with the given viewing key and return a session ID.
@@ -897,6 +1188,41 @@ type ParamChange implements DustLedgerEvent {
 	The protocol version.
 	"""
 	protocolVersion: Int!
+}
+
+type PausedEvent implements ContractEvent @beta {
+	"""
+	The ID of this contract event.
+	"""
+	id: Int!
+	"""
+	The hex-encoded serialized event payload.
+	"""
+	raw: HexEncoded!
+	"""
+	The maximum ID of all contract events.
+	"""
+	maxId: Int!
+	"""
+	The protocol version.
+	"""
+	protocolVersion: Int!
+	"""
+	The event schema version, as declared by the emitting contract's compiler.
+	"""
+	version: Int!
+	"""
+	The hex-encoded address of the emitting contract.
+	"""
+	contractAddress: HexEncoded!
+	"""
+	The ID of the transaction this event was emitted from.
+	"""
+	transactionId: Int!
+	"""
+	The transaction this event was emitted from.
+	"""
+	transaction: Transaction!
 }
 
 """
@@ -939,6 +1265,11 @@ type Query {
 	"""
 	contractAction(address: HexEncoded!, offset: ContractActionOffset): ContractAction
 	"""
+	Find a contract by address, resolved as of the given block offset (or its latest state if no
+	offset is given). Returns null if the contract has no action at or before that block.
+	"""
+	contract(address: HexEncoded!, offset: BlockOffset): Contract @beta
+	"""
 	Get DUST generation status for specific Cardano reward addresses.
 	"""
 	dustGenerationStatus(cardanoRewardAddresses: [CardanoRewardAddress!]!): [DustGenerationStatus!]!
@@ -955,6 +1286,14 @@ type Query {
 	Get a collapsed Merkle tree update for the dust generation tree.
 	"""
 	dustGenerationMerkleTreeUpdate(startIndex: Int!, endIndex: Int!): MerkleTreeCollapsedUpdate! @beta
+	"""
+	Find contract events matching the filter, ordered by ID; `limit` defaults to 100 and is
+	capped at 500, `offset` defaults to 0.
+	
+	Block-range bounds (`fromBlock`, `toBlock`) live on `ContractEventFilter`
+	for symmetry with the subscription. `limit`/`offset` are top-level args.
+	"""
+	contractEvents(filter: ContractEventFilter!, limit: Int, offset: Int): [ContractEvent!]! @beta
 	"""
 	Get the full history of D-parameter changes for governance auditability.
 	"""
@@ -1230,6 +1569,96 @@ type Segment {
 	success: Boolean!
 }
 
+type ShieldedBurnEvent implements ContractEvent @beta {
+	"""
+	The ID of this contract event.
+	"""
+	id: Int!
+	"""
+	The hex-encoded serialized event payload.
+	"""
+	raw: HexEncoded!
+	"""
+	The maximum ID of all contract events.
+	"""
+	maxId: Int!
+	"""
+	The protocol version.
+	"""
+	protocolVersion: Int!
+	"""
+	The event schema version, as declared by the emitting contract's compiler.
+	"""
+	version: Int!
+	"""
+	The hex-encoded address of the emitting contract.
+	"""
+	contractAddress: HexEncoded!
+	"""
+	The ID of the transaction this event was emitted from.
+	"""
+	transactionId: Int!
+	"""
+	The hex-encoded nullifier; filterable via `fieldPrefixes`.
+	"""
+	nullifier: HexEncoded!
+	"""
+	The optional amount as a decimal string; hidden in some shielded burns.
+	"""
+	amount: String
+	"""
+	The transaction this event was emitted from.
+	"""
+	transaction: Transaction!
+}
+
+type ShieldedMintEvent implements ContractEvent @beta {
+	"""
+	The ID of this contract event.
+	"""
+	id: Int!
+	"""
+	The hex-encoded serialized event payload.
+	"""
+	raw: HexEncoded!
+	"""
+	The maximum ID of all contract events.
+	"""
+	maxId: Int!
+	"""
+	The protocol version.
+	"""
+	protocolVersion: Int!
+	"""
+	The event schema version, as declared by the emitting contract's compiler.
+	"""
+	version: Int!
+	"""
+	The hex-encoded address of the emitting contract.
+	"""
+	contractAddress: HexEncoded!
+	"""
+	The ID of the transaction this event was emitted from.
+	"""
+	transactionId: Int!
+	"""
+	The hex-encoded commitment; filterable via `fieldPrefixes`.
+	"""
+	commitment: HexEncoded!
+	"""
+	The hex-encoded domain separator; filterable via `fieldPrefixes`.
+	"""
+	domainSep: HexEncoded!
+	"""
+	The optional amount as a decimal string; hidden in some shielded mints.
+	"""
+	amount: String
+	"""
+	The transaction this event was emitted from.
+	"""
+	transaction: Transaction!
+}
+
 """
 A transaction containing a shielded (zswap) nullifier match with block context.
 """
@@ -1258,6 +1687,94 @@ type ShieldedNullifierTransaction {
 	The transaction containing this nullifier match.
 	"""
 	transaction: Transaction! @beta
+}
+
+type ShieldedReceiveEvent implements ContractEvent @beta {
+	"""
+	The ID of this contract event.
+	"""
+	id: Int!
+	"""
+	The hex-encoded serialized event payload.
+	"""
+	raw: HexEncoded!
+	"""
+	The maximum ID of all contract events.
+	"""
+	maxId: Int!
+	"""
+	The protocol version.
+	"""
+	protocolVersion: Int!
+	"""
+	The event schema version, as declared by the emitting contract's compiler.
+	"""
+	version: Int!
+	"""
+	The hex-encoded address of the emitting contract.
+	"""
+	contractAddress: HexEncoded!
+	"""
+	The ID of the transaction this event was emitted from.
+	"""
+	transactionId: Int!
+	"""
+	The hex-encoded commitment; filterable via `fieldPrefixes`.
+	"""
+	commitment: HexEncoded!
+	"""
+	The hex-encoded optional ciphertext of the shielded coin receipt, up to 512 bytes;
+	filterable via `fieldPrefixes`.
+	"""
+	ciphertext: HexEncoded
+	"""
+	The hex-encoded receiving contract address; set when received by a contract, null for
+	user recipients. Named to avoid collision with the emitting `contractAddress`.
+	"""
+	receivingContractAddress: HexEncoded
+	"""
+	The transaction this event was emitted from.
+	"""
+	transaction: Transaction!
+}
+
+type ShieldedSpendEvent implements ContractEvent @beta {
+	"""
+	The ID of this contract event.
+	"""
+	id: Int!
+	"""
+	The hex-encoded serialized event payload.
+	"""
+	raw: HexEncoded!
+	"""
+	The maximum ID of all contract events.
+	"""
+	maxId: Int!
+	"""
+	The protocol version.
+	"""
+	protocolVersion: Int!
+	"""
+	The event schema version, as declared by the emitting contract's compiler.
+	"""
+	version: Int!
+	"""
+	The hex-encoded address of the emitting contract.
+	"""
+	contractAddress: HexEncoded!
+	"""
+	The ID of the transaction this event was emitted from.
+	"""
+	transactionId: Int!
+	"""
+	The hex-encoded nullifier; filterable via `fieldPrefixes`.
+	"""
+	nullifier: HexEncoded!
+	"""
+	The transaction this event was emitted from.
+	"""
+	transaction: Transaction!
 }
 
 """
@@ -1432,6 +1949,12 @@ type Subscription {
 	latest block if the offset is omitted.
 	"""
 	contractActions(address: HexEncoded!, offset: BlockOffset): ContractAction!
+	"""
+	Subscribe to contract events matching the given filter, starting at the given event ID
+	(inclusive) and returning events in monotonic ID order; completes once the chain has
+	reached `filter.toBlock` if that is set.
+	"""
+	contractEvents(filter: ContractEventFilter!, id: Int): ContractEvent! @beta
 	"""
 	Subscribe to a dust address's generations as a consistent snapshot at `block_hash`. The
 	wallet's owned generation entries, interleaved with collapsed Merkle tree updates for the
@@ -1639,7 +2162,238 @@ enum TransactionResultStatus {
 
 scalar Unit
 
+type UnpausedEvent implements ContractEvent @beta {
+	"""
+	The ID of this contract event.
+	"""
+	id: Int!
+	"""
+	The hex-encoded serialized event payload.
+	"""
+	raw: HexEncoded!
+	"""
+	The maximum ID of all contract events.
+	"""
+	maxId: Int!
+	"""
+	The protocol version.
+	"""
+	protocolVersion: Int!
+	"""
+	The event schema version, as declared by the emitting contract's compiler.
+	"""
+	version: Int!
+	"""
+	The hex-encoded address of the emitting contract.
+	"""
+	contractAddress: HexEncoded!
+	"""
+	The ID of the transaction this event was emitted from.
+	"""
+	transactionId: Int!
+	"""
+	The transaction this event was emitted from.
+	"""
+	transaction: Transaction!
+}
+
 scalar UnshieldedAddress
+
+type UnshieldedBurnEvent implements ContractEvent @beta {
+	"""
+	The ID of this contract event.
+	"""
+	id: Int!
+	"""
+	The hex-encoded serialized event payload.
+	"""
+	raw: HexEncoded!
+	"""
+	The maximum ID of all contract events.
+	"""
+	maxId: Int!
+	"""
+	The protocol version.
+	"""
+	protocolVersion: Int!
+	"""
+	The event schema version, as declared by the emitting contract's compiler.
+	"""
+	version: Int!
+	"""
+	The hex-encoded address of the emitting contract.
+	"""
+	contractAddress: HexEncoded!
+	"""
+	The ID of the transaction this event was emitted from.
+	"""
+	transactionId: Int!
+	"""
+	The spending user or contract address; filterable via `fieldPrefixes`.
+	"""
+	sender: AddressOrContract!
+	"""
+	The hex-encoded token type; filterable via `fieldPrefixes`.
+	"""
+	tokenType: HexEncoded!
+	"""
+	The amount as a decimal string.
+	"""
+	amount: String!
+	"""
+	The transaction this event was emitted from.
+	"""
+	transaction: Transaction!
+}
+
+type UnshieldedMintEvent implements ContractEvent @beta {
+	"""
+	The ID of this contract event.
+	"""
+	id: Int!
+	"""
+	The hex-encoded serialized event payload.
+	"""
+	raw: HexEncoded!
+	"""
+	The maximum ID of all contract events.
+	"""
+	maxId: Int!
+	"""
+	The protocol version.
+	"""
+	protocolVersion: Int!
+	"""
+	The event schema version, as declared by the emitting contract's compiler.
+	"""
+	version: Int!
+	"""
+	The hex-encoded address of the emitting contract.
+	"""
+	contractAddress: HexEncoded!
+	"""
+	The ID of the transaction this event was emitted from.
+	"""
+	transactionId: Int!
+	"""
+	The hex-encoded domain separator; filterable via `fieldPrefixes`.
+	"""
+	domainSep: HexEncoded!
+	"""
+	The hex-encoded token type; filterable via `fieldPrefixes`.
+	"""
+	tokenType: HexEncoded!
+	"""
+	The amount as a decimal string.
+	"""
+	amount: String!
+	"""
+	The transaction this event was emitted from.
+	"""
+	transaction: Transaction!
+}
+
+type UnshieldedReceiveEvent implements ContractEvent @beta {
+	"""
+	The ID of this contract event.
+	"""
+	id: Int!
+	"""
+	The hex-encoded serialized event payload.
+	"""
+	raw: HexEncoded!
+	"""
+	The maximum ID of all contract events.
+	"""
+	maxId: Int!
+	"""
+	The protocol version.
+	"""
+	protocolVersion: Int!
+	"""
+	The event schema version, as declared by the emitting contract's compiler.
+	"""
+	version: Int!
+	"""
+	The hex-encoded address of the emitting contract.
+	"""
+	contractAddress: HexEncoded!
+	"""
+	The ID of the transaction this event was emitted from.
+	"""
+	transactionId: Int!
+	"""
+	The receiving user or contract address; filterable via `fieldPrefixes`.
+	"""
+	recipient: AddressOrContract!
+	"""
+	The hex-encoded domain separator; filterable via `fieldPrefixes`.
+	"""
+	domainSep: HexEncoded!
+	"""
+	The hex-encoded token type; filterable via `fieldPrefixes`.
+	"""
+	tokenType: HexEncoded!
+	"""
+	The amount as a decimal string.
+	"""
+	amount: String!
+	"""
+	The transaction this event was emitted from.
+	"""
+	transaction: Transaction!
+}
+
+type UnshieldedSpendEvent implements ContractEvent @beta {
+	"""
+	The ID of this contract event.
+	"""
+	id: Int!
+	"""
+	The hex-encoded serialized event payload.
+	"""
+	raw: HexEncoded!
+	"""
+	The maximum ID of all contract events.
+	"""
+	maxId: Int!
+	"""
+	The protocol version.
+	"""
+	protocolVersion: Int!
+	"""
+	The event schema version, as declared by the emitting contract's compiler.
+	"""
+	version: Int!
+	"""
+	The hex-encoded address of the emitting contract.
+	"""
+	contractAddress: HexEncoded!
+	"""
+	The ID of the transaction this event was emitted from.
+	"""
+	transactionId: Int!
+	"""
+	The spending user or contract address; filterable via `fieldPrefixes`.
+	"""
+	sender: AddressOrContract!
+	"""
+	The hex-encoded domain separator; filterable via `fieldPrefixes`.
+	"""
+	domainSep: HexEncoded!
+	"""
+	The hex-encoded token type; filterable via `fieldPrefixes`.
+	"""
+	tokenType: HexEncoded!
+	"""
+	The amount as a decimal string.
+	"""
+	amount: String!
+	"""
+	The transaction this event was emitted from.
+	"""
+	transaction: Transaction!
+}
 
 """
 A transaction that created and/or spent UTXOs alongside these and other information.

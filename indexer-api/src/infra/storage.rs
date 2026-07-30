@@ -14,6 +14,7 @@
 mod block;
 mod bridge;
 mod contract_action;
+mod contract_event;
 mod dust;
 mod dust_generations;
 mod ledger_events;

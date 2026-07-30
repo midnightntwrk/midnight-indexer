@@ -466,6 +466,127 @@ export type DustGenerationsResponse = GraphQLResponse<{
   dustGenerations: DustGenerations[];
 }>;
 
+// c2m-bridge query surface (#941). Only BridgeUserTransfer carries fully-populated
+// fields today; other variants are discriminated by __typename until data exists.
+export interface BridgeUserTransfer {
+  __typename: 'BridgeUserTransfer';
+  id: number;
+  blockHeight: number;
+  midnightTxHash: string;
+  cardanoTxHash: string;
+  amount: string;
+  recipient: string;
+}
+
+// c2m-bridge pool observability surface (#944).
+export type BridgeTreasuryReason = 'INVALID' | 'UNAPPROVED' | 'SUBMINIMAL_FLUSH';
+
+export const BRIDGE_TREASURY_REASONS: BridgeTreasuryReason[] = [
+  'INVALID',
+  'UNAPPROVED',
+  'SUBMINIMAL_FLUSH',
+];
+
+export interface BridgeTreasuryAggregate {
+  reason: BridgeTreasuryReason;
+  total: string;
+}
+
+export interface BridgePoolSummary {
+  reserveTotal: string;
+  treasuryByReason: BridgeTreasuryAggregate[];
+  subminimumTxCount: number;
+  lastEventBlockHeight: number | null;
+}
+
+export type BridgePoolSummaryResponse = GraphQLResponse<{ bridgePoolSummary: BridgePoolSummary }>;
+
+// Inflow event lists. Only BridgeReserveTransfer carries populated fields today;
+// treasury variants are discriminated by __typename until data exists.
+export interface BridgeReserveTransfer {
+  __typename: 'BridgeReserveTransfer';
+  id: number;
+  blockHeight: number;
+  midnightTxHash: string;
+  cardanoTxHash: string;
+  amount: string;
+}
+
+export interface BridgeEventOther {
+  __typename: string;
+  id?: number;
+  recipient?: string;
+  amount?: string;
+}
+
+export type BridgeEvent = BridgeUserTransfer | BridgeReserveTransfer | BridgeEventOther;
+
+export type BridgeEventsResponse = GraphQLResponse<{ bridgeEvents: BridgeEvent[] }>;
+
+export type BridgeDepositsResponse = GraphQLResponse<{ bridgeDeposits: BridgeEvent[] }>;
+
+export interface BridgeBalance {
+  deposited: string;
+  claimed: string;
+  balance: string;
+}
+
+export type BridgeBalanceResponse = GraphQLResponse<{ bridgeBalance: BridgeBalance }>;
+
+export type BridgeReserveInflowsResponse = GraphQLResponse<{ bridgeReserveInflows: BridgeEvent[] }>;
+
+export type BridgeTreasuryInflowsResponse = GraphQLResponse<{
+  bridgeTreasuryInflows: BridgeEvent[];
+}>;
+
+// #1304: Block.contractZswapState and the composed CCC execution-inputs read.
+export type BlockContractZswapStateResponse = GraphQLResponse<{
+  block: {
+    hash: string;
+    height: number;
+    contractZswapState: string | null;
+  } | null;
+}>;
+
+export type ExecutionInputsResponse = GraphQLResponse<{
+  block: {
+    hash: string;
+    ledgerParameters: string;
+    contractZswapState: string | null;
+  } | null;
+  contract: { state: string } | null;
+}>;
+
+// #1275: top-level Contract type and contract(address, offset) query.
+export type ContractMaintenanceVerifyingKeyKind = 'SCHNORR' | 'ECDSA';
+
+export interface ContractMaintenanceVerifyingKey {
+  kind: ContractMaintenanceVerifyingKeyKind;
+  key: string;
+}
+
+export interface ContractMaintenanceAuthority {
+  committee: ContractMaintenanceVerifyingKey[];
+  threshold: number;
+  counter: number;
+}
+
+export type ContractActionTypeEnum = 'DEPLOY' | 'CALL' | 'UPDATE';
+
+export interface ContractTypeActionRef {
+  __typename: string;
+  address: string;
+}
+
+export interface ContractType {
+  address: string;
+  state: string;
+  maintenanceAuthority: ContractMaintenanceAuthority;
+  actions: ContractTypeActionRef[];
+}
+
+export type ContractResponse = GraphQLResponse<{ contract: ContractType | null }>;
+
 export interface DustCommitmentMerkleTreeUpdateResult {
   startIndex: number;
   endIndex: number;
@@ -527,9 +648,7 @@ export interface DustGenerationDtimeUpdateItem {
 }
 
 export type DustGenerationsEvent =
-  | DustGenerationsItem
-  | DustGenerationsProgress
-  | DustGenerationDtimeUpdateItem;
+  DustGenerationsItem | DustGenerationsProgress | DustGenerationDtimeUpdateItem;
 
 export interface DustNullifierTransaction {
   nullifierLeBytes: string;

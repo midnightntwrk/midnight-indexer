@@ -31,6 +31,9 @@ import type {
   ContractEvent,
   ContractEventFilter,
   GraphQLResponse,
+  BridgeEvent,
+  BridgeBalance,
+  BridgePoolSummary,
 } from './indexer-types';
 import { CONTRACT_EVENTS_SUBSCRIPTION } from './graphql/contract-event-queries';
 import {
@@ -48,9 +51,22 @@ import {
   SHIELDED_NULLIFIER_TRANSACTIONS_SUBSCRIPTION,
   ZSWAP_LEDGER_EVENTS_SUBSCRIPTION_DEFAULT,
   ZSWAP_LEDGER_EVENTS_SUBSCRIPTION_FROM_ID,
+  BRIDGE_EVENTS_SUBSCRIPTION_DEFAULT,
+  BRIDGE_EVENTS_SUBSCRIPTION_FROM,
+  BRIDGE_BALANCE_SUBSCRIPTION,
+  BRIDGE_POOL_UPDATES_SUBSCRIPTION,
 } from './graphql/subscriptions';
 
 export type BlockSubscriptionResponse = GraphQLResponse<{ blocks: Block }>;
+
+export interface BridgePoolUpdate {
+  newEvent: BridgeEvent | null;
+  pool: BridgePoolSummary;
+}
+
+export type BridgePoolUpdateSubscriptionResponse = GraphQLResponse<{
+  bridgePoolUpdates: BridgePoolUpdate;
+}>;
 
 export type UnshieldedTxSubscriptionResponse = GraphQLResponse<{
   unshieldedTransactions: UnshieldedTransactionEvent;
@@ -72,6 +88,10 @@ export type DustGenerationsSubscriptionResponse = GraphQLResponse<{
   dustGenerations: DustGenerationsEvent;
 }>;
 
+export type BridgeEventSubscriptionResponse = GraphQLResponse<{ bridgeEvents: BridgeEvent }>;
+
+export type BridgeBalanceSubscriptionResponse = GraphQLResponse<{ bridgeBalance: BridgeBalance }>;
+
 export type DustNullifierTransactionSubscriptionResponse = GraphQLResponse<{
   dustNullifierTransactions: DustNullifierTransaction;
 }>;
@@ -92,8 +112,8 @@ export type ContractEventSubscriptionResponse = GraphQLResponse<{
  * Handlers used to respond to incoming GraphQL subscription messages.
  */
 export interface SubscriptionHandlers<T> {
-  /** Called when a new payload is received */
-  next: (value: T) => void;
+  /** Called when a new payload is received (optional: the client invokes it as `next?.()`) */
+  next?: (value: T) => void;
 
   /** Called when an error is received */
   error?: (err: Error | GraphQLError) => void;
@@ -1077,15 +1097,17 @@ export class IndexerWsClient {
   }
 
   /**
-   * Subscribes to dust generation entries for a dust address within an index range.
+   * Subscribes to a dust address's generations as a consistent snapshot at a block hash.
    *
-   * Entries are interleaved with collapsed Merkle tree updates to fill gaps.
-   * The subscription finishes after reaching the end index with a final collapsed update.
+   * Owned dtime updates after the cutoff height are issued first, then owned generation
+   * entries interleaved with collapsed Merkle tree updates for the non-owned gaps, all
+   * served at the given block's state. The subscription completes once emitted.
    *
    * @param handlers - Callback functions for handling incoming dust generation events
    * @param dustAddress - Bech32m-encoded dust address to subscribe for
-   * @param startIndex - Start index into the dust commitment tree
-   * @param endIndex - End index into the dust commitment tree
+   * @param blockHash - Hex-encoded block hash the generation snapshot is pinned to
+   * @param dtimeCutoffHeight - Block height after which owned dtime updates are replayed
+   *                            (pass 0 to replay all)
    * @param queryOverride - Optional custom GraphQL subscription query
    *
    * @returns An object with subscription ID and unsubscribe function
@@ -1093,12 +1115,12 @@ export class IndexerWsClient {
   subscribeToDustGenerations(
     handlers: SubscriptionHandlers<DustGenerationsSubscriptionResponse>,
     dustAddress: string,
-    startIndex: number,
-    endIndex: number,
+    blockHash: string,
+    dtimeCutoffHeight: number,
     queryOverride?: string,
   ): { unsubscribe: () => void; id: string } {
     const query = queryOverride || DUST_GENERATIONS_SUBSCRIPTION;
-    const variables = { dustAddress, startIndex, endIndex };
+    const variables = { dustAddress, blockHash, dtimeCutoffHeight };
 
     const subscriptionId = this.getNextId();
 
@@ -1234,6 +1256,135 @@ export class IndexerWsClient {
           id: subscriptionId,
           type: 'stop',
         };
+        this.getWs().send(JSON.stringify(stopMessage));
+        this.handlersMap.delete(subscriptionId);
+      },
+    };
+  }
+
+  /**
+   * Subscribes to c2m-bridge events (#942).
+   *
+   * - Without `from`: streams historical events from the beginning, then live-tails.
+   * - With `from`: replays events with id greater than the cursor, then live-tails.
+   *
+   * There is no completion sentinel; callers terminate on their own condition.
+   *
+   * @param handlers - Callbacks for incoming bridge event messages
+   * @param opts - Optional `from` event-id cursor, `recipient` and `variant` filters
+   * @param queryOverride - Optional custom GraphQL subscription query
+   * @returns An object with subscription ID and unsubscribe function
+   */
+  subscribeToBridgeEvents(
+    handlers: SubscriptionHandlers<BridgeEventSubscriptionResponse>,
+    opts: { from?: number; recipient?: string; variant?: string } = {},
+    queryOverride?: string,
+  ): { unsubscribe: () => void; id: string } {
+    const hasFrom = opts.from !== undefined;
+    const query =
+      queryOverride ||
+      (hasFrom ? BRIDGE_EVENTS_SUBSCRIPTION_FROM : BRIDGE_EVENTS_SUBSCRIPTION_DEFAULT);
+    const variables = {
+      FROM: opts.from,
+      RECIPIENT: opts.recipient,
+      VARIANT: opts.variant,
+    };
+
+    const subscriptionId = this.getNextId();
+
+    const payload: GraphQLStartMessage = {
+      id: subscriptionId,
+      type: 'start',
+      payload: { query, variables },
+    };
+
+    log.debug(`Bridge Events payload:\n${JSON.stringify(payload, null, 2)}`);
+
+    this.handlersMap.set(subscriptionId, handlers as SubscriptionHandlers<unknown>);
+    this.getWs().send(JSON.stringify(payload));
+
+    return {
+      id: subscriptionId,
+      unsubscribe: () => {
+        const stopMessage: GraphQLStopMessage = { id: subscriptionId, type: 'stop' };
+        this.getWs().send(JSON.stringify(stopMessage));
+        this.handlersMap.delete(subscriptionId);
+      },
+    };
+  }
+
+  /**
+   * Subscribes to a c2m-bridge address balance (#942). Emits the current balance
+   * immediately on connect, then re-emits on every relevant event for the address.
+   *
+   * @param handlers - Callbacks for incoming bridge balance messages
+   * @param address - The hex-encoded address to observe
+   * @param queryOverride - Optional custom GraphQL subscription query
+   * @returns An object with subscription ID and unsubscribe function
+   */
+  subscribeToBridgeBalance(
+    handlers: SubscriptionHandlers<BridgeBalanceSubscriptionResponse>,
+    address: string,
+    queryOverride?: string,
+  ): { unsubscribe: () => void; id: string } {
+    const query = queryOverride || BRIDGE_BALANCE_SUBSCRIPTION;
+    const variables = { ADDRESS: address };
+
+    const subscriptionId = this.getNextId();
+
+    const payload: GraphQLStartMessage = {
+      id: subscriptionId,
+      type: 'start',
+      payload: { query, variables },
+    };
+
+    log.debug(`Bridge Balance payload:\n${JSON.stringify(payload, null, 2)}`);
+
+    this.handlersMap.set(subscriptionId, handlers as SubscriptionHandlers<unknown>);
+    this.getWs().send(JSON.stringify(payload));
+
+    return {
+      id: subscriptionId,
+      unsubscribe: () => {
+        const stopMessage: GraphQLStopMessage = { id: subscriptionId, type: 'stop' };
+        this.getWs().send(JSON.stringify(stopMessage));
+        this.handlersMap.delete(subscriptionId);
+      },
+    };
+  }
+
+  /**
+   * Subscribes to c2m-bridge pool updates (#944). Emits an initial snapshot on
+   * connect (newEvent = null, pool = current summary), then a refreshed summary
+   * paired with each new pool-affecting event. There is no completion sentinel.
+   *
+   * @param handlers - Callbacks for incoming pool update messages
+   * @param queryOverride - Optional custom GraphQL subscription query
+   * @returns An object with subscription ID and unsubscribe function
+   */
+  subscribeToBridgePoolUpdates(
+    handlers: SubscriptionHandlers<BridgePoolUpdateSubscriptionResponse>,
+    queryOverride?: string,
+  ): { unsubscribe: () => void; id: string } {
+    const query = queryOverride || BRIDGE_POOL_UPDATES_SUBSCRIPTION;
+
+    const subscriptionId = this.getNextId();
+
+    const payload: GraphQLStartMessage = {
+      id: subscriptionId,
+      type: 'start',
+      payload: { query },
+    };
+
+    log.debug(`Bridge Pool Updates payload:\n${JSON.stringify(payload, null, 2)}`);
+
+    this.handlersMap.set(subscriptionId, handlers as SubscriptionHandlers<unknown>);
+    this.getWs().send(JSON.stringify(payload));
+
+    return {
+      id: subscriptionId,
+      unsubscribe: () => {
+        const stopMessage: GraphQLStopMessage = { id: subscriptionId, type: 'stop' };
         this.getWs().send(JSON.stringify(stopMessage));
         this.handlersMap.delete(subscriptionId);
       },

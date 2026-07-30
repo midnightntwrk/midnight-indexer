@@ -23,7 +23,7 @@ infra:
     max_lifetime: "5m"
 
   ledger_db:
-    cache_size: "1kiB"
+    cache_max_nodes: 100000
 
   node:
     url: "ws://localhost:9944"

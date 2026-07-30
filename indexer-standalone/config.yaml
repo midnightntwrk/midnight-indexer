@@ -29,7 +29,7 @@ infra:
     cnn_url: "/data/indexer.sqlite"
 
   ledger_db:
-    cache_size: "1kiB"
+    cache_max_nodes: 100000
     cnn_url: "/data/ledger-db.sqlite"
 
   node:
@@ -57,6 +57,8 @@ infra:
       blocks:
         batch_size: 20
       contract_actions:
+        batch_size: 20
+      contract_events:
         batch_size: 20
       dust_generations:
         batch_size: 20

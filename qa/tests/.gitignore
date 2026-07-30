@@ -1,18 +1,12 @@
 # Node dependencies
 node_modules/
 
-# Yarn Zero-Install cache (only needed if using PnP — you're not)
-.yarn/
-
 # Logs
 logs/
 *.log
 npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
 
 # Runtime files
-.pnp.*
 *.tsbuildinfo
 
 # Optional: OS & IDE-specific files
@@ -29,4 +23,5 @@ xray_id.txt
 
 data/static/*/blocks.jsonc
 data/static/*/contract-actions.jsonc
+data/static/*/contract-events.jsonc
 data/static/*/transactions.jsonc

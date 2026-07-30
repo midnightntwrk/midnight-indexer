@@ -339,6 +339,7 @@ export class Environment {
       throw new Error(
         `INDEXER_INSTANCE="${instance}": could not reach ${this.indexerHost} ` +
           `(${(err as Error).message}). Unset INDEXER_INSTANCE to target the primary instance.`,
+        { cause: err },
       );
     }
 

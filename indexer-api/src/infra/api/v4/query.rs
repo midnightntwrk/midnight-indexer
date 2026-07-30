@@ -26,7 +26,9 @@ use crate::{
                 BridgeBalance, BridgeEvent, BridgeEventVariant, BridgePoolSummary,
                 BridgeTreasuryReason,
             },
+            contract::Contract,
             contract_action::{ContractAction, ContractActionOffset},
+            contract_event::{ContractEvent, ContractEventFilter},
             directives::beta,
             dust::DustGenerationStatus,
             dust_generations::DustGenerations,
@@ -251,6 +253,54 @@ where
         Ok(contract_action.map(Into::into))
     }
 
+    /// Find a contract by address, resolved as of the given block offset (or its latest state if no
+    /// offset is given). Returns null if the contract has no action at or before that block.
+    #[graphql(directive = beta::apply())]
+    #[trace(properties = { "address": "{address}", "offset": "{offset:?}" })]
+    async fn contract(
+        &self,
+        cx: &Context<'_>,
+        address: HexEncoded,
+        offset: Option<BlockOffset>,
+    ) -> ApiResult<Option<Contract<S>>> {
+        let storage = cx.get_storage::<S>();
+
+        let address = &address
+            .hex_decode()
+            .map_err_into_client_error(|| "invalid address")?;
+
+        let contract_action = match offset {
+            Some(BlockOffset::Hash(hash)) => {
+                let hash = hash
+                    .hex_decode()
+                    .map_err_into_client_error(|| "invalid offset")?;
+
+                storage
+                    .get_contract_action_by_address_as_of_block_hash(address, hash)
+                    .await
+                    .map_err_into_server_error(|| {
+                        format!("get contract by address {address} as of block hash {hash}")
+                    })?
+            }
+
+            Some(BlockOffset::Height(height)) => storage
+                .get_contract_action_by_address_as_of_block_height(address, height)
+                .await
+                .map_err_into_server_error(|| {
+                    format!("get contract by address {address} as of block height {height}")
+                })?,
+
+            None => storage
+                .get_latest_contract_action_by_address(address)
+                .await
+                .map_err_into_server_error(|| {
+                    format!("get latest contract action by address {address}")
+                })?,
+        };
+
+        Ok(contract_action.map(Into::into))
+    }
+
     /// Get DUST generation status for specific Cardano reward addresses.
     #[trace]
     async fn dust_generation_status(
@@ -376,6 +426,40 @@ where
                 error => ApiError::server("create dust generation collapsed update", error),
             })
             .map(MerkleTreeCollapsedUpdate::from)
+    }
+
+    /// Find contract events matching the filter, ordered by ID; `limit` defaults to 100 and is
+    /// capped at 500, `offset` defaults to 0.
+    ///
+    /// Block-range bounds (`fromBlock`, `toBlock`) live on `ContractEventFilter`
+    /// for symmetry with the subscription. `limit`/`offset` are top-level args.
+    #[graphql(directive = beta::apply())]
+    #[trace(properties = { "limit": "{limit:?}", "offset": "{offset:?}" })]
+    async fn contract_events(
+        &self,
+        cx: &Context<'_>,
+        filter: ContractEventFilter,
+        limit: Option<i32>,
+        offset: Option<i32>,
+    ) -> ApiResult<Vec<ContractEvent<S>>> {
+        let storage = cx.get_storage::<S>();
+
+        let filter = filter
+            .into_domain()
+            .map_err(|error| ApiError::client("invalid contract event filter", error))?;
+
+        let limit = limit.unwrap_or(100).clamp(1, 500) as u32;
+        let offset = offset.unwrap_or(0).max(0) as u32;
+
+        let rows = storage
+            .get_contract_events(&filter, limit, offset)
+            .await
+            .map_err_into_server_error(|| "get contract events")?;
+
+        rows.into_iter()
+            .map(ContractEvent::try_from)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err_into_server_error(|| "convert contract event row to GraphQL type")
     }
 
     /// Get the full history of D-parameter changes for governance auditability.

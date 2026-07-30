@@ -96,6 +96,17 @@ where
     let highest_block_height = highest_block_ref.map(|info| info.height);
     info!(highest_block_height:?; "starting indexing");
 
+    // Seed the parent-block timestamp from the highest stored block so the first block processed
+    // after a restart bumps its first regular transaction's well-formed `tblock` off the true
+    // parent block time. Without this, `parent_block_timestamp` would be seeded from the resumed
+    // block's own timestamp, over-bumping `tblock` and risking a spurious `IntentTtlExpired`
+    // rejection of a transaction the node accepted. `0` (empty DB) keeps the genesis behavior.
+    let initial_parent_block_timestamp = storage
+        .get_highest_block_timestamp()
+        .await
+        .context("get highest block timestamp")?
+        .unwrap_or(0);
+
     // Initialize metrics.
     let transaction_count = storage
         .get_transaction_count()
@@ -132,6 +143,21 @@ where
         .collect::<Result<Vec<_>, _>>()
         .context("get ledger state root hashes")?;
     let newest_count = newest_ledger_state_keys.len();
+
+    // Must precede the seeding below, and is idempotent, hence unconditional; see
+    // `LedgerState::repair_root_counts`.
+    let repair = LedgerState::repair_root_counts(
+        newest_ledger_state_keys
+            .iter()
+            .map(|(key, ledger_version, _)| (key, *ledger_version)),
+    )
+    .context("repair ledger state root counts")?;
+    if repair.raised_roots > 0 || repair.culled_roots > 0 {
+        warn!(repair:?; "repaired under-counted ledger state gc roots");
+    } else {
+        info!(repair:?; "ledger state gc root counts are consistent");
+    }
+
     let persisted_root_hashes = LedgerState::persisted_root_hashes();
     let mut persisted_ledger_state_keys = newest_ledger_state_keys
         .into_iter()
@@ -202,7 +228,7 @@ where
                 .buffered(blocks_buffer);
             let mut blocks = pin!(blocks);
             let mut caught_up = false;
-            let mut parent_block_timestamp = 0;
+            let mut parent_block_timestamp = initial_parent_block_timestamp;
 
             loop {
                 let (next_ledger_state, new_ledger_state_key) = get_and_index_block(
@@ -436,6 +462,9 @@ where
                 block.parent_hash,
                 block.timestamp,
                 *parent_block_timestamp,
+                // Only reproduce the node's mempool-cached first-tx `tblock` bump for non-genesis
+                // blocks; genesis (height 0) transactions never transited the mempool.
+                block.height > 0,
             )
             .context("apply transactions to ledger state")
     };

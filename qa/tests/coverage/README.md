@@ -58,11 +58,11 @@ Unique id format:
 Run from `qa/tests`:
 
 - Generate report:
-  - `yarn coverage:generate`
+  - `bun run coverage:generate`
 - Generate report with explicit context:
-  - `yarn coverage:generate --target-env=preview --indexer-api-version=v4`
+  - `bun run coverage:generate --target-env=preview --indexer-api-version=v4`
 - Run soft gate check (regression + optional critical checks):
-  - `yarn coverage:check`
+  - `bun run coverage:check`
 
 ## Configuration
 

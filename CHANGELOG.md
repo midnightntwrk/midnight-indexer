@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [unreleased]
+
+### 🐛 Bug Fixes
+
+- *(indexer-common)* [**breaking**] Rename the ledger DB's `cache_size` to `cache_max_nodes`, make it a plain node count and raise it to 100000
+
+  The value has always been a *number of arena nodes* (storage-core's own default is 10000), but it
+  was parsed as a byte size, so the shipped `"1kiB"` meant 1024 nodes — about 100x below where it
+  should be. Operators must rename the key in their config and replace any byte-unit string with a
+  plain integer; the `APP__INFRA__LEDGER_DB__CACHE_SIZE` environment variable becomes
+  `APP__INFRA__LEDGER_DB__CACHE_MAX_NODES`. `0` means unbounded.
+
+## [4.3.5] - 2026-07-25
+
+### 🐛 Bug Fixes
+
+- *(chain-indexer)* Validate the first regular transaction against the parent block timestamp's mempool `tblock` bump
+
+## [4.3.4] - 2026-07-24
+
+### 🐛 Bug Fixes
+
+- *(chain-indexer)* Avoid OutOfDustValidityWindow on the first transaction of a block by reproducing the node's mempool `tblock` bump (#1367)
+
 ## [4.3.3] - 2026-06-04
 
 ### 🚀 Features

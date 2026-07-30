@@ -45,7 +45,7 @@ fn init_ledger_db(rt: &Runtime) -> tempfile::TempDir {
         .to_string();
     rt.block_on(async {
         ledger_db::init(ledger_db::Config {
-            cache_size: 1_024,
+            cache_max_nodes: 1_024,
             cnn_url: sqlite_file,
         })
         .await
