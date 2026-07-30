@@ -23,12 +23,14 @@
 //! inside the ledger-state retention window we can load that block's ledger state out of the
 //! arena and compare, entirely offline and deterministically.
 //!
-//! Point it at a **copy** of a real (e.g. preprod) standalone database pair — some of these tests
-//! persist and flush arena nodes, so they write to the ledger DB:
+//! Point it at a **copy** of a real standalone database pair — some of these tests persist and
+//! flush arena nodes, so they write to the ledger DB. Both paths must be **absolute**: cargo runs
+//! tests with the package root rather than the workspace root as the working directory, so a
+//! relative path fails with an opaque `unable to open database file`.
 //!
 //! ```text
-//! SPIKE_INDEXER_DB=/path/indexer.sqlite \
-//! SPIKE_LEDGER_DB=/path/ledger-db.sqlite \
+//! SPIKE_INDEXER_DB=/abs/path/indexer.sqlite \
+//! SPIKE_LEDGER_DB=/abs/path/ledger-db.sqlite \
 //! cargo nextest run -p chain-indexer --features standalone --run-ignored all \
 //!     --no-capture -E 'binary(contract_state_arena)'
 //! ```
@@ -41,6 +43,55 @@
 //! fidelity gate fails rather than passing vacuously), `SPIKE_SCAN_ACTIONS` (default 5000, how far
 //! back the covering `(id, address)` index is scanned for candidates) and `SPIKE_DELTA_ACTIONS`
 //! (default 25 consecutive actions for the dedup, delta and root-growth measurements).
+//!
+//! # Producing a database pair
+//!
+//! Sync a standalone indexer built from this commit — the production code here is untouched, so it
+//! still stores blobs — against a network whose early blocks carry contract actions, with
+//! `ledger_state_retention` set above the target height so that no ledger state root is ever
+//! unpersisted. Nothing then produces arena garbage, which is the one situation in which
+//! `gc_bound: "0s"` is safe; `aged_out=0` in the fidelity output confirms it held. Since nothing
+//! ages out, the pair can be snapshotted and measured at any height while the sync continues.
+//!
+//! Only the early chain is useful. Contract activity starts at block 3,439 on stagenet
+//! (`rpc.stagenet.shielded.tools`) and at block 32,900 on preprod; both RPCs serve historical
+//! state, so a genesis-anchored prefix suffices, and all three public networks are idle at their
+//! tips. Snapshot with SQLite's `backup()` API rather than copying files, indexer DB first so the
+//! ledger image is never older than the references into it.
+//!
+//! # Measured results
+//!
+//! Stagenet at height 9,920 — 163 contract actions over 57 addresses, produced by a ~2.7 h prefix
+//! sync. The gate passes:
+//!
+//! ```text
+//! fidelity: candidates=25 compared=25 aged_out=0 empty_state=0
+//! ```
+//!
+//! Re-serialized contract state is byte-identical to the node's blob for all 25 addresses, so the
+//! design can serve `state` unchanged and the content-hash dedup fallback is not needed. Neither
+//! suspected divergence — `MerkleTreeNode.hash`, `ChargedState.charged_keys` — materialised.
+//! For the busiest contract, 14 actions on `1d02a2461eb6621b`:
+//!
+//! ```text
+//! dedup  sum_nodes=210 -> union_nodes=15, factor=14.00
+//!        blob_bytes=257530 -> arena union_bytes=18956             (13.6x smaller)
+//! delta  new_vs_previous=1                                       (one new node per action)
+//! roots  distinct_states=1 max_refcount=14, rows 9947 -> 9947    (no new root rows)
+//! zswap  13/14 identical, 1 distinct key, 23352 -> 1642 bytes
+//! load   cold 0.2ms, warm 0.0ms, flat across cache 1024..100000 and prefetch on/off
+//! ```
+//!
+//! Three limits on what the above supports:
+//!
+//! - A *single* state is 2-3% **larger** in the arena than as a blob (`sum_bytes=265384` against
+//!   `blob_bytes=257530`). The saving comes entirely from structural sharing across actions, not
+//!   from the encoding.
+//! - Every state measured is `depth=1` with 2 to 15 nodes. The sub-millisecond cold load therefore
+//!   says nothing about the far larger states on preprod, and on its own does not justify the
+//!   sizing of indexer-api's `contract_state_cache` or its `max_concurrent_loads`.
+//! - Stagenet runs `V2_0` throughout, so only the `LedgerVersion::V9` / `ContractStateV4` arm is
+//!   exercised. The V8 / `ContractStateV3` arm needs a preprod prefix and is still unmeasured.
 
 #![cfg(feature = "standalone")]
 

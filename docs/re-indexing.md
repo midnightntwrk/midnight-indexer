@@ -31,10 +31,13 @@ and it is easy to delete one and keep the other. Don't.
 ## When a re-index is required
 
 - **Contract states stored as arena keys** (v4.4.0). `contract_actions.state` and
-  `contract_actions.zswap_state` held a full serialized state per action —
-  ~860 KB each, and on preprod 301 GB of a 292 GB database. Both columns are
+  `contract_actions.zswap_state` held a full serialized state per action, one copy
+  per action even when the state had not changed — on preprod 301 GB of a 292 GB
+  database, with individual states reported at around 860 KB. Both columns are
   replaced by keys into the ledger arena, which stores the same states
-  deduplicated and structurally shared.
+  deduplicated and structurally shared. Measured on stagenet, whose states run
+  1.5-18 KB, 14 actions on one contract collapsed from 257,530 bytes of
+  byte-identical blobs to 18,956 bytes in 15 shared nodes.
 
   The old blobs cannot be converted: the arena nodes they would have to point at
   were garbage collected long ago, and a migration cannot replay the chain to

@@ -12,9 +12,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
   `contract_actions.state` and `contract_actions.zswap_state` are replaced by
   `state_key` and `zswap_state_key`, references into the content-addressed ledger arena that
-  already holds the same states, deduplicated and structurally shared. On preprod those two
-  columns were 301 GB of a 292 GB database and grew quadratically in the number of actions
-  per contract.
+  already holds the same states, deduplicated and structurally shared. Every action stored a
+  full copy of its contract's state, so the two columns grew with the number of actions per
+  contract even when the state itself was unchanged — and quadratically for contracts whose
+  state grows as it is called. On preprod they reached 301 GB of a 292 GB database.
+
+  Measured against stagenet: 14 actions on one contract stored 257,530 bytes of
+  byte-identical blobs, which the arena holds as 18,956 bytes in 15 nodes — 13.6x smaller,
+  one new node per action, and no new rows in `ledger_db_roots`. Re-serializing state out of
+  the arena was byte-identical to the node's blob for all 25 contracts compared, which is why
+  `state` still renders exactly the same bytes as before.
 
   **This requires a re-index from genesis.** The old blobs cannot be converted: the arena
   nodes they would have to point at were garbage collected long ago, and no migration can
