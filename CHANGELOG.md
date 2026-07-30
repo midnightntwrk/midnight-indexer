@@ -6,6 +6,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [unreleased]
 
+### 🚀 Features
+
+- *(chain-indexer)* [**breaking**] Store contract state as ledger-arena keys instead of blobs
+
+  `contract_actions.state` and `contract_actions.zswap_state` are replaced by
+  `state_key` and `zswap_state_key`, references into the content-addressed ledger arena that
+  already holds the same states, deduplicated and structurally shared. Every action stored a
+  full copy of its contract's state, so the two columns grew with the number of actions per
+  contract even when the state itself was unchanged — and quadratically for contracts whose
+  state grows as it is called. On preprod they reached 301 GB of a 292 GB database.
+
+  Measured against stagenet: 14 actions on one contract stored 257,530 bytes of
+  byte-identical blobs, which the arena holds as 18,956 bytes in 15 nodes — 13.6x smaller,
+  one new node per action, and no new rows in `ledger_db_roots`. Re-serializing state out of
+  the arena was byte-identical to the node's blob for all 25 contracts compared, which is why
+  `state` still renders exactly the same bytes as before.
+
+  **This requires a re-index from genesis.** The old blobs cannot be converted: the arena
+  nodes they would have to point at were garbage collected long ago, and no migration can
+  replay the chain to recreate them. Both stores — the indexer database and the ledger DB —
+  must be wiped **together**, since each holds references into the other. chain-indexer
+  refuses to start against a database whose contract actions have no keys rather than serving
+  empty states. See [docs/re-indexing.md](docs/re-indexing.md) for the procedure.
+
+  The GraphQL schema is unchanged apart from a field reordering within `ContractCall`:
+  `state` and `zswapState` still render as `HexEncoded!`, are still tagged-serialized, and
+  still resolve to the empty string for a failed action. They are now resolved on demand, so
+  a query that does not select them no longer pays for them.
+
+  Operators get two new knobs, both under `application:` in chain-indexer's config:
+  `gc_interval` (run gc every N blocks with N times the budget; defaults to 25) and
+  `arena_metrics_interval` (sample the ledger DB node count every N blocks; disabled by
+  default because each sample is a full scan). indexer-api gains a `contract_state_cache`
+  section under `api:`.
+
 ### 🐛 Bug Fixes
 
 - *(indexer-common)* [**breaking**] Rename the ledger DB's `cache_size` to `cache_max_nodes`, make it a plain node count and raise it to 100000

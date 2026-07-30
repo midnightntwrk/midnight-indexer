@@ -12,16 +12,24 @@
 // limitations under the License.
 
 use indexer_common::domain::{
-    ContractAttributes, ContractBalance, SerializedContractAddress, SerializedContractState,
-    SerializedZswapState,
+    ContractAttributes, ContractBalance, SerializedContractAddress, SerializedContractStateKey,
+    SerializedZswapStateKey,
 };
 
 /// A contract action.
+///
+/// The states are held as ledger-arena keys rather than serialized blobs: the arena already stores
+/// them content-addressed and structurally shared, so a key costs tens of bytes where the blob cost
+/// hundreds of kilobytes and grew quadratically in the number of actions per contract.
+///
+/// Both keys are optional because a failed action has no contract state to reference — today that
+/// is represented as an empty `state` blob — and because a state that could not be captured must
+/// read back as absent rather than as some other contract's state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContractAction {
     pub address: SerializedContractAddress,
-    pub state: SerializedContractState,
-    pub zswap_state: SerializedZswapState,
+    pub state_key: Option<SerializedContractStateKey>,
+    pub zswap_state_key: Option<SerializedZswapStateKey>,
     pub extracted_balances: Vec<ContractBalance>,
     pub attributes: ContractAttributes,
 }
@@ -30,8 +38,8 @@ impl From<indexer_common::domain::ContractAction> for ContractAction {
     fn from(contract_action: indexer_common::domain::ContractAction) -> Self {
         Self {
             address: contract_action.address,
-            state: contract_action.state,
-            zswap_state: Default::default(),
+            state_key: Default::default(),
+            zswap_state_key: Default::default(),
             extracted_balances: Default::default(),
             attributes: contract_action.attributes,
         }

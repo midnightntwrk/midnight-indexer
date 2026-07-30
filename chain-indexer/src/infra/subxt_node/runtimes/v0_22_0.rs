@@ -19,10 +19,7 @@ use crate::{
     },
 };
 use futures::TryStreamExt;
-use indexer_common::domain::{
-    ByteVec, DustPublicKey, SerializedContractAddress, SerializedContractState,
-    TermsAndConditionsHash,
-};
+use indexer_common::domain::{ByteVec, DustPublicKey, TermsAndConditionsHash};
 use itertools::Itertools;
 use parity_scale_codec::Decode;
 use subxt::error::RuntimeApiError;
@@ -191,25 +188,6 @@ pub fn decode_slot(mut slot: &[u8]) -> Result<u64, SubxtNodeError> {
     let slot = super::runtime_0_22_0::runtime_types::sp_consensus_slots::Slot::decode(&mut slot)
         .map(|x| x.0)?;
     Ok(slot)
-}
-
-pub async fn get_contract_state(
-    address: SerializedContractAddress,
-    block: &OnlineClientAtBlock,
-) -> Result<SerializedContractState, SubxtNodeError> {
-    let get_state = super::runtime_0_22_0::runtime_apis()
-        .midnight_runtime_api()
-        .get_contract_state(address.as_slice().into());
-
-    let state = block
-        .runtime_apis()
-        .call(get_state)
-        .await
-        .map_err(|error| SubxtNodeError::GetContractState(address.clone(), error.into()))?
-        .map_err(|error| SubxtNodeError::GetContractState(address, format!("{error:?}").into()))?
-        .into();
-
-    Ok(state)
 }
 
 pub async fn get_zswap_merkle_tree_root(

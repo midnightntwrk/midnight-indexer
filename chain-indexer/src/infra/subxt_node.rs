@@ -32,7 +32,6 @@ use http::{
 use indexer_common::{
     domain::{
         BlockAuthor, BlockHash, ByteVec, NodeVersion, ProtocolVersion, ProtocolVersionError,
-        SerializedContractAddress,
         ledger::{self, ZswapMerkleTreeRoot},
     },
     error::BoxError,
@@ -267,7 +266,7 @@ impl SubxtNode {
         };
 
         let transactions = stream::iter(transactions)
-            .then(|t| make_transaction(t, protocol_version, state_node_version, &block))
+            .then(|t| make_transaction(t, protocol_version))
             .try_collect::<Vec<_>>()
             .await?;
 
@@ -631,9 +630,6 @@ pub enum SubxtNodeError {
     #[error("cannot decode genesis cNight registration key")]
     DecodeGenesisCnightRegistrationKey(#[source] Box<subxt::error::StorageKeyError>),
 
-    #[error("cannot get contract state for address {0}")]
-    GetContractState(SerializedContractAddress, #[source] BoxError),
-
     #[error("cannot get zswap state root")]
     GetZswapStateRoot(#[source] BoxError),
 
@@ -767,12 +763,10 @@ fn decode_babe_authority_index(mut pre_digest: &[u8]) -> Result<u32, SubxtNodeEr
 async fn make_transaction(
     transaction: runtimes::Transaction,
     protocol_version: ProtocolVersion,
-    state_node_version: NodeVersion,
-    block: &OnlineClientAtBlock,
 ) -> Result<Transaction, SubxtNodeError> {
     match transaction {
         runtimes::Transaction::Regular(transaction) => {
-            make_regular_transaction(transaction, protocol_version, state_node_version, block).await
+            make_regular_transaction(transaction, protocol_version).await
         }
 
         runtimes::Transaction::System(transaction) => {
@@ -784,8 +778,6 @@ async fn make_transaction(
 async fn make_regular_transaction(
     transaction: ByteVec,
     protocol_version: ProtocolVersion,
-    state_node_version: NodeVersion,
-    block: &OnlineClientAtBlock,
 ) -> Result<Transaction, SubxtNodeError> {
     let ledger_transaction =
         ledger::Transaction::deserialize(&transaction, protocol_version.ledger_version())?;
@@ -795,10 +787,7 @@ async fn make_regular_transaction(
     let identifiers = ledger_transaction.identifiers()?;
 
     let contract_actions = ledger_transaction
-        .contract_actions(|address| async move {
-            runtimes::get_contract_state(address, state_node_version, block).await
-        })
-        .await?
+        .contract_actions()?
         .into_iter()
         .map(Into::into)
         .collect();

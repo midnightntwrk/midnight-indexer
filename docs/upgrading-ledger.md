@@ -87,4 +87,7 @@ When a chain needs a third concurrent ledger:
 
 - [Upgrading the node version](./updating-node-version.md) - usually the same
   PR, since a protocol bump moves both.
+- [Re-indexing from genesis](./re-indexing.md) - this guide assumes both stores
+  survive the upgrade, which is the normal case; that one covers the changes
+  where they cannot.
 - [Creating a release](./releasing.md)
