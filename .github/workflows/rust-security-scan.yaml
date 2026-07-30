@@ -32,7 +32,9 @@ jobs:
       - name: Install cargo-deny
         uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2.84.0
         with:
-          tool: cargo-deny
+          # Pinned: cargo-deny 0.20.0 removed CLI flags without a major bump, so a floating
+          # version silently breaks this workflow. Bump deliberately.
+          tool: cargo-deny@0.20.2
 
       - name: Run cargo-deny (produce SARIF for Security tab)
         # `-f sarif` always exits 0 since findings are encoded in the SARIF, not the exit code.
@@ -48,5 +50,7 @@ jobs:
 
       - name: Run cargo-deny (gate CI on advisories)
         # Re-runs cargo-deny without `-f sarif` so it exits non-zero on findings, gating CI.
-        # `--disable-fetch` reuses the cached advisory DB; `-Aunlicensed` rationale as above.
-        run: cargo deny check --disable-fetch -Aduplicate -Aunmaintained -Alicense-not-encountered -Aparse-error -Asource-not-allowed -Aunlicensed
+        # `--offline` reuses the advisory DB and registry cache warmed by the step above
+        # (it replaced the subcommand-level `--disable-fetch`, removed in cargo-deny 0.20.0),
+        # and must precede the `check` subcommand; `-Aunlicensed` rationale as above.
+        run: cargo deny --offline check -Aduplicate -Aunmaintained -Alicense-not-encountered -Aparse-error -Asource-not-allowed -Aunlicensed
