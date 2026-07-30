@@ -3,8 +3,9 @@
 -- `state` held a full serialized contract state per action and `zswap_state` a full serialized
 -- filtered commitment tree. Both are already in the ledger arena (`ledger_db_nodes`),
 -- content-addressed and structurally shared, so an action only needs to reference the node rather
--- than carry a copy of it. On preprod these two columns were 301 GB of a 292 GB `indexer.sqlite`
--- plus its ledger DB, growing quadratically in the number of actions per contract.
+-- than carry a copy of it. Every action stored a full copy even when the state had not changed, so
+-- the columns grew with the number of actions per contract, and quadratically for contracts whose
+-- state grows as it is called; on preprod they are reported at 301 GB of a 292 GB database.
 --
 -- BREAKING: the old blobs cannot be converted here. Their arena nodes were garbage collected long
 -- ago and a SQL migration cannot replay the chain to recreate them, so both stores must be wiped
