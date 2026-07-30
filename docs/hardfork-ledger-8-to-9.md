@@ -365,59 +365,75 @@ prove it. All of the following run against the harness from Phase 0:
   `test_translate` asserts it in CI (see the Status & handoff and Decision 3.2 notes). The live
   crossing below no longer needs to *produce* the fixture — it validates the remaining runtime
   `on_runtime_upgrade` + RPC `ledger_state_root` path end-to-end.
-- **8 → 9 boundary e2e — the missing coverage, with the concrete runbook.** Existing
+- **8 → 9 boundary e2e — the missing coverage, indexer-native via #1364.** Existing
   runtime-upgrade tests (`chain-indexer/tests/mainnet_runtime.rs`, `qa/scripts/test-runtime-upgrade.sh`)
-  only cross *same-ledger* boundaries. The 8→9 crossing uses the #1364 overlay to run the indexer
-  and the node's `local-environment/` **upgrade** commands to drive the fork:
+  only cross *same-ledger* boundaries. Run this through
+  [#1364](https://github.com/midnightntwrk/midnight-indexer/pull/1364) (branch
+  `feat/midnight-fork-overlay`; `just fork-up` / `fork-down`, `docker-compose.midnight-fork.yaml`,
+  `docs/running-against-a-fork.md`). `fork-up` sparse-clones the node's `local-environment/` into
+  `.midnight-node/` (override with `MIDNIGHT_NODE_DIR`, or pin with `MIDNIGHT_NODE_REF`), restores
+  a snapshot via `npm run run:<network>`, and attaches the overlay's `chain-indexer` to the fork's
+  docker network. **#1364 has no `just` recipe for the *upgrade* itself** — you drive it through
+  that same `fork-up`-managed node checkout, so the whole session stays indexer-native:
 
   0. **Prerequisites.**
-     - An indexer image that recognizes `2_001_000` (Phase 1 / #1333) — otherwise chain-indexer
-       refuses every post-fork block. Build local images with `INDEXER_TAG=dev just
-       build-docker-image chain-indexer` (and wallet-indexer / indexer-api).
-     - A node checkout that has the upgrade commands (`full-upgrade`,
-       `governance-runtime-upgrade`) — point `MIDNIGHT_NODE_DIR` at a 2.1.0-era checkout so
-       `fork-up` uses that tooling instead of sparse-cloning an older tag.
-     - The **2.1.0 migration node image** *and* the **2.1.0 runtime WASM**, both built from that
-       checkout. **The image matters:** the migration's new host fn `migrate_state_v8_to_v9` lives
-       in the node *binary*, so the node image must be rolled to 2.1.0 — a WASM-only upgrade
-       against a `1.0.x` binary would miss the host fn and abort. Place the WASM under the node
-       repo's `local-environment/artifacts/` (the `--wasm` path resolves there).
+     - An indexer image that recognizes `2_001_000` (Phase 1 / #1333) — otherwise `chain-indexer`
+       refuses every post-fork block. Build local images the #1364 way:
+       `INDEXER_TAG=dev just build-docker-image chain-indexer` (+ `wallet-indexer`, `indexer-api`),
+       then pass `INDEXER_TAG=dev` to `fork-up`. (`fork-up` version-checks the fork's *node* tag
+       against `NODE_VERSIONS`: it boots as `1.0.x` — in the list — and post-upgrade runs `2.1.0`,
+       which #1333 adds to `NODE_VERSIONS`; until then use `FORK_SKIP_VERSION_CHECK=1`.)
+     - A node checkout that both **builds the 2.1.0 image + WASM** and **has the upgrade commands**
+       (`full-upgrade`, `image-upgrade`, `governance-runtime-upgrade`). Point `fork-up` at it with
+       `MIDNIGHT_NODE_DIR=/path/to/mn6` (or `MIDNIGHT_NODE_REF=<2.1.0 tag>`) so it isn't
+       sparse-cloned at an older tag that lacks them.
+     - The **2.1.0 migration node image** *and* **2.1.0 runtime WASM**, built from that checkout.
+       **The image matters:** the migration's new host fn `migrate_state_v8_to_v9` lives in the
+       node *binary*, so the node must be rolled to the 2.1.0 image — a WASM-only upgrade against a
+       `1.0.x` binary would miss the host fn and abort. Put the WASM under
+       `${MIDNIGHT_NODE_DIR}/local-environment/artifacts/` (the `--wasm` path resolves there).
      - A **ledger-8 (`1.0.x`) snapshot** to fork from.
 
-  1. **Fork a ledger-8 network and attach the indexer** (indexer repo, `feat/midnight-fork-overlay`):
+  1. **Fork a ledger-8 network and attach the indexer** (indexer repo, on #1364's branch):
      ```bash
-     MIDNIGHT_NODE_DIR=/path/to/midnight-node \
+     MIDNIGHT_NODE_DIR=/path/to/mn6 \
      NODE_IMAGE=ghcr.io/midnight-ntwrk/midnight-node:1.0.x \
-     INDEXER_TAG=dev just fork-up <network> --from-snapshot <ledger-8-snapshot-url>
+     INDEXER_TAG=dev \
+     just fork-up <network> --from-snapshot <ledger-8-snapshot-url>
      ```
+     GraphQL comes up at `http://localhost:8088`; the manifest is written to
+     `${MIDNIGHT_NODE_DIR}/local-environment/artifacts/<network>.manifest.env`.
 
-  2. **Drive the in-place 8 → 9 upgrade** against that running fork (from
-     `<midnight-node>/local-environment/`). `full-upgrade` = image rollout (`1.0.x` → `2.1.0`
-     node) **then** the federated-authority runtime upgrade to the 2.1.0 WASM, which fires
-     `pallet_midnight::migrations::v2::MigrateV1ToV2` at `apply + 1`:
+  2. **Drive the in-place 8 → 9 upgrade** through the same `fork-up`-managed checkout (its upgrade
+     commands *reuse* the running fork). `full-upgrade` = image rollout (`1.0.x` → `2.1.0` node,
+     exposing the new host fn) **then** the federated-authority runtime upgrade to the 2.1.0 WASM,
+     which fires `pallet_midnight::migrations::v2::MigrateV1ToV2` at `apply + 1`:
      ```bash
-     NODE_IMAGE=ghcr.io/midnight-ntwrk/midnight-node:1.0.x \
-     NEW_NODE_IMAGE=<2.1.0 migration image> \
-     npm run full-upgrade:<network> -- \
-       --wasm upgrade/midnight_node_runtime.compact.wasm \
-       --council-uris //Dave //Eve //Ferdie \
-       --technical-uris //Alice //Bob //Charlie \
-       --executor-uri //Alice
+     ( cd "${MIDNIGHT_NODE_DIR:-.midnight-node}/local-environment" && \
+       NODE_IMAGE=ghcr.io/midnight-ntwrk/midnight-node:1.0.x \
+       NEW_NODE_IMAGE=<2.1.0 migration image> \
+       npm run full-upgrade:<network> -- \
+         --wasm upgrade/midnight_node_runtime.compact.wasm \
+         --council-uris //Dave //Eve //Ferdie \
+         --technical-uris //Alice //Bob //Charlie \
+         --executor-uri //Alice )
      ```
      The 2.1.0 WASM bumps `spec_version` to `2_001_000`, so do **not** pass `--allow-same-version`
      (that flag is only for same-spec local rehearsals).
 
-  3. **Assert the crossing.** chain-indexer must reach `apply + 1` with its re-derived
-     `ledger_state.root()` matching the node's RPC `ledger_state_root`, and the zswap root
-     matching — the per-block checks in `application.rs`. Tear down with `just fork-down <network>`
-     (overlay first) then `npm run stop:<network>`.
+  3. **Assert the crossing.** The attached `chain-indexer` must reach `apply + 1` with its
+     re-derived `ledger_state.root()` matching the node's RPC `ledger_state_root` and the zswap
+     root matching — the per-block checks in `application.rs`. Iterate on just the indexer without
+     re-forking via the manifest (`docs/running-against-a-fork.md`:
+     `docker compose --env-file <manifest> -f docker-compose.midnight-fork.yaml up -d`). Tear down
+     with `just fork-down <network>` (overlay first, then `npm run stop:<network>`).
 
-  > **Open integration point for the next owner:** both `just fork-up` and `full-upgrade` can
-  > restore a snapshot, so decide the composition — e.g. let `fork-up` restore + attach the
-  > indexer, then run `image-upgrade:<network>` + `governance-runtime-upgrade:<network>` (which
-  > *reuse* the running fork) instead of a second `full-upgrade` restore. The overlay (#1364) and
-  > the node's upgrade commands were built independently and have not yet been exercised together
-  > across the 8→9 boundary; wiring that is this phase's real work.
+  > **Open integration point for the next owner:** the overlay (#1364) and the node's upgrade
+  > commands were built independently and have **not** been exercised together across the 8→9
+  > boundary. Both `fork-up` and `full-upgrade` can restore a snapshot, so pick one restore path —
+  > e.g. let `fork-up` restore + attach the indexer, then use `image-upgrade:<network>` +
+  > `governance-runtime-upgrade:<network>` (which reuse the running fork) instead of a second
+  > `full-upgrade` restore. Wiring and validating that composition is this phase's real work.
 - **Fresh-from-genesis resync.** Assert a from-genesis resync of the post-fork chain agrees
   block-for-block with the incrementally-indexed result — the direct QA acceptance criterion.
 - **Resume / reorg across the boundary.** Kill the indexer at `apply + 1` and restart; confirm it
