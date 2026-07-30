@@ -2543,7 +2543,12 @@ mod tests {
                 .await
                 .context("run migrations")?;
 
-            ledger_db::init(ledger_db::Config { cache_size: 1_024 }, pool);
+            ledger_db::init(
+                ledger_db::Config {
+                    cache_max_nodes: 1_024,
+                },
+                pool,
+            );
 
             postgres_container
         };
@@ -2573,7 +2578,7 @@ mod tests {
                 .context("run migrations")?;
 
             ledger_db::init(ledger_db::Config {
-                cache_size: 1_024,
+                cache_max_nodes: 1_024,
                 cnn_url: sqlite_ledger_db_file,
             })
             .await
@@ -2663,7 +2668,12 @@ mod tests {
                 .await
                 .context("run migrations")?;
 
-            ledger_db::init(ledger_db::Config { cache_size: 1_024 }, pool);
+            ledger_db::init(
+                ledger_db::Config {
+                    cache_max_nodes: 1_024,
+                },
+                pool,
+            );
 
             postgres_container
         };
@@ -2680,7 +2690,7 @@ mod tests {
                 .to_string();
 
             ledger_db::init(ledger_db::Config {
-                cache_size: 1_024,
+                cache_max_nodes: 1_024,
                 cnn_url: sqlite_ledger_db_file,
             })
             .await
@@ -2798,7 +2808,12 @@ mod tests {
                 .await
                 .context("run migrations")?;
 
-            ledger_db::init(ledger_db::Config { cache_size: 1_024 }, pool);
+            ledger_db::init(
+                ledger_db::Config {
+                    cache_max_nodes: 1_024,
+                },
+                pool,
+            );
 
             postgres_container
         };
@@ -2815,7 +2830,7 @@ mod tests {
                 .to_string();
 
             ledger_db::init(ledger_db::Config {
-                cache_size: 1_024,
+                cache_max_nodes: 1_024,
                 cnn_url: sqlite_ledger_db_file,
             })
             .await
@@ -3680,7 +3695,7 @@ mod root_count_repair_tests {
             .display()
             .to_string();
         ledger_db::init(ledger_db::Config {
-            cache_size: 1_024,
+            cache_max_nodes: 1_024,
             cnn_url,
         })
         .await
