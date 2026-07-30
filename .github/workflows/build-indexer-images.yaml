@@ -23,7 +23,7 @@ concurrency:
 jobs:
   build-and-push:
     name: Build and push (${{ matrix.image.name }}, ${{ matrix.platform.arch }})
-    runs-on: ubuntu-latest-16-core-x64
+    runs-on: ${{ matrix.platform.runner }}
     permissions:
       packages: write
     strategy:
@@ -40,16 +40,15 @@ jobs:
             description: Midnight Indexer
           - name: spo-indexer
             description: Midnight SPO Indexer
-        # Each (image, arch) is an independent parallel job. amd64 keeps the existing (warm)
-        # buildcache ref and the unsuffixed tag and builds natively, so it publishes without
-        # waiting for arm64. arm64 builds in parallel under QEMU and publishes an -arm64-suffixed
-        # tag, so the slow emulated build never blocks the amd64 image from being pushed.
+        # Each (image, arch) is an independent parallel job so neither architecture gates the
+        # other's publication. Both build on native hardware; emulating arm64 under QEMU made
+        # Rust compilation roughly six times slower.
         platform:
           - arch: amd64
-            suffix: ""
+            runner: ubuntu-latest-16-core-x64
             cache_scope: ""
           - arch: arm64
-            suffix: "-arm64"
+            runner: ubuntu-latest-8-core-arm64
             cache_scope: "-arm64"
     steps:
       - name: Checkout repository
@@ -86,8 +85,10 @@ jobs:
           images: |
             ghcr.io/midnight-ntwrk/${{ matrix.image.name }}
             ${{ github.ref_type == 'tag' && format('midnightntwrk/{0}', matrix.image.name) || '' }}
+          # onlatest applies the suffix to `latest` as well; without it both architectures push
+          # the same unsuffixed `latest` and the slower job silently wins.
           flavor: |
-            suffix=${{ matrix.platform.suffix }}
+            suffix=-${{ matrix.platform.arch }},onlatest=true
           tags: |
             type=semver,pattern={{version}}
             ${{ github.ref_type != 'tag' && format('type=sha,prefix={0}-,format=short', env.VERSION) || '' }}
@@ -96,11 +97,21 @@ jobs:
             org.opencontainers.image.title=${{ matrix.image.name }}
             org.opencontainers.image.description=${{ matrix.image.description }}
 
-      - name: Setup QEMU
-        if: matrix.platform.arch == 'arm64'
-        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+      # amd64 also publishes the unsuffixed tag so the deployable image is pullable as soon as it
+      # builds, rather than waiting on arm64 and the manifest merge.
+      - name: Setup Docker Metadata (unsuffixed)
+        id: meta_unsuffixed
+        if: matrix.platform.arch == 'amd64'
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        env:
+          DOCKER_METADATA_SHORT_SHA_LENGTH: 8
         with:
-          image: tonistiigi/binfmt:qemu-v8.1.5
+          images: |
+            ghcr.io/midnight-ntwrk/${{ matrix.image.name }}
+            ${{ github.ref_type == 'tag' && format('midnightntwrk/{0}', matrix.image.name) || '' }}
+          tags: |
+            type=semver,pattern={{version}}
+            ${{ github.ref_type != 'tag' && format('type=sha,prefix={0}-,format=short', env.VERSION) || '' }}
 
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
@@ -117,7 +128,9 @@ jobs:
             PROFILE=${{ env.PROFILE }}
             RUST_VERSION=${{ env.TOOLCHAIN }}
           platforms: linux/${{ matrix.platform.arch }}
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: |
+            ${{ steps.meta.outputs.tags }}
+            ${{ steps.meta_unsuffixed.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: |
             type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.image.name }}:buildcache${{ matrix.platform.cache_scope }}
@@ -125,6 +138,74 @@ jobs:
           cache-to: |
             type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.image.name }}:buildcache${{ matrix.platform.cache_scope }},mode=max
             type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.image.name }}:buildcache-${{ env.PROFILE }}${{ matrix.platform.cache_scope }},mode=max
+
+  # Promotes each unsuffixed tag from the single-arch amd64 image to a multi-arch index. If this
+  # job is skipped or fails the tag keeps resolving for amd64, so deployments are never blocked.
+  merge-manifests:
+    name: Merge multi-arch manifest (${{ matrix.image }})
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - chain-indexer
+          - indexer-api
+          - wallet-indexer
+          - indexer-standalone
+          - spo-indexer
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up environment
+        run: |
+          version=$(grep '^version.*=' Cargo.toml | sed -E 's/version.*=.*"(.*)"/\1/')
+          echo "VERSION=$version" | tee -a "$GITHUB_ENV"
+
+      - name: Login to DockerHub
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          username: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_USER }}
+          password: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_TOKEN }}
+
+      - name: Login to GHCR
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: MidnightCI
+          password: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Setup Docker Metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        env:
+          DOCKER_METADATA_SHORT_SHA_LENGTH: 8
+        with:
+          images: |
+            ghcr.io/midnight-ntwrk/${{ matrix.image }}
+            ${{ github.ref_type == 'tag' && format('midnightntwrk/{0}', matrix.image) || '' }}
+          tags: |
+            type=semver,pattern={{version}}
+            ${{ github.ref_type != 'tag' && format('type=sha,prefix={0}-,format=short', env.VERSION) || '' }}
+
+      - name: Merge per-arch manifests
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          echo "$TAGS" | while read -r tag; do
+            if [ -z "$tag" ]; then
+              continue
+            fi
+            echo "Merging $tag from $tag-amd64 and $tag-arm64"
+            docker buildx imagetools create -t "$tag" "$tag-amd64" "$tag-arm64"
+          done
 
   docker-compose-validation:
     name: Docker Compose Validation
