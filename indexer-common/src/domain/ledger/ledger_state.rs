@@ -15,7 +15,8 @@ use crate::{
     domain::{
         AddressOrContract, ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome,
         ByteArray, ByteVec, IntentHash, LedgerEvent, LedgerEventAttributes, LedgerVersion,
-        NetworkId, Nonce, SerializedContractAddress, SerializedLedgerParameters,
+        NetworkId, Nonce, SerializedContractAddress, SerializedContractState,
+        SerializedLedgerParameters,
         SerializedLedgerStateKey, SerializedTransaction, SerializedZswapMerkleTreeRoot,
         SerializedZswapState, TokenType, TransactionResult, UnshieldedAddress, UnshieldedUtxo,
         bridge::BridgeClaim,
@@ -916,6 +917,48 @@ impl LedgerState {
                 contract_zswap_state
                     .tagged_serialize()
                     .map_err(|error| Error::Serialize("ZswapStateV9", error))
+            }
+        }
+    }
+
+    /// Read the serialized state of the contract at `address` from this (local) ledger state,
+    /// producing the exact bytes the node's `get_contract_state` runtime API returns: it is
+    /// `self.state.index(address)` tagged-serialized. Used to resolve contract actions at a
+    /// runtime-upgrade enactment block, where the node cannot serve contract state (the next
+    /// runtime cannot decode the still-previous-runtime arena). Returns `None` when the contract
+    /// is absent, mirroring the node's `ContractNotPresent`.
+    #[trace(properties = { "address": "{address}" })]
+    pub fn contract_state(
+        &self,
+        address: &SerializedContractAddress,
+    ) -> Result<Option<SerializedContractState>, Error> {
+        match self {
+            Self::V8 { ledger_state, .. } => {
+                let address = ContractAddressV8::deserialize(&mut address.as_ref(), 0)
+                    .map_err(|error| Error::Deserialize("ContractAddressV8", error))?;
+
+                ledger_state
+                    .index(address)
+                    .map(|state| {
+                        state
+                            .tagged_serialize()
+                            .map_err(|error| Error::Serialize("ContractStateV8", error))
+                    })
+                    .transpose()
+            }
+
+            Self::V9 { ledger_state, .. } => {
+                let address = ContractAddressV9::deserialize(&mut address.as_ref(), 0)
+                    .map_err(|error| Error::Deserialize("ContractAddressV9", error))?;
+
+                ledger_state
+                    .index(address)
+                    .map(|state| {
+                        state
+                            .tagged_serialize()
+                            .map_err(|error| Error::Serialize("ContractStateV9", error))
+                    })
+                    .transpose()
             }
         }
     }

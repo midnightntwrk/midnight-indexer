@@ -124,6 +124,9 @@ impl LedgerState {
         block_timestamp: u64,
         parent_block_timestamp: u64,
         bump_first_regular_tblock: bool,
+        // True at a runtime-upgrade enactment block, where the node cannot serve contract state, so
+        // `subxt_node` left it empty; resolve it from this (local, post-apply) ledger state instead.
+        defer_contract_state: bool,
     ) -> Result<(Vec<Transaction>, LedgerParameters), Error> {
         // The node validates a mempool transaction against a `tblock` bumped two slots ahead of the
         // *parent* (last produced) block's time, then caches the well-formed result keyed on
@@ -158,6 +161,7 @@ impl LedgerState {
                         block_timestamp,
                         parent_block_timestamp,
                         well_formed_timestamp,
+                        defer_contract_state,
                     )
                 }
 
@@ -191,6 +195,7 @@ impl LedgerState {
         block_timestamp: u64,
         parent_block_timestamp: u64,
         well_formed_timestamp: u64,
+        defer_contract_state: bool,
     ) -> Result<Transaction, Error> {
         let mut transaction = RegularTransaction::from(transaction);
 
@@ -241,6 +246,26 @@ impl LedgerState {
                 .extract_contract_zswap_state(&contract_action.address)
                 .map_err(|error| Error::ExtractContractZswapState(transaction.hash, error))?;
             contract_action.zswap_state = zswap_state;
+
+            // At a runtime-upgrade enactment block the node could not serve contract state, so
+            // `subxt_node` left it empty. Read it from this (local, post-apply) ledger state — the
+            // same `index(address)` lookup the node performs — so a contract-action transaction in
+            // the upgrade block resolves without the node. The `balances` extraction below then runs
+            // on the filled-in state.
+            if defer_contract_state && contract_action.state.is_empty() {
+                if let Some(state) = self
+                    .contract_state(&contract_action.address)
+                    .map_err(|error| {
+                        Error::ReadContractState(
+                            transaction.hash,
+                            contract_action.address.clone(),
+                            error,
+                        )
+                    })?
+                {
+                    contract_action.state = state;
+                }
+            }
 
             // TODO: Workaround until we filter failed contract actions (empty state means failed).
             if !contract_action.state.is_empty() {
@@ -334,6 +359,13 @@ pub enum Error {
     #[error("cannot extract contract zswap state for transaction {0}")]
     ExtractContractZswapState(
         TransactionHash,
+        #[source] indexer_common::domain::ledger::Error,
+    ),
+
+    #[error("cannot read local contract state for transaction {0} and contract address {1}")]
+    ReadContractState(
+        TransactionHash,
+        SerializedContractAddress,
         #[source] indexer_common::domain::ledger::Error,
     ),
 

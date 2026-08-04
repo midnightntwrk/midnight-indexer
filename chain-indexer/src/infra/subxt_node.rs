@@ -32,7 +32,7 @@ use http::{
 use indexer_common::{
     domain::{
         BlockAuthor, BlockHash, ByteVec, NodeVersion, ProtocolVersion, ProtocolVersionError,
-        SerializedContractAddress,
+        SerializedContractAddress, SerializedContractState,
         ledger::{self, ZswapMerkleTreeRoot},
     },
     error::BoxError,
@@ -58,6 +58,17 @@ use tokio::time::timeout;
 
 type OnlineClientAtBlock = subxt::client::OnlineClientAtBlock<SubstrateConfig>;
 type SubxtBlock = subxt::client::Block<SubstrateConfig>;
+
+/// Where to decode a block's content (extrinsics + events) from. At a runtime-upgrade
+/// enactment block the block's own metadata is the new runtime's, but its content was produced
+/// by the old runtime; `client` is the parent (old-runtime) at-block client and `extrinsic_bodies`
+/// are THIS block's raw extrinsic bytes, so content decodes against the old metadata. Raw bytes
+/// are metadata-independent, so feeding this block's bytes to the parent client decodes the
+/// content the old runtime actually produced.
+pub(crate) struct ContentSource {
+    pub(crate) client: OnlineClientAtBlock,
+    pub(crate) extrinsic_bodies: Vec<Vec<u8>>,
+}
 
 const AURA_ENGINE_ID: ConsensusEngineId = [b'a', b'u', b'r', b'a'];
 const BABE_ENGINE_ID: ConsensusEngineId = [b'B', b'A', b'B', b'E'];
@@ -239,17 +250,66 @@ impl SubxtNode {
             .transpose()?
             .flatten();
 
-        let zswap_merkle_tree_root =
-            runtimes::get_zswap_merkle_tree_root(state_node_version, &block).await?;
-        let zswap_merkle_tree_root =
-            ZswapMerkleTreeRoot::deserialize(zswap_merkle_tree_root, ledger_version)?;
+        // At a runtime-upgrade enactment block the block's ledger state is still on the previous
+        // runtime (the v8->v9 migration re-points `StateKey` only at apply+1), yet every RPC at this
+        // hash already executes the next runtime, whose state reader cannot decode the previous arena
+        // and fails the zswap-root call. Skip it here and let `application.rs` substitute the
+        // indexer's own locally derived root — identical to what the node would serve — for this one
+        // block; the node-vs-local cross-check resumes at apply+1. This keeps the 8->9 crossing
+        // self-contained on the indexer side, with no dependency on a node-side fallback.
+        let zswap_merkle_tree_root = if content_node_version == state_node_version {
+            let root = runtimes::get_zswap_merkle_tree_root(state_node_version, &block).await?;
+            Some(ZswapMerkleTreeRoot::deserialize(root, ledger_version)?)
+        } else {
+            None
+        };
+
+        // At a runtime-upgrade enactment block the block reports the next runtime, so subxt binds
+        // it to the next runtime's metadata even though its extrinsics and events were produced by
+        // the previous runtime. Decode the content against the parent block's client (which carries
+        // the previous runtime's metadata), fed this block's raw, metadata-independent bytes. Away
+        // from enactment blocks the two runtimes are equal and no parent client is needed.
+        let content_source = if content_node_version != state_node_version {
+            let parent = block
+                .online_client()
+                .at_block(header.parent_hash)
+                .await
+                .map_err(|error| {
+                    SubxtNodeError::GetOnlineClientAt(header.parent_hash, error.into())
+                })?;
+            let legacy_rpc_methods = LegacyRpcMethods::<RpcConfigFor<SubstrateConfig>>::new(
+                self.rpc_client.to_owned().into(),
+            );
+            let extrinsic_bodies = legacy_rpc_methods
+                .chain_get_block(Some(block.block_hash()))
+                .await
+                .map_err(SubxtNodeError::FetchBlockBody)?
+                .ok_or(SubxtNodeError::BlockBodyNotFound)?
+                .block
+                .extrinsics
+                .into_iter()
+                .map(|bytes| bytes.0)
+                .collect::<Vec<_>>();
+            Some(ContentSource {
+                client: parent,
+                extrinsic_bodies,
+            })
+        } else {
+            None
+        };
 
         let BlockDetails {
             timestamp,
             transactions,
             mut dust_registration_events,
             bridge_events,
-        } = runtimes::make_block_details(authorities, content_node_version, &block).await?;
+        } = runtimes::make_block_details(
+            authorities,
+            content_node_version,
+            &block,
+            content_source.as_ref(),
+        )
+        .await?;
 
         // At genesis, Substrate does not emit events (Parity PR #5463). Fetch cNight
         // registrations from pallet storage instead.
@@ -266,8 +326,19 @@ impl SubxtNode {
             None
         };
 
+        // At an enactment block the node cannot serve contract state, so resolve contract-action
+        // state from the local ledger later (application.rs) rather than via the node here.
+        let defer_contract_state = content_node_version != state_node_version;
         let transactions = stream::iter(transactions)
-            .then(|t| make_transaction(t, protocol_version, state_node_version, &block))
+            .then(|t| {
+                make_transaction(
+                    t,
+                    protocol_version,
+                    state_node_version,
+                    defer_contract_state,
+                    &block,
+                )
+            })
             .try_collect::<Vec<_>>()
             .await?;
 
@@ -589,6 +660,12 @@ pub enum SubxtNodeError {
     #[error("cannot fetch extrinsics")]
     FetchExtrinsics(#[source] Box<subxt::error::ExtrinsicError>),
 
+    #[error("cannot fetch block body via legacy RPC")]
+    FetchBlockBody(#[source] subxt::rpcs::Error),
+
+    #[error("block body not found")]
+    BlockBodyNotFound,
+
     #[error("cannot fetch events")]
     FetchEvents(#[source] Box<subxt::error::EventsError>),
 
@@ -768,11 +845,19 @@ async fn make_transaction(
     transaction: runtimes::Transaction,
     protocol_version: ProtocolVersion,
     state_node_version: NodeVersion,
+    defer_contract_state: bool,
     block: &OnlineClientAtBlock,
 ) -> Result<Transaction, SubxtNodeError> {
     match transaction {
         runtimes::Transaction::Regular(transaction) => {
-            make_regular_transaction(transaction, protocol_version, state_node_version, block).await
+            make_regular_transaction(
+                transaction,
+                protocol_version,
+                state_node_version,
+                defer_contract_state,
+                block,
+            )
+            .await
         }
 
         runtimes::Transaction::System(transaction) => {
@@ -785,6 +870,7 @@ async fn make_regular_transaction(
     transaction: ByteVec,
     protocol_version: ProtocolVersion,
     state_node_version: NodeVersion,
+    defer_contract_state: bool,
     block: &OnlineClientAtBlock,
 ) -> Result<Transaction, SubxtNodeError> {
     let ledger_transaction =
@@ -794,14 +880,24 @@ async fn make_regular_transaction(
 
     let identifiers = ledger_transaction.identifiers()?;
 
-    let contract_actions = ledger_transaction
-        .contract_actions(|address| async move {
-            runtimes::get_contract_state(address, state_node_version, block).await
-        })
-        .await?
-        .into_iter()
-        .map(Into::into)
-        .collect();
+    // Contract-action addresses and attributes come from the transaction itself; only the resulting
+    // contract state needs a lookup. At a runtime-upgrade enactment block the node cannot serve that
+    // state (its next runtime cannot read the still-previous-runtime arena), so resolve with an empty
+    // placeholder here and let `application.rs` fill it from the local post-apply ledger state.
+    let contract_actions = if defer_contract_state {
+        ledger_transaction
+            .contract_actions(|_address| async move {
+                Ok::<_, SubxtNodeError>(SerializedContractState::default())
+            })
+            .await?
+    } else {
+        ledger_transaction
+            .contract_actions(|address| async move {
+                runtimes::get_contract_state(address, state_node_version, block).await
+            })
+            .await?
+    };
+    let contract_actions = contract_actions.into_iter().map(Into::into).collect();
 
     let transaction = RegularTransaction {
         hash,

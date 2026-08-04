@@ -65,7 +65,10 @@ pub struct Block {
     pub parent_hash: BlockHash,
     pub author: Option<BlockAuthor>,
     pub timestamp: u64,
-    pub zswap_merkle_tree_root: ZswapMerkleTreeRoot,
+    /// `None` at a runtime-upgrade enactment block, where the node cannot serve the zswap root
+    /// (the next runtime cannot read the still-previous-runtime state); `application.rs` fills in
+    /// the locally derived root once transactions are applied. See `infra/subxt_node`.
+    pub zswap_merkle_tree_root: Option<ZswapMerkleTreeRoot>,
     pub ledger_state_root: Option<ByteVec>,
     pub transactions: Vec<Transaction>,
     pub dust_registration_events: Vec<DustRegistrationEvent>,
@@ -76,7 +79,13 @@ impl TryFrom<Block> for (domain::Block, Vec<Transaction>) {
     type Error = ledger::Error;
 
     fn try_from(block: Block) -> Result<(domain::Block, Vec<Transaction>), Self::Error> {
-        let zswap_merkle_tree_root = block.zswap_merkle_tree_root.serialize()?;
+        // `None` at a runtime-upgrade enactment block (the node cannot serve the zswap root there;
+        // see infra/subxt_node). Store a placeholder now; `application.rs` overwrites it with the
+        // locally derived root once this block's transactions are applied.
+        let zswap_merkle_tree_root = match block.zswap_merkle_tree_root {
+            Some(root) => root.serialize()?,
+            None => Default::default(),
+        };
 
         let transactions = block.transactions;
 

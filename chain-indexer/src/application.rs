@@ -424,8 +424,9 @@ async fn index_block<N>(
 where
     N: Node,
 {
-    // The try_into on the next line serializes the zswap merkle tree root, but the domain type is
-    // needed below to compare against the zswap merkle tree root in the ledger state.
+    // Capture the node's zswap merkle tree root (domain type) before `try_into` serializes it, to
+    // compare against the locally derived root below. `None` at a runtime-upgrade enactment block,
+    // where the node cannot serve it (see infra/subxt_node).
     let zswap_merkle_tree_root = block.zswap_merkle_tree_root;
 
     let (mut block, transactions) = block.try_into().context("convert node block into domain")?;
@@ -447,6 +448,11 @@ where
         *parent_block_timestamp = block.timestamp;
     };
 
+    // At a runtime-upgrade enactment block the node cannot serve contract state (the same reason it
+    // cannot serve the zswap root, which is why the node-provided `zswap_merkle_tree_root` is `None`
+    // here); have the apply path resolve contract-action state from the local ledger instead.
+    let defer_contract_state = zswap_merkle_tree_root.is_none();
+
     let apply_transactions = |ledger_state: &mut LedgerState| {
         ledger_state
             .apply_transactions(
@@ -457,6 +463,7 @@ where
                 // Only reproduce the node's mempool-cached first-tx `tblock` bump for non-genesis
                 // blocks; genesis (height 0) transactions never transited the mempool.
                 block.height > 0,
+                defer_contract_state,
             )
             .context("apply transactions to ledger state")
     };
@@ -530,12 +537,26 @@ where
             block.height
         );
     }
-    if ledger_state.zswap_merkle_tree_root() != zswap_merkle_tree_root {
-        bail!(
-            "zswap state root mismatch for block {} at height {}",
-            block.hash,
-            block.height
-        );
+    // Compare the locally derived zswap root against the node's when the node provided one. At a
+    // runtime-upgrade enactment block the node cannot serve it (see infra/subxt_node), so store the
+    // locally derived root — authoritative and equal to what a fixed node would serve — and skip the
+    // cross-check for this one block; it resumes at apply+1.
+    let local_zswap_merkle_tree_root = ledger_state.zswap_merkle_tree_root();
+    match zswap_merkle_tree_root {
+        Some(node_zswap_merkle_tree_root) => {
+            if local_zswap_merkle_tree_root != node_zswap_merkle_tree_root {
+                bail!(
+                    "zswap state root mismatch for block {} at height {}",
+                    block.hash,
+                    block.height
+                );
+            }
+        }
+        None => {
+            block.zswap_merkle_tree_root = local_zswap_merkle_tree_root
+                .serialize()
+                .context("serialize locally derived zswap merkle tree root")?;
+        }
     }
 
     // Determine whether caught up, also allowing to fall back a little in that state.
@@ -802,7 +823,7 @@ mod tests {
         parent_hash: ZERO_HASH,
         author: Default::default(),
         timestamp: Default::default(),
-        zswap_merkle_tree_root: ZswapMerkleTreeRoot::V8(Faker.fake()),
+        zswap_merkle_tree_root: Some(ZswapMerkleTreeRoot::V8(Faker.fake())),
         ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
@@ -816,7 +837,7 @@ mod tests {
         parent_hash: BLOCK_0_HASH,
         author: Default::default(),
         timestamp: Default::default(),
-        zswap_merkle_tree_root: ZswapMerkleTreeRoot::V8(Faker.fake()),
+        zswap_merkle_tree_root: Some(ZswapMerkleTreeRoot::V8(Faker.fake())),
         ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
@@ -830,7 +851,7 @@ mod tests {
         parent_hash: BLOCK_1_HASH,
         author: Default::default(),
         timestamp: Default::default(),
-        zswap_merkle_tree_root: ZswapMerkleTreeRoot::V8(Faker.fake()),
+        zswap_merkle_tree_root: Some(ZswapMerkleTreeRoot::V8(Faker.fake())),
         ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
@@ -844,7 +865,7 @@ mod tests {
         parent_hash: BLOCK_2_HASH,
         author: Default::default(),
         timestamp: Default::default(),
-        zswap_merkle_tree_root: ZswapMerkleTreeRoot::V8(Faker.fake()),
+        zswap_merkle_tree_root: Some(ZswapMerkleTreeRoot::V8(Faker.fake())),
         ledger_state_root: None,
         transactions: Default::default(),
         dust_registration_events: Default::default(),
