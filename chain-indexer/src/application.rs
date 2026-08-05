@@ -424,8 +424,8 @@ async fn index_block<N>(
 where
     N: Node,
 {
-    // The try_into on the next line serializes the zswap merkle tree root, but the domain type is
-    // needed below to compare against the zswap merkle tree root in the ledger state.
+    // Capture the node's zswap merkle tree root (domain type) before `try_into` serializes it, to
+    // compare against the zswap merkle tree root in the ledger state below.
     let zswap_merkle_tree_root = block.zswap_merkle_tree_root;
 
     let (mut block, transactions) = block.try_into().context("convert node block into domain")?;
@@ -437,9 +437,17 @@ where
         // seed a fresh state at the block's version rather than translating across versions
         // (which is not supported, e.g. V8 to V9).
         LedgerState::new(network_id.clone(), ledger_version).context("create ledger state")?
-    } else {
+    } else if ledger_state.ledger_version() == ledger_version {
+        // Same ledger version (the common case): `translate` is a no-op, so keep it on the
+        // async path and avoid the cost of parking a runtime worker every block.
         ledger_state
             .translate(ledger_version)
+            .context("translate ledger state")?
+    } else {
+        // Cross-version hard-fork boundary (fires once, at `apply + 1`): the v8 -> v9
+        // translation walks the entire ledger arena and is synchronous and CPU-bound, so run it
+        // via `block_in_place` so it does not stall other tasks on this runtime worker.
+        tokio::task::block_in_place(|| ledger_state.translate(ledger_version))
             .context("translate ledger state")?
     };
 
@@ -519,22 +527,25 @@ where
     // Validate ledger state.
     // TODO: Only use ledger state root comparison once support for Node < 0.22 is dropped!
     let ledger_state_root = ledger_state.root().context("get ledger state root")?;
-    if block
-        .ledger_state_root
-        .as_ref()
-        .is_some_and(|root| *root != ledger_state_root)
+    if let Some(node_ledger_state_root) = block.ledger_state_root.as_ref()
+        && *node_ledger_state_root != ledger_state_root
     {
         bail!(
-            "ledger state root mismatch for block {} at height {}",
+            "ledger state root mismatch for block {} at height {}: node={}, indexer={}",
             block.hash,
-            block.height
+            block.height,
+            node_ledger_state_root,
+            ledger_state_root,
         );
     }
-    if ledger_state.zswap_merkle_tree_root() != zswap_merkle_tree_root {
+    let local_zswap_merkle_tree_root = ledger_state.zswap_merkle_tree_root();
+    if local_zswap_merkle_tree_root != zswap_merkle_tree_root {
         bail!(
-            "zswap state root mismatch for block {} at height {}",
+            "zswap state root mismatch for block {} at height {}: node={:?}, indexer={:?}",
             block.hash,
-            block.height
+            block.height,
+            zswap_merkle_tree_root,
+            local_zswap_merkle_tree_root,
         );
     }
 
