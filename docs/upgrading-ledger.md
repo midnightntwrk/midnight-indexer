@@ -70,7 +70,24 @@ first.
    common RC case), the affected e2e / round-trip tests are `#[ignore]`d until a
    node built against that ledger ships - note this in the PR.
 
-6. **Run** `just all-all`.
+6. **Re-sync the v8 → v9 state-translation table** if the node's table changed.
+   `indexer-common/src/domain/ledger/state_translation_v8_to_v9.rs` is a manual
+   re-port of the node's `ledger/helpers/src/state_translation_v8_to_v9.rs` and
+   must stay semantically identical to it — the ledger-8→9 fork-boundary block
+   re-derives `ledger_state.root()` and compares it to the node's on-chain
+   migration output, so any drift breaks that block permanently. If the node's
+   table or the v9 `INITIAL_PARAMETERS` it seeds change:
+
+   - re-port the file and keep the provenance header's node commit current, and
+   - regenerate the golden-root fixture
+     `indexer-common/tests/golden_v8_to_v9_empty_root.raw` (currently a
+     self-consistency baseline; capture the node's authoritative
+     `ledger_state_root` at `apply + 1` once the 2.1.0 fork is runnable).
+
+   Drift is caught by `test_translate` (characterization guard) and the ported
+   module's `table_is_closed` / `table_tags_match_types` tests.
+
+7. **Run** `just all-all`.
 
 ## Adding a new ledger major
 
