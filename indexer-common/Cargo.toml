@@ -20,8 +20,10 @@ midnight-base-crypto_v1      = { workspace = true }
 midnight-coin-structure_v2   = { workspace = true }
 midnight-ledger_v8           = { workspace = true }
 midnight-onchain-runtime_v3  = { workspace = true }
+midnight-onchain-state_v3    = { workspace = true }
 midnight-serialize_v1        = { workspace = true }
 midnight-storage-core_v1     = { workspace = true, features = [ "layout-v2", "gc-v1" ] }
+midnight-storage_v2          = { workspace = true, features = [ "state-translation" ] }
 midnight-transient-crypto_v2 = { workspace = true }
 midnight-zswap_v8            = { workspace = true }
 # ledger v9 rc (base-crypto, serialize and storage-core stay unified across v8
@@ -30,6 +32,7 @@ midnight-zswap_v8            = { workspace = true }
 midnight-coin-structure_v3   = { workspace = true }
 midnight-ledger_v9           = { workspace = true }
 midnight-onchain-runtime_v4  = { workspace = true }
+midnight-onchain-state_v4    = { workspace = true }
 midnight-transient-crypto_v3 = { workspace = true }
 midnight-zswap_v9            = { workspace = true }
 async-nats                   = { workspace = true, optional = true }
