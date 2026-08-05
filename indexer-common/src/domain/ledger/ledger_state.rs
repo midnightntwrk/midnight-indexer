@@ -88,7 +88,9 @@ use midnight_onchain_runtime_v4::{
 };
 use midnight_serialize_v1::{Deserializable, tagged_deserialize};
 use midnight_storage_core_v1::{
+    Storage,
     arena::{ArenaHash, Sp, TypedArenaKey},
+    backend::StorageBackend,
     db::DB,
     storage::default_storage,
 };
@@ -101,7 +103,11 @@ use midnight_transient_crypto_v3::merkle_tree::{
 };
 use midnight_zswap_v8::ledger::State as ZswapStateV8;
 use midnight_zswap_v9::ledger::State as ZswapStateV9;
-use std::{collections::HashSet, ops::Deref, sync::LazyLock};
+use std::{
+    collections::{BTreeMap, HashSet},
+    ops::Deref,
+    sync::LazyLock,
+};
 
 const OUTPUT_INDEX_ZERO: u32 = 0;
 
@@ -408,6 +414,34 @@ impl LedgerState {
             .into_keys()
             .map(|hash| hash.0.to_vec())
             .collect()
+    }
+
+    /// Raise the ledger DB's gc root counts to match `window`, the retention window's ledger state
+    /// keys with the ledger version each was persisted under - one entry per block, so a key
+    /// appearing in `n` blocks must have root count `n`.
+    ///
+    /// Repairs DBs written before the `get_root_count` read fix, whose corruption outlives that
+    /// fix: the old read saturated at 1, so the write path stored `1 + delta` and counts capped at
+    /// 2 however many blocks referenced a root. Such a root then takes `n` unpersists as the window
+    /// advances, and the third drives storage-core's `stored + delta` negative, panicking the
+    /// chain-indexer ("roots counts can't be negative").
+    ///
+    /// Those reads being lossy in one direction only, every error is an *under*-count: this only
+    /// ever raises, and is a no-op on a DB whose counts already match the window.
+    ///
+    /// Not only a migration - do not delete it once pre-fix DBs are gone. Raising
+    /// `ledger_state_retention` across a restart under-counts the same way on a DB written
+    /// entirely by the fixed code: the enlarged window re-seeds occurrences that the old, smaller
+    /// window had already unpersisted, and the seed is all-or-nothing per root, so a root shared
+    /// by several blocks takes more unpersists than its stored count allows.
+    ///
+    /// Call at startup, before seeding the retention window from [Self::persisted_root_hashes], so
+    /// the seed sees repaired counts.
+    pub fn repair_root_counts<'a>(
+        window: impl IntoIterator<Item = (&'a SerializedLedgerStateKey, LedgerVersion)>,
+    ) -> Result<RootCountRepair, Error> {
+        window_root_counts(window)
+            .map(|wanted| raise_root_counts(&default_storage::<v1_1::LedgerDb>(), &wanted))
     }
 
     fn arena_root_hash(
@@ -2328,6 +2362,123 @@ fn clamp_and_normalize(
     clamped.normalize(*limits).expect("clamped cost normalises")
 }
 
+/// What [LedgerState::repair_root_counts] changed and what it deliberately left alone.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct RootCountRepair {
+    /// Roots whose stored count was raised.
+    pub raised_roots: usize,
+
+    /// Sum of the increments applied, i.e. the persists the old read path lost.
+    pub raised_total: u32,
+
+    /// Window keys that are no longer roots and whose DAG gc has begun culling, so they cannot be
+    /// brought back: re-rooting one would hand the window seeding a state it reports as loadable
+    /// and cannot load. See `dag_is_complete`. Roots that are still roots, and roots needing no
+    /// raise, are never checked, so they never land here.
+    pub culled_roots: usize,
+
+    /// Root rows outside the window. Left alone - nothing will ever unpersist them, so they leak
+    /// disk, but deleting one that is still needed costs a resync.
+    pub strays: usize,
+}
+
+/// Gc root counts by arena hash. Ordered, so the repair's DB writes happen in the same sequence on
+/// every run.
+type RootCounts = BTreeMap<ArenaHash<<v1_1::LedgerDb as DB>::Hasher>, u32>;
+
+/// The count each of the retention window's roots must have: one per block referencing it.
+fn window_root_counts<'a>(
+    window: impl IntoIterator<Item = (&'a SerializedLedgerStateKey, LedgerVersion)>,
+) -> Result<RootCounts, Error> {
+    window
+        .into_iter()
+        .try_fold(BTreeMap::new(), |mut wanted, (key, ledger_version)| {
+            let hash = LedgerState::arena_root_hash(key, ledger_version)?;
+            *wanted.entry(hash).or_insert(0) += 1;
+            Ok(wanted)
+        })
+}
+
+/// Body of [LedgerState::repair_root_counts], with the storage passed in so tests can drive it
+/// without the process-global default.
+fn raise_root_counts(storage: &Storage<v1_1::LedgerDb>, wanted: &RootCounts) -> RootCountRepair {
+    storage.with_backend(|backend| {
+        let stored = backend.get_roots();
+        let mut repair = RootCountRepair {
+            strays: stored
+                .keys()
+                .filter(|hash| !wanted.contains_key(*hash))
+                .count(),
+            ..Default::default()
+        };
+
+        for (hash, want) in wanted {
+            // Healthy roots cost nothing: no node read, no write. That is what makes an
+            // unconditional run at every startup cheap.
+            let have = stored.get(hash).copied().unwrap_or_default();
+            let missing = want.saturating_sub(have);
+            if missing == 0 {
+                continue;
+            }
+
+            // A root that is still a root has been marked by every gc pass since it was written,
+            // so its DAG is intact and raising its count needs no check. Bringing one back from
+            // zero does - see [RootCountRepair::culled_roots].
+            if have == 0 && !dag_is_complete(backend, hash) {
+                repair.culled_roots += 1;
+                continue;
+            }
+
+            // Persist rather than write the count directly: it is the supported API, and repeated
+            // persists coalesce into one delta, hence one row write per root.
+            for _ in 0..missing {
+                backend.persist(hash);
+            }
+            repair.raised_roots += 1;
+            repair.raised_total += missing;
+        }
+
+        backend.flush_all_changes_to_db();
+
+        repair
+    })
+}
+
+/// Whether every node of the DAG rooted at `hash` is present in the ledger DB.
+///
+/// Guards bringing a root back from a stored count of zero. Such a root was garbage as far as gc
+/// was concerned, so an incremental sweep is entitled to have culled any part of its DAG - and the
+/// sweep is a resumable table scan in arena-hash order whose cursor lives only in memory, so a
+/// restart can leave the root node on disk with descendants already deleted. The root node's own
+/// presence therefore proves nothing.
+///
+/// Takes `backend` rather than the storage so the walk shares one borrow with the re-rooting it
+/// guards, leaving no point at which a gc pass could cull between check and use. Cost is the DAG's
+/// nodes, paid only for roots being brought back from zero.
+fn dag_is_complete(
+    backend: &mut StorageBackend<v1_1::LedgerDb>,
+    hash: &ArenaHash<<v1_1::LedgerDb as DB>::Hasher>,
+) -> bool {
+    let mut visited = HashSet::new();
+    let mut frontier = vec![hash.to_owned()];
+
+    while let Some(hash) = frontier.pop() {
+        if !visited.insert(hash.clone()) {
+            continue;
+        }
+
+        match backend.get(&hash) {
+            Some(node) => {
+                frontier.extend(node.children.iter().flat_map(|child| child.refs()).cloned())
+            }
+
+            None => return false,
+        }
+    }
+
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
@@ -2392,7 +2543,12 @@ mod tests {
                 .await
                 .context("run migrations")?;
 
-            ledger_db::init(ledger_db::Config { cache_size: 1_024 }, pool);
+            ledger_db::init(
+                ledger_db::Config {
+                    cache_max_nodes: 1_024,
+                },
+                pool,
+            );
 
             postgres_container
         };
@@ -2423,7 +2579,7 @@ mod tests {
                 .context("run migrations")?;
 
             ledger_db::init(ledger_db::Config {
-                cache_size: 1_024,
+                cache_max_nodes: 1_024,
                 cnn_url: sqlite_ledger_db_file,
                 create_if_missing: true,
             })
@@ -2514,7 +2670,12 @@ mod tests {
                 .await
                 .context("run migrations")?;
 
-            ledger_db::init(ledger_db::Config { cache_size: 1_024 }, pool);
+            ledger_db::init(
+                ledger_db::Config {
+                    cache_max_nodes: 1_024,
+                },
+                pool,
+            );
 
             postgres_container
         };
@@ -2531,7 +2692,7 @@ mod tests {
                 .to_string();
 
             ledger_db::init(ledger_db::Config {
-                cache_size: 1_024,
+                cache_max_nodes: 1_024,
                 cnn_url: sqlite_ledger_db_file,
                 create_if_missing: true,
             })
@@ -2650,7 +2811,12 @@ mod tests {
                 .await
                 .context("run migrations")?;
 
-            ledger_db::init(ledger_db::Config { cache_size: 1_024 }, pool);
+            ledger_db::init(
+                ledger_db::Config {
+                    cache_max_nodes: 1_024,
+                },
+                pool,
+            );
 
             postgres_container
         };
@@ -2667,7 +2833,7 @@ mod tests {
                 .to_string();
 
             ledger_db::init(ledger_db::Config {
-                cache_size: 1_024,
+                cache_max_nodes: 1_024,
                 cnn_url: sqlite_ledger_db_file,
                 create_if_missing: true,
             })
@@ -3349,6 +3515,280 @@ mod tests {
             alignment: Alignment(vec![]),
         };
         StateValue::Cell(Sp::new(aligned))
+    }
+}
+
+#[cfg(all(test, feature = "standalone"))]
+mod root_count_repair_tests {
+    use crate::{
+        domain::{
+            LedgerVersion,
+            ledger::{
+                LedgerState,
+                ledger_state::{RootCountRepair, raise_root_counts, window_root_counts},
+            },
+        },
+        infra::{
+            ledger_db,
+            ledger_db::v1_1::{
+                LedgerDb, arena_hash,
+                sqlite_tests::{setup_pool, stored_root_count},
+            },
+            pool::sqlite::SqlitePool,
+        },
+    };
+    use anyhow::Context;
+    use midnight_storage_core_v1::{
+        DefaultHasher, Storage,
+        arena::{ArenaHash, Sp},
+        db::DB,
+        storable::SMALL_OBJECT_LIMIT,
+    };
+    use std::{collections::BTreeMap, error::Error as StdError};
+
+    /// Blocks in the retention window referencing one and the same ledger state root.
+    const WINDOW_HITS: u32 = 5;
+
+    /// The count a pre-fix indexer stored for any root persisted two or more times.
+    const CAPPED_COUNT: u32 = 2;
+
+    /// A fresh ledger DB plus a storage over it, sharing the pool so tests can read the stored
+    /// counts back without going through storage-core.
+    async fn pool_and_storage() -> Result<(SqlitePool, Storage<LedgerDb>), Box<dyn StdError>> {
+        let pool = setup_pool().await?;
+        Ok((pool.clone(), Storage::new(16, LedgerDb::new(pool))))
+    }
+
+    /// A healthy root on disk: allocated, persisted once, flushed.
+    fn persisted_root(storage: &Storage<LedgerDb>, value: u32) -> Sp<u32, LedgerDb> {
+        let mut root = storage.alloc(value);
+        root.persist();
+        storage.with_backend(|backend| backend.flush_all_changes_to_db());
+        root
+    }
+
+    /// Plant the state a pre-fix indexer left behind. Goes through the real write path - only the
+    /// read was broken, so this is what actually put those rows on disk. A `count` of 0 would
+    /// delete the row.
+    fn set_stored_root_count(pool: &SqlitePool, key: &ArenaHash<DefaultHasher>, count: u32) {
+        LedgerDb::new(pool.clone()).set_root_count(key.clone(), count);
+    }
+
+    /// A root under-counted by the pre-fix read path is raised to the count the retention window
+    /// implies, and a healthy root is left alone.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn repair_raises_under_counted_roots() -> Result<(), Box<dyn StdError>> {
+        let (pool, storage) = pool_and_storage().await?;
+        let under_counted = persisted_root(&storage, 42);
+        let healthy = persisted_root(&storage, 43);
+
+        // What a pre-fix indexer left on disk: WINDOW_HITS persists, count capped at 2.
+        set_stored_root_count(&pool, &under_counted.hash(), CAPPED_COUNT);
+        set_stored_root_count(&pool, &healthy.hash(), 1);
+
+        let wanted = BTreeMap::from([(under_counted.hash(), WINDOW_HITS), (healthy.hash(), 1)]);
+        let repair = raise_root_counts(&storage, &wanted);
+
+        assert_eq!(
+            repair,
+            RootCountRepair {
+                raised_roots: 1,
+                raised_total: WINDOW_HITS - CAPPED_COUNT,
+                culled_roots: 0,
+                strays: 0,
+            }
+        );
+        assert_eq!(
+            stored_root_count(&pool, &under_counted.hash()).await?,
+            Some(WINDOW_HITS.into())
+        );
+        assert_eq!(stored_root_count(&pool, &healthy.hash()).await?, Some(1));
+
+        Ok(())
+    }
+
+    /// Counts are never lowered, window keys whose node is gone are not re-rooted, and root rows
+    /// outside the window are reported but left in place.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn repair_never_lowers_and_reports_what_it_skips() -> Result<(), Box<dyn StdError>> {
+        let (pool, storage) = pool_and_storage().await?;
+        let over_counted = persisted_root(&storage, 42);
+        let stray = persisted_root(&storage, 43);
+
+        set_stored_root_count(&pool, &over_counted.hash(), 3);
+
+        // A window key whose arena node was already culled: never allocated, so no node exists.
+        let culled = arena_hash([0xcc; 32]);
+
+        let wanted = BTreeMap::from([(over_counted.hash(), 1), (culled.clone(), WINDOW_HITS)]);
+        let repair = raise_root_counts(&storage, &wanted);
+
+        assert_eq!(
+            repair,
+            RootCountRepair {
+                raised_roots: 0,
+                raised_total: 0,
+                culled_roots: 1,
+                strays: 1,
+            }
+        );
+        assert_eq!(
+            stored_root_count(&pool, &over_counted.hash()).await?,
+            Some(3)
+        );
+        assert_eq!(stored_root_count(&pool, &culled).await?, None);
+        assert_eq!(stored_root_count(&pool, &stray.hash()).await?, Some(1));
+
+        Ok(())
+    }
+
+    /// Repairing is idempotent: a second pass over an already-repaired DB changes nothing.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn repair_is_idempotent() -> Result<(), Box<dyn StdError>> {
+        let (pool, storage) = pool_and_storage().await?;
+        let root = persisted_root(&storage, 42);
+        set_stored_root_count(&pool, &root.hash(), CAPPED_COUNT);
+
+        let wanted = BTreeMap::from([(root.hash(), WINDOW_HITS)]);
+        raise_root_counts(&storage, &wanted);
+        let second = raise_root_counts(&storage, &wanted);
+
+        assert_eq!(second, RootCountRepair::default());
+        assert_eq!(
+            stored_root_count(&pool, &root.hash()).await?,
+            Some(WINDOW_HITS.into())
+        );
+
+        Ok(())
+    }
+
+    /// The point of the whole exercise: after repair, a root the pre-fix indexer under-counted
+    /// survives the window rolling past it. Without repair the third unpersist drives
+    /// storage-core's `stored + delta` negative and panics.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn repaired_root_survives_the_window_rolling_over() -> Result<(), Box<dyn StdError>> {
+        let (pool, storage) = pool_and_storage().await?;
+        let root = persisted_root(&storage, 42);
+        set_stored_root_count(&pool, &root.hash(), CAPPED_COUNT);
+
+        raise_root_counts(&storage, &BTreeMap::from([(root.hash(), WINDOW_HITS)]));
+
+        for _ in 0..WINDOW_HITS {
+            root.unpersist();
+            storage.with_backend(|backend| backend.flush_all_changes_to_db());
+        }
+
+        assert_eq!(
+            stored_root_count(&pool, &root.hash()).await?,
+            None,
+            "no longer a root"
+        );
+
+        Ok(())
+    }
+
+    /// The window is a list of per-block keys, so the same key appearing in `n` blocks must tally
+    /// to `n` - that tally is what the repair treats as the truth. Goes through a real serialized
+    /// ledger state key, exercising the version-dependent `TypedArenaKey` decode.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn window_root_counts_tallies_repeated_keys() -> Result<(), Box<dyn StdError>> {
+        let temp_dir = tempfile::tempdir().context("create tempdir")?;
+        let cnn_url = temp_dir
+            .path()
+            .join("ledger-db.sqlite")
+            .display()
+            .to_string();
+        ledger_db::init(ledger_db::Config {
+            cache_max_nodes: 1_024,
+            cnn_url,
+        })
+        .await
+        .context("init ledger DB")?;
+
+        let (state, key) = LedgerState::new("undeployed".try_into()?, LedgerVersion::V8)
+            .context("create ledger state")?
+            .persist()
+            .context("persist ledger state")?;
+        let ledger_version = state.ledger_version();
+
+        let tally = window_root_counts((0..WINDOW_HITS).map(|_| (&key, ledger_version)))?;
+
+        let hash = LedgerState::root_hash_bytes(&key, ledger_version)?;
+        assert_eq!(
+            tally
+                .into_iter()
+                .map(|(hash, count)| (hash.0.to_vec(), count))
+                .collect::<Vec<_>>(),
+            vec![(hash, WINDOW_HITS)]
+        );
+
+        Ok(())
+    }
+
+    /// A root whose stored count reached 0 is garbage as far as gc is concerned, so an
+    /// incremental sweep is entitled to have culled part of its DAG. The sweep is a resumable
+    /// table scan in key order whose cursor lives only in memory, so a restart can leave the root
+    /// node on disk with descendants already deleted. Re-rooting such a root hands the retention
+    /// window an unloadable state that it reports as loadable; the root node's own presence
+    /// cannot rule this out.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn repair_does_not_resurrect_a_root_whose_dag_has_holes() -> Result<(), Box<dyn StdError>>
+    {
+        let (pool, storage) = pool_and_storage().await?;
+
+        // A three-node DAG. Both children exceed the inline limit, so the parent references them
+        // by hash instead of carrying them as direct children.
+        let kept = storage.alloc([0u32; SMALL_OBJECT_LIMIT / 4]);
+        let culled = storage.alloc([1u32; SMALL_OBJECT_LIMIT / 4]);
+        let mut parent = storage.alloc((kept.clone(), culled.clone()));
+        parent.persist();
+        storage.with_backend(|backend| backend.flush_all_changes_to_db());
+
+        let (parent_hash, culled_hash) = (parent.hash(), culled.hash());
+        let refs = storage.with_backend(|backend| {
+            backend
+                .get(&parent_hash)
+                .expect("parent node on disk")
+                .children
+                .iter()
+                .flat_map(|child| child.refs())
+                .cloned()
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(
+            refs,
+            vec![kept.hash(), culled_hash.clone()],
+            "parent must reference its children by hash, not inline them"
+        );
+
+        // What a restart mid-sweep leaves behind: no root row, the root node still on disk, a
+        // descendant already culled.
+        set_stored_root_count(&pool, &parent_hash, 0);
+        LedgerDb::new(pool.clone()).delete_node(&culled_hash);
+
+        // A fresh storage over the same DB stands in for the restart: an empty cache, so reads
+        // see only what is on disk.
+        let restarted = Storage::new(16, LedgerDb::new(pool.clone()));
+        let wanted = BTreeMap::from([(parent_hash.clone(), WINDOW_HITS)]);
+        let repair = raise_root_counts(&restarted, &wanted);
+
+        assert_eq!(
+            repair,
+            RootCountRepair {
+                raised_roots: 0,
+                raised_total: 0,
+                culled_roots: 1,
+                strays: 0,
+            },
+            "a root with a culled descendant must be skipped, not re-rooted"
+        );
+        assert_eq!(
+            stored_root_count(&pool, &parent_hash).await?,
+            None,
+            "still not a root"
+        );
+
+        Ok(())
     }
 }
 

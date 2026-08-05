@@ -30,7 +30,7 @@ infra:
     create_if_missing: false
 
   ledger_db:
-    cache_size: "1kiB"
+    cache_max_nodes: 100000
     cnn_url: "/data/ledger-db.sqlite"
     create_if_missing: false
 

@@ -40,20 +40,21 @@ jobs:
             description: Midnight Indexer
           - name: spo-indexer
             description: Midnight SPO Indexer
-        # Each (image, arch) is an independent parallel job. amd64 keeps the existing (warm)
-        # buildcache ref and the unsuffixed tag and builds natively, so it publishes without
-        # waiting for arm64. arm64 builds in parallel under QEMU and publishes an -arm64-suffixed
-        # tag, so the slow emulated build never blocks the amd64 image from being pushed.
+        # Each (image, arch) is an independent parallel job publishing an arch-suffixed tag.
+        # amd64 keeps the existing (warm) buildcache ref and builds natively; arm64 builds in
+        # parallel under QEMU. Neither blocks the other, and each -amd64/-arm64 tag is available
+        # as soon as that arch finishes. The downstream merge-manifests job then assembles the
+        # unsuffixed tag into a real multi-arch manifest referencing both arches.
         platform:
           - arch: amd64
-            suffix: ""
+            suffix: "-amd64"
             cache_scope: ""
           - arch: arm64
             suffix: "-arm64"
             cache_scope: "-arm64"
     steps:
       - name: Checkout repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up environment
         env:
@@ -65,13 +66,13 @@ jobs:
           echo "VERSION=$version" | tee -a "$GITHUB_ENV"
 
       - name: Login to DockerHub
-        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        uses: docker/login-action@06fb636fac595d6fb4b28a5dfcb21a6f5091859c # v4.5.0
         with:
           username: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_USER }}
           password: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_TOKEN }}
 
       - name: Login to GHCR
-        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        uses: docker/login-action@06fb636fac595d6fb4b28a5dfcb21a6f5091859c # v4.5.0
         with:
           registry: ghcr.io
           username: MidnightCI
@@ -79,7 +80,7 @@ jobs:
 
       - name: Setup Docker Metadata
         id: meta
-        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6.1.0
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         env:
           DOCKER_METADATA_SHORT_SHA_LENGTH: 8
         with:
@@ -103,7 +104,7 @@ jobs:
           image: tonistiigi/binfmt:qemu-v8.1.5
 
       - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
       - name: Build and push Docker Image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
@@ -126,9 +127,76 @@ jobs:
             type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.image.name }}:buildcache${{ matrix.platform.cache_scope }},mode=max
             type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.image.name }}:buildcache-${{ env.PROFILE }}${{ matrix.platform.cache_scope }},mode=max
 
+  merge-manifests:
+    name: Merge multi-arch manifest (${{ matrix.image.name }})
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - name: chain-indexer
+          - name: indexer-api
+          - name: wallet-indexer
+          - name: indexer-standalone
+          - name: spo-indexer
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up environment
+        run: |
+          version=$(grep '^version.*=' Cargo.toml | sed -E 's/version.*=.*"(.*)"/\1/')
+          echo "VERSION=$version" | tee -a "$GITHUB_ENV"
+
+      - name: Login to DockerHub
+        uses: docker/login-action@06fb636fac595d6fb4b28a5dfcb21a6f5091859c # v4.5.0
+        with:
+          username: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_USER }}
+          password: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_TOKEN }}
+
+      - name: Login to GHCR
+        uses: docker/login-action@06fb636fac595d6fb4b28a5dfcb21a6f5091859c # v4.5.0
+        with:
+          registry: ghcr.io
+          username: MidnightCI
+          password: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      # Recompute the unsuffixed tags exactly as the build-and-push job did (same images/tags,
+      # no suffix). For each tag T we combine the already-published T-amd64 and T-arm64 into a
+      # single multi-arch manifest published as T.
+      - name: Setup Docker Metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        env:
+          DOCKER_METADATA_SHORT_SHA_LENGTH: 8
+        with:
+          images: |
+            ghcr.io/midnight-ntwrk/${{ matrix.image.name }}
+            ${{ github.ref_type == 'tag' && format('midnightntwrk/{0}', matrix.image.name) || '' }}
+          tags: |
+            type=semver,pattern={{version}}
+            ${{ github.ref_type != 'tag' && format('type=sha,prefix={0}-,format=short', env.VERSION) || '' }}
+
+      - name: Merge per-arch images into multi-arch manifests
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          echo "$TAGS" | while IFS= read -r tag; do
+            [ -z "$tag" ] && continue
+            echo "Merging ${tag} from ${tag}-amd64 + ${tag}-arm64"
+            docker buildx imagetools create -t "${tag}" "${tag}-amd64" "${tag}-arm64"
+            docker buildx imagetools inspect "${tag}"
+          done
+
   docker-compose-validation:
     name: Docker Compose Validation
-    needs: build-and-push
+    needs: merge-manifests
     runs-on: ubuntu-latest
     continue-on-error: true
     strategy:
@@ -136,7 +204,7 @@ jobs:
         profile: [cloud, standalone]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Docker versions
         run: |
@@ -155,7 +223,7 @@ jobs:
           echo "Docker Compose syntax validation completed successfully"
 
       - name: Login to GHCR
-        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        uses: docker/login-action@06fb636fac595d6fb4b28a5dfcb21a6f5091859c # v4.5.0
         with:
           registry: ghcr.io
           username: MidnightCI
@@ -163,7 +231,7 @@ jobs:
 
       - name: Setup Docker Metadata
         id: meta
-        uses: docker/metadata-action@80c7e94dd9b9319bd5eb7a0e0fe9291e23a2a2e9 # v6.1.0
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         env:
           DOCKER_METADATA_SHORT_SHA_LENGTH: 8
         with:

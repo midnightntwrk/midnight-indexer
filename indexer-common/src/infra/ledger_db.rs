@@ -19,11 +19,11 @@ use serde::Deserialize;
 
 #[cfg(feature = "cloud")]
 pub fn init(config: Config, pool: crate::infra::pool::postgres::PostgresPool) {
-    let Config { cache_size } = config;
+    let Config { cache_max_nodes } = config;
 
     let db = v1_1::LedgerDb::new(pool);
     let _ = midnight_storage_core_v1::storage::set_default_storage(|| {
-        midnight_storage_core_v1::Storage::new(cache_size as usize, db)
+        midnight_storage_core_v1::Storage::new(cache_max_nodes, db)
     });
 }
 
@@ -32,7 +32,7 @@ pub async fn init(config: Config) -> Result<(), Error> {
     use crate::infra::{migrations, pool::sqlite};
 
     let Config {
-        cache_size,
+        cache_max_nodes,
         cnn_url,
         create_if_missing,
     } = config;
@@ -46,7 +46,7 @@ pub async fn init(config: Config) -> Result<(), Error> {
 
     let db = v1_1::LedgerDb::new(pool);
     let _ = midnight_storage_core_v1::storage::set_default_storage(|| {
-        midnight_storage_core_v1::Storage::new(cache_size as usize, db)
+        midnight_storage_core_v1::Storage::new(cache_max_nodes, db)
     });
 
     Ok(())
@@ -54,8 +54,11 @@ pub async fn init(config: Config) -> Result<(), Error> {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-    #[serde(with = "byte_unit_serde")]
-    pub cache_size: u64,
+    /// Maximum number of arena nodes held in the storage-core caches. This is a node *count*, not
+    /// a byte size: storage-core's read cache is strictly bounded by it and its write cache is
+    /// truncated to it on flush (see `midnight_storage_core_v1::Storage::new`, whose own default
+    /// is `DEFAULT_CACHE_SIZE = 10_000`). `0` means unbounded.
+    pub cache_max_nodes: usize,
 
     #[cfg(feature = "standalone")]
     pub cnn_url: String,

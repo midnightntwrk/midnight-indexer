@@ -218,7 +218,12 @@ async fn init_ledger_db()
         .await
         .context("run Postgres migrations")?;
 
-    ledger_db::init(ledger_db::Config { cache_size: 1_024 }, pool);
+    ledger_db::init(
+        ledger_db::Config {
+            cache_max_nodes: 1_024,
+        },
+        pool,
+    );
 
     Ok(postgres_container)
 }
@@ -235,7 +240,7 @@ async fn init_ledger_db() -> anyhow::Result<tempfile::TempDir> {
         .to_string();
 
     ledger_db::init(ledger_db::Config {
-        cache_size: 1_024,
+        cache_max_nodes: 1_024,
         cnn_url,
         create_if_missing: true,
     })
