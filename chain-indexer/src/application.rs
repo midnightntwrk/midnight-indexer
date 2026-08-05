@@ -424,8 +424,8 @@ async fn index_block<N>(
 where
     N: Node,
 {
-    // The try_into on the next line serializes the zswap merkle tree root, but the domain type is
-    // needed below to compare against the zswap merkle tree root in the ledger state.
+    // Capture the node's zswap merkle tree root (domain type) before `try_into` serializes it, to
+    // compare against the zswap merkle tree root in the ledger state below.
     let zswap_merkle_tree_root = block.zswap_merkle_tree_root;
 
     let (mut block, transactions) = block.try_into().context("convert node block into domain")?;
@@ -530,7 +530,8 @@ where
             block.height
         );
     }
-    if ledger_state.zswap_merkle_tree_root() != zswap_merkle_tree_root {
+    let local_zswap_merkle_tree_root = ledger_state.zswap_merkle_tree_root();
+    if local_zswap_merkle_tree_root != zswap_merkle_tree_root {
         bail!(
             "zswap state root mismatch for block {} at height {}",
             block.hash,

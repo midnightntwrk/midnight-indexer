@@ -21,7 +21,7 @@ include!(concat!(env!("OUT_DIR"), "/generated_runtime.rs"));
 
 use crate::{
     domain::{DParameter, DustRegistrationEvent, TermsAndConditions},
-    infra::subxt_node::{OnlineClientAtBlock, SubxtNodeError},
+    infra::subxt_node::{ContentSource, OnlineClientAtBlock, SubxtNodeError},
 };
 use indexer_common::domain::{
     ByteVec, NodeVersion, SerializedContractAddress, SerializedContractState,
@@ -49,13 +49,14 @@ pub async fn make_block_details(
     authorities: &mut Option<Vec<[u8; 32]>>,
     node_version: NodeVersion,
     block: &OnlineClientAtBlock,
+    content: Option<&ContentSource>,
 ) -> Result<BlockDetails, SubxtNodeError> {
     // TODO Replace this often repeated pattern with a macro?
     match node_version {
-        NodeVersion::V0_22 => v0_22_0::make_block_details(authorities, block).await,
-        NodeVersion::V1_0 => v1_0_0::make_block_details(authorities, block).await,
-        NodeVersion::V2_0 => v2_0_0::make_block_details(authorities, block).await,
-        NodeVersion::V2_1 => v2_1_0::make_block_details(authorities, block).await,
+        NodeVersion::V0_22 => v0_22_0::make_block_details(authorities, block, content).await,
+        NodeVersion::V1_0 => v1_0_0::make_block_details(authorities, block, content).await,
+        NodeVersion::V2_0 => v2_0_0::make_block_details(authorities, block, content).await,
+        NodeVersion::V2_1 => v2_1_0::make_block_details(authorities, block, content).await,
     }
 }
 
