@@ -45,6 +45,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - *(chain-indexer)* Avoid OutOfDustValidityWindow on the first transaction of a block by reproducing the node's mempool `tblock` bump (#1367)
 
+## [4.3.3-hotfix] - 2026-07-20
+
+> **Out-of-band emergency hotfix, not on the 4.3.4/4.3.5 release line.** Cut from `4.3.3` (`a89e1d3`) plus one commit and deployed to mainnet blue/green to recover from the 2026-07-20 runtime-upgrade stall (spec `22000 → 1000000`, enactment block `1,774,491`). Published as a GitHub pre-release for traceability only; it does **not** contain the 4.3.4/4.3.5 fixes. Superseded by the durable fix on `main` (#1346).
+
+### 🐛 Bug Fixes
+
+- *(chain-indexer)* Tolerate a runtime-upgrade enactment block in `get_contract_state` by falling back across runtime modules when the header-digest-selected module is rejected by the live chain
+
 ## [4.3.3] - 2026-06-04
 
 ### 🚀 Features
