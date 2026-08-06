@@ -84,6 +84,186 @@ impl Default for Config {
 }
 
 #[cfg(test)]
+mod pool_concurrency {
+    use crate::infra::pool::sqlite::{Config, SqlitePool};
+    use std::{
+        sync::{
+            Arc,
+            atomic::{AtomicU64, Ordering},
+        },
+        time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    };
+    use tokio::sync::Notify;
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    async fn fresh_pool() -> SqlitePool {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "indexer_pool_test_{}_{}_{}.sqlite",
+            std::process::id(),
+            nanos,
+            seq
+        ));
+        let url = format!("sqlite://{}", path.display());
+        SqlitePool::new(Config { cnn_url: url })
+            .await
+            .expect("create pool")
+    }
+
+    async fn create_t(pool: &SqlitePool) {
+        sqlx::query("CREATE TABLE t (id INTEGER PRIMARY KEY AUTOINCREMENT, v INTEGER NOT NULL)")
+            .execute(&**pool)
+            .await
+            .expect("create table");
+    }
+
+    /// A SELECT issued while a writer holds an in-progress transaction returns
+    /// promptly rather than queueing behind the writer's commit.
+    #[tokio::test]
+    async fn reader_runs_concurrent_with_in_progress_writer() {
+        let pool = fresh_pool().await;
+        create_t(&pool).await;
+
+        let writer_acquired = Arc::new(Notify::new());
+        let writer_acquired_inner = writer_acquired.clone();
+        let pool_writer = pool.clone();
+
+        let writer = tokio::spawn(async move {
+            let mut tx = pool_writer.begin().await.expect("begin");
+            sqlx::query("INSERT INTO t (v) VALUES (1)")
+                .execute(&mut *tx)
+                .await
+                .expect("insert");
+            writer_acquired_inner.notify_one();
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            tx.commit().await.expect("commit");
+        });
+
+        writer_acquired.notified().await;
+
+        let start = Instant::now();
+        let result = tokio::time::timeout(
+            Duration::from_millis(200),
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM t").fetch_one(&*pool),
+        )
+        .await;
+        let elapsed = start.elapsed();
+
+        writer.await.expect("writer task");
+
+        assert!(
+            result.is_ok(),
+            "SELECT did not return within 200ms while writer held a 500ms tx; elapsed = {:?}",
+            elapsed
+        );
+    }
+
+    /// Eight concurrent SELECTs against the pool while a writer holds a
+    /// transaction complete in roughly the time of one SELECT.
+    #[tokio::test]
+    async fn many_readers_run_in_parallel_with_writer() {
+        let pool = fresh_pool().await;
+        create_t(&pool).await;
+        sqlx::query("INSERT INTO t (v) VALUES (0)")
+            .execute(&*pool)
+            .await
+            .expect("seed");
+
+        let writer_acquired = Arc::new(Notify::new());
+        let writer_acquired_inner = writer_acquired.clone();
+        let pool_writer = pool.clone();
+
+        let writer = tokio::spawn(async move {
+            let mut tx = pool_writer.begin().await.expect("begin");
+            sqlx::query("INSERT INTO t (v) VALUES (1)")
+                .execute(&mut *tx)
+                .await
+                .expect("insert");
+            writer_acquired_inner.notify_one();
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            tx.commit().await.expect("commit");
+        });
+
+        writer_acquired.notified().await;
+
+        let start = Instant::now();
+        let readers = (0..8).map(|_| {
+            let p = pool.clone();
+            tokio::spawn(async move {
+                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM t")
+                    .fetch_one(&*p)
+                    .await
+            })
+        });
+        let results = futures::future::join_all(readers).await;
+        let elapsed = start.elapsed();
+
+        writer.await.expect("writer task");
+        for r in results {
+            r.expect("reader task").expect("reader query");
+        }
+
+        assert!(
+            elapsed < Duration::from_millis(200),
+            "8 concurrent SELECTs took {:?} while writer held a 500ms tx",
+            elapsed
+        );
+    }
+
+    /// A second writer issued while a first writer holds a long-running
+    /// transaction succeeds (the pool retries via busy_timeout) rather than
+    /// failing with SQLITE_BUSY / "database is locked".
+    #[tokio::test]
+    async fn concurrent_writer_does_not_fail_with_database_is_locked() {
+        let pool = fresh_pool().await;
+        create_t(&pool).await;
+
+        let long_writer_started = Arc::new(Notify::new());
+        let long_writer_started_inner = long_writer_started.clone();
+        let pool_long = pool.clone();
+
+        let long_writer = tokio::spawn(async move {
+            let mut tx = pool_long.begin().await.expect("begin");
+            sqlx::query("INSERT INTO t (v) VALUES (1)")
+                .execute(&mut *tx)
+                .await
+                .expect("insert");
+            long_writer_started_inner.notify_one();
+            for _ in 0..10 {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                sqlx::query("INSERT INTO t (v) VALUES (1)")
+                    .execute(&mut *tx)
+                    .await
+                    .expect("insert in loop");
+            }
+            tx.commit().await.expect("commit");
+        });
+
+        long_writer_started.notified().await;
+
+        let start = Instant::now();
+        let result = sqlx::query("INSERT INTO t (v) VALUES (2)")
+            .execute(&*pool)
+            .await;
+        let elapsed = start.elapsed();
+
+        long_writer.await.expect("long writer task");
+
+        assert!(
+            result.is_ok(),
+            "concurrent INSERT failed after {:?}: {:?}",
+            elapsed,
+            result.err()
+        );
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use crate::infra::pool::sqlite::{Config, SqlitePool};
     use std::{ops::Deref, path::Path};
