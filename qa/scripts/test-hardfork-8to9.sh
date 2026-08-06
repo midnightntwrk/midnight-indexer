@@ -8,14 +8,12 @@
 # submits v9 transactions. The indexer must cross the boundary without a ledger/
 # zswap root mismatch and keep indexing.
 #
-# This is the generative, from-genesis sibling of the snapshot-fork oracle in
-# docs/hardfork-ledger-8-to-9.md (Phase 3). It validates the live transaction path
-# across the fork; it does NOT stress the run(budget) drain path (dev genesis is
-# tiny) -- use the snapshot fork for that. See docs/hardfork-devnet-rehearsal-8to9.md.
+# This is the generative, from-genesis rehearsal described in
+# docs/hardfork-devnet-rehearsal-8to9.md. It validates the live transaction path
+# across the fork; it does not stress a production-sized `run(budget)` drain.
 #
-# Prerequisites (see the doc's Handoff checklist):
-#   - Indexer images that recognize spec_version 2_001_000 (Phase 1 / #1333). Build
-#     from the integration/fork-8to9-e2e branch: INDEXER_TAG=dev just build-docker-image <pkg>
+# Prerequisites (see the runbook's release checklist):
+#   - Indexer images that recognize spec_version 2_001_000.
 #   - The 2.1.0 migration node image + runtime WASM, and a ledger-8 (1.0.x) node image.
 #   - A ledger-9-capable toolkit for the post-fork sends.
 #

@@ -13,6 +13,8 @@ Maintainer and contributor guides. For local setup see the top-level
 
 - [Creating a release](./releasing.md) - versioning, changelog, tagging, image
   publish.
+- [Ledger 8 → 9 devnet rehearsal](./hardfork-devnet-rehearsal-8to9.md) - release-gate
+  procedure for validating the hard-fork crossing.
 - [Upgrading the node version](./updating-node-version.md) - `NODE_VERSIONS`,
   metadata, per-version runtime modules.
 - [Upgrading the ledger](./upgrading-ledger.md) - the `v8`/`v9` coexistence and

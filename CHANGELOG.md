@@ -4,9 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [unreleased]
+## [4.4.0-rc.2] - 2026-08-06
+
+### 🚀 Features
+
+- *(indexer)* Index the ledger 8→9 hard-fork crossing (#1395).
+- *(chain-indexer)* Derive block authors from BABE pre-runtime digests (#1321).
+- *(chain-indexer)* Gate BABE author derivation on the presence of `pallet-consensus-engine` (#1377).
 
 ### 🐛 Bug Fixes
+
+- Dispatch runtime API and storage calls by the state runtime version at upgrade enactment blocks (#1346).
+- *(indexer-common)* Read the stored count in `ledger-db` `get_root_count` (#1378).
+- Publish multi-architecture manifests for indexer images (#1391).
 
 - *(indexer-common)* [**breaking**] Rename the ledger DB's `cache_size` to `cache_max_nodes`, make it a plain node count and raise it to 100000
 
@@ -15,6 +25,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   should be. Operators must rename the key in their config and replace any byte-unit string with a
   plain integer; the `APP__INFRA__LEDGER_DB__CACHE_SIZE` environment variable becomes
   `APP__INFRA__LEDGER_DB__CACHE_MAX_NODES`. `0` means unbounded.
+
+### ⚙️ Miscellaneous Tasks
+
+- Add `pallet_session` support for the 2.1.0 runtime upgrade (#1333).
+- Pin `cargo-audit` (#1387).
+
+## [unreleased]
 
 ## [4.3.5] - 2026-07-25
 
