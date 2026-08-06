@@ -14,8 +14,11 @@
 use derive_more::Into;
 use log::debug;
 use serde::Deserialize;
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-use std::ops::Deref;
+use sqlx::{
+    Sqlite, Transaction,
+    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
+};
+use std::{ops::Deref, time::Duration};
 use thiserror::Error;
 
 /// New type for `sqlx::SqlitePool`, allowing for some custom extensions as well as security.
@@ -28,16 +31,33 @@ pub struct SqlitePool(sqlx::SqlitePool);
 impl SqlitePool {
     /// Try to create a new [SqlitePool] with the given config.
     pub async fn new(config: Config) -> Result<Self, Error> {
+        let max_connections = config.max_connections;
         let connect_options =
             SqliteConnectOptions::try_from(config).map_err(Error::ConvertConfig)?;
         let inner = SqlitePoolOptions::new()
-            .max_connections(1)
+            .max_connections(max_connections)
             .connect_with(connect_options)
             .await?;
         let pool = SqlitePool(inner);
         debug!(pool:?; "created pool");
 
         Ok(pool)
+    }
+
+    /// Begin a transaction with `BEGIN IMMEDIATE` semantics, claiming the
+    /// writer lock up front.
+    ///
+    /// SQLite's default `BEGIN DEFERRED` transaction stays a reader until its
+    /// first write statement. When multiple connections run in WAL mode, a
+    /// deferred reader that later tries to upgrade to a writer (while another
+    /// connection has committed in between) gets `SQLITE_BUSY_SNAPSHOT` (517),
+    /// which is not retryable via `busy_timeout`. Every caller in this
+    /// codebase that starts a transaction does so to write, so taking the
+    /// write lock immediately is both correct and avoids the race. Shadowing
+    /// `sqlx::Pool::begin` via inherent method makes the existing
+    /// `self.pool.begin()` call sites pick up the new behavior transparently.
+    pub async fn begin(&self) -> Result<Transaction<'static, Sqlite>, sqlx::Error> {
+        self.0.begin_with("BEGIN IMMEDIATE").await
     }
 }
 
@@ -63,14 +83,45 @@ pub enum Error {
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub cnn_url: String,
+
+    #[serde(default = "default_max_connections")]
+    pub max_connections: u32,
+}
+
+impl Config {
+    /// Build a [Config] for the given connection URL using defaults for the
+    /// remaining fields.
+    pub fn with_url(cnn_url: impl Into<String>) -> Self {
+        Self {
+            cnn_url: cnn_url.into(),
+            ..Default::default()
+        }
+    }
+}
+
+fn default_max_connections() -> u32 {
+    8
 }
 
 impl TryFrom<Config> for SqliteConnectOptions {
     type Error = sqlx::Error;
 
     fn try_from(config: Config) -> Result<Self, Self::Error> {
-        let mut options = config.cnn_url.parse::<SqliteConnectOptions>()?;
-        options = options.create_if_missing(true);
+        // WAL lets readers run concurrent with a single writer; without it the
+        // default `DELETE` journal mode serializes all access on a single file.
+        // `busy_timeout` lets SQLite itself retry on lock contention instead of
+        // immediately returning `SQLITE_BUSY`. It needs to cover the worst-case
+        // writer hold time: on mainnet, chain-indexer's per-block write
+        // transaction (many inserts across several tables) can exceed a few
+        // seconds, so a short timeout causes concurrent writes (e.g. an API
+        // `disconnect_wallet` UPDATE) to spuriously fail.
+        let options = config
+            .cnn_url
+            .parse::<SqliteConnectOptions>()?
+            .create_if_missing(true)
+            .journal_mode(SqliteJournalMode::Wal)
+            .synchronous(SqliteSynchronous::Normal)
+            .busy_timeout(Duration::from_secs(30));
         Ok(options)
     }
 }
@@ -79,6 +130,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             cnn_url: "sqlite::memory:".to_string(),
+            max_connections: default_max_connections(),
         }
     }
 }
@@ -100,10 +152,7 @@ mod tests {
         }
         assert!(!Path::new(db_path).exists());
 
-        let pool = SqlitePool::new(Config {
-            cnn_url: format!("sqlite://{db_path}"),
-        })
-        .await;
+        let pool = SqlitePool::new(Config::with_url(format!("sqlite://{db_path}"))).await;
 
         assert!(pool.is_ok());
         assert!(Path::new(db_path).exists());
