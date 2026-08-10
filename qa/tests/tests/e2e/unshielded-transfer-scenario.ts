@@ -209,6 +209,26 @@ function utxosOfTokenUnderTest(
 }
 
 /**
+ * Fetches the transfer under test from its block, selected by the transaction hash the
+ * toolkit reported. Selecting by hash rather than by "the first transaction with
+ * unshielded activity" is what keeps the assertions on this transfer: the sibling suite
+ * transfers from the same funding wallet, and a busy chain carries other traffic.
+ */
+async function fetchTransactionUnderTest(
+  scenario: UnshieldedTransferScenario,
+): Promise<Transaction> {
+  const blockResponse = await getBlockByHashWithRetry(scenario.transactionResult.blockHash);
+  const transaction = blockResponse.data?.block?.transactions?.find(
+    (tx: Transaction) => tx.hash === scenario.transactionResult.txHash,
+  );
+  expect(
+    transaction,
+    `Transaction ${scenario.transactionResult.txHash} is not in block ${scenario.transactionResult.blockHash}`,
+  ).toBeDefined();
+  return transaction!;
+}
+
+/**
  * Finds a progress update event reporting a transaction id past the baseline.
  * Used by the source and destination progress tests through `retry`.
  *
@@ -462,17 +482,7 @@ export function defineUnshieldedTransferTests(scenario: UnshieldedTransferScenar
       startTest(scenario, ctx, 'transferredAmount', []);
       skipUnlessConfirmed(scenario, ctx);
 
-      // The expected block might take a bit more to show up by indexer, so we retry a few times
-      const blockResponse = await getBlockByHashWithRetry(scenario.transactionResult.blockHash);
-      const unshieldedTx = blockResponse.data?.block?.transactions?.find((tx: Transaction) => {
-        const hasCreated = tx.unshieldedCreatedOutputs && tx.unshieldedCreatedOutputs.length > 0;
-        const hasSpent = tx.unshieldedSpentOutputs && tx.unshieldedSpentOutputs.length > 0;
-        log.info(`Transaction ${tx.hash}: hasCreated=${hasCreated}, hasSpent=${hasSpent}`);
-        return hasCreated || hasSpent;
-      });
-
-      expect(unshieldedTx).toBeDefined();
-
+      const unshieldedTx = await fetchTransactionUnderTest(scenario);
       const createdOutputs = utxosOfTokenUnderTest(
         scenario,
         unshieldedTx,
@@ -510,15 +520,10 @@ export function defineUnshieldedTransferTests(scenario: UnshieldedTransferScenar
       startTest(scenario, ctx, 'tokenTypeOnOutputs', ['Query', 'Block', 'ByHash']);
       skipUnlessConfirmed(scenario, ctx);
 
-      const blockResponse = await getBlockByHashWithRetry(scenario.transactionResult.blockHash);
-      const unshieldedTx = blockResponse.data?.block?.transactions?.find(
-        (tx: Transaction) => tx.hash === scenario.transactionResult.txHash,
-      );
-      expect(unshieldedTx).toBeDefined();
-
+      const unshieldedTx = await fetchTransactionUnderTest(scenario);
       const utxos = [
-        ...(unshieldedTx?.unshieldedCreatedOutputs ?? []),
-        ...(unshieldedTx?.unshieldedSpentOutputs ?? []),
+        ...(unshieldedTx.unshieldedCreatedOutputs ?? []),
+        ...(unshieldedTx.unshieldedSpentOutputs ?? []),
       ];
       expect(utxos.length).toBeGreaterThan(0);
       expect(new Set(utxos.map((utxo: UnshieldedUtxo) => utxo.tokenType))).toEqual(
