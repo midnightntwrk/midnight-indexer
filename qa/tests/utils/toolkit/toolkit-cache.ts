@@ -85,21 +85,49 @@ async function bootstrap(): Promise<ToolkitCacheConnection> {
 }
 
 async function ensureChainNamesTable(): Promise<void> {
-  await execFileAsync('docker', [
-    'exec',
-    CONTAINER_NAME,
-    'psql',
-    '-U',
-    POSTGRES_USER,
-    '-d',
-    POSTGRES_DB,
-    '-c',
-    `CREATE TABLE IF NOT EXISTS chain_names (
-       chain_id      BYTEA PRIMARY KEY,
-       env_name      TEXT NOT NULL,
-       registered_at TIMESTAMPTZ DEFAULT now()
-     );`,
-  ]);
+  const deadline = Date.now() + READY_TIMEOUT_MS;
+  for (;;) {
+    try {
+      await execFileAsync('docker', [
+        'exec',
+        CONTAINER_NAME,
+        'psql',
+        // TCP, not the unix socket: the entrypoint's first-run temporary
+        // server is socket-only, so the socket can reach a server that is
+        // about to be restarted.
+        '-h',
+        '127.0.0.1',
+        '-U',
+        POSTGRES_USER,
+        '-d',
+        POSTGRES_DB,
+        '-c',
+        `CREATE TABLE IF NOT EXISTS chain_names (
+           chain_id      BYTEA PRIMARY KEY,
+           env_name      TEXT NOT NULL,
+           registered_at TIMESTAMPTZ DEFAULT now()
+         );`,
+      ]);
+      return;
+    } catch (err) {
+      const message = errorMessage(err);
+      // IF NOT EXISTS is not concurrency-safe: two workers can both pass the
+      // existence check and race the catalog insert; the loser gets a
+      // duplicate-key error on a pg_* catalog index. The only statement here
+      // is this CREATE TABLE, so any duplicate-key error means the table
+      // already exists — which is all we need.
+      if (message.includes('duplicate key value violates unique constraint')) {
+        return;
+      }
+      const transient =
+        message.includes('the database system is starting up') ||
+        message.includes('connection to server');
+      if (!transient || Date.now() >= deadline) {
+        throw err;
+      }
+      await sleep(READY_POLL_INTERVAL_MS);
+    }
+  }
 }
 
 async function ensureContainer(): Promise<number> {
@@ -189,6 +217,12 @@ async function waitForReady(): Promise<void> {
         'exec',
         CONTAINER_NAME,
         'pg_isready',
+        // TCP, not the unix socket: on a fresh data dir the postgres image
+        // initializes via a temporary socket-only server before restarting
+        // for real, and pg_isready against the socket reports that temporary
+        // server as ready. Only the final server listens on TCP.
+        '-h',
+        '127.0.0.1',
         '-U',
         POSTGRES_USER,
         '-d',
