@@ -152,6 +152,16 @@ jobs:
           APP__INFRA__STORAGE__PASSWORD: ${{ secrets.APP__INFRA__STORAGE__PASSWORD }}
           APP__INFRA__PUB_SUB__PASSWORD: ${{ secrets.APP__INFRA__PUB_SUB__PASSWORD }}
         run: |
+          # No APP__INFRA__* secrets are configured for this repo (repo and
+          # org level), leaving these empty — an empty POSTGRES_PASSWORD makes
+          # the postgres container restart-loop and the whole environment
+          # never comes up. The local environment is ephemeral, so random
+          # values suffice (same approach as .github/actions/init-env);
+          # secrets still win when present.
+          export APP__INFRA__SECRET="${APP__INFRA__SECRET:-$(openssl rand -hex 32)}"
+          export APP__INFRA__STORAGE__PASSWORD="${APP__INFRA__STORAGE__PASSWORD:-$(openssl rand -hex 32)}"
+          export APP__INFRA__PUB_SUB__PASSWORD="${APP__INFRA__PUB_SUB__PASSWORD:-$(openssl rand -hex 32)}"
+
           . ./.envrc
           echo "NODE_TAG: $NODE_TAG"
           echo "INDEXER_TAG: $INDEXER_TAG"
