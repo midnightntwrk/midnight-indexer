@@ -46,7 +46,9 @@ import {
 
 const CANDIDATE_TOKEN_TYPES = dataProvider.getCustomUnshieldedTokenTypes();
 
-const DESTINATION_SEED = '0000000000000000000000000000000000000000000000000000000123456789';
+// Destination wallets are numbered per e2e suite (…e2e001 is the NIGHT suite's) so that
+// no two suites share one — see `destinationSeed` in unshielded-transfer-scenario.ts.
+const DESTINATION_SEED = '0000000000000000000000000000000000000000000000000000000000e2e002';
 const TRANSFER_AMOUNT = 1;
 
 describe.skipIf(CANDIDATE_TOKEN_TYPES.length === 0)(

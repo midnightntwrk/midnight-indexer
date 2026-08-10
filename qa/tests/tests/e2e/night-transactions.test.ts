@@ -37,7 +37,11 @@ import {
 /** NIGHT is the chain's native unshielded token: its token type is all zeros. */
 const NIGHT_TOKEN_TYPE = '0'.repeat(64);
 
-const DESTINATION_SEED = '0000000000000000000000000000000000000000000000000000000987654321';
+// Destination wallets are numbered per e2e suite (…e2e002 is the custom-token suite's) so
+// that no two suites share one — see `destinationSeed` in unshielded-transfer-scenario.ts.
+// The seed this suite used before, …987654321, is wallet-subscriptions.test.ts's first
+// destination.
+const DESTINATION_SEED = '0000000000000000000000000000000000000000000000000000000000e2e001';
 
 // A second destination, subscribed on the same WS connection, so the multi-destination tests
 // below can assert the indexer routes each transfer to the intended recipient only.

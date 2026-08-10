@@ -79,8 +79,11 @@ export interface UnshieldedTokenUnderTest {
   amount: number;
   unit: string;
   /**
-   * Seed of the receiving wallet. Distinct per suite, so two suites running in
-   * parallel against one chain never observe each other's destination events.
+   * Seed of the receiving wallet, which must be distinct from every other e2e suite's
+   * destination. The e2e files run concurrently against one chain, so a shared
+   * destination lets one suite's transfer show up in the other's event stream — and
+   * where a suite asserts that a wallet received no transaction event at all
+   * (wallet-subscriptions.test.ts does), that turns into a false failure over there.
    */
   destinationSeed: string;
   /**
@@ -247,10 +250,13 @@ async function expectProgressUpdate(
   const isProgress = (event: UnshieldedTxSubscriptionResponse) =>
     event.data?.unshieldedTransactions.__typename === 'UnshieldedTransactionsProgress';
 
-  const highestTransactionIdBefore = (
-    historicalEvents.filter(isProgress).at(-1)?.data
-      ?.unshieldedTransactions as UnshieldedTransactionsProgress
-  ).highestTransactionId;
+  // A wallet that has never transacted still gets an immediate progress update reporting
+  // 0, so 0 is the baseline when no historical update was captured.
+  const highestTransactionIdBefore =
+    (
+      historicalEvents.filter(isProgress).at(-1)?.data?.unshieldedTransactions as
+        UnshieldedTransactionsProgress | undefined
+    )?.highestTransactionId ?? 0;
   log.info(
     `Highest ${addressLabel} transaction ID before transaction: ${highestTransactionIdBefore}`,
   );
