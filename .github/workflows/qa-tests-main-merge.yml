@@ -123,6 +123,11 @@ jobs:
       node_tag: ${{ needs.derive-tags.outputs.node_tag }}
       indexer_tag: ${{ needs.derive-tags.outputs.indexer_tag }}
       node_toolkit_tag: ${{ needs.derive-tags.outputs.node_toolkit_tag }}
+      # Main-branch image builds are only published to GHCR: build-indexer-images
+      # pushes <version>-<sha8> to ghcr.io/midnight-ntwrk, while Docker Hub
+      # (midnightntwrk) only receives release-tag builds. GHCR also mirrors the
+      # release tags, so this registry works for workflow_dispatch runs too.
+      image_registry: ghcr.io/midnight-ntwrk
     secrets:
       MIDNIGHTCI_PACKAGES_READ: ${{ secrets.MIDNIGHTCI_PACKAGES_READ }}
       APP__INFRA__SECRET: ${{ secrets.APP__INFRA__SECRET }}
