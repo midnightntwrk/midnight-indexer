@@ -120,6 +120,7 @@ where
             subscription_config,
             quota_config,
             contract_state_cache_config,
+            session_token_ttl,
         } = self.config;
 
         let app = make_app(
@@ -134,6 +135,7 @@ where
             subscription_config,
             quota_config,
             contract_state_cache_config,
+            session_token_ttl,
         );
 
         let listener = TcpListener::bind((address, port))
@@ -168,7 +170,20 @@ pub struct Config {
 
     #[serde(rename = "contract_state_cache")]
     pub contract_state_cache_config: ContractStateCacheConfig,
+
+    /// Maximum age of the sealed session tokens returned by `connect`. Bounds the token lifetime,
+    /// because `disconnect` cannot revoke tokens held by other instances.
+    #[serde(with = "humantime_serde", default = "default_session_token_ttl")]
+    pub session_token_ttl: Duration,
 }
+
+fn default_session_token_ttl() -> Duration {
+    Duration::from_secs(7 * 24 * 60 * 60)
+}
+
+/// Newtype so the TTL can be stored in the GraphQL context data.
+#[derive(Clone, Copy)]
+struct SessionTokenTtl(Duration);
 
 #[derive(Debug, Clone, Copy, Deserialize)]
 pub struct SubscriptionConfig {
@@ -291,6 +306,7 @@ fn make_app<S, B>(
     subscription_config: SubscriptionConfig,
     quota_config: QuotaConfig,
     contract_state_cache_config: ContractStateCacheConfig,
+    session_token_ttl: Duration,
 ) -> Router
 where
     S: Storage,
@@ -313,6 +329,7 @@ where
         quotas,
         progress_cache,
         contract_state_cache,
+        session_token_ttl,
     );
 
     // For some reason the FastraceLayer and RequestBodyLimitLayer cannot be put into a
@@ -452,6 +469,8 @@ trait ContextExt {
 
     fn get_subscription_config(&self) -> &SubscriptionConfig;
 
+    fn get_session_token_ttl(&self) -> Duration;
+
     fn get_subscription_quotas(&self) -> &SubscriptionQuotas;
 
     fn get_progress_cache(&self) -> &ProgressCache;
@@ -538,6 +557,12 @@ impl ContextExt for Context<'_> {
     fn get_subscription_config(&self) -> &SubscriptionConfig {
         self.data::<SubscriptionConfig>()
             .expect("SubscriptionConfig is stored in Context")
+    }
+
+    fn get_session_token_ttl(&self) -> Duration {
+        self.data::<SessionTokenTtl>()
+            .expect("SessionTokenTtl is stored in Context")
+            .0
     }
 
     fn get_subscription_quotas(&self) -> &SubscriptionQuotas {
