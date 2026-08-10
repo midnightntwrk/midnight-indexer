@@ -15,7 +15,27 @@ These tests are slower than the other tests as submitting transactions to a Midn
 
 ### Transaction Tests
 - **Shielded Transactions**: Creates shielded token transfers between wallets and validates indexer reporting
-- **Unshielded Transactions**: Performs unshielded STAR transfers and verifies balance updates and transaction events
+- **Unshielded Transactions**: One suite per unshielded token type, both sharing every test through `unshielded-transfer-scenario.ts` so the two token types cannot drift apart in coverage:
+  - `night-transactions.test.ts` — the native NIGHT token (1 STAR), plus the dust assertions that are NIGHT's alone, since a custom unshielded token generates no DUST
+  - `unshielded-transactions.test.ts` — a custom, contract-minted unshielded token
+
+#### Provisioning the custom unshielded token
+
+NIGHT is on every chain from genesis; a custom unshielded token is not — a contract has to mint it and the funding wallet has to hold it. That is an environment concern, so `unshielded-transactions.test.ts` **skips rather than fails** when the environment has not been provisioned:
+
+- no `data/static/<env>/unshielded-token-types.jsonc`, or no `custom` entry in it → the whole suite is skipped at collection;
+- an entry exists but the funding wallet holds no spendable balance of that token → every test skips with an `environment not provisioned` reason.
+
+`qanet` is provisioned — see `qa/tests/data/static/qanet/unshielded-token-types.jsonc`. `undeployed` is not and never will be: its chain is minted from genesis with NIGHT alone, so this suite always skips there and only the NIGHT suite runs.
+
+To make the suite executable on another environment, mint the token to the wallet behind that environment's `FUNDING_SEED_<ENV>` and record its type:
+
+```jsonc
+// qa/tests/data/static/<env>/unshielded-token-types.jsonc
+{
+  "custom": "<32-byte hex token type>"
+}
+```
 
 ### Contract Action Tests
 - **Contract Deployment**: Deploys smart contracts and validates deployment events in the indexer
@@ -43,6 +63,10 @@ E2E tests should be executed:
 # Run only e2e tests (includes cache warmup)
 bash qa/scripts/startup-localenv-from-genesis.sh
 TARGET_ENV=undeployed bun run test:e2e
+
+# Run a single unshielded token type
+TARGET_ENV=undeployed bun run test:e2e tests/e2e/night-transactions.test.ts
+TARGET_ENV=undeployed bun run test:e2e tests/e2e/unshielded-transactions.test.ts
 ```
 
 These tests require:
