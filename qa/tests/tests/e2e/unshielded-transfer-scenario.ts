@@ -39,6 +39,7 @@ import {
 } from '@utils/indexer/indexer-types';
 import {
   getBlockByHashWithRetry,
+  getEventsOfType,
   resolveBlockHash,
   setupWalletEventSubscriptions,
 } from './test-utils';
@@ -236,6 +237,35 @@ async function fetchTransactionUnderTest(
 }
 
 /**
+ * Waits for a wallet's subscription to deliver the transaction event of the transfer
+ * under test, matched by the transaction hash the toolkit reported — the source address
+ * is the shared funding wallet, so matching on the owner alone would also be satisfied
+ * by the sibling suite's concurrent transfer.
+ */
+async function findTransferEvent(
+  scenario: UnshieldedTransferScenario,
+  events: UnshieldedTxSubscriptionResponse[],
+  addressLabel: string,
+): Promise<UnshieldedTransaction> {
+  return retry(
+    async () => {
+      const event = getEventsOfType(events, 'UnshieldedTransaction').find(
+        (txEvent) => txEvent.transaction.hash === scenario.transactionResult.txHash,
+      );
+      if (!event) {
+        throw new Error(`${addressLabel} address transaction event not found yet`);
+      }
+      return event;
+    },
+    {
+      maxRetries: 10,
+      delayMs: 3000,
+      retryLabel: `find ${addressLabel} address transaction event`,
+    },
+  );
+}
+
+/**
  * Finds a progress update event reporting a transaction id past the baseline.
  * Used by the source and destination progress tests through `retry`.
  *
@@ -400,39 +430,23 @@ export function defineUnshieldedTransferTests(scenario: UnshieldedTransferScenar
      *
      * @given a subscription to unshielded transaction events for the source address
      * @when an unshielded transaction is submitted to node
-     * @then a transaction event including created and spent UTXOs for the source address is received
+     * @then the event of that very transaction hash is received, and the UTXOs it spends
+     *       carry the token type under test and belong to the source address
      */
     test('should be reported by the indexer through an unshielded transaction event for the source address', async (ctx: TestContext) => {
       startTest(scenario, ctx, 'sourceTransactionEvent', ['Subscription', 'Transaction']);
       skipUnlessConfirmed(scenario, ctx);
 
-      // The event arrives asynchronously through the subscription, so we retry a few times.
-      const sourceAddressEvent = await retry(
-        async () => {
-          const event = scenario.wallet.source.events.find((event) => {
-            const txEvent = event.data?.unshieldedTransactions as UnshieldedTransaction;
-            return (
-              txEvent.__typename === 'UnshieldedTransaction' &&
-              txEvent.createdUtxos?.some(
-                (utxo: UnshieldedUtxo) => utxo.owner === scenario.wallet.source.address,
-              ) &&
-              txEvent.spentUtxos?.some(
-                (utxo: UnshieldedUtxo) => utxo.owner === scenario.wallet.source.address,
-              )
-            );
-          });
-          if (!event) {
-            throw new Error('Source address transaction event not found yet');
-          }
-          return event;
-        },
-        {
-          maxRetries: 10,
-          delayMs: 3000,
-          retryLabel: 'find source address transaction event',
-        },
+      const sourceAddressEvent = await findTransferEvent(
+        scenario,
+        scenario.wallet.source.events,
+        'source',
       );
-      expect(sourceAddressEvent).toBeDefined();
+
+      const spentUtxos = ofTokenUnderTest(scenario, sourceAddressEvent.spentUtxos);
+      expect(spentUtxos.length).toBeGreaterThan(0);
+      expect(spentUtxos.every((utxo) => utxo.owner === scenario.wallet.source.address)).toBe(true);
+      expect(ofTokenUnderTest(scenario, sourceAddressEvent.createdUtxos).length).toBeGreaterThan(0);
     });
 
     /**
@@ -441,38 +455,23 @@ export function defineUnshieldedTransferTests(scenario: UnshieldedTransferScenar
      *
      * @given a subscription to unshielded transaction events for the destination address
      * @when an unshielded transaction is submitted to node
-     * @then a transaction event including a created UTXO for the destination is received
+     * @then the event of that very transaction hash is received, holding a single created
+     *       UTXO for the destination of the amount sent, in the token type under test
      */
     test('should be reported by the indexer through an unshielded transaction event for the destination address', async (ctx: TestContext) => {
       startTest(scenario, ctx, 'destinationTransactionEvent', ['Subscription', 'Transaction']);
       skipUnlessConfirmed(scenario, ctx);
 
-      // The event arrives asynchronously through the subscription, so we retry a few times.
-      const destinationAddressEvent = await retry(
-        async () => {
-          const event = scenario.wallet.destinations[0].events.find((event) => {
-            const txEvent = event.data?.unshieldedTransactions as UnshieldedTransaction;
-            return (
-              txEvent.__typename === 'UnshieldedTransaction' &&
-              txEvent.createdUtxos?.some(
-                (utxo: UnshieldedUtxo) =>
-                  utxo.owner === scenario.wallet.destinations[0].destinationAddress,
-              )
-            );
-          });
-
-          if (!event) {
-            throw new Error('Destination address transaction event not found yet');
-          }
-          return event;
-        },
-        {
-          maxRetries: 10,
-          delayMs: 3000,
-          retryLabel: 'find destination address transaction event',
-        },
+      const destinationAddressEvent = await findTransferEvent(
+        scenario,
+        scenario.wallet.destinations[0].events,
+        'destination',
       );
-      expect(destinationAddressEvent).toBeDefined();
+
+      const receivedUtxos = ofTokenUnderTest(scenario, destinationAddressEvent.createdUtxos).filter(
+        (utxo) => utxo.owner === scenario.wallet.destinations[0].destinationAddress,
+      );
+      expect(receivedUtxos.map((utxo) => utxo.value)).toEqual([String(amount)]);
     });
 
     /**
