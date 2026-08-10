@@ -30,12 +30,10 @@ import { collectValidDustLedgerEvents } from 'tests/shared/dust-ledger-utils';
 import { getEventsOfType, retrySimple, waitForEventsStabilization } from './test-utils';
 import {
   defineUnshieldedTransferTests,
+  NIGHT_TOKEN_TYPE,
   setupUnshieldedTransferScenario,
   UNSHIELDED_TRANSFER_TIMEOUT,
 } from './unshielded-transfer-scenario';
-
-/** NIGHT is the chain's native unshielded token: its token type is all zeros. */
-const NIGHT_TOKEN_TYPE = '0'.repeat(64);
 
 // Destination wallets are numbered per e2e suite (…e2e002 is the custom-token suite's) so
 // that no two suites share one — see `destinationSeed` in unshielded-transfer-scenario.ts.

@@ -46,6 +46,9 @@ import {
 /** Timeout for the suite and for the transfer that sets it up. */
 export const UNSHIELDED_TRANSFER_TIMEOUT = 200_000;
 
+/** NIGHT is the chain's native unshielded token: its token type is all zeros. */
+export const NIGHT_TOKEN_TYPE = '0'.repeat(64);
+
 /**
  * The progress subscription backs off while idle (since indexer 4.4.0: 30s doubling
  * up to 240s, ±20% jitter), so a subscription opened well before the transaction may
@@ -197,15 +200,19 @@ function skipUnlessConfirmed(scenario: UnshieldedTransferScenario, ctx: TestCont
   );
 }
 
-/** Returns the transfer's UTXOs that carry the token type under test. */
-function utxosOfTokenUnderTest(
+/** Returns the UTXOs that carry the token type under test. */
+function ofTokenUnderTest(
   scenario: UnshieldedTransferScenario,
-  transaction: Transaction | undefined,
-  side: 'unshieldedCreatedOutputs' | 'unshieldedSpentOutputs',
+  utxos: UnshieldedUtxo[] | undefined,
 ): UnshieldedUtxo[] {
-  return (transaction?.[side] ?? []).filter(
+  return (utxos ?? []).filter(
     (utxo: UnshieldedUtxo) => utxo.tokenType === scenario.token.tokenType,
   );
+}
+
+/** Sums UTXO values. On-chain values are u128, so they are summed as BigInt. */
+function totalValue(utxos: UnshieldedUtxo[]): bigint {
+  return utxos.reduce((total, utxo) => total + BigInt(utxo.value), 0n);
 }
 
 /**
@@ -469,66 +476,75 @@ export function defineUnshieldedTransferTests(scenario: UnshieldedTransferScenar
     });
 
     /**
-     * A transfer of one unshielded token splits the spent UTXO into the destination's
-     * amount and the source's change, so the indexer should report two created outputs
-     * and one spent output of that token type.
+     * A transfer pays the destination the amount sent and returns the rest of what it
+     * spent to the source as change, so the created and spent outputs of the token type
+     * under test have to account for exactly that. How many inputs coin selection takes
+     * is its own business, so nothing here is asserted on their number.
      *
      * @given a confirmed unshielded transaction between two wallets
-     * @when the containing block is inspected for outputs of the token under test
-     * @then two created outputs and one spent output reflect the transfer of the amount
-     *       sent (1 STAR for NIGHT), with the destination's output holding that amount
+     * @when that transaction is looked up in its block and its outputs of the token
+     *       under test are inspected
+     * @then the destination holds a single created output of the amount sent, every
+     *       spent output belongs to the source, and the source's change accounts for
+     *       the rest of what was spent
      */
     test(`should have transferred ${amount} ${unit} from the source to the destination address`, async (ctx: TestContext) => {
       startTest(scenario, ctx, 'transferredAmount', []);
       skipUnlessConfirmed(scenario, ctx);
 
       const unshieldedTx = await fetchTransactionUnderTest(scenario);
-      const createdOutputs = utxosOfTokenUnderTest(
-        scenario,
-        unshieldedTx,
-        'unshieldedCreatedOutputs',
+      const createdOutputs = ofTokenUnderTest(scenario, unshieldedTx.unshieldedCreatedOutputs);
+      const spentOutputs = ofTokenUnderTest(scenario, unshieldedTx.unshieldedSpentOutputs);
+      log.info(
+        `Transaction ${unshieldedTx.hash} moved ${amount} ${unit} through ` +
+          `${spentOutputs.length} spent and ${createdOutputs.length} created output(s)`,
       );
-      expect(createdOutputs).toHaveLength(2);
 
-      const sourceOutput = createdOutputs.find(
-        (output) => output.owner === scenario.wallet.source.address,
-      );
-      const destOutput = createdOutputs.find(
+      const destinationOutputs = createdOutputs.filter(
         (output) => output.owner === scenario.wallet.destinations[0].destinationAddress,
       );
+      expect(destinationOutputs.map((output) => output.value)).toEqual([String(amount)]);
 
-      expect(sourceOutput).toBeDefined();
-      expect(destOutput).toBeDefined();
-      expect(destOutput?.value).toBe(String(amount));
+      expect(spentOutputs.length).toBeGreaterThan(0);
+      expect(spentOutputs.every((output) => output.owner === scenario.wallet.source.address)).toBe(
+        true,
+      );
 
-      const spentOutputs = utxosOfTokenUnderTest(scenario, unshieldedTx, 'unshieldedSpentOutputs');
-      expect(spentOutputs).toHaveLength(1);
-      expect(spentOutputs[0]?.owner).toBe(scenario.wallet.source.address);
+      const changeOutputs = createdOutputs.filter(
+        (output) => output.owner === scenario.wallet.source.address,
+      );
+      expect(totalValue(changeOutputs)).toBe(totalValue(spentOutputs) - BigInt(amount));
     });
 
     /**
-     * A transfer moves one unshielded token only, so every UTXO it creates or spends must
-     * carry the token type the transfer was made in — the type the suite asked the toolkit
-     * for, never a value read back from the response under test.
+     * A transfer moves one unshielded token, so the UTXOs it creates and spends must carry
+     * the token type the transfer was made in — the type the suite asked the toolkit for,
+     * never a value read back from the response under test.
      *
      * @given a confirmed unshielded transaction between two wallets
      * @when the created and spent outputs of that transaction are inspected
-     * @then every one of them carries the token type under test (0x00…00 for NIGHT), and
-     *       no other token type appears
+     * @then the token type under test is among them, and the only other one tolerated is
+     *       NIGHT, which a transfer of any other token may touch to pay for itself
      */
     test('should report the token type under test on every created and spent output', async (ctx: TestContext) => {
       startTest(scenario, ctx, 'tokenTypeOnOutputs', ['Query', 'Block', 'ByHash']);
       skipUnlessConfirmed(scenario, ctx);
 
       const unshieldedTx = await fetchTransactionUnderTest(scenario);
-      const utxos = [
-        ...(unshieldedTx.unshieldedCreatedOutputs ?? []),
-        ...(unshieldedTx.unshieldedSpentOutputs ?? []),
+      const tokenTypes = [
+        ...new Set(
+          [
+            ...(unshieldedTx.unshieldedCreatedOutputs ?? []),
+            ...(unshieldedTx.unshieldedSpentOutputs ?? []),
+          ].map((utxo: UnshieldedUtxo) => utxo.tokenType),
+        ),
       ];
-      expect(utxos.length).toBeGreaterThan(0);
-      expect(new Set(utxos.map((utxo: UnshieldedUtxo) => utxo.tokenType))).toEqual(
-        new Set([scenario.token.tokenType]),
+
+      expect(tokenTypes).toContain(scenario.token.tokenType);
+      const unexpected = tokenTypes.filter(
+        (tokenType) => tokenType !== scenario.token.tokenType && tokenType !== NIGHT_TOKEN_TYPE,
       );
+      expect(unexpected).toEqual([]);
     });
 
     /**
