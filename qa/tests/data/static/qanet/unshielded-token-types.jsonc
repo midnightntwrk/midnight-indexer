@@ -12,6 +12,11 @@
 // not seen at all. Consumers must probe the live balance and skip when it is gone —
 // which is why several candidates are recorded rather than one.
 //
+// The holders are recorded for human review only — no test reads them. On a QA
+// environment the holder of a custom token is normally the environment's funding wallet
+// by construction, since the token is minted into it for the e2e suite to spend; the
+// address and its balances are public on-chain data either way.
+//
 // Re-run `bun run generate:data` (see qa/tools/block-scanner/README.md) to refresh.
 {
   // Heights of the first and last transaction-carrying block of the scan, and the
