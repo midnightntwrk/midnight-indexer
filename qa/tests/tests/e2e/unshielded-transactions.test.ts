@@ -25,10 +25,12 @@
 // contract and put in the funding wallet. That provisioning is an environment
 // concern, not something this suite does, so the suite skips (never fails) when the
 // environment has not been provisioned:
-//   * no data/static/<env>/unshielded-token-types.jsonc, or no "custom" entry
-//     -> the whole suite is skipped at collection;
-//   * an entry exists but the funding wallet has no spendable balance of it
+//   * no candidate in data/static/<env>/unshielded-token-types.jsonc (the fixture
+//     the block-scanner generates) -> the whole suite is skipped at collection;
+//   * candidates exist but the funding wallet can spend none of them
 //     -> every test skips with an "environment not provisioned" reason.
+// The second case is the normal one to expect: the fixture records what was unspent
+// at scan time, so its candidates can have been spent since.
 // Minting the token from the test itself, through the toolkit minter flow the
 // wrapper already implements (deployMintSendUnshielded), is a known future option
 // and was deliberately deferred — it would make every run deploy a contract.
@@ -42,19 +44,21 @@ import {
   UNSHIELDED_TRANSFER_TIMEOUT,
 } from './unshielded-transfer-scenario';
 
-const CUSTOM_TOKEN_TYPE = dataProvider.getUnshieldedTokenType('custom');
+const CANDIDATE_TOKEN_TYPES = dataProvider.getCustomUnshieldedTokenTypes();
 
 const DESTINATION_SEED = '0000000000000000000000000000000000000000000000000000000123456789';
 const TRANSFER_AMOUNT = 1;
 
-describe.skipIf(CUSTOM_TOKEN_TYPE === null)(
+describe.skipIf(CANDIDATE_TOKEN_TYPES.length === 0)(
   'unshielded custom token transactions',
   { timeout: UNSHIELDED_TRANSFER_TIMEOUT },
   () => {
     const scenario = setupUnshieldedTransferScenario({
       label: 'CustomToken',
-      // Safe: the describe above is skipped when the environment has no entry.
-      tokenType: CUSTOM_TOKEN_TYPE!,
+      // Placeholder: `prepare` below replaces it with the candidate the funding wallet
+      // can actually spend. Indexing is safe — the describe is skipped when there is
+      // no candidate at all.
+      tokenType: CANDIDATE_TOKEN_TYPES[0],
       amount: TRANSFER_AMOUNT,
       unit: 'token',
       destinationSeed: DESTINATION_SEED,
@@ -65,16 +69,28 @@ describe.skipIf(CUSTOM_TOKEN_TYPE === null)(
         const walletState = await scenario.toolkit.showPublicWalletState(
           scenario.wallet.source.address,
         );
-        const spendable = walletState.utxos
-          .filter((utxo) => utxo.token_type === CUSTOM_TOKEN_TYPE)
-          .reduce((total, utxo) => total + utxo.value, 0);
-        log.debug(`Funding wallet holds ${spendable} of custom token ${CUSTOM_TOKEN_TYPE}`);
+        const holdings = CANDIDATE_TOKEN_TYPES.map((tokenType) => ({
+          tokenType,
+          spendable: walletState.utxos
+            .filter((utxo) => utxo.token_type === tokenType)
+            .reduce((total, utxo) => total + utxo.value, 0),
+        }));
+        log.debug(
+          'Funding wallet holdings of the candidate token types: ' +
+            holdings.map(({ tokenType, spendable }) => `${tokenType}=${spendable}`).join(', '),
+        );
 
         // Strictly greater: the transfer has to leave change behind, so that it creates
         // a destination output and a source output just as the NIGHT transfer does.
-        return spendable > TRANSFER_AMOUNT
-          ? null
-          : `environment not provisioned: the funding wallet holds ${spendable} of custom unshielded token ${CUSTOM_TOKEN_TYPE}, which is not enough to transfer ${TRANSFER_AMOUNT} and leave change`;
+        const usable = holdings.find((holding) => holding.spendable > TRANSFER_AMOUNT);
+        if (usable === undefined) {
+          return `environment not provisioned: the funding wallet cannot spend any of the ${holdings.length} custom unshielded token type(s) recorded for this environment, so ${TRANSFER_AMOUNT} cannot be transferred leaving change behind`;
+        }
+
+        // Assigned before the scenario submits the transfer, which happens once this
+        // hook has returned.
+        scenario.token.tokenType = usable.tokenType;
+        return null;
       },
     });
 

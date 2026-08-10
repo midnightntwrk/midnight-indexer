@@ -69,7 +69,11 @@ export type UnshieldedTransferTestId =
 export interface UnshieldedTokenUnderTest {
   /** Short name used in test titles and in each test's `labels`, e.g. `NIGHT`. */
   label: string;
-  /** Hex token type to transfer, and the type every UTXO of the transfer must carry. */
+  /**
+   * Hex token type to transfer, and the type every UTXO of the transfer must carry.
+   * A suite that picks its token at runtime may replace it from `prepare`, which runs
+   * before the transfer is submitted.
+   */
   tokenType: string;
   /** Amount to transfer, with the unit name used in test titles (e.g. `1` / `STAR`). */
   amount: number;
