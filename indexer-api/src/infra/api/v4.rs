@@ -39,7 +39,7 @@ use crate::{
         storage::{NoopStorage, Storage},
     },
     infra::api::{
-        ApiResult, ContextExt, Metrics, OptionExt, ResultExt, SubscriptionConfig,
+        ApiResult, ContextExt, Metrics, OptionExt, ResultExt, SessionTokenTtl, SubscriptionConfig,
         contract_state_cache::ContractStateCache,
         ledger_query_limit::LedgerQueryLimiter,
         progress_cache::ProgressCache,
@@ -79,6 +79,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     any::type_name,
     sync::{Arc, atomic::AtomicBool},
+    time::Duration,
 };
 use thiserror::Error;
 
@@ -387,6 +388,7 @@ pub fn make_app<S, B>(
     quotas: SubscriptionQuotas,
     progress_cache: ProgressCache,
     contract_state_cache: ContractStateCache,
+    session_token_ttl: Duration,
 ) -> Router<Arc<AtomicBool>>
 where
     S: Storage,
@@ -426,6 +428,7 @@ where
         .data(subscriber)
         .data(metrics)
         .data(subscription_config)
+        .data(SessionTokenTtl(session_token_ttl))
         .data(quotas)
         .data(progress_cache)
         .data(contract_state_cache)
@@ -577,7 +580,7 @@ mod tests {
     use crate::{
         domain::storage::NoopStorage,
         infra::api::{
-            Metrics,
+            Metrics, SessionTokenTtl,
             quota::{PerConnectionCounter, QuotaConfig, SubscriptionQuotas},
             v4::schema_builder,
         },
@@ -593,6 +596,7 @@ mod tests {
     use std::{
         num::{NonZeroU32, NonZeroUsize},
         sync::Arc,
+        time::Duration,
     };
 
     const MARKER: &str = "deadbeefdeadbeefdeadbeefdeadbeef";
@@ -677,6 +681,7 @@ mod tests {
         };
         let schema = schema_builder::<NoopStorage, NoopSubscriber>()
             .data(NoopStorage)
+            .data(SessionTokenTtl(Duration::from_secs(60)))
             .data(Metrics::default())
             .data(NetworkId::try_from("undeployed").expect("network ID is valid"))
             .data(SubscriptionQuotas::new(quota_config))
@@ -684,8 +689,8 @@ mod tests {
 
         // A well-formed session ID that no wallet has. With one subscription per minute allowed,
         // a second attempt would exceed the rate limit if unknown sessions consumed quota.
-        let session_id = "00".repeat(32);
-        for attempt in 1..=2 {
+        for (attempt, len) in [(1, 32), (2, 32), (1, 76), (2, 76)] {
+            let session_id = "00".repeat(len);
             let request = Request::new(format!(
                 r#"subscription {{ shieldedTransactions(sessionId: "{session_id}") {{ __typename }} }}"#
             ))
