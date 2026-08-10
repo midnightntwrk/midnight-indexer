@@ -98,11 +98,13 @@ function importJsoncData(filePath: string): JsonValue {
 class TestDataProvider {
   private cardanoRewardAddresses: Record<string, string>;
   private unshieldedAddresses: Record<string, string>;
+  private unshieldedTokenTypes: Record<string, string> | null;
   private multiUtxoCandidates: MultiUtxoCandidate[] | null;
 
   constructor() {
     this.cardanoRewardAddresses = {};
     this.unshieldedAddresses = {};
+    this.unshieldedTokenTypes = null;
     this.multiUtxoCandidates = null;
   }
 
@@ -161,6 +163,33 @@ class TestDataProvider {
       );
     }
     return this.unshieldedAddresses[property];
+  }
+
+  /**
+   * Retrieves a custom (non-NIGHT) unshielded token type from the test data by
+   * property name, from `data/static/<env>/unshielded-token-types.jsonc`.
+   *
+   * Mirrors {@link getUnshieldedAddress} but returns null instead of throwing when
+   * the file or the property is missing. A custom unshielded token is minted by a
+   * contract, so no chain starts with one: a missing entry means the environment
+   * was never provisioned with such a token, and the tests that need it must skip
+   * rather than fail as if the indexer were at fault.
+   *
+   * @param property - The property name of the token type to retrieve.
+   * @returns The hex-encoded token type, or null if this environment has no entry.
+   */
+  getUnshieldedTokenType(property: string): string | null {
+    if (this.unshieldedTokenTypes === null) {
+      const envName = env.getCurrentEnvironmentName();
+      let parsed: JsonValue = null;
+      try {
+        parsed = importJsoncData(`data/static/${envName}/unshielded-token-types.jsonc`);
+      } catch {
+        // Environment not provisioned with a custom unshielded token — see above.
+      }
+      this.unshieldedTokenTypes = (parsed as Record<string, string>) ?? {};
+    }
+    return this.unshieldedTokenTypes[property] ?? null;
   }
 
   /**
