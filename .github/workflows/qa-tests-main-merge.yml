@@ -12,6 +12,10 @@ name: Indexer QA Tests - main merge
 
 permissions:
   contents: read
+  # Required by the called base workflow's job (GHCR image pulls); a called
+  # job cannot escalate beyond the caller's grant, so omitting this fails
+  # run creation with startup_failure.
+  packages: read
 
 on:
   workflow_run:
