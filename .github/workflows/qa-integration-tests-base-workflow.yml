@@ -140,6 +140,26 @@ jobs:
           username: MidnightCI
           password: ${{ secrets.MIDNIGHTCI_PACKAGES_READ }}
 
+      # Pulling up front keeps registry/auth/tag failures out of the startup
+      # step (they fail here with a one-glance log instead) and lets the step
+      # timings separate download time from environment startup time. Images
+      # already present make this a cheap manifest check.
+      - name: Pull images
+        if: inputs.target_env == 'undeployed'
+        env:
+          NODE_TAG: ${{ inputs.node_tag }}
+          INDEXER_TAG: ${{ inputs.indexer_tag }}
+          NODE_TOOLKIT_TAG: ${{ inputs.node_toolkit_tag }}
+          IMAGE_REGISTRY: ${{ inputs.image_registry }}
+        run: |
+          docker compose --profile cloud pull
+          # Used by qa/scripts/startup-localenv-with-data.sh for volume setup.
+          docker pull alpine
+          # Used by the toolkit wrapper for test data generation; the registry
+          # is hardcoded there (qa/tests/utils/toolkit/toolkit-wrapper.ts) and
+          # the tag default mirrors startup-localenv-with-data.sh.
+          docker pull "ghcr.io/midnight-ntwrk/midnight-node-toolkit:${NODE_TOOLKIT_TAG:-latest-main}"
+
       - name: Startup local environment
         if: inputs.target_env == 'undeployed'
         env:
