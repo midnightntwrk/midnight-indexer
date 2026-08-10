@@ -186,6 +186,8 @@ class TestDataProvider {
    * unshielded token is minted by a contract, so no chain starts with one, and a
    * missing file means the environment was never provisioned with such a token — the
    * tests that need it must skip rather than fail as if the indexer were at fault.
+   * A file that exists but cannot be read or parsed throws instead, so a broken
+   * fixture cannot masquerade as an unprovisioned environment.
    *
    * These are candidates, not guarantees. The fixture records what was unspent when
    * the chain was scanned, so a caller must still probe the live balance and move on
@@ -196,13 +198,18 @@ class TestDataProvider {
   getCustomUnshieldedTokenTypes(): string[] {
     if (this.customUnshieldedTokenTypes === null) {
       const envName = env.getCurrentEnvironmentName();
+      const filePath = `data/static/${envName}/unshielded-token-types.jsonc`;
       let customTokens: CustomUnshieldedToken[] = [];
       try {
-        const parsed = importJsoncData(`data/static/${envName}/unshielded-token-types.jsonc`);
-        customTokens = ((parsed as Record<string, JsonValue>)['custom-tokens'] ??
-          []) as unknown as CustomUnshieldedToken[];
-      } catch {
-        // Environment not provisioned with a custom unshielded token — see above.
+        const parsed = importJsoncData(filePath);
+        const tokens = (parsed as Record<string, JsonValue>)['custom-tokens'];
+        customTokens = Array.isArray(tokens) ? (tokens as unknown as CustomUnshieldedToken[]) : [];
+      } catch (error) {
+        // A missing file is the "never provisioned" case handled above; anything else is a
+        // broken fixture, which must not read as an unprovisioned environment and skip.
+        if ((error as { code?: string }).code !== 'ENOENT') {
+          throw new Error(`Test data provider cannot read ${filePath}`, { cause: error });
+        }
       }
       this.customUnshieldedTokenTypes = customTokens.map((token) => token['token-type']);
     }
