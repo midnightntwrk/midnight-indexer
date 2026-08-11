@@ -308,11 +308,21 @@ async function expectProgressUpdate(
   const isProgress = (event: UnshieldedTxSubscriptionResponse) =>
     event.data?.unshieldedTransactions.__typename === 'UnshieldedTransactionsProgress';
 
-  // A wallet that has never transacted still gets an immediate progress update reporting
-  // 0, so 0 is the baseline when no historical update was captured.
+  // The indexer sends a progress update as soon as a wallet subscribes, so the snapshot
+  // taken before the transfer must hold one — including for a wallet that has never
+  // transacted, which gets one reporting 0. Without that check a snapshot that merely
+  // arrived too late would silently baseline at 0, and against an environment where the
+  // wallet has transacted before, the first replayed event would clear a `> 0` bar
+  // without the transfer under test having been observed at all.
+  const historicalProgress = historicalEvents.filter(isProgress);
+  expect(
+    historicalProgress.length,
+    `No ${addressLabel} progress update was captured before the transfer, so there is no baseline to compare against`,
+  ).toBeGreaterThan(0);
+
   const highestTransactionIdBefore =
     (
-      historicalEvents.filter(isProgress).at(-1)?.data?.unshieldedTransactions as
+      historicalProgress.at(-1)?.data?.unshieldedTransactions as
         UnshieldedTransactionsProgress | undefined
     )?.highestTransactionId ?? 0;
   log.info(
