@@ -79,8 +79,9 @@ on:
         type: string
         description: >-
           Registry for the indexer images (leave empty for the docker-compose
-          default, Docker Hub midnightntwrk). Main-branch builds are only
-          published to ghcr.io/midnight-ntwrk.
+          default, Docker Hub midnightntwrk). Per-commit main-branch builds
+          are only published to ghcr.io/midnight-ntwrk (the legacy org —
+          publisher and readers must migrate to midnightntwrk together).
         required: false
         default: ""
     secrets:
@@ -157,7 +158,11 @@ jobs:
           docker pull alpine
           # Used by the toolkit wrapper for test data generation; the registry
           # is hardcoded there (qa/tests/utils/toolkit/toolkit-wrapper.ts) and
-          # the tag default mirrors startup-localenv-with-data.sh.
+          # this pull must match it. The tag default mirrors
+          # startup-localenv-with-data.sh. Docker Hub's
+          # midnightntwrk/midnight-node-toolkit cannot be used here: it only
+          # carries the toolkit's own release tags and latest-main, not the
+          # node-paired tags this workflow passes.
           docker pull "ghcr.io/midnight-ntwrk/midnight-node-toolkit:${NODE_TOOLKIT_TAG:-latest-main}"
 
       - name: Startup local environment
