@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   qa-tests:
-    name: tests — lint, format, audit
+    name: tests — compile, lint, format, audit
     runs-on: ubuntu-latest
     defaults:
       run:
