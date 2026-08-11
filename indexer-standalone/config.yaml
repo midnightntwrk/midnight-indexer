@@ -31,6 +31,10 @@ infra:
   ledger_db:
     cache_max_nodes: 100000
     cnn_url: "/data/ledger-db.sqlite"
+    # Compact the ledger DB at startup once gc has freed most of the file (>= 1 GiB and >= 2x
+    # the live pages). Copies the live pages next to the DB and swaps; can take a while on a
+    # large backlog, so raise the supervisor's startup timeout or turn this off if that bites.
+    vacuum_on_startup: true
 
   node:
     url: "ws://localhost:9944"

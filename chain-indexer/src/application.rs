@@ -140,6 +140,27 @@ pub async fn run(
         .context("get ledger state root hashes")?;
     let newest_count = newest_ledger_state_keys.len();
 
+    // Sweep stored roots outside the window NOW, before the repair below performs this
+    // process's first flush - see `LedgerState::sweep_stray_roots` for why deleting after a
+    // flush can split a concurrent component's root accounting and panic a later flush.
+    // Such roots never get an unpersist and pin their DAGs forever, growing the ledger DB
+    // without bound (strandings predating the retention fix reached millions of roots and
+    // hundreds of GB). At least one window root among the stored rows proves this ledger DB
+    // belongs to the block storage above, so everything else stored really is stray; a
+    // mis-paired or fresh DB is left untouched. Gc reclaims the orphaned nodes incrementally
+    // afterwards.
+    let window_root_hashes = newest_ledger_state_keys
+        .iter()
+        .map(|(_, _, root_hash)| root_hash.clone())
+        .collect::<HashSet<_>>();
+    let (window_rooted, stray_roots) = LedgerState::stored_root_keys()
+        .into_iter()
+        .partition::<Vec<_>, _>(|key| window_root_hashes.contains(key));
+    if !window_rooted.is_empty() && !stray_roots.is_empty() {
+        let swept_roots = LedgerState::sweep_stray_roots(&stray_roots);
+        info!(swept_roots; "swept stray ledger state gc roots");
+    }
+
     // Must precede the seeding below, and is idempotent, hence unconditional; see
     // `LedgerState::repair_root_counts`.
     let repair = LedgerState::repair_root_counts(
