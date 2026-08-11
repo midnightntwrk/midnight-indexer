@@ -184,7 +184,6 @@ jobs:
           images: |
             ghcr.io/midnight-ntwrk/${{ matrix.image.name }}
             ghcr.io/midnightntwrk/${{ matrix.image.name }}
-            ${{ github.ref_type == 'tag' && format('midnightntwrk/{0}', matrix.image.name) || '' }}
           tags: |
             type=semver,pattern={{version}}
             ${{ github.ref_type != 'tag' && format('type=sha,prefix={0}-,format=short', env.VERSION) || '' }}
