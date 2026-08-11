@@ -141,6 +141,16 @@ impl LedgerState {
         indexer_common::domain::ledger::LedgerState::persisted_root_hashes()
     }
 
+    /// See [`indexer_common::domain::ledger::LedgerState::stored_root_keys`].
+    pub fn stored_root_keys() -> Vec<Vec<u8>> {
+        indexer_common::domain::ledger::LedgerState::stored_root_keys()
+    }
+
+    /// See [`indexer_common::domain::ledger::LedgerState::sweep_stray_roots`].
+    pub fn sweep_stray_roots(doomed: &[Vec<u8>]) -> u64 {
+        indexer_common::domain::ledger::LedgerState::sweep_stray_roots(doomed)
+    }
+
     /// See [`indexer_common::domain::ledger::LedgerState::repair_root_counts`].
     pub fn repair_root_counts<'a>(
         window: impl IntoIterator<Item = (&'a SerializedLedgerStateKey, LedgerVersion)>,
@@ -669,6 +679,7 @@ mod tblock_skew_tests {
         let temp_dir = tempfile::tempdir().expect("create tempdir");
         ledger_db::init(ledger_db::Config {
             cache_max_nodes: 1_024,
+            vacuum_on_startup: false,
             cnn_url: temp_dir
                 .path()
                 .join("ledger-db.sqlite")

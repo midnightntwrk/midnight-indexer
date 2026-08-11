@@ -53,6 +53,72 @@ impl LedgerDb {
     pub fn new(pool: crate::infra::pool::sqlite::SqlitePool) -> Self {
         Self { pool }
     }
+
+    /// The keys of all gc root rows, straight from the DB. Unlike storage-core's `get_roots`,
+    /// no in-memory root-count deltas are merged in: a snapshot taken before this process's
+    /// first flush therefore cannot contain roots that concurrent components (e.g.
+    /// wallet-indexer's `ChildRef`s in standalone mode) only hold in memory yet.
+    pub fn root_keys(&self) -> Vec<Vec<u8>> {
+        block_in_place(|| {
+            Handle::current().block_on(async {
+                let query = indoc! {"
+                    SELECT key
+                    FROM ledger_db_roots
+                "};
+
+                sqlx::query_as::<_, (Vec<u8>,)>(query)
+                    .fetch_all(&*self.pool)
+                    .await
+                    .unwrap_or_panic("cannot get root keys")
+                    .into_iter()
+                    .map(|(key,)| key)
+                    .collect()
+            })
+        })
+    }
+
+    /// Delete the given gc root rows - whatever their stored count - in one transaction,
+    /// returning the number of deleted rows. Batched, so any number of keys fits the
+    /// backends' bind limits.
+    ///
+    /// This is the unpersist that never ran for roots stranded outside the retention window
+    /// (see `RootCountRepair::strays`); the DAGs they pinned become eligible for gc. Bypasses
+    /// storage-core on purpose: its backend adjusts counts one root at a time, each with its
+    /// own count read.
+    pub fn delete_roots(&self, doomed: &[Vec<u8>]) -> u64 {
+        block_in_place(|| {
+            Handle::current().block_on(async {
+                let mut tx = self
+                    .pool
+                    .begin()
+                    .await
+                    .unwrap_or_panic("begin transaction for delete roots");
+
+                let mut deleted = 0;
+                for chunk in doomed.chunks(BATCH_INSERT_SIZE) {
+                    let mut query = QueryBuilder::new("DELETE FROM ledger_db_roots WHERE key IN (");
+                    let mut keys = query.separated(", ");
+                    for key in chunk {
+                        keys.push_bind(key.as_slice());
+                    }
+                    query.push(")");
+
+                    deleted += query
+                        .build()
+                        .execute(&mut *tx)
+                        .await
+                        .unwrap_or_panic("cannot delete roots")
+                        .rows_affected();
+                }
+
+                tx.commit()
+                    .await
+                    .unwrap_or_panic("commit transaction for delete roots");
+
+                deleted
+            })
+        })
+    }
 }
 
 impl DB for LedgerDb {

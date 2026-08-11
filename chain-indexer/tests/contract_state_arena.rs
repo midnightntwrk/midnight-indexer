@@ -584,6 +584,7 @@ async fn init() -> anyhow::Result<SqlitePool> {
     ledger_db::init(ledger_db::Config {
         cache_max_nodes: env_usize("SPIKE_CACHE_MAX_NODES", 100_000),
         cnn_url: env_var("SPIKE_LEDGER_DB")?,
+        vacuum_on_startup: false,
     })
     .await
     .context("init ledger db")?;

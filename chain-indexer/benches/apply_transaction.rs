@@ -38,6 +38,7 @@ fn init_ledger_db(rt: &Runtime) -> tempfile::TempDir {
         ledger_db::init(ledger_db::Config {
             cache_max_nodes: 1_024,
             cnn_url: sqlite_file,
+            vacuum_on_startup: false,
         })
         .await
         .expect("init ledger_db");

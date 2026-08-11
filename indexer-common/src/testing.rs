@@ -275,6 +275,7 @@ pub async fn init_ledger_db() -> Result<impl Sized, BoxError> {
     let temp_dir = tempdir()?;
     ledger_db::init(ledger_db::Config {
         cache_max_nodes: 1_024,
+        vacuum_on_startup: false,
         cnn_url: temp_dir
             .path()
             .join("ledger-db.sqlite")
