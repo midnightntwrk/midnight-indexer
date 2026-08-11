@@ -29,7 +29,7 @@
 //
 // Tracking: https://github.com/midnightntwrk/midnight-indexer/issues/941
 
-import log from '@utils/logging/logger';
+import log from '@utils/logging/loggerXX';
 import { env } from 'environment/model';
 import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
