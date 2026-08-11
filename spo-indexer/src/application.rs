@@ -117,7 +117,7 @@ async fn process_next_epoch(
         .candidate_registrations
         .values()
         .flatten()
-        .map(|reg| (get_cardano_id(&reg.mainchain_pub_key), reg.clone()))
+        .map(|reg| (get_cardano_id(&reg.mainchain_pub_key), reg))
         .collect::<Vec<_>>();
 
     let mut blocks_produced: HashMap<String, u32> = HashMap::new();
@@ -127,7 +127,7 @@ async fn process_next_epoch(
     for (cardano_id, raw_spo) in &entries {
         // Normalize all keys by stripping optional 0x prefix for consistency with DB values.
         let spo_sk = remove_hex_prefix(&raw_spo.sidechain_pub_key).to_owned();
-        val_to_registration.insert(spo_sk.clone(), raw_spo.clone());
+        val_to_registration.insert(spo_sk.clone(), (*raw_spo).clone());
         *blocks_produced.entry(spo_sk).or_insert(0) += 1;
 
         if let Entry::Vacant(slot) = pool_metadata.entry(cardano_id.clone()) {
@@ -296,17 +296,22 @@ async fn refresh_stake_snapshots(
                 error!("stake refresh for {pid} failed: {error:?}");
             }
         }
+
+        // Advance the cursor per pool, not once after the loop: pools committed so far stay
+        // committed when a later pool fails, and re-reading them on the next cycle would
+        // append duplicate spo_stake_history rows (the table has no unique key).
+        storage
+            .set_stake_refresh_cursor(Some(pid.as_str()))
+            .await
+            .with_context(|| format!("advance stake refresh cursor to {pid}"))?;
+
         if sleep_per_req_ms > 0 {
             sleep(Duration::from_millis(sleep_per_req_ms)).await;
         }
     }
 
-    // Persist cursor at the last processed id
-    let last_id = pool_ids.last().map(|s| s.as_str());
-    storage.set_stake_refresh_cursor(last_id).await?;
-
     if total_updated > 0 {
-        info!(total_updated, cursor:? = last_id; "stake refresh completed");
+        info!(total_updated, cursor:? = pool_ids.last(); "stake refresh completed");
     }
     Ok(())
 }
@@ -423,7 +428,7 @@ async fn get_epoch_to_process(
 }
 
 fn elapsed_ms(t: Instant) -> u64 {
-    u64::try_from(t.elapsed().as_millis()).unwrap_or(u64::MAX)
+    t.elapsed().as_millis() as u64
 }
 
 fn get_cardano_id(mainchain_pk: &str) -> String {

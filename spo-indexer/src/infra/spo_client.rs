@@ -64,21 +64,34 @@ pub struct Config {
 /// same values so the total idle socket count is bounded.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct HttpPoolConfig {
+    #[serde(default = "default_max_idle_per_host")]
     pub max_idle_per_host: usize,
 
-    #[serde(with = "humantime_serde")]
+    #[serde(default = "default_idle_timeout", with = "humantime_serde")]
     pub idle_timeout: Duration,
 
-    #[serde(with = "humantime_serde")]
+    #[serde(default = "default_tcp_keepalive", with = "humantime_serde")]
     pub tcp_keepalive: Duration,
+}
+
+fn default_max_idle_per_host() -> usize {
+    4
+}
+
+fn default_idle_timeout() -> Duration {
+    Duration::from_secs(30)
+}
+
+fn default_tcp_keepalive() -> Duration {
+    Duration::from_secs(60)
 }
 
 impl Default for HttpPoolConfig {
     fn default() -> Self {
         Self {
-            max_idle_per_host: 4,
-            idle_timeout: Duration::from_secs(30),
-            tcp_keepalive: Duration::from_secs(60),
+            max_idle_per_host: default_max_idle_per_host(),
+            idle_timeout: default_idle_timeout(),
+            tcp_keepalive: default_tcp_keepalive(),
         }
     }
 }
@@ -127,10 +140,11 @@ impl SPOClient {
             .await
             .map_err(|error| SPOClientError::UnexpectedResponse(error.to_string()))?;
 
+        // Keep the user agent Blockfrost has seen from this client since day one.
         let blockfrost = BlockfrostAPI::new_with_client(
             blockfrost_id.expose_secret(),
             Default::default(),
-            tuned_client_builder(&http_pool),
+            tuned_client_builder(&http_pool).user_agent("midnight-spo-indexer/1.0"),
         )
         .map_err(|error| SPOClientError::UnexpectedResponse(error.to_string()))?;
 
