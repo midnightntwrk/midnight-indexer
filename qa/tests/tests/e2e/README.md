@@ -67,8 +67,13 @@ TARGET_ENV=undeployed bun run test:e2e
 
 # Run a single unshielded token type
 TARGET_ENV=undeployed bun run test:e2e tests/e2e/night-transactions.test.ts
-TARGET_ENV=qanet bun run test:e2e tests/e2e/custom-unshielded-token-transactions.test.ts
+TARGET_ENV=qanet NODE_TOOLKIT_TAG=1.0.0 bun run test:e2e tests/e2e/custom-unshielded-token-transactions.test.ts
 ```
+
+Running against a long-lived environment — which the custom token suite has to, since `undeployed` has no custom token — costs two things a local run does not:
+
+- **Pin the toolkit to that environment's node.** With `NODE_TOOLKIT_TAG` unset, `ToolkitWrapper` falls back to `latest-main`, which resolves to whatever that tag last pulled locally and then fails global setup against a node it does not match (`SubxtError(Metadata(IncompatibleCodegen))`). qanet's node is 1.0.x, so `NODE_TOOLKIT_TAG=1.0.0` — the stable entry in `NODE_VERSIONS`.
+- **The first run pays for the whole chain.** The toolkit replays from genesis to build wallet state and has no start-height option. Measured against qanet on 2026-08-11: 2.17M blocks at ~4,000 blocks/minute, so roughly nine hours of fetching before the first transaction is built. The fetch cache (the `toolkit-postgres` container) and the ledger cache survive the run, so only the first one pays it.
 
 These tests require:
 - A running Midnight node and indexer
