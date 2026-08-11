@@ -17,11 +17,11 @@ These tests are slower than the other tests as submitting transactions to a Midn
 - **Shielded Transactions**: Creates shielded token transfers between wallets and validates indexer reporting
 - **Unshielded Transactions**: One suite per unshielded token type, both sharing every test through `unshielded-transfer-scenario.ts` so the two token types cannot drift apart in coverage:
   - `night-transactions.test.ts` — the native NIGHT token (1 STAR), plus the dust assertions that are NIGHT's alone, since a custom unshielded token generates no DUST
-  - `unshielded-transactions.test.ts` — a custom, contract-minted unshielded token
+  - `custom-unshielded-token-transactions.test.ts` — a custom, contract-minted unshielded token
 
 #### Provisioning the custom unshielded token
 
-NIGHT is on every chain from genesis; a custom unshielded token is not — a contract has to mint it and the funding wallet has to hold it. That is an environment concern, so `unshielded-transactions.test.ts` **skips rather than fails** when the environment has not been provisioned:
+NIGHT is on every chain from genesis; a custom unshielded token is not — a contract has to mint it and the funding wallet has to hold it. That is an environment concern, so `custom-unshielded-token-transactions.test.ts` **skips rather than fails** when the environment has not been provisioned:
 
 - no candidate token type in `data/static/<env>/unshielded-token-types.jsonc` → the whole suite is skipped at collection;
 - candidates exist but the funding wallet can spend none of them → every test skips with an `environment not provisioned` reason.
@@ -67,7 +67,7 @@ TARGET_ENV=undeployed bun run test:e2e
 
 # Run a single unshielded token type
 TARGET_ENV=undeployed bun run test:e2e tests/e2e/night-transactions.test.ts
-TARGET_ENV=undeployed bun run test:e2e tests/e2e/unshielded-transactions.test.ts
+TARGET_ENV=qanet bun run test:e2e tests/e2e/custom-unshielded-token-transactions.test.ts
 ```
 
 These tests require:

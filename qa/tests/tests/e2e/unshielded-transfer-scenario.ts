@@ -15,9 +15,10 @@
 
 // The unshielded transfer scenario, shared by the two unshielded e2e suites:
 // night-transactions.test.ts (the native NIGHT token) and
-// unshielded-transactions.test.ts (a contract-minted custom token). Both suites
-// exercise the same transfer and the same indexer surfaces; the token type is the
-// only parameter, so the coverage cannot silently drift apart between them.
+// custom-unshielded-token-transactions.test.ts (a contract-minted custom token).
+// Both suites exercise the same transfer and the same indexer surfaces; the token
+// type is the only parameter, so the coverage cannot silently drift apart between
+// them.
 //
 // Not a *.test.ts file, so it is never collected on its own — it only defines
 // tests when a suite calls defineUnshieldedTransferTests.
