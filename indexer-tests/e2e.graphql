@@ -926,3 +926,20 @@ query TermsAndConditionsHistoryQuery {
         url
     }
 }
+
+query BlockContractZswapStateQuery($address: HexEncoded!, $block_offset: BlockOffset) {
+    block(offset: $block_offset) {
+        contractZswapState(address: $address)
+    }
+}
+
+query ExecutionInputsQuery($address: HexEncoded!, $block_offset: BlockOffset) {
+    block(offset: $block_offset) {
+        hash
+        ledgerParameters
+        contractZswapState(address: $address)
+    }
+    contract(address: $address, offset: $block_offset) {
+        state
+    }
+}
