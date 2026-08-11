@@ -84,9 +84,12 @@ jobs:
         env:
           DOCKER_METADATA_SHORT_SHA_LENGTH: 8
         with:
+          # midnight-ntwrk is the legacy GitHub org: dual-publish to the
+          # current midnightntwrk org so internal consumers can migrate,
+          # then the legacy org gets sunset.
           images: |
             ghcr.io/midnight-ntwrk/${{ matrix.image.name }}
-            ${{ github.ref_type == 'tag' && format('midnightntwrk/{0}', matrix.image.name) || '' }}
+            ghcr.io/midnightntwrk/${{ matrix.image.name }}
           flavor: |
             suffix=${{ matrix.platform.suffix }}
           tags: |
@@ -176,9 +179,11 @@ jobs:
         env:
           DOCKER_METADATA_SHORT_SHA_LENGTH: 8
         with:
+          # Keep in sync with the build-and-push images list (legacy org
+          # dual-published with the current midnightntwrk org).
           images: |
             ghcr.io/midnight-ntwrk/${{ matrix.image.name }}
-            ${{ github.ref_type == 'tag' && format('midnightntwrk/{0}', matrix.image.name) || '' }}
+            ghcr.io/midnightntwrk/${{ matrix.image.name }}
           tags: |
             type=semver,pattern={{version}}
             ${{ github.ref_type != 'tag' && format('type=sha,prefix={0}-,format=short', env.VERSION) || '' }}
