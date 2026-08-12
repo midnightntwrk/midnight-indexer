@@ -129,9 +129,11 @@ jobs:
       # security fixes that must stay internal until released. Those images
       # are published by build-indexer-images to GHCR, which also mirrors the
       # release tags, so this registry works for workflow_dispatch runs too.
-      # NOTE: midnight-ntwrk is the legacy GitHub org; it is what
-      # build-indexer-images still publishes to, so this reader can only
-      # migrate to the midnightntwrk org together with that publisher.
+      # NOTE: build-indexer-images dual-publishes to both GHCR orgs
+      # (midnight-ntwrk is the legacy one, midnightntwrk the current one),
+      # but per-commit tags built before dual-publishing landed exist in the
+      # legacy org only — keep this here so workflow_dispatch runs can still
+      # pull older SHAs. Switch to midnightntwrk once those are irrelevant.
       image_registry: ghcr.io/midnight-ntwrk
     secrets:
       MIDNIGHTCI_PACKAGES_READ: ${{ secrets.MIDNIGHTCI_PACKAGES_READ }}

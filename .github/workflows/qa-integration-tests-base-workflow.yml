@@ -80,8 +80,8 @@ on:
         description: >-
           Registry for the indexer images (leave empty for the docker-compose
           default, Docker Hub midnightntwrk). Per-commit main-branch builds
-          are only published to ghcr.io/midnight-ntwrk (the legacy org —
-          publisher and readers must migrate to midnightntwrk together).
+          are published to GHCR only, so callers that test those images must
+          set this explicitly.
         required: false
         default: ""
     secrets:
