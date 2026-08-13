@@ -126,7 +126,9 @@ function collectDustGenerations(
         },
         error: (error) => {
           safeUnsubscribe(unsubscribe);
-          settle(() => reject(new Error(`Subscription error: ${JSON.stringify(error)}`)));
+          settle(() =>
+            reject(new Error(`Subscription error: ${extractSubscriptionErrorMessage(error)}`)),
+          );
         },
         complete: () => {
           settle(() => resolve(events));
