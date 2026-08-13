@@ -15,43 +15,49 @@
 
 import { env } from 'environment/model';
 
-const BLOCK_FIELD_DESCRIPTIONS_QUERY = `{
-  __type(name: "Block") {
-    fields {
-      name
-      description
-    }
-  }
-}`;
-
 interface IntrospectedField {
   name: string;
-  description: string | null;
+  description?: string | null;
+  args?: { name: string }[];
 }
 
 /**
- * Introspects the deployed schema and returns the description of a `Block` field,
- * or null when the field does not exist.
+ * Introspects the deployed schema and returns the fields of a type, or null when
+ * the type does not exist. `fieldSelection` adds per-field sub-selections on top
+ * of `name` (e.g. `description`, `args { name }`).
  *
  * Uses native fetch (pattern of http-compression-probe) because the typed
  * IndexerHttpClient methods are bound to domain queries, not introspection.
  */
-export async function fetchBlockFieldDescription(fieldName: string): Promise<string | null> {
+async function introspectTypeFields(
+  typeName: string,
+  fieldSelection: string,
+): Promise<IntrospectedField[] | null> {
   const apiVersion = process.env.INDEXER_API_VERSION?.trim() || 'v4';
   const url = `${env.getIndexerHttpBaseURL()}/api/${apiVersion}/graphql`;
 
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query: BLOCK_FIELD_DESCRIPTIONS_QUERY }),
+    body: JSON.stringify({
+      query: `{ __type(name: "${typeName}") { fields { name ${fieldSelection} } } }`,
+    }),
     signal: AbortSignal.timeout(30_000),
   });
 
   const body = (await response.json()) as {
     data?: { __type?: { fields?: IntrospectedField[] } };
   };
-  const field = body.data?.__type?.fields?.find((f) => f.name === fieldName);
-  return field?.description ?? null;
+  return body.data?.__type?.fields ?? null;
+}
+
+/**
+ * Introspects the deployed schema and returns the description of a `Block` field,
+ * or null when the field does not exist.
+ */
+export async function fetchBlockFieldDescription(fieldName: string): Promise<string | null> {
+  const fields = await introspectTypeFields('Block', 'description');
+  return fields?.find((f) => f.name === fieldName)?.description ?? null;
 }
 
 /**
@@ -66,4 +72,20 @@ export async function fetchBlockFieldDescription(fieldName: string): Promise<str
 export async function isPerBlockDustRootsSupported(): Promise<boolean> {
   const description = await fetchBlockFieldDescription('dustGenerationMerkleTreeRoot');
   return description !== null && description.includes('at this block');
+}
+
+/**
+ * Whether the deployed indexer serves the block-hash `dustGenerations` signature.
+ *
+ * Up to and including 4.3.3 the subscription takes `(dustAddress, startIndex,
+ * endIndex)`; the block-hash sync replaced those with `(dustAddress, blockHash,
+ * dtimeCutoffHeight)`. The argument names are the only observable marker — the
+ * field name and its event union are identical on both sides. Without this probe
+ * the block-hash subscription document fails GraphQL validation on a pre-4.4
+ * environment, turning a missing surface into a suite of hard failures.
+ */
+export async function isBlockHashDustGenerationsSupported(): Promise<boolean> {
+  const fields = await introspectTypeFields('Subscription', 'args { name }');
+  const dustGenerations = fields?.find((f) => f.name === 'dustGenerations');
+  return dustGenerations?.args?.some((arg) => arg.name === 'blockHash') ?? false;
 }

@@ -23,12 +23,21 @@ import {
   DustGenerationsSubscriptionResponse,
 } from '@utils/indexer/websocket-client';
 import { extractSubscriptionErrorMessage } from '@utils/indexer/subscription-error';
+import { isBlockHashDustGenerationsSupported } from '@utils/indexer/schema-feature-probe';
 import { DustGenerationsEventSchema } from '@utils/indexer/graphql/schema';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { env } from 'environment/model';
 import dataProvider from '@utils/testdata-provider';
 
 const indexerHttpClient = new IndexerHttpClient();
+
+// Every case in this file sends the block-hash subscription document, which fails
+// GraphQL validation outright on an environment still serving the older
+// startIndex/endIndex signature. Probed once, then each test skips rather than
+// reporting a missing surface as a behavioural failure.
+let blockHashSurfacePresent = false;
+const SURFACE_ABSENT_REASON =
+  'deployed indexer does not serve the block-hash dustGenerations signature';
 
 function encodeDustAddressAsHex(dustAddress: string): string {
   const { words } = bech32m.decode(dustAddress);
@@ -203,6 +212,16 @@ function eventsOfType(
 describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
   let indexerWsClient: IndexerWsClient;
 
+  beforeAll(async () => {
+    blockHashSurfacePresent = await isBlockHashDustGenerationsSupported();
+    if (!blockHashSurfacePresent) {
+      log.warn(
+        `dustGenerations(blockHash) is absent on ${env.getCurrentEnvironmentName()}; ` +
+          'skipping the whole surface',
+      );
+    }
+  }, 30_000);
+
   beforeEach(async () => {
     indexerWsClient = new IndexerWsClient();
     await indexerWsClient.connectionInit();
@@ -224,6 +243,7 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
      */
     test('should stream a complete generation snapshot for a registered dust address', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations'] };
+      if (!blockHashSurfacePresent) return ctx.skip(true, SURFACE_ABSENT_REASON);
 
       let rewardAddress: string;
       try {
@@ -264,6 +284,7 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
      */
     test('should deliver identical events for repeated subscriptions at the same block', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations'] };
+      if (!blockHashSurfacePresent) return ctx.skip(true, SURFACE_ABSENT_REASON);
 
       let rewardAddress: string;
       try {
@@ -301,6 +322,7 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
      */
     test('should snapshot the generation tree at the queried block rather than the tip', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations'] };
+      if (!blockHashSurfacePresent) return ctx.skip(true, SURFACE_ABSENT_REASON);
 
       let rewardAddress: string;
       try {
@@ -359,6 +381,7 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
      */
     test('should replay owned dtime updates before generation items when the cutoff is zero', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations'] };
+      if (!blockHashSurfacePresent) return ctx.skip(true, SURFACE_ABSENT_REASON);
 
       let rewardAddress: string;
       try {
@@ -412,6 +435,7 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
      */
     test('should deliver no dtime updates when the cutoff equals the snapshot block height', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations'] };
+      if (!blockHashSurfacePresent) return ctx.skip(true, SURFACE_ABSENT_REASON);
 
       let rewardAddress: string;
       try {
@@ -447,6 +471,7 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
      */
     test('should return an error for an invalid dust address', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations', 'Negative'] };
+      if (!blockHashSurfacePresent) return ctx.skip(true, SURFACE_ABSENT_REASON);
 
       const block = await fetchBlock();
       const errorReceived = await collectDustGenerationsError(indexerWsClient, {
@@ -469,6 +494,7 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
      */
     test('should return an error for a valid address that is meant for another networkid', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations', 'Negative'] };
+      if (!blockHashSurfacePresent) return ctx.skip(true, SURFACE_ABSENT_REASON);
 
       const targetNetworkId = env.getNetworkId().toLowerCase();
       const networkIds = env.getAllEnvironmentNames();
@@ -513,6 +539,7 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
      */
     test('should return an error for a valid dust address passed in hex format', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations', 'Negative'] };
+      if (!blockHashSurfacePresent) return ctx.skip(true, SURFACE_ABSENT_REASON);
 
       const targetNetworkId = env.getNetworkId().toLowerCase();
       const bech32DustAddress = generateDustAddressForNetworkId(targetNetworkId);
@@ -542,6 +569,7 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
      */
     test('should return an error for an unknown block hash', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations', 'Negative'] };
+      if (!blockHashSurfacePresent) return ctx.skip(true, SURFACE_ABSENT_REASON);
 
       const targetNetworkId = env.getNetworkId().toLowerCase();
       const dustAddress = generateDustAddressForNetworkId(targetNetworkId);
@@ -567,6 +595,7 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
      */
     test('should return an error for a malformed block hash', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations', 'Negative'] };
+      if (!blockHashSurfacePresent) return ctx.skip(true, SURFACE_ABSENT_REASON);
 
       const targetNetworkId = env.getNetworkId().toLowerCase();
       const dustAddress = generateDustAddressForNetworkId(targetNetworkId);
@@ -607,6 +636,7 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
      */
     test('first item transactionHash resolves via transactions(offset)', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations', 'Transaction'] };
+      if (!blockHashSurfacePresent) return ctx.skip(true, SURFACE_ABSENT_REASON);
 
       let rewardAddress: string;
       try {
