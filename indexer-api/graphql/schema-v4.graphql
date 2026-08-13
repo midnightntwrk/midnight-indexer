@@ -911,6 +911,20 @@ type DustGenerationsProgress @beta {
 	collapsedMerkleTree: MerkleTreeCollapsedUpdate
 }
 
+"""
+The effective freshness policy for `dustGenerations` snapshots, reflecting this deployment's
+runtime configuration rather than a compiled-in default.
+"""
+type DustGenerationsSnapshotPolicy {
+	"""
+	Maximum age, in blocks, of a snapshot `blockHash` relative to the latest indexed block. A
+	`dustGenerations` subscription whose block is more than this many blocks below the tip is
+	rejected with a re-subscribe hint. The tip advances continuously, so treat this as an upper
+	bound and leave headroom for indexing lag when choosing a block.
+	"""
+	maxAgeBlocks: Int!
+}
+
 type DustInitialUtxo implements DustLedgerEvent {
 	"""
 	The ID of this dust ledger event.
@@ -1278,6 +1292,12 @@ type Query {
 	addresses.
 	"""
 	dustGenerations(cardanoRewardAddresses: [CardanoRewardAddress!]!): [DustGenerations!]!
+	"""
+	The effective freshness policy for `dustGenerations` snapshots, reflecting this deployment's
+	runtime configuration. Query this before opening a `dustGenerations` subscription to choose
+	a `blockHash` that will be accepted; account for indexing lag since the tip keeps advancing.
+	"""
+	dustGenerationsSnapshotPolicy: DustGenerationsSnapshotPolicy!
 	"""
 	Get a collapsed Merkle tree update for the dust commitment tree.
 	"""

@@ -24,7 +24,7 @@ The GraphQL schema is defined in [`indexer-api/graphql/schema-v4.graphql`](../..
 
 - **Queries**:
     - *Blocks, transactions, contracts:* `block`, `transactions`, `contractAction`, `zswapMerkleTreeCollapsedUpdate`.
-    - *DUST:* `dustGenerationStatus`, `dustGenerations`, `dustCommitmentMerkleTreeUpdate`, `dustGenerationMerkleTreeUpdate`.
+    - *DUST:* `dustGenerationStatus`, `dustGenerations`, `dustGenerationsSnapshotPolicy`, `dustCommitmentMerkleTreeUpdate`, `dustGenerationMerkleTreeUpdate`.
     - *Governance history:* `dParameterHistory`, `termsAndConditionsHistory`.
     - *Stake Pool Operators (SPO):* identity and metadata (`spoIdentities`, `spoIdentityByPoolId`, `spoByPoolId`, `spoList`, `spoCompositeByPoolId`, `poolMetadata`, `poolMetadataList`, `spoCount`, `stakePoolOperators`), performance and epochs (`spoPerformanceLatest`, `spoPerformanceBySpoSk`, `epochPerformance`, `currentEpochInfo`, `epochUtilization`, `committee`), and registration series (`registeredTotalsSeries`, `registeredSpoSeries`, `registeredPresence`, `registeredFirstValidEpochs`, `stakeDistribution`).
 
@@ -385,6 +385,22 @@ query {
       utxoTxHash
       utxoOutputIndex
     }
+  }
+}
+```
+
+### dustGenerationsSnapshotPolicy: DustGenerationsSnapshotPolicy!
+
+Return the effective freshness policy for `dustGenerations` snapshot subscriptions, reflecting this deployment's **runtime** configuration rather than a compiled-in default. The `DustGenerationsSnapshotPolicy` type has a single field, `maxAgeBlocks: Int!`: the maximum age, in blocks, of a snapshot `blockHash` relative to the latest indexed block. A `dustGenerations` subscription whose block is more than `maxAgeBlocks` blocks below the tip is rejected with a re-subscribe hint.
+
+Query this before opening a `dustGenerations` subscription so you can pick a `blockHash` that will be accepted. Because the tip advances continuously, treat `maxAgeBlocks` as an upper bound and leave headroom for indexing lag: read the current tip and `maxAgeBlocks`, choose a sufficiently recent block, then subscribe.
+
+**Example:**
+
+```graphql
+query {
+  dustGenerationsSnapshotPolicy {
+    maxAgeBlocks
   }
 }
 ```
