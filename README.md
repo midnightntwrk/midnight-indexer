@@ -160,6 +160,36 @@ The Blockfrost API key is required for stake distribution queries against Cardan
 
 For the full set of configuration options see [config.yaml](spo-indexer/config.yaml).
 
+### Sourcing Secrets from Files
+
+Any of the above environment variables can instead be sourced from a file by appending `_FILE` to
+its name and setting that to the file's path. This suits secrets mounted as Kubernetes Secret or
+Docker Secret volumes:
+
+```bash
+export APP__INFRA__SECRET_FILE=/run/secrets/indexer-secret
+export APP__INFRA__STORAGE__PASSWORD_FILE=/run/secrets/postgres-password
+```
+
+Surrounding whitespace is trimmed, so a trailing newline is harmless. Files larger than 64 KiB are
+rejected. An unreadable, oversized or non-regular file aborts startup rather than leaving the value
+silently unset.
+
+The value is read directly into the configuration and is **never** written back into the process
+environment, so it does not appear in `/proc/<pid>/environ` — which is the point of mounting a
+secret as a file. Setting `APP__X` directly takes precedence over `APP__X_FILE`, in which case the
+file is not read at all.
+
+Passing a secret directly as an environment variable still works, but the Indexer prints a warning
+at startup naming (never printing) each such variable. That warning is advice for the next deploy
+rather than this one: `/proc/<pid>/environ` reflects the environment the process was *exec'd* with,
+so once a secret is there it cannot be removed for the lifetime of the process — `unsetenv` hides it
+from the program while leaving it visible in `/proc`.
+
+`docker-compose.yaml` is the worked example: it takes the same host variables developers already
+export, hands them to the containers as Docker secrets under `/run/secrets`, and points the
+matching `APP__*_FILE` variables at them. No developer setup changes.
+
 ### Running Locally
 
 For development, you can use Docker Compose or run components manually:
