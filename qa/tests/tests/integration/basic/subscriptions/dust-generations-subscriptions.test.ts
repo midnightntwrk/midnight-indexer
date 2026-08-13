@@ -151,6 +151,10 @@ function collectDustGenerations(
   });
 }
 
+// Rejection reason when the server accepted the subscription instead of failing it.
+// Tests that gate on a server-side guard being present branch on this.
+const COMPLETED_WITHOUT_ERROR = 'Subscription completed without error';
+
 /**
  * Subscribes to dustGenerations and resolves with the subscription error message.
  * Completion without an error, or a timeout, rejects.
@@ -176,7 +180,7 @@ function collectDustGenerationsError(
         },
         complete: () => {
           clearTimeout(timeout);
-          reject(new Error('Subscription completed without error'));
+          reject(new Error(COMPLETED_WITHOUT_ERROR));
         },
       },
       args.dustAddress,
@@ -213,6 +217,10 @@ type PinnedBlock = Awaited<ReturnType<typeof fetchBlock>>;
 // Staying 400 blocks back leaves ~100 blocks (~10 minutes at 6s blocks) of
 // margin for discovery, and survives the window being lowered.
 const IN_WINDOW_OFFSET = 400;
+
+// Far enough outside the window to survive it being raised.
+const OUT_OF_WINDOW_OFFSET = 5_000;
+const OUT_OF_WINDOW_MIN_MARGIN = 1_000;
 
 /**
  * Opens a block-pinned subscription and asserts the activity-independent
@@ -690,6 +698,68 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
       });
 
       expect(errorReceived.toLowerCase()).toMatch(/(invalid block hash|hex)/);
+    });
+
+    /**
+     * A snapshot request older than the freshness window is rejected up front.
+     *
+     * The indexer only keeps recent ledger states loadable, so it refuses a
+     * block-pinned snapshot whose block is more than `max_snapshot_age` behind the
+     * tip rather than failing mid-stream on garbage-collected state. The window is
+     * runtime configuration and is not exposed through the schema, so the block is
+     * chosen far enough back to stay outside any plausible value.
+     *
+     * @given a valid dust address and an indexed block 5000 blocks behind the tip
+     * @when a dustGenerations subscription is opened at that block's hash
+     * @then the subscription is rejected with the snapshot-freshness message, and not
+     *       with either neighbouring rejection (an unknown block hash, or a ledger
+     *       state that is no longer available)
+     *
+     * midnight-indexer#1427
+     */
+    test('should reject a block hash older than the snapshot freshness window', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations', 'Negative'] };
+      if (!blockHashSurfacePresent) return ctx.skip(true, SURFACE_ABSENT_REASON);
+
+      const tipBlock = await fetchBlock();
+      const minimumTipHeight = OUT_OF_WINDOW_OFFSET + OUT_OF_WINDOW_MIN_MARGIN;
+      if (tipBlock.height <= minimumTipHeight) {
+        return ctx.skip(
+          true,
+          `chain is too short to address a block outside the freshness window: tip height ` +
+            `${tipBlock.height}, needs more than ${minimumTipHeight}`,
+        );
+      }
+
+      const staleBlock = await fetchBlock({ height: tipBlock.height - OUT_OF_WINDOW_OFFSET });
+      const dustAddress = generateDustAddressForNetworkId(env.getNetworkId().toLowerCase());
+
+      const outcome = await collectDustGenerationsError(indexerWsClient, {
+        dustAddress,
+        blockHash: staleBlock.hash,
+        dtimeCutoffHeight: 0,
+      }).then(
+        (message) => ({ message, failure: null as string | null }),
+        (failure: Error) => ({ message: null as string | null, failure: failure.message }),
+      );
+
+      // The guard is not present in every deployed build and cannot be detected by
+      // introspection, so a clean completion means the indexer predates it rather
+      // than that it regressed. Any other rejection reason is a real failure.
+      if (outcome.failure === COMPLETED_WITHOUT_ERROR) {
+        return ctx.skip(
+          true,
+          `deployed indexer predates the snapshot freshness guard: a subscription at block ` +
+            `${staleBlock.height}, ${OUT_OF_WINDOW_OFFSET} blocks behind tip ${tipBlock.height}, ` +
+            `streamed a snapshot instead of being rejected`,
+        );
+      }
+      expect(outcome.failure, 'the subscription should have surfaced a server error').toBeNull();
+
+      log.debug(`Received expected freshness rejection: ${outcome.message}`);
+      expect(outcome.message).toContain('older than the snapshot freshness window');
+      expect(outcome.message).not.toMatch(/unknown block hash/);
+      expect(outcome.message).not.toMatch(/no longer available/);
     });
   });
 
