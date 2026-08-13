@@ -206,6 +206,73 @@ function eventsOfType(
   return events.filter((msg) => msg.data?.dustGenerations?.__typename === typename);
 }
 
+type PinnedBlock = Awaited<ReturnType<typeof fetchBlock>>;
+
+// The indexer rejects snapshots older than its `max_snapshot_age` (500 by
+// default) against the tip *at subscribe time*, not at block-selection time.
+// Staying 400 blocks back leaves ~100 blocks (~10 minutes at 6s blocks) of
+// margin for discovery, and survives the window being lowered.
+const IN_WINDOW_OFFSET = 400;
+
+/**
+ * Opens a block-pinned subscription and asserts the activity-independent
+ * invariants: every event is schema-valid, exactly one progress event terminates
+ * the snapshot, and its highestIndex is the queried block's tree size. Returns
+ * that highestIndex so callers can compare snapshots across blocks.
+ */
+async function assertPinnedSnapshot(
+  wsClient: IndexerWsClient,
+  dustAddress: string,
+  block: PinnedBlock,
+): Promise<number> {
+  const events = await collectDustGenerations(wsClient, {
+    dustAddress,
+    blockHash: block.hash,
+    dtimeCutoffHeight: 0,
+  });
+
+  assertEventsMatchSchema(events);
+  const progressEvents = eventsOfType(events, 'DustGenerationsProgress');
+  expect(progressEvents).toHaveLength(1);
+  const { highestIndex } = progressEvents[0].data!.dustGenerations as { highestIndex: number };
+  log.debug(
+    `Snapshot pinned to block ${block.height}: endIndex ${block.dustGenerationEndIndex}, ` +
+      `highestIndex ${highestIndex}, ${events.length} event(s)`,
+  );
+  expect(
+    highestIndex,
+    `highestIndex at block ${block.height} should reflect that block's tree size`,
+  ).toBe(block.dustGenerationEndIndex - 1);
+  return highestIndex;
+}
+
+/**
+ * Locates the newest block inside `(older, newer]` at which the generation tree
+ * grew — the lowest height whose dustGenerationEndIndex already equals `newer`'s —
+ * and returns the tight pair straddling it. Picking the newest rather than the
+ * oldest boundary in the range maximises the margin against the sliding freshness
+ * window. Callers must have established that the two bounding blocks differ.
+ */
+async function findNewestGrowthBoundary(
+  older: PinnedBlock,
+  newer: PinnedBlock,
+): Promise<{ before: PinnedBlock; after: PinnedBlock }> {
+  let low = older.height; // known to have a smaller endIndex than `newer`
+  let high = newer.height; // known to have `newer`'s endIndex
+
+  while (high - low > 1) {
+    const mid = Math.floor((low + high) / 2);
+    const block = await fetchBlock({ height: mid });
+    if (block.dustGenerationEndIndex === newer.dustGenerationEndIndex) {
+      high = mid;
+    } else {
+      low = mid;
+    }
+  }
+
+  return { before: await fetchBlock({ height: low }), after: await fetchBlock({ height: high }) };
+}
+
 // Dust generation registrations require a Cardano-side mapping which has no
 // counterpart in the `undeployed` environment. Skip the whole surface there;
 // re-enable once #1152 lands local Cardano test-data provisioning.
@@ -312,11 +379,21 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
     /**
      * The snapshot reflects the queried block's generation tree, not the tip's.
      *
-     * @given two blocks between which the dust generation tree has grown
-     *        (their dustGenerationEndIndex values differ)
+     * Blocks are discovered from queried chain state rather than by arithmetic on
+     * the tip height: any tip-relative fraction lands far outside the indexer's
+     * snapshot freshness window on a long-running chain. The strong comparison
+     * additionally needs the tree to have grown inside that window, which a quiet
+     * chain cannot guarantee, so the assertions are tiered — the per-block
+     * invariant always runs, the cross-block comparison runs when a growth
+     * boundary exists and reports the measured numbers when it does not.
+     *
+     * @given two blocks inside the freshness window, the older one 400 blocks back
      * @when a dustGenerations subscription is opened at each block's hash
      * @then each final progress event reports highestIndex equal to that block's
-     *       dustGenerationEndIndex - 1, so the earlier block yields the smaller snapshot
+     *       dustGenerationEndIndex - 1 (on devnet today, endIndex 2452 yields
+     *       highestIndex 2451)
+     * @and when the tree grew between the two blocks, the pair straddling the newest
+     *      growth boundary yields a strictly smaller snapshot before it than after
      *
      * midnight-indexer#1283
      */
@@ -324,47 +401,53 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
       ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations'] };
       if (!blockHashSurfacePresent) return ctx.skip(true, SURFACE_ABSENT_REASON);
 
-      let rewardAddress: string;
-      try {
-        rewardAddress = dataProvider.getCardanoRewardAddress('registered-with-dust');
-      } catch (error) {
-        log.warn(error);
-        ctx.skip?.(true, (error as Error).message);
-        return;
-      }
-
-      const dustAddress = await fetchDustAddress(rewardAddress);
+      // highestIndex is a global tree property — the resolver reports the pinned
+      // ledger state's first-free generation index minus one — so it needs no
+      // registered wallet and no Cardano fixture.
+      const dustAddress = generateDustAddressForNetworkId(env.getNetworkId().toLowerCase());
       const tipBlock = await fetchBlock();
-      const earlierBlock = await fetchBlock({ height: Math.floor(tipBlock.height / 2) });
+      const earlierBlock = await fetchBlock({ height: tipBlock.height - IN_WINDOW_OFFSET });
 
-      if (
-        earlierBlock.dustGenerationEndIndex === 0 ||
-        earlierBlock.dustGenerationEndIndex === tipBlock.dustGenerationEndIndex
-      ) {
-        ctx.skip?.(
+      if (earlierBlock.dustGenerationEndIndex === 0) {
+        return ctx.skip(
           true,
-          `generation tree did not grow between block ${earlierBlock.height} ` +
-            `(endIndex ${earlierBlock.dustGenerationEndIndex}) and block ${tipBlock.height} ` +
-            `(endIndex ${tipBlock.dustGenerationEndIndex}) — snapshot comparison is vacuous`,
+          `generation tree is still empty at block ${earlierBlock.height} (endIndex 0), where ` +
+            `the resolver saturates highestIndex to 0 instead of endIndex - 1 — tip ` +
+            `${tipBlock.height} (endIndex ${tipBlock.dustGenerationEndIndex})`,
         );
-        return;
       }
 
-      for (const block of [earlierBlock, tipBlock]) {
-        const events = await collectDustGenerations(indexerWsClient, {
-          dustAddress,
-          blockHash: block.hash,
-          dtimeCutoffHeight: 0,
-        });
+      // Tier A — activity-independent, so it asserts on every run and every env.
+      await assertPinnedSnapshot(indexerWsClient, dustAddress, earlierBlock);
+      await assertPinnedSnapshot(indexerWsClient, dustAddress, tipBlock);
 
-        const progressEvents = eventsOfType(events, 'DustGenerationsProgress');
-        expect(progressEvents).toHaveLength(1);
-        const progress = progressEvents[0].data!.dustGenerations as { highestIndex: number };
-        expect(
-          progress.highestIndex,
-          `highestIndex at block ${block.height} should reflect that block's tree size`,
-        ).toBe(block.dustGenerationEndIndex - 1);
+      // Tier B — the pinning comparison proper, possible only where the tree grew
+      // inside the window.
+      const boundaryFound = earlierBlock.dustGenerationEndIndex !== tipBlock.dustGenerationEndIndex;
+      const measurements =
+        `tip ${tipBlock.height} (endIndex ${tipBlock.dustGenerationEndIndex}), ` +
+        `block ${earlierBlock.height} at tip-${IN_WINDOW_OFFSET} ` +
+        `(endIndex ${earlierBlock.dustGenerationEndIndex}), ` +
+        `growth boundary found: ${boundaryFound}`;
+
+      if (!boundaryFound) {
+        log.warn(`Tier B not exercised — ${measurements}`);
+        return ctx.skip(
+          true,
+          `generation tree did not grow within the ${IN_WINDOW_OFFSET}-block in-window budget, ` +
+            `so a cross-block comparison would be vacuous — ${measurements}`,
+        );
       }
+
+      const { before, after } = await findNewestGrowthBoundary(earlierBlock, tipBlock);
+      log.debug(`Tier B comparing blocks ${before.height} and ${after.height} — ${measurements}`);
+
+      const beforeHighestIndex = await assertPinnedSnapshot(indexerWsClient, dustAddress, before);
+      const afterHighestIndex = await assertPinnedSnapshot(indexerWsClient, dustAddress, after);
+      expect(
+        beforeHighestIndex,
+        `block ${before.height} should yield a strictly smaller snapshot than block ${after.height}`,
+      ).toBeLessThan(afterHighestIndex);
     }, 90_000);
   });
 
