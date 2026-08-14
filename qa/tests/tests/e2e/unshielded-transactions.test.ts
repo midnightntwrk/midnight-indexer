@@ -890,43 +890,4 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
       }
     });
   });
-
-  // Future scenarios planned for coverage
-  describe('future coverage', () => {
-    /**
-     * Ensures that unsubscribing and resubscribing to the same wallet does NOT cause duplicate historical events or missing live updates.
-     *
-     * @given a wallet subscribed to unshielded transaction events
-     * @when it unsubscribes and then subscribes again later
-     * @then the indexer must re-send historical events exactly once, and continue streaming live events with no duplicates.
-     */
-    test.todo('should not duplicate events after resubscription');
-
-    /**
-     * Validates correct subscription behavior under multiple sequential unshielded transactions between two wallets (A and B).
-     *
-     * @given wallets A and B subscribed to unshielded transaction events
-     * @when A > B, then B > A, then A > B transactions are submitted
-     * @then each wallet must receive only the events relevant to itself,  in the correct order, with no leakage between addresses.
-     */
-    test.todo('should correctly handle multiple sequential A > B transactions');
-
-    /**
-     * Tests mixed historical + live sync behavior across two wallets: one with pre-existing transactions and one new empty wallet.
-     *
-     * @given wallet A with historical transactions and wallet B with none
-     * @when both subscribe to unshielded transaction events
-     * @then A receives historical + live events, while B receives only live events.
-     */
-    test.todo('should correctly handle mixed historical and new wallet subscriptions');
-
-    /**
-     * Ensures shielded and unshielded transactions are routed to the correct subscription types with no cross-contamination.
-     *
-     * @given a wallet performs both shielded and unshielded transactions
-     * @when subscriptions are active for both event types
-     * @then shielded events must NOT appear in unshielded subscriptions, and unshielded events must NOT appear in shielded subscriptions.
-     */
-    test.todo('should segregate shielded and unshielded events correctly');
-  });
 });
