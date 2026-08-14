@@ -2,6 +2,8 @@ version: 2
 
 updates:
   - package-ecosystem: "cargo"
+    labels:
+      - "bot:dependencies"
     directory: "/"
     schedule:
       interval: "weekly"
@@ -15,6 +17,8 @@ updates:
       - dependency-name: "fake"
 
   - package-ecosystem: "github-actions"
+    labels:
+      - "bot:github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
@@ -26,6 +30,8 @@ updates:
           - "*"
 
   - package-ecosystem: "docker"
+    labels:
+      - "bot:dependencies"
     directory: "/"
     schedule:
       interval: "weekly"
