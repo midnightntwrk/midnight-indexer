@@ -20,8 +20,11 @@ import { retry } from '@utils/retry-helper';
 import dataProvider from '@utils/testdata-provider';
 import {
   getBlockByHashWithRetry,
+  getEventsOfType,
+  retrySimple,
   setupWalletEventSubscriptions,
   resolveBlockHash,
+  waitForEventsStabilization,
 } from './test-utils';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { ToolkitWrapper, ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
@@ -32,6 +35,7 @@ import {
   UnshieldedTransactionEvent,
   UnshieldedTransactionsProgress,
   UnshieldedUtxo,
+  isUnshieldedTransaction,
 } from '@utils/indexer/indexer-types';
 import { IndexerWsClient, UnshieldedTxSubscriptionResponse } from '@utils/indexer/websocket-client';
 import { collectValidDustLedgerEvents } from 'tests/shared/dust-ledger-utils';
@@ -71,6 +75,90 @@ function findProgressUpdateEvent(
   return event;
 }
 
+/**
+ * Validates that an unshielded transaction is reported consistently across the event streams of
+ * the source and the destination wallet.
+ *
+ * Each destination transaction is paired with the source transaction carrying the same hash, then
+ * deep-checked for identical transaction identity, UTXO ownership and output indices, creation
+ * time, dust registration flags, spent-UTXO cross-links and value conservation.
+ *
+ * @param srcTxs - Events emitted for the **source** wallet.
+ * @param destTxs - Events emitted for the **destination** wallet.
+ * @param srcAddr - Source wallet address, expected to own the change UTXO at outputIndex 1.
+ * @param destAddr - Destination wallet address, expected to own the created UTXO at outputIndex 0.
+ * @param expectedValue - Value the destination is expected to receive.
+ *
+ * - Uses `isUnshieldedTransaction()` to filter out `UnshieldedTransactionsProgress` events.
+ */
+function validateCrossWalletTransaction(
+  srcTxs: UnshieldedTransactionEvent[],
+  destTxs: UnshieldedTransactionEvent[],
+  srcAddr: string,
+  destAddr: string,
+  expectedValue: string,
+) {
+  const validSrcTxs = srcTxs.filter(isUnshieldedTransaction);
+  const validDestTxs = destTxs.filter(isUnshieldedTransaction);
+
+  log.debug(validSrcTxs, `Source transactions for ${srcAddr}`);
+  log.debug(validDestTxs, `Destination transactions for ${destAddr}`);
+
+  if (!validDestTxs.length) {
+    throw new Error(`No UnshieldedTransaction events for ${destAddr} — expected at least one.`);
+  }
+
+  validDestTxs.forEach((destTx) => {
+    const srcTx = validSrcTxs.find((s) => s.transaction.hash === destTx.transaction.hash);
+    if (!srcTx) {
+      throw new Error(`No matching source transaction found for hash ${destTx.transaction.hash}`);
+    }
+
+    const srcUtxo = srcTx.createdUtxos[0];
+    const destUtxo = destTx.createdUtxos[0];
+
+    // Value & identity
+    expect(destUtxo.value).toBe(expectedValue);
+    expect(BigInt(srcUtxo.value)).toBeGreaterThan(BigInt(destUtxo.value));
+    expect(destTx.transaction.hash).toBe(srcTx.transaction.hash);
+    expect(destTx.transaction.id).toBe(srcTx.transaction.id);
+
+    // Ownership & indices
+    expect(srcUtxo.owner).toBe(srcAddr);
+    expect(destUtxo.owner).toBe(destAddr);
+    expect(destUtxo.outputIndex).toBe(0);
+    expect(srcUtxo.outputIndex).toBe(1);
+
+    // Creation time alignment
+    expect(srcUtxo.ctime).toBe(destUtxo.ctime);
+
+    // Dust registration flags. This asymmetry holds only because the source is the funding wallet,
+    // which is registered for dust generation, while the destinations are fresh, unregistered ones.
+    expect(destUtxo.registeredForDustGeneration).toBe(false);
+    expect(srcUtxo.registeredForDustGeneration).toBe(true);
+
+    // Cross-link consistency
+    expect(srcUtxo.createdAtTransaction.hash).toBe(destTx.transaction.hash);
+
+    // The source funds the transfer by spending an input, so its stream must carry a spent UTXO.
+    // Assert that rather than guarding on it, or the checks below silently disappear.
+    expect(
+      srcTx.spentUtxos,
+      `No spent UTXO in the source stream for ${srcAddr} on hash ${destTx.transaction.hash}`,
+    ).not.toHaveLength(0);
+
+    const spent = srcTx.spentUtxos[0];
+    expect(spent.spentAtTransaction.hash).toBe(destTx.transaction.hash);
+    const spentTx = spent.spentAtTransaction as { hash: string; identifiers?: string[] };
+    expect(spentTx.identifiers?.[0]).toBe(destTx.transaction.identifiers?.[0]);
+
+    // Value conservation: the destination receives the spent input minus the change kept by source.
+    expect(BigInt(destUtxo.value)).toBe(BigInt(spent.value) - BigInt(srcUtxo.value));
+
+    log.debug(`Validation complete for hash=${destTx.transaction.hash}`);
+  });
+}
+
 describe('unshielded transactions', { timeout: 200_000 }, () => {
   let indexerWsClient: IndexerWsClient;
   let indexerHttpClient: IndexerHttpClient;
@@ -87,6 +175,7 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
 
   // Addresses for the source and destination wallets, derived from their seeds
   let destinationAddress: string;
+  let secondDestinationAddress: string;
 
   let indexerEventCoordinator: EventCoordinator;
   indexerEventCoordinator = new EventCoordinator();
@@ -104,14 +193,21 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
     await toolkit.start();
 
     const seedA = dataProvider.getFundingSeed();
-    const seedB = '0000000000000000000000000000000000000000000000000000000987654321';
+    const seedB1 = '0000000000000000000000000000000000000000000000000000000987654321';
+    // A second destination, subscribed on the same WS connection, so the multi-destination tests
+    // below can assert the indexer routes each transfer to the intended recipient only.
+    const seedB2 = '0000000000000000000000000000000000000000000000000000000123456789';
 
-    walletFixture = await setupWalletEventSubscriptions(toolkit, indexerWsClient, seedA, [seedB]);
+    walletFixture = await setupWalletEventSubscriptions(toolkit, indexerWsClient, seedA, [
+      seedB1,
+      seedB2,
+    ]);
 
     // Extract for convenience
     sourceSeed = walletFixture.source.seed;
 
     destinationAddress = walletFixture.destinations[0].destinationAddress;
+    secondDestinationAddress = walletFixture.destinations[1].destinationAddress;
 
     const beforeEvents = await collectValidDustLedgerEvents(
       indexerWsClient,
@@ -268,12 +364,16 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
       // Wait for the unshielded transaction event for the source address to be reported by the indexer
       // through the unshielded transaction subscription. Note this is an async operation, so we need
       // to retry a few times.
+      // The event is matched on the submitted transaction hash, not just on the owner: every e2e
+      // file spends from the same funding wallet into the same destination seed, and the files run
+      // in parallel workers, so an owner-only match can be satisfied by another file's transfer.
       const sourceAddressEvent = await retry(
         async () => {
           const event = walletFixture.source.events.find((event) => {
             const txEvent = event.data?.unshieldedTransactions as UnshieldedTransaction;
             return (
               txEvent.__typename === 'UnshieldedTransaction' &&
+              txEvent.transaction.hash === transactionResult.txHash &&
               txEvent.createdUtxos?.some(
                 (utxo: UnshieldedUtxo) => utxo.owner === walletFixture.source.address,
               ) &&
@@ -324,6 +424,7 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
             const txEvent = event.data?.unshieldedTransactions as UnshieldedTransaction;
             return (
               txEvent.__typename === 'UnshieldedTransaction' &&
+              txEvent.transaction.hash === transactionResult.txHash &&
               txEvent.createdUtxos?.some(
                 (utxo: UnshieldedUtxo) => utxo.owner === destinationAddress,
               )
@@ -618,6 +719,175 @@ describe('unshielded transactions', { timeout: 200_000 }, () => {
         'DustInitialUtxo',
         'DustSpendProcessed',
       ]);
+    });
+  });
+
+  // `.sequential` documents that the A > B2 transfer depends on A > B1 having run first.
+  // These tests run after the block above and deliberately do not clear the event buffers: the
+  // block above compares them against baselines captured in beforeAll, and matching on the
+  // submitted transaction hash already disambiguates the streams.
+  describe.sequential('a confirmed unshielded transfer streamed to address subscriptions', () => {
+    /**
+     * This test verifies correct propagation of event types across multi-destination subscriptions, ensuring that
+     * the indexer only emits transaction data to the intended recipient while other wallets observe progress updates.
+     *
+     * @given a source wallet (A) and two destination wallets (B1, B2) all subscribed to unshielded transaction events
+     * @when wallet A performs an unshielded transfer of 3 units to B1
+     * @then B1 should receive a single `UnshieldedTransaction` event representing the received funds, while B2 should only
+     * receive `UnshieldedTransactionsProgress` events and no actual `UnshieldedTransaction` payloads.
+     */
+    test('should emit UnshieldedTransaction only for the target wallet (A > B1)', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Wallet', 'Subscription', 'MultiDestination'] };
+
+      const b1TxResult = await toolkit.generateSingleTx(
+        sourceSeed,
+        'unshielded',
+        destinationAddress,
+        3,
+      );
+
+      // Wait for B1's UnshieldedTransaction matching the submitted tx hash
+      const latestB1Tx = await retrySimple(async () => {
+        const events = getEventsOfType(
+          walletFixture.destinations[0].events,
+          'UnshieldedTransaction',
+        );
+        return events.find((e) => e.transaction.hash === b1TxResult.txHash) ?? null;
+      });
+
+      // Wait for source event matching the same tx hash
+      const latestSourceTx = await retrySimple(async () => {
+        const events = getEventsOfType(walletFixture.source.events, 'UnshieldedTransaction');
+        return events.find((e) => e.transaction.hash === b1TxResult.txHash) ?? null;
+      });
+
+      // Wait for B2 progress
+      const latestB2Tx = await retrySimple(async () => {
+        const progressEvents = getEventsOfType(
+          walletFixture.destinations[1].events,
+          'UnshieldedTransactionsProgress',
+        );
+        return progressEvents.at(-1) ?? null;
+      });
+
+      validateCrossWalletTransaction(
+        [latestSourceTx],
+        [latestB1Tx],
+        walletFixture.source.address,
+        destinationAddress,
+        '3',
+      );
+
+      // Ensure B2 did not receive a UnshieldedTransaction event
+      const b2Tx = getEventsOfType(walletFixture.destinations[1].events, 'UnshieldedTransaction');
+      expect(b2Tx.length).toBe(0);
+
+      // B2 must at least show progress
+      expect(latestB2Tx).toBeDefined();
+    });
+
+    /**
+     * This test validates correct event propagation when performing an unshielded transfer from wallet A to the second destination wallet (B2) in a multi-destination
+     * subscription scenario.
+     * @given a source wallet (A) and two destination wallets (B1, B2), all subscribed to unshielded transaction events
+     * @when wallet A performs an unshielded transfer of 1 unit to B2
+     * @then B2 should receive a single `UnshieldedTransaction` event representing the received funds, while B1 should only observe its own previous transaction history and must not receive the new `UnshieldedTransaction` intended for B2
+     */
+    test('should emit UnshieldedTransaction only for the target wallet (A > B2)', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Wallet', 'Subscription', 'MultiDestination'] };
+
+      const b2TxResult = await toolkit.generateSingleTx(
+        sourceSeed,
+        'unshielded',
+        secondDestinationAddress,
+        1,
+      );
+
+      // Wait for B2's UnshieldedTransaction matching the submitted tx hash
+      const latestB2Tx = await retrySimple(async () => {
+        const b2Events = getEventsOfType(
+          walletFixture.destinations[1].events,
+          'UnshieldedTransaction',
+        );
+        return b2Events.find((e) => e.transaction.hash === b2TxResult.txHash) ?? null;
+      });
+
+      // B1 UnshieldedTransaction (should NOT match B2)
+      const latestB1Tx = await retrySimple(async () => {
+        const b1Events = getEventsOfType(
+          walletFixture.destinations[0].events,
+          'UnshieldedTransaction',
+        );
+        return b1Events.at(-1) ?? null;
+      });
+
+      // Source event matching the same tx hash
+      const latestSourceTx = await retrySimple(async () => {
+        const srcEvents = getEventsOfType(walletFixture.source.events, 'UnshieldedTransaction');
+        return srcEvents.find((e) => e.transaction.hash === b2TxResult.txHash) ?? null;
+      });
+
+      validateCrossWalletTransaction(
+        [latestSourceTx],
+        [latestB2Tx],
+        walletFixture.source.address,
+        secondDestinationAddress,
+        '1',
+      );
+
+      // Ensure B1 did NOT receive the B2 transaction
+      expect(latestB1Tx.transaction.hash).not.toBe(latestB2Tx.transaction.hash);
+    });
+  });
+
+  describe('an address with no transaction history', () => {
+    /**
+     * Validates event subscription behavior for an empty wallet.
+     *
+     * @given an empty wallet subscribed to unshielded transaction events
+     * @when no transactions are performed
+     * @then only ProgressUpdate events should be emitted by the indexer
+     */
+    test('should emit only ProgressUpdate for empty wallet', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Wallet', 'Subscription', 'EmptyWallet'] };
+
+      const emptySeed = '000000000000000000000000000000000000000000000000000000000000000E';
+      const emptyAddress = (await toolkit.showAddress(emptySeed)).unshielded;
+      log.debug(`Empty wallet address: ${emptyAddress}`);
+
+      const ws = new IndexerWsClient();
+      await ws.connectionInit();
+      const emptyEvents: UnshieldedTxSubscriptionResponse[] = [];
+
+      const unsubscribe = ws.subscribeToUnshieldedTransactionEvents(
+        {
+          next: (e) => {
+            emptyEvents.push(e);
+          },
+        },
+        { address: emptyAddress },
+      );
+
+      try {
+        const stabilized = await waitForEventsStabilization(emptyEvents, 1000);
+        log.debug(`Received ${stabilized.length} events for empty wallet.`);
+
+        // The stream must be alive, not merely silent: `every` on an empty array is vacuously true,
+        // so without this an indexer emitting nothing at all would pass.
+        expect(stabilized.length).toBeGreaterThan(0);
+
+        const onlyProgressUpdates = stabilized.every((e) => {
+          const data = e.data?.unshieldedTransactions;
+          return (
+            data?.__typename === 'UnshieldedTransactionsProgress' && data.highestTransactionId === 0
+          );
+        });
+
+        expect(onlyProgressUpdates).toBe(true);
+      } finally {
+        unsubscribe();
+        await ws.connectionClose();
+      }
     });
   });
 });
