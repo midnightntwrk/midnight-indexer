@@ -41,7 +41,13 @@ fn run() -> anyhow::Result<()> {
     use indexer_api::{
         application,
         config::Config,
-        infra::{self, api::AxumApi},
+        infra::{
+            self,
+            api::{
+                AxumApi,
+                ledger_query_limit::{LedgerQueryLimiter, permits_for_worker_threads},
+            },
+        },
     };
     use indexer_common::{
         cipher::make_cipher,
@@ -50,7 +56,7 @@ fn run() -> anyhow::Result<()> {
         telemetry,
     };
     use log::info;
-    use std::time::Duration;
+    use std::{num::NonZeroUsize, thread, time::Duration};
     use tokio::runtime::Builder;
 
     // Load configuration.
@@ -58,6 +64,8 @@ fn run() -> anyhow::Result<()> {
     info!(config:?; "starting");
     let Config {
         thread_stack_size,
+        worker_threads,
+        ledger_query_concurrency,
         application_config,
         infra_config,
         telemetry_config:
@@ -76,7 +84,22 @@ fn run() -> anyhow::Result<()> {
         secret,
     } = infra_config;
 
+    // Resolve the worker-thread count explicitly (issue #595): with an implicit count we cannot
+    // size the ledger-query semaphore relative to it, and unbounded ledger queries can occupy
+    // every worker via `block_in_place` and wedge the runtime.
+    let worker_threads = worker_threads.map(NonZeroUsize::get).unwrap_or_else(|| {
+        thread::available_parallelism()
+            .map(NonZeroUsize::get)
+            .unwrap_or(1)
+    });
+
+    let ledger_query_permits =
+        ledger_query_concurrency.unwrap_or_else(|| permits_for_worker_threads(worker_threads));
+    info!(worker_threads, ledger_query_permits = ledger_query_permits.get(); "runtime concurrency");
+    let ledger_query_limiter = LedgerQueryLimiter::new(ledger_query_permits);
+
     let runtime = Builder::new_multi_thread()
+        .worker_threads(worker_threads)
         .enable_all()
         .thread_stack_size(thread_stack_size as usize)
         .build()
@@ -102,7 +125,12 @@ fn run() -> anyhow::Result<()> {
 
         let subscriber = pub_sub::nats::subscriber::NatsSubscriber::new(pub_sub_config).await?;
 
-        let api = AxumApi::new(api_config, storage, subscriber.clone());
+        let api = AxumApi::new(
+            api_config,
+            storage,
+            subscriber.clone(),
+            ledger_query_limiter,
+        );
 
         application::run(application_config, api, subscriber).await
     });
