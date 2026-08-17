@@ -66,7 +66,7 @@ impl WalletStorage for Storage {
             .bind(start_index)
             .bind(OffsetDateTime::now_utc())
             .bind(session_id.as_ref())
-            .execute(&*self.pool)
+            .execute(self.pool.writer())
             .await?;
 
         Ok(session_id)
@@ -82,7 +82,7 @@ impl WalletStorage for Storage {
 
         sqlx::query(query)
             .bind(session_id.as_ref())
-            .execute(&*self.pool)
+            .execute(self.pool.writer())
             .await?;
 
         Ok(())
@@ -114,7 +114,7 @@ impl WalletStorage for Storage {
         let result = sqlx::query(query)
             .bind(OffsetDateTime::now_utc())
             .bind(wallet_id)
-            .execute(&*self.pool)
+            .execute(self.pool.writer())
             .map_ok(|_| ())
             .await;
 
