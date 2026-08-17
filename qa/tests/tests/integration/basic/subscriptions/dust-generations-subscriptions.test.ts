@@ -263,29 +263,39 @@ async function assertPinnedSnapshot(
   return highestIndex;
 }
 
+type PinnedSnapshotOutcome = { highestIndex: number } | { rejection: string };
+
 /**
  * Runs the per-block assertions unless the server refuses the block as older than
  * its snapshot freshness window, in which case the rejection message is returned
- * so the caller can step closer to the tip. `max_snapshot_age` is runtime
- * configuration the schema does not expose, so this rejection is the only signal
- * that the deployed window is narrower than the offset this test prefers — it is
- * configuration, not a defect. Every other failure propagates.
+ * so the caller can decide what that means in its context. `max_snapshot_age` is
+ * runtime configuration the schema does not expose, so this rejection is the only
+ * signal that the deployed window is narrower than a caller assumed. Every other
+ * failure propagates.
  */
 async function assertPinnedSnapshotUnlessStale(
   wsClient: IndexerWsClient,
   dustAddress: string,
   block: PinnedBlock,
-): Promise<string | null> {
+): Promise<PinnedSnapshotOutcome> {
   try {
-    await assertPinnedSnapshot(wsClient, dustAddress, block);
-    return null;
+    return { highestIndex: await assertPinnedSnapshot(wsClient, dustAddress, block) };
   } catch (error) {
     const message = extractSubscriptionErrorMessage(error);
     if (message.includes(FRESHNESS_REJECTION)) {
-      return message;
+      return { rejection: message };
     }
     throw error;
   }
+}
+
+/**
+ * Skips the current test, recording the reason in the run log as well as the
+ * report so a reader of either can tell why coverage was reduced.
+ */
+function skipWithReason(ctx: TestContext, reason: string): void {
+  log.warn(reason);
+  ctx.skip(true, reason);
 }
 
 /**
@@ -429,7 +439,8 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
      * invariant always runs, the cross-block comparison runs when a growth
      * boundary exists and reports the measured numbers when it does not.
      *
-     * @given two blocks inside the freshness window, the older one 400 blocks back
+     * @given two blocks inside the freshness window, the older one up to 400 blocks
+     *        back — closer when the deployed window is narrower or the chain shorter
      * @when a dustGenerations subscription is opened at each block's hash
      * @then each final progress event reports highestIndex equal to that block's
      *       dustGenerationEndIndex - 1 (on devnet today, endIndex 2452 yields
@@ -449,31 +460,28 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
       const dustAddress = generateDustAddressForNetworkId(env.getNetworkId().toLowerCase());
       const tipBlock = await fetchBlock();
 
-      if (tipBlock.height <= IN_WINDOW_OFFSET) {
-        return ctx.skip(
-          true,
-          `chain is too short to select a block ${IN_WINDOW_OFFSET} blocks back: tip height ` +
-            `${tipBlock.height}, needs more than ${IN_WINDOW_OFFSET}`,
-        );
-      }
-
       if (tipBlock.dustGenerationEndIndex === 0) {
-        return ctx.skip(
-          true,
+        return skipWithReason(
+          ctx,
           `generation tree is still empty at the tip (block ${tipBlock.height}, endIndex 0), ` +
             'where the resolver saturates highestIndex to 0 instead of endIndex - 1',
         );
       }
 
-      // Tier A — activity-independent, so it asserts on every run and every env.
-      // Start at the preferred offset and step closer to the tip while the server
-      // reports the snapshot out of window (a narrower max_snapshot_age) or the
-      // tree still empty (closer blocks hold a larger tree).
+      // Tier A at the tip is always exercisable — offset 0 is inside any window and
+      // needs no chain length — so it runs before any block discovery can skip.
+      await assertPinnedSnapshot(indexerWsClient, dustAddress, tipBlock);
+
+      // Then step closer to the tip while the server reports the snapshot out of
+      // window (a narrower max_snapshot_age) or the tree still empty (closer blocks
+      // hold a larger tree). The start is clamped so a short chain never addresses a
+      // negative height.
+      const startOffset = Math.min(IN_WINDOW_OFFSET, tipBlock.height - 1);
       let earlierBlock: PinnedBlock | undefined;
       let offsetUsed = 0;
       let lastRejection = '';
       for (
-        let offset = IN_WINDOW_OFFSET;
+        let offset = startOffset;
         offset >= MIN_IN_WINDOW_OFFSET;
         offset = Math.floor(offset / 2)
       ) {
@@ -482,29 +490,39 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
           log.warn(`Generation tree still empty at tip-${offset} (block ${candidate.height})`);
           continue;
         }
-        const rejection = await assertPinnedSnapshotUnlessStale(
+        const outcome = await assertPinnedSnapshotUnlessStale(
           indexerWsClient,
           dustAddress,
           candidate,
         );
-        if (rejection === null) {
+        if (!('rejection' in outcome)) {
           earlierBlock = candidate;
           offsetUsed = offset;
           break;
         }
-        lastRejection = rejection;
-        log.warn(`Snapshot at tip-${offset} (block ${candidate.height}) refused: ${rejection}`);
+        lastRejection = outcome.rejection;
+        log.warn(
+          `Snapshot at tip-${offset} (block ${candidate.height}) refused: ${outcome.rejection}`,
+        );
       }
 
-      await assertPinnedSnapshot(indexerWsClient, dustAddress, tipBlock);
-
       if (earlierBlock === undefined) {
-        return ctx.skip(
-          true,
-          `no usable older block between tip-${IN_WINDOW_OFFSET} and tip-${MIN_IN_WINDOW_OFFSET}: ` +
-            `tip ${tipBlock.height} (endIndex ${tipBlock.dustGenerationEndIndex}), ` +
-            `last rejection: ${lastRejection || 'none — tree empty at every offset tried'}`,
-        );
+        const attempted =
+          `tip ${tipBlock.height} (endIndex ${tipBlock.dustGenerationEndIndex}), offsets ` +
+          `${startOffset} down to ${MIN_IN_WINDOW_OFFSET}`;
+
+        // Being refused even at the smallest offset is not a configuration this
+        // deployment can reach: max_snapshot_age defaults to 500, nothing overrides
+        // it, and a value under MIN_IN_WINDOW_OFFSET would be absurd. The realistic
+        // cause is a regression in the freshness computation, which the negative
+        // test cannot catch either — its block stays rejected either way. Fail.
+        expect(
+          lastRejection,
+          `every candidate offset was refused as outside the snapshot freshness window, which ` +
+            `no deployable max_snapshot_age explains — ${attempted}`,
+        ).toBe('');
+
+        return skipWithReason(ctx, `generation tree empty at every offset tried — ${attempted}`);
       }
 
       // Tier B — the pinning comparison proper, possible only where the tree grew
@@ -517,9 +535,8 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
         `growth boundary found: ${boundaryFound}`;
 
       if (!boundaryFound) {
-        log.warn(`Tier B not exercised — ${measurements}`);
-        return ctx.skip(
-          true,
+        return skipWithReason(
+          ctx,
           `generation tree did not grow within the ${offsetUsed}-block in-window budget, ` +
             `so a cross-block comparison would be vacuous — ${measurements}`,
         );
@@ -528,8 +545,37 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
       const { before, after } = await findNewestGrowthBoundary(earlierBlock, tipBlock);
       log.debug(`Tier B comparing blocks ${before.height} and ${after.height} — ${measurements}`);
 
-      const beforeHighestIndex = await assertPinnedSnapshot(indexerWsClient, dustAddress, before);
-      const afterHighestIndex = await assertPinnedSnapshot(indexerWsClient, dustAddress, after);
+      // Tier B carries the least margin of anything here: the boundary pair is the
+      // oldest thing subscribed to, and the binary search plus these two
+      // subscriptions all run after it was selected. A refusal now is the window
+      // sliding past the boundary, not a pinning defect.
+      const beforeOutcome = await assertPinnedSnapshotUnlessStale(
+        indexerWsClient,
+        dustAddress,
+        before,
+      );
+      if ('rejection' in beforeOutcome) {
+        return skipWithReason(
+          ctx,
+          `growth boundary aged out of the freshness window before it could be compared: block ` +
+            `${before.height} refused (${beforeOutcome.rejection}) — ${measurements}`,
+        );
+      }
+      const afterOutcome = await assertPinnedSnapshotUnlessStale(
+        indexerWsClient,
+        dustAddress,
+        after,
+      );
+      if ('rejection' in afterOutcome) {
+        return skipWithReason(
+          ctx,
+          `growth boundary aged out of the freshness window before it could be compared: block ` +
+            `${after.height} refused (${afterOutcome.rejection}) — ${measurements}`,
+        );
+      }
+
+      const beforeHighestIndex = beforeOutcome.highestIndex;
+      const afterHighestIndex = afterOutcome.highestIndex;
       expect(
         beforeHighestIndex,
         `block ${before.height} should yield a strictly smaller snapshot than block ${after.height}`,
@@ -802,8 +848,8 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
       const tipBlock = await fetchBlock();
       const minimumTipHeight = OUT_OF_WINDOW_OFFSET + OUT_OF_WINDOW_MIN_MARGIN;
       if (tipBlock.height <= minimumTipHeight) {
-        return ctx.skip(
-          true,
+        return skipWithReason(
+          ctx,
           `chain is too short to address a block outside the freshness window: tip height ` +
             `${tipBlock.height}, needs more than ${minimumTipHeight}`,
         );
@@ -825,12 +871,12 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
       // introspection, so a clean completion means the indexer predates it rather
       // than that it regressed. Any other rejection reason is a real failure.
       if (outcome.failure === COMPLETED_WITHOUT_ERROR) {
-        const reason =
+        return skipWithReason(
+          ctx,
           `deployed indexer predates the snapshot freshness guard: a subscription at block ` +
-          `${staleBlock.height}, ${OUT_OF_WINDOW_OFFSET} blocks behind tip ${tipBlock.height}, ` +
-          `streamed a snapshot instead of being rejected`;
-        log.warn(reason);
-        return ctx.skip(true, reason);
+            `${staleBlock.height}, ${OUT_OF_WINDOW_OFFSET} blocks behind tip ` +
+            `${tipBlock.height}, streamed a snapshot instead of being rejected`,
+        );
       }
       expect(outcome.failure, 'the subscription should have surfaced a server error').toBeNull();
 
