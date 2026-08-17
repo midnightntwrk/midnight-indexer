@@ -35,10 +35,13 @@ use serde::Deserialize;
 use std::{
     collections::{HashSet, VecDeque},
     error::Error as StdError,
-    future::ready,
+    future::{pending, ready},
     num::NonZeroUsize,
     pin::pin,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{Duration, Instant},
 };
 use tokio::{
@@ -64,6 +67,22 @@ pub struct Config {
     /// is unpersisted. Must comfortably exceed indexer-api's block-hash snapshot reads, e.g.
     /// the dust generations subscription's max_snapshot_age, or those reads hit culled state.
     pub ledger_state_retention: NonZeroUsize,
+
+    /// How long the block-apply loop may make no progress, while the node has already finalized
+    /// blocks we have not applied yet, before the process exits so the orchestrator restarts it.
+    /// This recovers the silent apply-loop stall (e.g. a storage-core/DB deadlock) that otherwise
+    /// leaves the task alive with `/ready` latched, serving stale data indefinitely. Restarting is
+    /// the same recovery a manual pod restart performs.
+    ///
+    /// Keep this comfortably above the one-time hard-fork ledger translation, which is CPU-bound
+    /// and can run long on large state; raise it (or set "0s" to disable the watchdog) around a
+    /// known fork boundary.
+    #[serde(with = "humantime_serde", default = "default_stalled_apply_timeout")]
+    pub stalled_apply_timeout: Duration,
+}
+
+fn default_stalled_apply_timeout() -> Duration {
+    Duration::from_secs(180)
 }
 
 pub async fn run(
@@ -80,6 +99,7 @@ pub async fn run(
         caught_up_leeway,
         gc_bound,
         ledger_state_retention,
+        stalled_apply_timeout,
     } = config;
 
     // Get info from highest block.
@@ -182,6 +202,11 @@ pub async fn run(
 
     let highest_block_on_node = Arc::new(RwLock::new(None));
 
+    // Height of the most recently applied block, bumped by the index task after each block and
+    // read by the watchdog task below. Seeded with the resumed height so the watchdog's backlog
+    // check (node height vs. last indexed height) is correct before the first block is applied.
+    let last_indexed_height = Arc::new(AtomicU64::new(highest_block_height.unwrap_or(0)));
+
     // Spawn task to set info for highest block on node.
     let mut highest_block_on_node_task = task::spawn({
         let node = node.clone();
@@ -217,6 +242,8 @@ pub async fn run(
     // Spawn task to index blocks.
     let mut index_blocks_task = task::spawn({
         let node = node.clone();
+        let last_indexed_height = last_indexed_height.clone();
+        let highest_block_on_node = highest_block_on_node.clone();
 
         async move {
             let blocks = node_blocks(highest_block_ref, node.clone())
@@ -227,7 +254,7 @@ pub async fn run(
             let mut parent_block_timestamp = initial_parent_block_timestamp;
 
             loop {
-                let (next_ledger_state, new_ledger_state_key) = get_and_index_block(
+                let (next_ledger_state, new_ledger_state_key, height) = get_and_index_block(
                     caught_up_max_distance,
                     caught_up_leeway,
                     &mut blocks,
@@ -245,6 +272,9 @@ pub async fn run(
                 .await?;
 
                 ledger_state = next_ledger_state;
+
+                // Signal apply-loop progress to the watchdog task.
+                last_indexed_height.store(height, Ordering::Relaxed);
 
                 // Keep the newest ledger_state_retention keys persisted and unpersist the
                 // oldest beyond the window, each with the version it was persisted under
@@ -278,12 +308,69 @@ pub async fn run(
         }
     });
 
+    // Spawn watchdog task: the block-apply loop above can wedge alive (e.g. a storage-core/DB
+    // deadlock in the apply path) with no panic and no exit, while this process keeps polling the
+    // node and `/ready` stays latched on the last `BlockIndexed` event. Neither the supervising
+    // `select!` (fires only on panic/return) nor the node-side `subscription_recovery_timeout`
+    // (covers only the block stream) detects that. This watchdog turns such a stall into a
+    // recoverable error+exit — the same recovery a manual restart performs.
+    let mut watchdog_task = task::spawn({
+        let highest_block_on_node = highest_block_on_node.clone();
+        let last_indexed_height = last_indexed_height.clone();
+
+        async move {
+            // A zero timeout disables the watchdog; park forever so the `select!` ignores it.
+            if stalled_apply_timeout.is_zero() {
+                info!("block-apply watchdog disabled (stalled_apply_timeout is 0s)");
+                pending::<()>().await;
+                return Ok::<_, anyhow::Error>(());
+            }
+
+            // Poll well within the timeout so a stall is caught promptly once the window elapses.
+            let tick = (stalled_apply_timeout / 10).max(Duration::from_secs(1));
+            let mut ticker = tokio::time::interval(tick);
+            let mut last_seen_height = last_indexed_height.load(Ordering::Relaxed);
+            let mut last_progress_at = Instant::now();
+
+            loop {
+                ticker.tick().await;
+
+                let indexed_height = last_indexed_height.load(Ordering::Relaxed);
+                if indexed_height != last_seen_height {
+                    last_seen_height = indexed_height;
+                    last_progress_at = Instant::now();
+                    continue;
+                }
+
+                // No block applied since the last tick. Only a stall if the node has finalized
+                // blocks beyond what we have applied; a quiet node (no backlog) is not a stall.
+                let node_height = highest_block_on_node
+                    .read()
+                    .map(|BlockRef { height, .. }| height);
+                let stalled_for = last_progress_at.elapsed();
+                if apply_loop_stalled(
+                    stalled_for,
+                    stalled_apply_timeout,
+                    node_height,
+                    indexed_height,
+                ) {
+                    bail!(
+                        "block-apply loop stalled: no block applied for {stalled_for:?} while the \
+                         node advanced to {} (last indexed {indexed_height}); exiting to recover",
+                        node_height.unwrap_or_default()
+                    );
+                }
+            }
+        }
+    });
+
     select! {
         result = &mut highest_block_on_node_task => {
             let result = result
                 .context("highest_block_on_node_task panicked")
                 .and_then(|r| r.context("highest_block_on_node_task failed"));
             index_blocks_task.abort();
+            watchdog_task.abort();
             result
         },
 
@@ -292,6 +379,16 @@ pub async fn run(
                 .context("index_blocks_task panicked")
                 .and_then(|r: anyhow::Result<()>| r.context("index_blocks_task failed"));
             highest_block_on_node_task.abort();
+            watchdog_task.abort();
+            result
+        },
+
+        result = &mut watchdog_task => {
+            let result = result
+                .context("watchdog_task panicked")
+                .and_then(|r: anyhow::Result<()>| r.context("watchdog_task failed"));
+            highest_block_on_node_task.abort();
+            index_blocks_task.abort();
             result
         },
 
@@ -299,9 +396,24 @@ pub async fn run(
             warn!("SIGTERM received");
             highest_block_on_node_task.abort();
             index_blocks_task.abort();
+            watchdog_task.abort();
             Ok(())
         }
     }
+}
+
+/// Decide whether the block-apply loop has stalled: it has made no progress for at least
+/// `timeout`, and the node has finalized at least one block beyond the last applied height (so
+/// there is actual work being missed). A quiet node with no backlog is never treated as a stall,
+/// and a node height that trails the last indexed height (the two node subscriptions are
+/// independent and may be transiently out of order) does not trip it either.
+fn apply_loop_stalled(
+    stalled_for: Duration,
+    timeout: Duration,
+    node_height: Option<u64>,
+    last_indexed_height: u64,
+) -> bool {
+    stalled_for >= timeout && node_height.is_some_and(|height| height > last_indexed_height)
 }
 
 /// An infinite stream of node blocks, neither with duplicates, nor with gaps or otherwise
@@ -365,14 +477,15 @@ async fn get_and_index_block<E, N>(
     publisher: &impl Publisher,
     metrics: &Metrics,
     node: &N,
-) -> anyhow::Result<(LedgerState, SerializedLedgerStateKey)>
+) -> anyhow::Result<(LedgerState, SerializedLedgerStateKey, u64)>
 where
     E: StdError + Send + Sync + 'static,
     N: Node,
 {
     let block = get_next_block(blocks).await?;
+    let height = block.height;
 
-    let result = index_block(
+    let (ledger_state, ledger_state_key) = index_block(
         caught_up_max_distance,
         caught_up_leeway,
         block,
@@ -388,7 +501,7 @@ where
     )
     .await?;
 
-    Ok(result)
+    Ok((ledger_state, ledger_state_key, height))
 }
 
 #[trace]
@@ -735,7 +848,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{
-        application::node_blocks,
+        application::{apply_loop_stalled, node_blocks},
         domain::{
             BlockRef, SystemParametersChange,
             node::{self, Node},
@@ -750,7 +863,7 @@ mod tests {
         },
         error::BoxError,
     };
-    use std::{convert::Infallible, sync::LazyLock};
+    use std::{convert::Infallible, sync::LazyLock, time::Duration};
 
     #[tokio::test]
     async fn test_blocks() -> Result<(), BoxError> {
@@ -763,6 +876,32 @@ mod tests {
         assert_eq!(heights, vec![0, 1, 2, 3]);
 
         Ok(())
+    }
+
+    #[test]
+    fn test_apply_loop_stalled() {
+        let timeout = Duration::from_secs(180);
+        let short = Duration::from_secs(60);
+        let long = Duration::from_secs(200);
+
+        // Backlog present and stalled past the timeout: this is a stall.
+        assert!(apply_loop_stalled(long, timeout, Some(100), 90));
+
+        // Backlog present but not yet stalled long enough: not a stall.
+        assert!(!apply_loop_stalled(short, timeout, Some(100), 90));
+
+        // Stalled past the timeout but caught up (no backlog): a quiet node is not a stall.
+        assert!(!apply_loop_stalled(long, timeout, Some(90), 90));
+
+        // Node height trails the last indexed height (streams transiently out of order): not a
+        // stall.
+        assert!(!apply_loop_stalled(long, timeout, Some(80), 90));
+
+        // Node height not known yet: not a stall.
+        assert!(!apply_loop_stalled(long, timeout, None, 90));
+
+        // Exactly at the timeout boundary with a backlog: a stall.
+        assert!(apply_loop_stalled(timeout, timeout, Some(91), 90));
     }
 
     #[derive(Clone)]
