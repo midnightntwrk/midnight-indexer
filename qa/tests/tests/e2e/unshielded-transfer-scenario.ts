@@ -87,8 +87,8 @@ export interface UnshieldedTokenUnderTest {
    * Seed of the receiving wallet, which must be distinct from every other e2e suite's
    * destination. The e2e files run concurrently against one chain, so a shared
    * destination lets one suite's transfer show up in the other's event stream — and
-   * where a suite asserts that a wallet received no transaction event at all
-   * (wallet-subscriptions.test.ts does), that turns into a false failure over there.
+   * where a suite asserts that a wallet received no transaction event at all (the
+   * NIGHT suite's multi-destination tests do), that turns into a false failure.
    */
   destinationSeed: string;
   /**

@@ -16,7 +16,7 @@ These tests are slower than the other tests as submitting transactions to a Midn
 ### Transaction Tests
 - **Shielded Transactions**: Creates shielded token transfers between wallets and validates indexer reporting
 - **Unshielded Transactions**: One suite per unshielded token type, both sharing every test through `unshielded-transfer-scenario.ts` so the two token types cannot drift apart in coverage:
-  - `night-transactions.test.ts` — the native NIGHT token (1 STAR), plus the dust assertions that are NIGHT's alone, since a custom unshielded token generates no DUST
+  - `night-transactions.test.ts` — the native NIGHT token (1 STAR), plus the assertions that are NIGHT's alone: the dust activity of the transfer, since a custom unshielded token generates no DUST, and the address-subscription routing across several subscribed recipients, which only the funding wallet holds enough NIGHT to drive
   - `custom-unshielded-token-transactions.test.ts` — a custom, contract-minted unshielded token
 
 #### Provisioning the custom unshielded token

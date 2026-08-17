@@ -37,13 +37,15 @@ import {
 
 // Destination wallets are numbered per e2e suite (…e2e002 is the custom-token suite's) so
 // that no two suites share one — see `destinationSeed` in unshielded-transfer-scenario.ts.
-// The seed this suite used before, …987654321, is wallet-subscriptions.test.ts's first
+// The seed this suite used before, …987654321, is shielded-transactions.test.ts's
 // destination.
 const DESTINATION_SEED = '0000000000000000000000000000000000000000000000000000000000e2e001';
 
-// A second destination, subscribed on the same WS connection, so the multi-destination tests
-// below can assert the indexer routes each transfer to the intended recipient only.
-const SECOND_DESTINATION_SEED = '0000000000000000000000000000000000000000000000000000000123456789';
+// A second destination for this suite, subscribed on the same WS connection, so the
+// multi-destination tests below can assert the indexer routes each transfer to the intended
+// recipient only. It must stay unused elsewhere: those tests assert it receives no
+// transaction event at all.
+const SECOND_DESTINATION_SEED = '000000000000000000000000000000000000000000000000000000000e2e001b';
 
 /**
  * Validates that an unshielded transaction is reported consistently across the event streams of
@@ -372,10 +374,7 @@ describe('unshielded NIGHT transactions', { timeout: UNSHIELDED_TRANSFER_TIMEOUT
       );
 
       // Ensure B2 did not receive a UnshieldedTransaction event
-      const b2Tx = getEventsOfType(
-        scenario.wallet.destinations[1].events,
-        'UnshieldedTransaction',
-      );
+      const b2Tx = getEventsOfType(scenario.wallet.destinations[1].events, 'UnshieldedTransaction');
       expect(b2Tx.length).toBe(0);
 
       // B2 must at least show progress
