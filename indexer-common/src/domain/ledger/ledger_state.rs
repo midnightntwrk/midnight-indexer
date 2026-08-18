@@ -624,10 +624,21 @@ impl LedgerState {
                     whitelist: None,
                 };
 
+                // The node accumulates `block_fullness` from the *stateless* `cost`
+                // (midnight-node `Bridge::apply_transaction`), and fee prices derive
+                // from that accumulator via `post_block_update`. The indexer must
+                // match it exactly: with the state-aware cost, the accumulators
+                // diverge on the first contract call, fee prices drift, and any
+                // fee-dependent ledger value (e.g. registration-created dust
+                // outputs) is derived differently from consensus — poisoning every
+                // subsequently derived dust commitment (shielded-sre#515).
+                let fullness_cost = transaction
+                    .cost(&ledger_state.parameters, true)
+                    .map_err(|error| Error::TransactionCost(error.into()))?;
                 // The stateless `cost` estimates verifier-key sizes, under-costing
                 // contract calls; `cost_with_state` reads them from the ledger state.
-                // The ledger has no state-aware `fees`, so the fee is computed from
-                // the cost the same way `Transaction::fees` does.
+                // Kept for the reported `fees` only — informational, never fed back
+                // into consensus-relevant state.
                 let cost = transaction
                     .cost_with_state(&ledger_state.parameters, ledger_state, true)
                     .map_err(|error| Error::TransactionCost(error.into()))?;
@@ -670,7 +681,7 @@ impl LedgerState {
 
                 // Only count cost for successful/partial transactions (match node behavior)
                 let block_fullness = if should_count_cost {
-                    *block_fullness + cost
+                    *block_fullness + fullness_cost
                 } else {
                     *block_fullness
                 };
@@ -2504,6 +2515,44 @@ fn dag_is_complete(
 
 #[cfg(test)]
 mod tests {
+    /// Regression scaffold for the node/indexer block-fullness divergence
+    /// (shielded-sre#515): the node accumulates `block_fullness` from the
+    /// *stateless* `Transaction::cost`, and fee prices derive from that
+    /// accumulator, so the indexer must use the identical function. The two
+    /// cost functions only differ for transactions with contract operations
+    /// (verifier-key sizes are estimated statelessly but read from state by
+    /// `cost_with_state`), which is why this needs a contract-call fixture.
+    ///
+    /// To arm this test, generate with the contract tooling and commit:
+    ///   - `tests/contract_deploy_tx.raw` — a contract deployment
+    ///   - `tests/contract_call_tx.raw`   — a call to that contract
+    /// against `tests/genesis_state.raw`, then remove the `#[ignore]`.
+    ///
+    /// It then asserts, after applying both transactions:
+    ///   1. `cost(params, true)` != `cost_with_state(params, state, true)` for
+    ///      the call tx (the divergence vector exists), and
+    ///   2. the ledger state's accumulated `block_fullness` equals the sum of
+    ///      the *stateless* costs (node parity — the actual regression check).
+    ///
+    /// On-chain reproduction that motivated this: stagenet txs
+    /// 0733c136c3015043e7b20830b260f949d5d90baa35eb08bf30ea61ae81fbccae and
+    /// 3c0898a742853dc55375b5017e5136164c11e893ee4011e3f5cf326d53886ecb
+    /// (blocks 33532/33537) produced dust commitments diverging from the node
+    /// after contract calls in blocks 33513–33531 desynced fee prices.
+    #[test]
+    #[ignore = "requires contract deploy/call fixtures; see doc comment"]
+    fn block_fullness_uses_stateless_cost_node_parity() {
+        let deploy =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/contract_deploy_tx.raw");
+        let call =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/contract_call_tx.raw");
+        assert!(
+            deploy.exists() && call.exists(),
+            "contract fixtures missing — generate per the doc comment above"
+        );
+        unimplemented!("apply genesis + deploy + call; assert invariants 1 and 2 per doc comment");
+    }
+
     use crate::{
         domain::{
             AddressOrContract, LedgerEventAttributes, LedgerVersion,
