@@ -14,6 +14,7 @@
 // limitations under the License.
 
 import { env } from 'environment/model';
+import { retry } from '@utils/retry-helper';
 
 interface IntrospectedField {
   name: string;
@@ -31,10 +32,25 @@ interface IntrospectedField {
  * schema does not have this", so a failed request must never reach them as null:
  * that reports a feature as absent on evidence that says nothing about it.
  *
+ * A single blip is retried, since one lost request would otherwise fail every
+ * test a probing hook gates.
+ *
  * Uses native fetch (pattern of http-compression-probe) because the typed
  * IndexerHttpClient methods are bound to domain queries, not introspection.
  */
 async function introspectTypeFields(
+  typeName: string,
+  fieldSelection: string,
+): Promise<IntrospectedField[] | null> {
+  return retry(() => introspectTypeFieldsOnce(typeName, fieldSelection), {
+    maxRetries: 1,
+    delayMs: 1000,
+    retryLabel: `introspection of type ${typeName}`,
+  });
+}
+
+/** One introspection attempt. See `introspectTypeFields` for the contract. */
+async function introspectTypeFieldsOnce(
   typeName: string,
   fieldSelection: string,
 ): Promise<IntrospectedField[] | null> {
@@ -108,9 +124,20 @@ export async function isPerBlockDustRootsSupported(): Promise<boolean> {
  * field name and its event union are identical on both sides. Without this probe
  * the block-hash subscription document fails GraphQL validation on a pre-4.4
  * environment, turning a missing surface into a suite of hard failures.
+ *
+ * A probe that cannot run at all throws with its own name in the message: the
+ * suite gates every test on this one call, so a bare `TypeError: fetch failed`
+ * across twelve tests reads like a dustGenerations regression rather than an
+ * unreachable indexer.
  */
 export async function isBlockHashDustGenerationsSupported(): Promise<boolean> {
-  const fields = await introspectTypeFields('Subscription', 'args { name }');
+  const fields = await introspectTypeFields('Subscription', 'args { name }').catch((error) => {
+    throw new Error(
+      `dustGenerations surface probe failed against ${env.getIndexerHttpBaseURL()}: ` +
+        `${(error as Error).message}`,
+      { cause: error },
+    );
+  });
   const dustGenerations = fields?.find((f) => f.name === 'dustGenerations');
   return dustGenerations?.args?.some((arg) => arg.name === 'blockHash') ?? false;
 }
