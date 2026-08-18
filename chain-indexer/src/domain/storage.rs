@@ -39,6 +39,12 @@ where
         &self,
     ) -> Result<Option<(BlockRef, ProtocolVersion, SerializedLedgerStateKey)>, sqlx::Error>;
 
+    /// Get the timestamp (milliseconds) of the highest stored block, if any. Used on resume to seed
+    /// the parent-block timestamp, so the first block processed after a restart bumps its first
+    /// regular transaction's well-formed `tblock` off the true parent block time rather than off
+    /// its own timestamp (see chain-indexer's `apply_transactions`).
+    async fn get_highest_block_timestamp(&self) -> Result<Option<u64>, sqlx::Error>;
+
     /// Get the number of stored transactions.
     async fn get_transaction_count(&self) -> Result<u64, sqlx::Error>;
 

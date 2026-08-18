@@ -123,6 +123,23 @@ impl domain::storage::Storage for Storage {
     }
 
     #[trace]
+    async fn get_highest_block_timestamp(&self) -> Result<Option<u64>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT timestamp
+            FROM blocks
+            ORDER BY height DESC
+            LIMIT 1
+        "};
+
+        let timestamp = sqlx::query_as::<_, (i64,)>(query)
+            .fetch_optional(&*self.pool)
+            .await?
+            .map(|(timestamp,)| timestamp as u64);
+
+        Ok(timestamp)
+    }
+
+    #[trace]
     async fn get_transaction_count(&self) -> Result<u64, sqlx::Error> {
         let query = indoc! {"
             SELECT count(*)

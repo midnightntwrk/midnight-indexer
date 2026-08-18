@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.3.7] - 2026-08-17
+
+Ledger-v8 maintenance release for the mainnet line: `v4.3.3-hotfix` (the emergency build mainnet has
+been running) plus the dust-validity fix below. It keeps the runtime-upgrade enactment-block
+tolerance from that hotfix, so deploying it over the current mainnet build does not regress. Schema
+stays at 68 definitions / 4 migrations — no feature delta.
+
+Note the version ordering does NOT imply supersession of the feature work: 4.3.4, 4.3.5, and the
+unreleased 4.3.6 branch inadvertently carried 4.4.0-preview content (ledger v9, c2m-bridge, storage
+gc-v1, +36 GraphQL definitions, +4 migrations). That content belongs to the 4.4.0 line; this release
+deliberately excludes it.
+
+### 🐛 Bug Fixes
+
+- *(chain-indexer)* Avoid `OutOfDustValidityWindow`/`IntentTtlExpired` on the first regular transaction of a block by reproducing the node's mempool `tblock` bump off the parent block timestamp, and seed that timestamp from the highest stored block on restart (#1367, #1371)
+- *(chain-indexer)* Tolerate a runtime-upgrade enactment block in `get_contract_state` (consolidated from `v4.3.3-hotfix`)
+
 ## [4.3.3] - 2026-06-04
 
 ### 🚀 Features
