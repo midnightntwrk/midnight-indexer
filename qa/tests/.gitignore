@@ -24,3 +24,4 @@ xray_id.txt
 data/static/*/blocks.jsonc
 data/static/*/contract-actions.jsonc
 data/static/*/transactions.jsonc
+data/static/*/unshielded-token-types.jsonc

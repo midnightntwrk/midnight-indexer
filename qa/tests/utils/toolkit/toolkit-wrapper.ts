@@ -711,6 +711,8 @@ class ToolkitWrapper {
    * @param addressType - The address type to use
    * @param destinationAddress - The destination address to use
    * @param amount - The amount to use
+   * @param tokenType - Optional 32-byte hex token type to transfer. Omit for the
+   *                    toolkit default, which is the all-zeros native token (NIGHT).
    *
    * @returns The transaction result
    */
@@ -719,6 +721,7 @@ class ToolkitWrapper {
     addressType: AddressType,
     destinationAddress: string,
     amount: number,
+    tokenType?: string,
   ): Promise<ToolkitTransactionResult> {
     if (!this.startedContainer) {
       throw new Error('Container is not started. Call start() first.');
@@ -738,6 +741,7 @@ class ToolkitWrapper {
       destinationAddress,
       `--${addressType}-amount`,
       amount.toString(),
+      ...(tokenType ? [`--${addressType}-token-type`, tokenType] : []),
     ]);
 
     log.debug(`Generate single transaction output:\n${result.output}`);
