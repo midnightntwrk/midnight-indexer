@@ -138,7 +138,13 @@ source .envrc
 
 ### 4) Set versions
 
-By default, the node and indexer version to use will be determined based on the value in `NODE_VERSION` file and the SHA-1 of the commit where that file was updated (which indicates when a working indexer/node pair has been identified).
+When the `qa/scripts/startup-localenv-*.sh` scripts bring a local stack up, they derive
+the versions they were not given: `NODE_TAG` from the stable entry of
+[`NODE_VERSIONS`](../../NODE_VERSIONS) (the same entry the test framework picks, so node
+and toolkit agree), `NODE_TOOLKIT_TAG` paired with that node, and `INDEXER_TAG` from the
+newest published main build at or below the branch's base — main tags every push as
+`<version>-<sha8>`, and those per-commit tags live on GHCR, so `IMAGE_REGISTRY` is set to
+match the registry the image was found in.
 Alternatively, you can override versions before running tests, depending on the target environment.
 
 ### 4a) Toolkit fetch cache (Postgres)
