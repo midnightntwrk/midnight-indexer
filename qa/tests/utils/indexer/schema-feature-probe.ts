@@ -26,6 +26,11 @@ interface IntrospectedField {
  * the type does not exist. `fieldSelection` adds per-field sub-selections on top
  * of `name` (e.g. `description`, `args { name }`).
  *
+ * Throws when the introspection itself does not succeed — a non-2xx response, a
+ * GraphQL error, or a response carrying no `data`. Callers read null as "the
+ * schema does not have this", so a failed request must never reach them as null:
+ * that reports a feature as absent on evidence that says nothing about it.
+ *
  * Uses native fetch (pattern of http-compression-probe) because the typed
  * IndexerHttpClient methods are bound to domain queries, not introspection.
  */
@@ -45,10 +50,30 @@ async function introspectTypeFields(
     signal: AbortSignal.timeout(30_000),
   });
 
+  if (!response.ok) {
+    throw new Error(
+      `Introspection of type ${typeName} against ${url} returned HTTP ` +
+        `${response.status} ${response.statusText}`,
+    );
+  }
+
   const body = (await response.json()) as {
     data?: { __type?: { fields?: IntrospectedField[] } };
+    errors?: { message?: string }[];
   };
-  return body.data?.__type?.fields ?? null;
+
+  if (body.errors?.length) {
+    const messages = body.errors.map((error) => error.message ?? '<no message>').join('; ');
+    throw new Error(`Introspection of type ${typeName} against ${url} failed: ${messages}`);
+  }
+
+  if (body.data === undefined) {
+    throw new Error(`Introspection of type ${typeName} against ${url} returned no data`);
+  }
+
+  // Only now does null mean what the callers take it to mean: the schema served by
+  // this environment has no such type.
+  return body.data.__type?.fields ?? null;
 }
 
 /**
