@@ -16,6 +16,8 @@
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:net';
+import type { Readable } from 'node:stream';
+import { StringDecoder } from 'node:string_decoder';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { env } from 'environment/model';
@@ -69,8 +71,11 @@ const DIVERGENCE_PATTERN =
  * can bail out for reasons no phrase list enumerates - a wrong network id, for one,
  * fails with "malformed transaction: invalid network ID" and matches none of the
  * divergence patterns. Without this the run would report only an exit code.
+ *
+ * A main-thread panic takes the other exit: every binary installs a panic hook logging
+ * "process panicked", which never reaches the line above, so both are matched.
  */
-const FATAL_PATTERN = /process exited with ERROR/;
+const FATAL_PATTERN = /process exited with ERROR|process panicked/;
 
 /**
  * Pulls the offending block out of a mismatch line, matching the format strings in
@@ -78,6 +83,41 @@ const FATAL_PATTERN = /process exited with ERROR/;
  * it localises a divergence to a single block.
  */
 const MISMATCH_PATTERN = /(ledger|zswap) state root mismatch for block (\S+) at height (\d+)/i;
+
+/** Reassembles whole lines from a byte stream delivered in arbitrary chunks. */
+export interface LineAssembler {
+  push: (chunk: Buffer) => void;
+  flush: () => void;
+}
+
+/**
+ * Collect whole lines from chunked stream data.
+ *
+ * A `data` event carries a slice of bytes, not a line. Over a long run a boundary lands
+ * mid-line constantly, and treating each half as a complete line would split a bail-out
+ * phrase across two of them, so the line the failure report exists to surface would
+ * match nothing. The remainder is carried into the next chunk and flushed at the end.
+ *
+ * The decoder additionally holds back a partial multi-byte character, which a plain
+ * `chunk.toString()` would turn into replacement characters at a boundary.
+ */
+export function createLineAssembler(onLine: (line: string) => void): LineAssembler {
+  const decoder = new StringDecoder('utf8');
+  let pending = '';
+
+  return {
+    push(chunk: Buffer): void {
+      const lines = (pending + decoder.write(chunk)).split('\n');
+      pending = lines.pop() ?? '';
+      for (const line of lines) onLine(line);
+    },
+    flush(): void {
+      const rest = pending + decoder.end();
+      pending = '';
+      if (rest !== '') onLine(rest);
+    },
+  };
+}
 
 /** True when a log line reports a bail-out worth failing and reporting on. */
 export function isBailOutLine(line: string): boolean {
@@ -556,18 +596,26 @@ export class IndexerSyncHarness {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
-    const consume = (chunk: Buffer) => {
-      for (const line of chunk.toString().split('\n')) {
-        if (line.trim() === '') continue;
-        this.logBuffer.push(line);
-        if (this.logBuffer.length > LOG_BUFFER_LINES) this.logBuffer.shift();
-        this.inspectLine(line);
-      }
-    };
-
-    this.logStream.stdout?.on('data', consume);
-    this.logStream.stderr?.on('data', consume);
+    this.readLines(this.logStream.stdout);
+    this.readLines(this.logStream.stderr);
     this.logStream.on('error', () => undefined);
+  }
+
+  /** Feed a stream's chunks through a line assembler into the log buffer. */
+  private readLines(stream: Readable | null | undefined): void {
+    if (!stream) return;
+    // One assembler per stream: stdout and stderr arrive independently, so a shared
+    // remainder would splice one stream's partial line onto the other's.
+    const assembler = createLineAssembler((line) => this.acceptLine(line));
+    stream.on('data', (chunk: Buffer) => assembler.push(chunk));
+    stream.on('close', () => assembler.flush());
+  }
+
+  private acceptLine(line: string): void {
+    if (line.trim() === '') return;
+    this.logBuffer.push(line);
+    if (this.logBuffer.length > LOG_BUFFER_LINES) this.logBuffer.shift();
+    this.inspectLine(line);
   }
 
   private inspectLine(line: string): void {
