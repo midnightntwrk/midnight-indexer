@@ -11,6 +11,7 @@
     "test:e2e": "vitest run --project e2e",
     "test:smoke": "vitest run --project smoke",
     "test:integration": "vitest run --project integration",
+    "test:sync": "vitest run --project sync",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
     "coverage:generate": "bun ./coverage/src/cli.ts generate",
