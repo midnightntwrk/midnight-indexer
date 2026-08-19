@@ -28,11 +28,27 @@ if (process.env.TARGET_ENV === 'mainnet') {
   );
 }
 
+// `undeployed` resolves to ws://localhost:9944, which inside the indexer container is
+// the container itself: the run cannot succeed, and without this it fails only after
+// exhausting the node reconnect budget. Supporting it needs the node reached over the
+// host gateway or a shared docker network.
+if (process.env.TARGET_ENV === 'undeployed') {
+  throw new Error(
+    'TARGET_ENV=undeployed is not supported by the sync suite: its node URL is ' +
+      'localhost, which is not reachable from inside the indexer container. Point the ' +
+      'suite at a deployed chain instead.',
+  );
+}
+
 // Resolved here, in the main Vitest process, because a worker's stdout is a pipe:
 // `process.stdout.isTTY` inside a test is always falsy and would pin the reporter to
 // plain mode even in a terminal. `SYNC_PROGRESS` overrides the detection.
-const progressMode =
-  process.env.SYNC_PROGRESS ?? (process.env.CI || !process.stdout.isTTY ? 'plain' : 'live');
+//
+// Deliberately not block-scanner's `process.env.CI === "true"`: that misses runners
+// which set `CI=1`. Testing truthiness alone has the opposite fault, treating an
+// explicit `CI=false` as CI, so both spellings of "not CI" are excluded here.
+const ci = process.env.CI !== undefined && !['false', '0', ''].includes(process.env.CI);
+const progressMode = process.env.SYNC_PROGRESS ?? (ci || !process.stdout.isTTY ? 'plain' : 'live');
 
 export default defineConfig({
   test: {
