@@ -55,7 +55,19 @@ TARGET_ENV=qanet SYNC_INDEXER_TAG=4.3.7 MAX_BLOCKS=50000 MAX_DURATION_MS=7200000
 
 `TARGET_ENV` selects the **chain** (its RPC endpoint and network id come from
 `environment/model.ts`), not a deployed indexer — the indexer under test always runs
-locally from `qa/docker/docker-compose-sync.yaml`. `mainnet` is rejected.
+locally from `qa/docker/docker-compose-sync.yaml`.
+
+Two environments are rejected up front. `mainnet` is excluded from agent-run
+verification and has no host entry in the env model. `undeployed` resolves to
+`ws://localhost:9944`, which inside the indexer container is the container itself, so
+the run could only fail after exhausting the node reconnect budget; supporting it would
+mean reaching the node over the host gateway or joining the undeployed stack's docker
+network.
+
+The images are declared `pull_policy: always`, so the run always tests the published
+image for the tag rather than a local build that happens to share it — `just
+build-docker-image` tags local builds `:latest` and `:<short-sha>`, which compose would
+otherwise reuse from the local image store silently.
 
 The harness generates its own container secrets, so no `APP__INFRA__*` or
 `FUNDING_SEED*` setup is needed. The whole run is skipped when `SYNC_INDEXER_TAG`
@@ -65,7 +77,7 @@ is unset or `docker compose` is unavailable, so the unit-level cases still run.
 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `TARGET_ENV` | Yes | — | Chain to index: `undeployed`, `devnet`, `qanet`, `preview`, `preprod`, `stagenet`. `mainnet` is rejected. |
+| `TARGET_ENV` | Yes | — | Chain to index: `devnet`, `qanet`, `preview`, `preprod`, `stagenet`. `mainnet` and `undeployed` are rejected (see below). |
 | `SYNC_INDEXER_TAG` | Yes | — | Indexer image tag under test. Deliberately not `INDEXER_TAG`, which must not be set for deployed environments. |
 | `SYNC_TOPOLOGY` | No | `cloud` | `cloud` (chain-indexer + wallet-indexer + indexer-api + postgres + nats) or `standalone` (single container, SQLite). |
 | `SYNC_IMAGE_REGISTRY` | No | `midnightntwrk` | Image registry. |
@@ -100,7 +112,18 @@ blocks synced: 700/1000 (70%) | 2.2 blocks/s overall | 3.1 blocks/s (30s) | ETA:
 ```
 
 A poll interval can carry a run past its budget, so the block count may exceed the
-target; the percentage is capped at 100 rather than reading e.g. 105%.
+target; the percentage is capped at 100 rather than reading e.g. 105%. With a single
+observation there is no interval to average, so the 30-second rate renders as `--`
+rather than a misleading `0.0`.
+
+## Failure Reporting
+
+A failing run reports the last indexed height, the chain tip, any container exit code,
+the bail-out line matched in the logs and a log tail. Matched bail-out lines are held
+outside the tail's ring buffer, because with several containers logging at debug level a
+tail can span less time than one poll interval and would otherwise evict the very line
+that explains the failure. For a state root mismatch the offending block height is
+parsed out and named directly — that height is the point of the suite.
 
 ## Runtime Expectations
 

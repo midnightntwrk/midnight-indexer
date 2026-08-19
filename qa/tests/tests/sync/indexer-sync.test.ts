@@ -19,7 +19,9 @@ import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
 import {
   IndexerSyncHarness,
+  isBailOutLine,
   parseIndexerMetrics,
+  parseStateRootMismatch,
   readSyncOptions,
   syncPrerequisiteGap,
 } from '@utils/sync/harness';
@@ -31,6 +33,11 @@ import {
 } from '@utils/sync/progress-reporter';
 
 const prerequisiteGap = syncPrerequisiteGap();
+if (prerequisiteGap !== undefined) {
+  // Without this the only compatibility case disappears from a green run with no
+  // explanation, which is the worst possible default for a gate.
+  console.log(`[SYNC] Skipping the sync compatibility test: ${prerequisiteGap}.`);
+}
 
 // Fixed clock so the rate maths is deterministic.
 const START_MS = 1_000_000;
@@ -87,6 +94,27 @@ describe('indexer sync compatibility', () => {
     });
 
     /**
+     * One observation gives no interval to average over. Reporting 0 blocks/s there
+     * reads as a stall on the first line of every run, so the field is absent instead.
+     *
+     * @given a single height observation
+     * @when progress is derived from it
+     * @then no 30-second rate is reported and the line renders it as unavailable
+     */
+    test('should not report a 30-second rate from a single observation', (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Sync', 'Progress'] };
+
+      const stats = computeProgress(SAMPLES.slice(0, 1), 10_000, {
+        startHeight: 0,
+        maxBlocks: 1000,
+        startedAtMs: START_MS,
+      });
+
+      expect(stats.windowRate).toBeUndefined();
+      expect(formatProgressLine(stats)).toContain('-- blocks/s (30s)');
+    });
+
+    /**
      * `MAX_BLOCKS=0` is the opt-in to an unbounded run. It must be read as "no bound,
      * sync to the chain tip", never as a budget of zero blocks.
      *
@@ -114,42 +142,130 @@ describe('indexer sync compatibility', () => {
     });
 
     /**
-     * The indexer publishes none of its height metrics until the first block batch is
-     * processed, so a freshly started container serves a body without them. An absent
-     * metric means "not known yet" — reading it as height 0 would make a stalled
-     * indexer look like a healthy one at the start of a chain.
+     * Height must not be invented before the indexer reports one: treating an unknown
+     * height as 0 would make a stalled indexer look like a healthy one at the start of
+     * a chain.
      *
-     * @given a metrics body carrying only unrelated counters
-     * @when the height metrics are read and progress is derived from no observations
-     * @then no height, tip or caught-up state is reported, the rates stay at zero, and
-     *       the line says it is still waiting rather than claiming 0%
+     * @given no height observations yet
+     * @when progress is derived
+     * @then no height is reported, the overall rate stays at zero, and the line says it
+     *       is still waiting rather than claiming 0%
      */
-    test('should report no height until the indexer publishes its first metrics', (ctx: TestContext) => {
+    test('should report no height before the indexer reports one', (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Sync', 'Progress'] };
-
-      const silent = ['# TYPE indexer_transaction_count counter', 'indexer_transaction_count 0'];
-      const empty = parseIndexerMetrics(silent.join('\n'));
-      expect(empty.blockHeight).toBeUndefined();
-      expect(empty.nodeBlockHeight).toBeUndefined();
-      expect(empty.caughtUp).toBeUndefined();
 
       const stats = computeProgress([], undefined, {
         startHeight: 0,
         maxBlocks: 1000,
         startedAtMs: START_MS,
       });
+
       expect(stats.height).toBeUndefined();
       expect(stats.synced).toBe(0);
       expect(stats.overallRate).toBe(0);
-      expect(stats.windowRate).toBe(0);
+      expect(stats.windowRate).toBeUndefined();
       expect(formatProgressLine(stats)).toBe('waiting for the indexer to report a height...');
+    });
+  });
 
-      const reporting = parseIndexerMetrics(
+  describe('reading the indexer progress metrics', () => {
+    /**
+     * None of the height metrics are published until the first block batch is
+     * processed, so a freshly started container serves a body without them.
+     *
+     * @given a metrics body carrying only unrelated counters
+     * @when the progress metrics are read from it
+     * @then no height, node height or caught-up state is reported
+     */
+    test('should report nothing from a body without the height metrics', (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Sync', 'Progress'] };
+
+      const metrics = parseIndexerMetrics(
+        ['# TYPE indexer_transaction_count counter', 'indexer_transaction_count 0'].join('\n'),
+      );
+
+      expect(metrics.blockHeight).toBeUndefined();
+      expect(metrics.nodeBlockHeight).toBeUndefined();
+      expect(metrics.caughtUp).toBeUndefined();
+    });
+
+    /**
+     * @given a metrics body reporting height 512, node height 4096 and caught up
+     * @when the progress metrics are read from it
+     * @then all three values are reported, with the caught-up gauge read as a boolean
+     */
+    test('should report height, node height and caught-up state when published', (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Sync', 'Progress'] };
+
+      const metrics = parseIndexerMetrics(
         ['indexer_block_height 512', 'indexer_node_block_height 4096', 'indexer_caught_up 1'].join(
           '\n',
         ),
       );
-      expect(reporting).toEqual({ blockHeight: 512, nodeBlockHeight: 4096, caughtUp: true });
+
+      expect(metrics).toEqual({ blockHeight: 512, nodeBlockHeight: 4096, caughtUp: true });
+    });
+  });
+
+  describe('recognising a bail-out in the container logs', () => {
+    /**
+     * Naming the offending block is the point of the suite, so the height has to come
+     * out of the log line rather than being left for a reader to find.
+     *
+     * @given a zswap state root mismatch logged for block 9df3eda7 at height 15616
+     * @when the line is read
+     * @then it counts as a bail-out and the offending block and height are reported
+     */
+    test('should name the offending block of a state root mismatch', (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Sync', 'Negative'] };
+
+      const line =
+        'chain-indexer-1  | zswap state root mismatch for block 9df3eda7 at height 15616: ' +
+        'node=Some(00df7a18), indexer=Some(009e6bae)';
+
+      expect(isBailOutLine(line)).toBe(true);
+      expect(parseStateRootMismatch(line)).toEqual({
+        kind: 'zswap state root',
+        block: '9df3eda7',
+        height: 15616,
+        line,
+      });
+    });
+
+    /**
+     * An incompatible image can bail out for reasons no phrase list enumerates, so the
+     * fatal line every binary logs on its way out has to count too. This is a real line
+     * captured from chain-indexer 4.3.7 pointed at a chain with a mismatched network id.
+     *
+     * @given the fatal exit line of an indexer rejecting a transaction's network id
+     * @when the line is read
+     * @then it counts as a bail-out even though it names no state root
+     */
+    test('should recognise a fatal exit that names no state root', (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Sync', 'Negative'] };
+
+      const line =
+        'chain-indexer-1  | {"level":"ERROR","target":"chain_indexer",' +
+        '"message":"process exited with ERROR","kvs":{"error":"index_blocks_task failed: ' +
+        'apply transactions to ledger state: malformed transaction: invalid network ID - ' +
+        "expect 'devnet' found 'qanet'\"}}";
+
+      expect(isBailOutLine(line)).toBe(true);
+      expect(parseStateRootMismatch(line)).toBeUndefined();
+    });
+
+    /**
+     * @given an ordinary block-indexed line
+     * @when the line is read
+     * @then it is not treated as a bail-out
+     */
+    test('should not treat a routine log line as a bail-out', (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Sync', 'Negative'] };
+
+      const line = 'chain-indexer-1  | {"level":"INFO","message":"block indexed","height":58}';
+
+      expect(isBailOutLine(line)).toBe(false);
+      expect(parseStateRootMismatch(line)).toBeUndefined();
     });
   });
 
@@ -199,12 +315,17 @@ describe('indexer sync compatibility', () => {
           result.mismatch &&
             `${result.mismatch.kind} mismatch at height ${result.mismatch.height} ` +
               `(block ${result.mismatch.block})`,
+          result.failure && `bail-out line:\n${result.failure}`,
           result.logTail.length > 0 && `log tail:\n${result.logTail.join('\n')}`,
         ]
           .filter(Boolean)
           .join('\n');
 
+        // Most specific first, so the message names the divergence and not its symptom.
+        // `failure` covers the bail-outs carrying no block height of their own, such as
+        // a failed ledger state translation.
         expect(result.mismatch, `state root divergence\n${detail}`).toBeUndefined();
+        expect(result.failure, `indexer bailed out\n${detail}`).toBeUndefined();
         expect(
           result.exit,
           `indexer stopped before reaching its target\n${detail}`,
