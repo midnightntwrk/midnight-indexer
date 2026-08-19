@@ -21,11 +21,10 @@ import { defineConfig } from 'vitest/config';
 // NOTHING here may throw. The root `vitest.config.ts` lists this file in `test.projects`,
 // and Vitest resolves every project config before it applies `--project` filtering, so a
 // module-scope throw fails `test:smoke`, `test:integration` and `test:e2e` too - runs
-// that never asked for the sync project. An earlier revision rejected unsupported values
-// of TARGET_ENV here and broke every undeployed suite, including CI.
+// that never asked for the sync project, and the undeployed CI jobs with them.
 //
-// Environments this suite cannot serve are rejected from `readSyncOptions()` instead, so
-// the error lands on the sync test and only when it actually runs.
+// Environments this suite cannot serve are rejected from the sync test file instead,
+// which Vitest loads only for this project, so the error lands on the sync suite alone.
 
 // Resolved here, in the main Vitest process, because a worker's stdout is a pipe:
 // `process.stdout.isTTY` inside a test is always falsy and would pin the reporter to
