@@ -210,6 +210,7 @@ function parseIntOption(
  * "must not be set for deployed environments".
  */
 export function readSyncOptions(): SyncHarnessOptions {
+  assertSyncEnvironmentSupported();
   // Single source of truth for preconditions: the suite skips on this, and a direct
   // caller gets the same explanation as an error rather than a second, divergent check.
   const gap = syncPrerequisiteGap();
@@ -259,13 +260,33 @@ export function readSyncOptions(): SyncHarnessOptions {
 }
 
 /**
+ * Reject an environment this suite cannot serve.
+ *
+ * A hard error rather than a skip: asking for an environment the suite cannot index
+ * deserves to fail, not to pass quietly having tested nothing. It lives here rather than
+ * in the project config because that config is resolved on every Vitest invocation, so
+ * throwing there breaks suites that never asked for the sync project.
+ *
+ * `mainnet` cannot be caught here at all: it has no host entry, so `environment/model`
+ * throws while being imported, before any of this runs - exactly as it does for every
+ * other suite in the framework.
+ */
+export function assertSyncEnvironmentSupported(): void {
+  if (env.isUndeployedEnv()) {
+    throw new Error(
+      'TARGET_ENV=undeployed is not supported by the sync suite: its node URL is ' +
+        'localhost, which inside the indexer container is the container itself. Point ' +
+        'the suite at a deployed chain, or reach the node over the host gateway.',
+    );
+  }
+}
+
+/**
  * Why a sync cannot run here, or undefined when it can. These are the gaps a developer
  * can close, so the suite skips on them and says so rather than failing.
  *
- * Unsupported values of `TARGET_ENV` are deliberately NOT checked here: `mainnet` and
- * `undeployed` are rejected outright in `vitest.config.sync.ts`, before the environment
- * model is even constructed, because asking for an environment the suite cannot serve
- * deserves a hard error rather than a green run that quietly tested nothing.
+ * Unsupported values of `TARGET_ENV` are deliberately NOT reported here: they are a hard
+ * error from `assertSyncEnvironmentSupported()`, not something to skip over.
  */
 export function syncPrerequisiteGap(): string | undefined {
   if (!process.env.SYNC_INDEXER_TAG?.trim()) {
