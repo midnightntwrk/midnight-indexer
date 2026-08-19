@@ -51,14 +51,18 @@ where
     /// Kubernetes Secret files. Sources are merged in ascending precedence: config file, secret
     /// files, environment variables.
     fn load() -> Result<Self, Box<figment::Error>> {
+        let path = env::var(CONFIG_FILE).unwrap_or_else(|_| "config.yaml".to_owned());
+        Self::load_from(path)
+    }
+
+    /// Load configuration from `path`, retaining the same secret-file and environment overlays as
+    /// [`ConfigExt::load`]. This lets an embedding process select the indexer configuration without
+    /// mutating the process-wide `CONFIG_FILE` environment variable.
+    fn load_from(path: impl AsRef<Path>) -> Result<Self, Box<figment::Error>> {
         warn_about_env_secrets();
 
-        let config_file = env::var(CONFIG_FILE)
-            .map(Yaml::file_exact)
-            .unwrap_or(Yaml::file_exact("config.yaml"));
-
         let config = Figment::new()
-            .merge(config_file)
+            .merge(Yaml::file_exact(path))
             .merge(SecretFiles::from_env())
             .merge(Env::prefixed(ENV_PREFIX).split(ENV_SEPARATOR))
             .extract()?;
