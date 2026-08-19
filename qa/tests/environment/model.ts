@@ -304,6 +304,17 @@ export class Environment {
     return `${this.wsProtocol}://${this.nodeHost}`;
   }
 
+  /**
+   * HTTP base URL of the node's Substrate JSON-RPC endpoint.
+   *
+   * Substrate serves JSON-RPC over both WebSocket and HTTP on the same host, and
+   * one-shot calls (chain tip, block hash) are cheaper over HTTP than standing up
+   * a socket. Callers previously derived this by rewriting the ws:// URL inline.
+   */
+  getNodeHttpBaseURL(): string {
+    return `${this.httpProtocol}://${this.nodeHost}`;
+  }
+
   getNodeVersion(): string {
     return this.nodeTag;
   }
