@@ -57,12 +57,19 @@ TARGET_ENV=qanet SYNC_INDEXER_TAG=4.3.7 MAX_BLOCKS=50000 MAX_DURATION_MS=7200000
 `environment/model.ts`), not a deployed indexer — the indexer under test always runs
 locally from `qa/docker/docker-compose-sync.yaml`.
 
-Two environments are rejected up front. `mainnet` is excluded from agent-run
-verification and has no host entry in the env model. `undeployed` resolves to
-`ws://localhost:9944`, which inside the indexer container is the container itself, so
-the run could only fail after exhausting the node reconnect budget; supporting it would
-mean reaching the node over the host gateway or joining the undeployed stack's docker
-network.
+`undeployed` is rejected: it resolves to `ws://localhost:9944`, which inside the indexer
+container is the container itself, so the run could only fail after exhausting the node
+reconnect budget. Supporting it would mean reaching the node over the host gateway or
+joining the undeployed stack's docker network.
+
+That rejection is raised from the run itself, not from the project config. The root
+`vitest.config.ts` lists this project, and Vitest resolves every project config before
+it applies `--project` filtering, so anything thrown at a config's module scope breaks
+`test:smoke`, `test:integration` and `test:e2e` as well — runs that never asked for the
+sync project. Keep this project's config free of throws.
+
+`mainnet` needs no rejection here: it has no host entry, so `environment/model.ts` throws
+while being imported. That applies to every suite in the framework, not just this one.
 
 The images are declared `pull_policy: always`, so the run always tests the published
 image for the tag rather than a local build that happens to share it — `just
@@ -77,7 +84,7 @@ is unset or `docker compose` is unavailable, so the unit-level cases still run.
 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `TARGET_ENV` | Yes | — | Chain to index: `devnet`, `qanet`, `preview`, `preprod`, `stagenet`. `mainnet` and `undeployed` are rejected (see below). |
+| `TARGET_ENV` | Yes | — | Chain to index: `devnet`, `qanet`, `preview`, `preprod`, `stagenet`. `undeployed` is rejected (see below); `mainnet` is unusable framework-wide. |
 | `SYNC_INDEXER_TAG` | Yes | — | Indexer image tag under test. Deliberately not `INDEXER_TAG`, which must not be set for deployed environments. |
 | `SYNC_TOPOLOGY` | No | `cloud` | `cloud` (chain-indexer + wallet-indexer + indexer-api + postgres + nats) or `standalone` (single container, SQLite). |
 | `SYNC_IMAGE_REGISTRY` | No | `midnightntwrk` | Image registry. |

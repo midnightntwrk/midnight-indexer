@@ -18,27 +18,14 @@ import { defineConfig } from 'vitest/config';
 
 // Sync test configuration - starts a local indexer against a remote chain.
 //
-// `mainnet` is rejected here rather than in the suite: `environment/model.ts` exports
-// `env` as a module-level singleton, so importing anything from the test file already
-// throws for an environment with no host entry. This runs first and explains why.
-if (process.env.TARGET_ENV === 'mainnet') {
-  throw new Error(
-    'TARGET_ENV=mainnet is not supported by the sync suite. It is excluded from ' +
-      'agent-run verification and has no host entry in environment/model.ts.',
-  );
-}
-
-// `undeployed` resolves to ws://localhost:9944, which inside the indexer container is
-// the container itself: the run cannot succeed, and without this it fails only after
-// exhausting the node reconnect budget. Supporting it needs the node reached over the
-// host gateway or a shared docker network.
-if (process.env.TARGET_ENV === 'undeployed') {
-  throw new Error(
-    'TARGET_ENV=undeployed is not supported by the sync suite: its node URL is ' +
-      'localhost, which is not reachable from inside the indexer container. Point the ' +
-      'suite at a deployed chain instead.',
-  );
-}
+// NOTHING here may throw. The root `vitest.config.ts` lists this file in `test.projects`,
+// and Vitest resolves every project config before it applies `--project` filtering, so a
+// module-scope throw fails `test:smoke`, `test:integration` and `test:e2e` too - runs
+// that never asked for the sync project. An earlier revision rejected unsupported values
+// of TARGET_ENV here and broke every undeployed suite, including CI.
+//
+// Environments this suite cannot serve are rejected from `readSyncOptions()` instead, so
+// the error lands on the sync test and only when it actually runs.
 
 // Resolved here, in the main Vitest process, because a worker's stdout is a pipe:
 // `process.stdout.isTTY` inside a test is always falsy and would pin the reporter to
