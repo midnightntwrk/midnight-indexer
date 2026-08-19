@@ -15,6 +15,7 @@
 
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { createServer } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { env } from 'environment/model';
@@ -39,24 +40,61 @@ export const DEFAULT_MAX_DURATION_MS = 30 * 60_000;
 
 const DEFAULT_API_PORT = 8188;
 const DEFAULT_METRICS_PORT = 9100;
+const DEFAULT_POSTGRES_PORT = 5433;
+const DEFAULT_NATS_PORT = 4422;
 const POLL_INTERVAL_MS = 5_000;
+/** Live-line redraw cadence, so the spinner animates between polls. */
+const SPINNER_REFRESH_MS = 120;
 const METRICS_TIMEOUT_MS = 5_000;
-const LOG_BUFFER_LINES = 400;
-const LOG_TAIL_LINES = 40;
+// The buffer must comfortably outlast one poll interval: three containers on debug
+// logging emit tens of lines a second, and a 40-line tail was measured spanning under
+// two seconds - short enough to evict the very line that explains a failure.
+const LOG_BUFFER_LINES = 4000;
+const LOG_TAIL_LINES = 80;
+/** Matched bail-out lines are kept apart from the tail so they can never be evicted. */
+const MAX_FAILURE_LINES = 20;
 
 /**
- * Failure lines chain-indexer bails out with. Kept identical to the set
- * `qa/scripts/test-hardfork-8to9.sh` greps for, so both surfaces agree on what
- * counts as a divergence.
+ * Divergence bail-outs. Kept identical to the set `qa/scripts/test-hardfork-8to9.sh`
+ * greps for, so both surfaces agree on what counts as a divergence.
  */
-const FAILURE_PATTERN =
+const DIVERGENCE_PATTERN =
   /ledger state root mismatch|zswap state root mismatch|translate ledger state/i;
 
 /**
- * Pulls the offending block out of a mismatch line. The height is the product of
- * this whole suite: it localises a divergence to a single block.
+ * The line every indexer binary logs on its way out (see each crate's `main.rs`),
+ * carrying the fatal error in its `error` field.
+ *
+ * Matching on it as well as on the divergence phrases matters: an incompatible image
+ * can bail out for reasons no phrase list enumerates - a wrong network id, for one,
+ * fails with "malformed transaction: invalid network ID" and matches none of the
+ * divergence patterns. Without this the run would report only an exit code.
+ */
+const FATAL_PATTERN = /process exited with ERROR/;
+
+/**
+ * Pulls the offending block out of a mismatch line, matching the format strings in
+ * `chain-indexer/src/application.rs`. The height is the product of this whole suite:
+ * it localises a divergence to a single block.
  */
 const MISMATCH_PATTERN = /(ledger|zswap) state root mismatch for block (\S+) at height (\d+)/i;
+
+/** True when a log line reports a bail-out worth failing and reporting on. */
+export function isBailOutLine(line: string): boolean {
+  return FATAL_PATTERN.test(line) || DIVERGENCE_PATTERN.test(line);
+}
+
+/** The offending block named by a state root mismatch line, if it is one. */
+export function parseStateRootMismatch(line: string): StateRootMismatch | undefined {
+  const match = MISMATCH_PATTERN.exec(line);
+  if (match === null) return undefined;
+  return {
+    kind: `${match[1].toLowerCase()} state root`,
+    block: match[2],
+    height: Number(match[3]),
+    line,
+  };
+}
 
 export type SyncTopology = 'cloud' | 'standalone';
 
@@ -73,10 +111,13 @@ export interface SyncHarnessOptions {
   maxDurationMs: number;
   apiPort: number;
   metricsPort: number;
+  postgresPort: number;
+  natsPort: number;
   progressMode: ProgressMode;
 }
 
-export type SyncOutcome = 'caught-up' | 'budget-reached' | 'timed-out' | 'exited';
+/** `failed` covers both a non-zero container exit and a bail-out line in the logs. */
+export type SyncOutcome = 'caught-up' | 'budget-reached' | 'timed-out' | 'failed';
 
 export interface ServiceExit {
   service: string;
@@ -99,6 +140,8 @@ export interface SyncRunResult {
   elapsedMs: number;
   exit?: ServiceExit;
   mismatch?: StateRootMismatch;
+  /** The bail-out line that ended the run, when one was matched in the logs. */
+  failure?: string;
   logTail: string[];
 }
 
@@ -139,11 +182,21 @@ export function parseIndexerMetrics(body: string): IndexerMetrics {
   };
 }
 
-function parsePositiveInt(raw: string | undefined, fallback: number, name: string): number {
+/**
+ * Parse an integer option with an explicit floor. Only `MAX_BLOCKS` accepts 0, where it
+ * is the documented "unbounded" sentinel; a 0 duration would time a run out instantly
+ * and a 0 port would bind a random one the harness could then never scrape.
+ */
+function parseIntOption(
+  raw: string | undefined,
+  fallback: number,
+  name: string,
+  min: number,
+): number {
   if (raw === undefined || raw.trim() === '') return fallback;
   const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed < 0) {
-    throw new Error(`${name} must be a non-negative integer, got: ${JSON.stringify(raw)}`);
+  if (!Number.isInteger(parsed) || parsed < min) {
+    throw new Error(`${name} must be an integer >= ${min}, got: ${JSON.stringify(raw)}`);
   }
   return parsed;
 }
@@ -157,12 +210,13 @@ function parsePositiveInt(raw: string | undefined, fallback: number, name: strin
  * "must not be set for deployed environments".
  */
 export function readSyncOptions(): SyncHarnessOptions {
-  const indexerTag = process.env.SYNC_INDEXER_TAG?.trim();
-  if (!indexerTag) {
-    throw new Error(
-      'SYNC_INDEXER_TAG is required: it names the indexer image tag whose sync is under test.',
-    );
+  // Single source of truth for preconditions: the suite skips on this, and a direct
+  // caller gets the same explanation as an error rather than a second, divergent check.
+  const gap = syncPrerequisiteGap();
+  if (gap !== undefined) {
+    throw new Error(`Cannot run a sync: ${gap}.`);
   }
+  const indexerTag = process.env.SYNC_INDEXER_TAG!.trim();
 
   const topology = (process.env.SYNC_TOPOLOGY?.trim() || 'cloud') as SyncTopology;
   if (!TOPOLOGIES.includes(topology)) {
@@ -178,29 +232,59 @@ export function readSyncOptions(): SyncHarnessOptions {
     nodeUrl: env.getNodeWebsocketBaseURL(),
     networkId: env.getNetworkId(),
     // 0 is the documented "unbounded" sentinel, not an empty budget.
-    maxBlocks: parsePositiveInt(process.env.MAX_BLOCKS, DEFAULT_MAX_BLOCKS, 'MAX_BLOCKS'),
-    maxDurationMs: parsePositiveInt(
+    // 0 is the documented "unbounded" sentinel here, and only here.
+    maxBlocks: parseIntOption(process.env.MAX_BLOCKS, DEFAULT_MAX_BLOCKS, 'MAX_BLOCKS', 0),
+    maxDurationMs: parseIntOption(
       process.env.MAX_DURATION_MS,
       DEFAULT_MAX_DURATION_MS,
       'MAX_DURATION_MS',
+      1000,
     ),
-    apiPort: parsePositiveInt(process.env.SYNC_API_PORT, DEFAULT_API_PORT, 'SYNC_API_PORT'),
-    metricsPort: parsePositiveInt(
+    apiPort: parseIntOption(process.env.SYNC_API_PORT, DEFAULT_API_PORT, 'SYNC_API_PORT', 1),
+    metricsPort: parseIntOption(
       process.env.SYNC_METRICS_PORT,
       DEFAULT_METRICS_PORT,
       'SYNC_METRICS_PORT',
+      1,
     ),
+    postgresPort: parseIntOption(
+      process.env.SYNC_POSTGRES_PORT,
+      DEFAULT_POSTGRES_PORT,
+      'SYNC_POSTGRES_PORT',
+      1,
+    ),
+    natsPort: parseIntOption(process.env.SYNC_NATS_PORT, DEFAULT_NATS_PORT, 'SYNC_NATS_PORT', 1),
     progressMode: process.env.SYNC_PROGRESS === 'live' ? 'live' : 'plain',
   };
 }
 
-/** Why the suite cannot run here, or undefined when it can. */
+/**
+ * Why a sync cannot run here, or undefined when it can. These are the gaps a developer
+ * can close, so the suite skips on them and says so rather than failing.
+ *
+ * Unsupported values of `TARGET_ENV` are deliberately NOT checked here: `mainnet` and
+ * `undeployed` are rejected outright in `vitest.config.sync.ts`, before the environment
+ * model is even constructed, because asking for an environment the suite cannot serve
+ * deserves a hard error rather than a green run that quietly tested nothing.
+ */
 export function syncPrerequisiteGap(): string | undefined {
-  if (!process.env.SYNC_INDEXER_TAG?.trim()) return 'SYNC_INDEXER_TAG is not set';
+  if (!process.env.SYNC_INDEXER_TAG?.trim()) {
+    return 'SYNC_INDEXER_TAG is not set, so there is no indexer version to test';
+  }
   if (spawnSync('docker', ['compose', 'version'], { stdio: 'ignore' }).status !== 0) {
     return 'docker compose is not available';
   }
   return undefined;
+}
+
+/** True when nothing is listening on the given host port. */
+async function isPortFree(port: number): Promise<boolean> {
+  return await new Promise((resolve) => {
+    const server = createServer();
+    server.once('error', () => resolve(false));
+    server.once('listening', () => server.close(() => resolve(true)));
+    server.listen(port, '127.0.0.1');
+  });
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -220,10 +304,16 @@ export class IndexerSyncHarness {
   private readonly rpc: NodeRpcClient;
   private readonly secrets: Record<string, string>;
   private readonly logBuffer: string[] = [];
+  private readonly failureLines: string[] = [];
   private startedByUs = false;
   private logStream?: ChildProcess;
   private mismatch?: StateRootMismatch;
-  private failureLine?: string;
+  /** Torn down on SIGINT/SIGTERM so an interrupted run does not leak its stack. */
+  private readonly onSignal = (signal: string) => {
+    console.warn(`\n[SYNC] ${signal} received - tearing down the stack.`);
+    this.teardown();
+    process.exit(130);
+  };
 
   constructor(private readonly options: SyncHarnessOptions) {
     this.project = `midnight-indexer-sync-${options.topology}-${process.pid}`;
@@ -254,6 +344,11 @@ export class IndexerSyncHarness {
         `indexing ${this.options.nodeUrl} as network '${this.options.networkId}'.`,
     );
 
+    await this.assertPortsFree();
+
+    process.on('SIGINT', this.onSignal);
+    process.on('SIGTERM', this.onSignal);
+
     const result = spawnSync('docker', this.composeArgs(['up', '-d']), {
       env: this.composeEnv(),
       stdio: 'inherit',
@@ -283,48 +378,59 @@ export class IndexerSyncHarness {
     let nodeTip: number | undefined;
     let caughtUp = false;
 
-    for (;;) {
-      const metrics = await this.scrapeMetrics();
-      height = metrics.blockHeight ?? height;
-      caughtUp = metrics.caughtUp ?? false;
-      // Prefer the tip the indexer itself sees; fall back to the node directly while
-      // the metrics endpoint is still silent.
-      nodeTip = metrics.nodeBlockHeight ?? (await this.chainTip()) ?? nodeTip;
+    // The poll interval is far longer than a spinner frame, so the live line is
+    // redrawn between polls to stay animated. No-op in plain mode.
+    const animation = setInterval(() => reporter.refresh(nodeTip), SPINNER_REFRESH_MS);
 
-      reporter.update(height, nodeTip);
+    try {
+      for (;;) {
+        const metrics = await this.scrapeMetrics();
+        height = metrics.blockHeight ?? height;
+        caughtUp = metrics.caughtUp ?? false;
+        // Prefer the tip the indexer itself sees; fall back to the node directly while
+        // the metrics endpoint is still silent.
+        nodeTip = metrics.nodeBlockHeight ?? (await this.chainTip()) ?? nodeTip;
 
-      const exit = this.exitedService();
-      if (exit !== undefined || this.failureLine !== undefined) {
-        outcome = 'exited';
-        reporter.clear();
-        return {
-          outcome,
-          startHeight,
-          height,
-          nodeTip,
-          caughtUp,
-          elapsedMs: Date.now() - startedAtMs,
-          exit,
-          mismatch: this.mismatch,
-          logTail: this.logTail(),
-        };
-      }
+        reporter.update(height, nodeTip);
 
-      if (caughtUp) {
-        outcome = 'caught-up';
-        break;
-      }
-      const synced = height === undefined ? undefined : height - startHeight;
-      if (maxBlocks !== UNBOUNDED_MAX_BLOCKS && synced !== undefined && synced >= maxBlocks) {
-        outcome = 'budget-reached';
-        break;
-      }
-      if (Date.now() - startedAtMs >= maxDurationMs) {
-        outcome = 'timed-out';
-        break;
-      }
+        const exit = this.exitedService();
+        const failure = this.failureLines[0];
+        if (exit !== undefined || failure !== undefined) {
+          outcome = 'failed';
+          reporter.clear();
+          console.log(`[SYNC] ${outcome}: ${reporter.summary(nodeTip)}`);
+          return {
+            outcome,
+            startHeight,
+            height,
+            nodeTip,
+            caughtUp,
+            elapsedMs: Date.now() - startedAtMs,
+            exit,
+            mismatch: this.mismatch,
+            failure,
+            logTail: this.logTail(exit?.service),
+          };
+        }
 
-      await sleep(POLL_INTERVAL_MS);
+        if (caughtUp) {
+          outcome = 'caught-up';
+          break;
+        }
+        const synced = height === undefined ? undefined : height - startHeight;
+        if (maxBlocks !== UNBOUNDED_MAX_BLOCKS && synced !== undefined && synced >= maxBlocks) {
+          outcome = 'budget-reached';
+          break;
+        }
+        if (Date.now() - startedAtMs >= maxDurationMs) {
+          outcome = 'timed-out';
+          break;
+        }
+
+        await sleep(POLL_INTERVAL_MS);
+      }
+    } finally {
+      clearInterval(animation);
     }
 
     reporter.clear();
@@ -338,16 +444,25 @@ export class IndexerSyncHarness {
       caughtUp,
       elapsedMs: Date.now() - startedAtMs,
       mismatch: this.mismatch,
+      failure: this.failureLines[0],
       logTail: this.logTail(),
     };
   }
 
   /** Remove the stack, but only if this instance brought it up. */
   async stop(): Promise<void> {
+    process.off('SIGINT', this.onSignal);
+    process.off('SIGTERM', this.onSignal);
+    this.teardown();
+  }
+
+  /** Remove the stack, synchronously, so it is also usable from a signal handler. */
+  private teardown(): void {
     this.logStream?.kill('SIGTERM');
     this.logStream = undefined;
 
     if (!this.startedByUs) return;
+    this.startedByUs = false;
     const result = spawnSync('docker', this.composeArgs(['down', '-v', '--remove-orphans']), {
       env: this.composeEnv(),
       stdio: 'inherit',
@@ -358,15 +473,31 @@ export class IndexerSyncHarness {
     }
   }
 
-  /** Readiness as the API reports it: 200 once caught up, 503 while still syncing. */
-  async readyStatus(): Promise<number | undefined> {
-    try {
-      const response = await fetch(`http://localhost:${this.options.apiPort}/ready`, {
-        signal: AbortSignal.timeout(METRICS_TIMEOUT_MS),
-      });
-      return response.status;
-    } catch {
-      return undefined;
+  /**
+   * Fail fast on a port clash. The host ports are fixed, so a leaked stack from an
+   * interrupted run otherwise surfaces only as `up exited with status 1`.
+   */
+  private async assertPortsFree(): Promise<void> {
+    const { topology, apiPort, metricsPort, postgresPort, natsPort } = this.options;
+    const ports =
+      topology === 'cloud'
+        ? {
+            SYNC_API_PORT: apiPort,
+            SYNC_METRICS_PORT: metricsPort,
+            SYNC_POSTGRES_PORT: postgresPort,
+            SYNC_NATS_PORT: natsPort,
+          }
+        : { SYNC_API_PORT: apiPort, SYNC_METRICS_PORT: metricsPort };
+
+    const taken: string[] = [];
+    for (const [name, port] of Object.entries(ports)) {
+      if (!(await isPortFree(port))) taken.push(`${port} (${name})`);
+    }
+    if (taken.length > 0) {
+      throw new Error(
+        `[SYNC] Host port(s) already in use: ${taken.join(', ')}. Another stack is running - ` +
+          'remove it (`docker compose ls`) or point the suite at different ports.',
+      );
     }
   }
 
@@ -393,6 +524,8 @@ export class IndexerSyncHarness {
       SYNC_NETWORK_ID: this.options.networkId,
       SYNC_API_PORT: String(this.options.apiPort),
       SYNC_METRICS_PORT: String(this.options.metricsPort),
+      SYNC_POSTGRES_PORT: String(this.options.postgresPort),
+      SYNC_NATS_PORT: String(this.options.natsPort),
     };
   }
 
@@ -417,18 +550,10 @@ export class IndexerSyncHarness {
   }
 
   private inspectLine(line: string): void {
-    if (this.failureLine === undefined && FAILURE_PATTERN.test(line)) {
-      this.failureLine = line;
+    if (isBailOutLine(line) && this.failureLines.length < MAX_FAILURE_LINES) {
+      this.failureLines.push(line);
     }
-    const match = MISMATCH_PATTERN.exec(line);
-    if (match !== null && this.mismatch === undefined) {
-      this.mismatch = {
-        kind: `${match[1].toLowerCase()} state root`,
-        block: match[2],
-        height: Number(match[3]),
-        line,
-      };
-    }
+    this.mismatch ??= parseStateRootMismatch(line);
   }
 
   private async scrapeMetrics(): Promise<IndexerMetrics> {
@@ -475,7 +600,23 @@ export class IndexerSyncHarness {
     return undefined;
   }
 
-  private logTail(): string[] {
-    return this.logBuffer.slice(-LOG_TAIL_LINES);
+  /**
+   * Recent log lines for the report, narrowed to the failing service when one is known
+   * so a noisy sibling container cannot crowd out the relevant output.
+   */
+  private logTail(service?: string): string[] {
+    // A bail-out is usually seen in the log stream before the container is observed to
+    // have exited, so fall back to the service that logged it: `docker compose logs`
+    // prefixes every line with "<service>-<n>  | ".
+    const source = service ?? this.failureLines[0]?.match(/^(\S+?)-\d+\s+\|/)?.[1];
+    const lines =
+      source === undefined
+        ? this.logBuffer
+        : this.logBuffer.filter((line) => line.startsWith(source));
+    const tail = (lines.length > 0 ? lines : this.logBuffer).slice(-LOG_TAIL_LINES);
+    // Matched bail-out lines are prepended: they are the point of the report and are
+    // held outside the evictable buffer precisely so they survive a busy tail.
+    const missing = this.failureLines.filter((line) => !tail.includes(line));
+    return [...missing, ...tail];
   }
 }
