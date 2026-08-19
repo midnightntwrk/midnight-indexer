@@ -112,8 +112,9 @@ The test suite is organized using **Vitest projects**, which allows running diff
 - **[Smoke Tests](tests/smoke/README.md)** - Quick health checks and API validation (~1 second runtime)
 - **[Integration Tests](tests/integration/README.md)** - Comprehensive GraphQL API testing with pre-seeded data
 - **[E2E Tests](tests/e2e/README.md)** - End-to-end validation using the Node Toolkit (includes cache warmup)
+- **[Sync Tests](tests/sync/README.md)** - Runs a chosen indexer version against a deployed chain and watches it index from genesis, to prove that version can sync that chain
 
-Each project can be run independently or together. E2E tests include a cache warmup phase for the Node Toolkit, while smoke and integration tests start immediately.
+Each project can be run independently or together. E2E tests include a cache warmup phase for the Node Toolkit, while smoke and integration tests start immediately. Sync tests are deliberately excluded from the aggregate `test` script: a run takes minutes at best, and days if its block budget is lifted.
 
 ## 🚀 Getting Started
 
@@ -441,6 +442,21 @@ TARGET_ENV=preprod INDEXER_API_VERSION=v3 bun run test:integration
 | `VITEST_MAX_WORKERS`  | No                                | all available CPUs     | Cap the Vitest worker pool. Accepts a positive integer (`1`, `2`, …) or a percentage (`"50%"`).       |
 | `MN_FETCH_CACHE`      | No (managed by harness)           | auto                   | Postgres-backed toolkit fetch cache. The `toolkit-postgres` container is started automatically.       |
 | `INDEXER_INSTANCE`    | No                                | (primary)              | Blue/green indexer instance to target: `blue` / `green`. Unset → primary (bare `indexer.<env>`). Only meaningful on `qanet`/`preview`/`preprod`; ignored for `undeployed`. A `/ready` preflight fails fast if the colour isn't routed. |
+
+**Sync test project only** (`bun run test:sync`, see [tests/sync/README.md](tests/sync/README.md)):
+
+| Variable              | Required | Default         | Description                                                                                              |
+| --------------------- | -------- | --------------- | -------------------------------------------------------------------------------------------------------- |
+| `SYNC_INDEXER_TAG`    | Yes      | —               | Indexer image tag under test. Separate from `INDEXER_TAG`, which must not be set for deployed envs.       |
+| `SYNC_TOPOLOGY`       | No       | `cloud`         | `cloud` (the deployed shape) or `standalone` (single container; markedly slower, see the suite README).   |
+| `SYNC_IMAGE_REGISTRY` | No       | `midnightntwrk` | Image registry for the indexer images.                                                                   |
+| `MAX_BLOCKS`          | No       | `2000`          | Blocks to index before the run passes. **`0` means unbounded — sync to the chain tip**, not zero blocks.  |
+| `MAX_DURATION_MS`     | No       | `1800000`       | Wall-clock bound on a run; the only bound when `MAX_BLOCKS=0`.                                            |
+| `SYNC_PROGRESS`       | No       | auto            | Progress output mode: `live` or `plain`. Auto-detected from `CI` and whether stdout is a terminal.        |
+| `SYNC_API_PORT`       | No       | `8188`          | Host port for the local indexer API.                                                                     |
+| `SYNC_METRICS_PORT`   | No       | `9100`          | Host port for the Prometheus endpoint progress is read from.                                              |
+| `SYNC_POSTGRES_PORT`  | No       | `5433`          | Host port for the cloud profile's Postgres.                                                               |
+| `SYNC_NATS_PORT`      | No       | `4422`          | Host port for the cloud profile's NATS.                                                                   |
 
 **Runtime-upgrade test only** (`qa/scripts/test-runtime-upgrade.sh`):
 
