@@ -18,6 +18,7 @@ import { env } from 'environment/model';
 import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
 import {
+  createLineAssembler,
   IndexerSyncHarness,
   isBailOutLine,
   parseIndexerMetrics,
@@ -219,14 +220,21 @@ describe('indexer sync compatibility', () => {
     test('should name the offending block of a state root mismatch', (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Sync', 'Negative'] };
 
+      // The shape the binary actually emits: the mismatch is an `anyhow` bail that
+      // reaches the log only inside the `error` field of the fatal exit line, rendered
+      // as a single JSON object by the logging layer.
       const line =
-        'chain-indexer-1  | zswap state root mismatch for block 9df3eda7 at height 15616: ' +
-        'node=Some(00df7a18), indexer=Some(009e6bae)';
+        'chain-indexer-1  | {"timestamp":"2026-08-19T17:17:34.390320+00:00[Etc/UTC]",' +
+        '"level":"ERROR","target":"chain_indexer","file":"chain-indexer/src/main.rs",' +
+        '"line":33,"message":"process exited with ERROR","kvs":{"backtrace":' +
+        '"disabled backtrace","error":"index_blocks_task failed: zswap state root ' +
+        'mismatch for block b7840d11 at height 15616: node=Some(00df7a18), ' +
+        'indexer=Some(009e6bae)"}}';
 
       expect(isBailOutLine(line)).toBe(true);
       expect(parseStateRootMismatch(line)).toEqual({
         kind: 'zswap state root',
-        block: '9df3eda7',
+        block: 'b7840d11',
         height: 15616,
         line,
       });
@@ -255,6 +263,26 @@ describe('indexer sync compatibility', () => {
     });
 
     /**
+     * A main-thread panic exits through the panic hook every binary installs, not
+     * through the fatal-exit path, so it needs matching in its own right.
+     *
+     * @given the line a panicking indexer logs from its panic hook
+     * @when the line is read
+     * @then it counts as a bail-out
+     */
+    test('should recognise a panic as a bail-out', (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Sync', 'Negative'] };
+
+      const line =
+        'chain-indexer-1  | {"level":"ERROR","target":"chain_indexer",' +
+        '"message":"process panicked","kvs":{"panic":"called `Option::unwrap()` on a ' +
+        '`None` value"}}';
+
+      expect(isBailOutLine(line)).toBe(true);
+      expect(parseStateRootMismatch(line)).toBeUndefined();
+    });
+
+    /**
      * @given an ordinary block-indexed line
      * @when the line is read
      * @then it is not treated as a bail-out
@@ -266,6 +294,54 @@ describe('indexer sync compatibility', () => {
 
       expect(isBailOutLine(line)).toBe(false);
       expect(parseStateRootMismatch(line)).toBeUndefined();
+    });
+  });
+
+  describe('assembling log lines from a chunked stream', () => {
+    /**
+     * Container output arrives as byte chunks, not lines. If a chunk boundary falls
+     * inside a bail-out phrase and each half is treated as a line, neither half matches
+     * and the failure report loses the line it exists to surface.
+     *
+     * @given a fatal log line delivered as two chunks split inside the word "ERROR"
+     * @when the chunks are assembled
+     * @then one whole line is produced and it is recognised as a bail-out
+     */
+    test('should rejoin a line split across two chunks', (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Sync', 'Negative'] };
+
+      const lines: string[] = [];
+      const assembler = createLineAssembler((line) => lines.push(line));
+      const full = 'chain-indexer-1  | {"message":"process exited with ERROR"}\n';
+      const split = full.indexOf('ERROR') + 2;
+
+      assembler.push(Buffer.from(full.slice(0, split)));
+      assembler.push(Buffer.from(full.slice(split)));
+
+      expect(lines).toEqual([full.trimEnd()]);
+      expect(isBailOutLine(lines[0])).toBe(true);
+    });
+
+    /**
+     * @given a chunk boundary falling inside a multi-byte character, and a final line
+     *        with no trailing newline
+     * @when the chunks are assembled and the remainder flushed
+     * @then the character survives intact and the unterminated line is still reported
+     */
+    test('should preserve a split multi-byte character and flush a trailing line', (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Sync', 'Negative'] };
+
+      const lines: string[] = [];
+      const assembler = createLineAssembler((line) => lines.push(line));
+      const bytes = Buffer.from('caught up \u2713 done\nno newline here');
+
+      // Split inside the three-byte check mark.
+      assembler.push(bytes.subarray(0, 11));
+      assembler.push(bytes.subarray(11));
+      expect(lines).toEqual(['caught up \u2713 done']);
+
+      assembler.flush();
+      expect(lines).toEqual(['caught up \u2713 done', 'no newline here']);
     });
   });
 
