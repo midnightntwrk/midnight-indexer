@@ -24,7 +24,6 @@ interface JsonRpcResponse<T> {
 
 interface BlockHeader {
   number: string;
-  parentHash: string;
 }
 
 /**
@@ -41,31 +40,15 @@ export class NodeRpcClient {
     this.url = url;
   }
 
-  getTargetUrl(): string {
-    return this.url;
-  }
-
   /** The height of the current best block. */
   async getChainTip(): Promise<number> {
     const header = await this.call<BlockHeader>('chain_getHeader');
     return Number.parseInt(header.number, 16);
   }
 
-  /** The height of the current finalized block. */
-  async getFinalizedHeight(): Promise<number> {
-    const hash = await this.call<string>('chain_getFinalizedHead');
-    const header = await this.call<BlockHeader>('chain_getHeader', [hash]);
-    return Number.parseInt(header.number, 16);
-  }
-
   /** The block hash at the given height, or null if the height is beyond the tip. */
   async getBlockHash(height: number): Promise<string | null> {
     return await this.call<string | null>('chain_getBlockHash', [height]);
-  }
-
-  /** The chain's human-readable name, e.g. "Midnight QANet". */
-  async getChainName(): Promise<string> {
-    return await this.call<string>('system_chain');
   }
 
   private async call<T>(
