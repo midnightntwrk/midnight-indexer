@@ -38,6 +38,12 @@
 #
 # `restart: "no"` on every indexer service is deliberate: a crash must stay crashed so
 # the harness can read the exit code instead of watching a container loop.
+#
+# Unlike the root docker-compose.yaml, secrets are passed as plain container environment
+# rather than through /run/secrets files. That file's rationale is about not exposing a
+# developer's real, reused secrets in a container's /proc/<pid>/environ; here the harness
+# generates fresh random values per run, they unlock nothing outside this throwaway
+# stack, and the stack is destroyed with its volumes when the run ends.
 
 services:
   chain-indexer:
@@ -50,6 +56,10 @@ services:
         condition: "service_started"
     image: "${SYNC_IMAGE_REGISTRY:-midnightntwrk}/chain-indexer:${SYNC_INDEXER_TAG:?SYNC_INDEXER_TAG must be set}"
     restart: "no"
+    # Always re-resolve the tag: this suite reports on published images, and
+    # `just build-docker-image` tags local builds :latest and :<short-sha>, which
+    # compose would otherwise reuse from the local store without a word.
+    pull_policy: always
     ports:
       - "${SYNC_METRICS_PORT:-9100}:9000"
     environment:
@@ -81,8 +91,12 @@ services:
         condition: "service_started"
     image: "${SYNC_IMAGE_REGISTRY:-midnightntwrk}/wallet-indexer:${SYNC_INDEXER_TAG:?SYNC_INDEXER_TAG must be set}"
     restart: "no"
+    # Always re-resolve the tag: this suite reports on published images, and
+    # `just build-docker-image` tags local builds :latest and :<short-sha>, which
+    # compose would otherwise reuse from the local store without a word.
+    pull_policy: always
     environment:
-      RUST_LOG: "wallet_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info"
+      RUST_LOG: "wallet_indexer=info,indexer_common=info,fastrace_opentelemetry=off,info"
       APP__INFRA__SECRET: $APP__INFRA__SECRET
       APP__INFRA__STORAGE__HOST: "postgres"
       APP__INFRA__STORAGE__PASSWORD: $APP__INFRA__STORAGE__PASSWORD
@@ -106,10 +120,14 @@ services:
         condition: "service_started"
     image: "${SYNC_IMAGE_REGISTRY:-midnightntwrk}/indexer-api:${SYNC_INDEXER_TAG:?SYNC_INDEXER_TAG must be set}"
     restart: "no"
+    # Always re-resolve the tag: this suite reports on published images, and
+    # `just build-docker-image` tags local builds :latest and :<short-sha>, which
+    # compose would otherwise reuse from the local store without a word.
+    pull_policy: always
     ports:
       - "${SYNC_API_PORT:-8188}:8088"
     environment:
-      RUST_LOG: "indexer_api=debug,indexer_common=debug,fastrace_opentelemetry=off,info"
+      RUST_LOG: "indexer_api=info,indexer_common=info,fastrace_opentelemetry=off,info"
       APP__APPLICATION__NETWORK_ID: "${SYNC_NETWORK_ID:?SYNC_NETWORK_ID must be set}"
       APP__INFRA__SECRET: $APP__INFRA__SECRET
       APP__INFRA__STORAGE__HOST: "postgres"
@@ -129,6 +147,10 @@ services:
       - standalone
     image: "${SYNC_IMAGE_REGISTRY:-midnightntwrk}/indexer-standalone:${SYNC_INDEXER_TAG:?SYNC_INDEXER_TAG must be set}"
     restart: "no"
+    # Always re-resolve the tag: this suite reports on published images, and
+    # `just build-docker-image` tags local builds :latest and :<short-sha>, which
+    # compose would otherwise reuse from the local store without a word.
+    pull_policy: always
     ports:
       - "${SYNC_API_PORT:-8188}:8088"
       - "${SYNC_METRICS_PORT:-9100}:9000"
