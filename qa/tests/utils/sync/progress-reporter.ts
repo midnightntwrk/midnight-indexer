@@ -63,8 +63,8 @@ export interface ProgressStats {
   percent?: number;
   /** Blocks per second across the whole run. */
   overallRate: number;
-  /** Blocks per second over the last 30 seconds. */
-  windowRate: number;
+  /** Blocks per second over the last 30 seconds, or undefined with too few samples. */
+  windowRate?: number;
   etaMs?: number;
 }
 
@@ -97,7 +97,7 @@ export function computeProgress(
 
   const latest = samples.at(-1);
   if (latest === undefined) {
-    return { tip, synced: 0, total, overallRate: 0, windowRate: 0 };
+    return { tip, synced: 0, total, overallRate: 0 };
   }
 
   const synced = Math.max(latest.height - options.startHeight, 0);
@@ -111,7 +111,11 @@ export function computeProgress(
   const window = inWindow.length >= 2 ? inWindow : samples.slice(-2);
   const oldest = window[0];
   const windowSeconds = (latest.atMs - oldest.atMs) / 1000;
-  const windowRate = windowSeconds > 0 ? (latest.height - oldest.height) / windowSeconds : 0;
+  // Undefined rather than 0 when there is only one observation: a fresh run would
+  // otherwise render "0.0 blocks/s (30s)" and read as stalled. Clamped at 0 because a
+  // height regression (a chain rollback) makes a negative rate meaningless.
+  const windowRate =
+    windowSeconds > 0 ? Math.max((latest.height - oldest.height) / windowSeconds, 0) : undefined;
 
   // A single poll can carry the run past its budget, so synced may exceed total.
   // The overshoot is real and stays visible in `synced`; the percentage is capped.
@@ -150,7 +154,7 @@ export function formatProgressLine(stats: ProgressStats): string {
   return [
     progress,
     `${stats.overallRate.toFixed(1)} blocks/s overall`,
-    `${stats.windowRate.toFixed(1)} blocks/s (30s)`,
+    `${stats.windowRate === undefined ? '--' : stats.windowRate.toFixed(1)} blocks/s (30s)`,
     `ETA: ${stats.etaMs === undefined ? 'unknown' : formatDuration(stats.etaMs)}`,
   ].join(' | ');
 }
@@ -208,6 +212,15 @@ export class SyncProgressReporter {
       this.plainAtMs = nowMs;
       console.log(`[SYNC] ${line}`);
     }
+  }
+
+  /**
+   * Re-render the current state without recording an observation, so the spinner can
+   * animate between polls. No-op outside live mode.
+   */
+  refresh(tip: number | undefined, nowMs: number = Date.now()): void {
+    if (this.mode !== 'live' || this.samples.length === 0) return;
+    this.writeLive(formatProgressLine(this.stats(tip)), nowMs);
   }
 
   /** Erase the live line. Must be called before any final or error output. */
