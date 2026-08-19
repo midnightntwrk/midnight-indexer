@@ -18,6 +18,7 @@ import { env } from 'environment/model';
 import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
 import {
+  assertSyncEnvironmentSupported,
   createLineAssembler,
   IndexerSyncHarness,
   isBailOutLine,
@@ -32,6 +33,16 @@ import {
   formatProgressLine,
   UNBOUNDED_MAX_BLOCKS,
 } from '@utils/sync/progress-reporter';
+
+// Rejected here, at module scope, so the rejection is unconditional. Behind the run
+// itself it was reachable only once SYNC_INDEXER_TAG was set, so an unsupported
+// environment passed as a green skip whenever the tag happened to be absent - the
+// green-run-asserting-nothing outcome this suite is meant to avoid.
+//
+// Safe at module scope, unlike the project config: this file is only ever loaded for the
+// sync project, whose `include` glob is `tests/sync/**`, whereas every project config is
+// resolved on every Vitest invocation.
+assertSyncEnvironmentSupported();
 
 const prerequisiteGap = syncPrerequisiteGap();
 if (prerequisiteGap !== undefined) {
