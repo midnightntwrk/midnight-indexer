@@ -114,7 +114,7 @@ The test suite is organized using **Vitest projects**, which allows running diff
 - **[E2E Tests](tests/e2e/README.md)** - End-to-end validation using the Node Toolkit (includes cache warmup)
 - **[Sync Tests](tests/sync/README.md)** - Runs a chosen indexer version against a deployed chain and watches it index from genesis, to prove that version can sync that chain
 
-Each project can be run independently or together. E2E tests include a cache warmup phase for the Node Toolkit, while smoke and integration tests start immediately. Sync tests are deliberately excluded from the aggregate `test` script: a run takes minutes at best, and days if its block budget is lifted.
+Each project can be run independently or together. E2E tests include a cache warmup phase for the Node Toolkit, while smoke and integration tests start immediately. Sync tests are deliberately excluded from the aggregate `test`, `test:coverage` and `test:ui` scripts, each of which names its projects explicitly: a sync run takes minutes at best, and days if its block budget is lifted.
 
 ## 🚀 Getting Started
 
