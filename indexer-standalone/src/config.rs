@@ -27,6 +27,16 @@ pub struct Config {
     #[serde(with = "byte_unit_serde")]
     pub thread_stack_size: u64,
 
+    /// Tokio worker threads for the multi-thread runtime. `None` uses the number of CPU cores.
+    /// Setting it explicitly makes `ledger_query_concurrency`'s default predictable across hosts.
+    #[serde(default)]
+    pub worker_threads: Option<NonZeroUsize>,
+
+    /// Maximum concurrent ledger-DB-backed GraphQL queries (issue #595). `None` defaults to
+    /// `worker_threads - 1`, keeping a worker free for liveness probes while ledger walks run.
+    #[serde(default)]
+    pub ledger_query_concurrency: Option<NonZeroUsize>,
+
     #[serde(rename = "application")]
     pub application_config: ApplicationConfig,
 

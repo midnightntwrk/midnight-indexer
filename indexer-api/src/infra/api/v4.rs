@@ -39,6 +39,7 @@ use crate::{
     },
     infra::api::{
         ApiResult, ContextExt, Metrics, OptionExt, ResultExt, SubscriptionConfig,
+        ledger_query_limit::LedgerQueryLimiter,
         progress_cache::ProgressCache,
         quota::{PerConnectionCounter, SubscriptionQuotas},
         v4::{
@@ -375,6 +376,7 @@ pub fn make_app<S, B>(
     ledger_state_cache: LedgerStateCache,
     storage: S,
     subscriber: B,
+    ledger_query_limiter: LedgerQueryLimiter,
     max_complexity: usize,
     max_depth: usize,
     subscription_config: SubscriptionConfig,
@@ -390,6 +392,7 @@ where
     let schema = schema_builder::<S, B>()
         .data(network_id)
         .data(ledger_state_cache)
+        .data(ledger_query_limiter)
         .data(DataLoader::new(
             BlockByHashLoader::new(storage.clone()),
             tokio::spawn,

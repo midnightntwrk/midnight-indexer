@@ -48,7 +48,13 @@ fn run() -> anyhow::Result<()> {
     };
     use indexer_api::{
         application as api_app,
-        infra::{api::AxumApi, storage as api_storage},
+        infra::{
+            api::{
+                AxumApi,
+                ledger_query_limit::{LedgerQueryLimiter, permits_for_worker_threads},
+            },
+            storage as api_storage,
+        },
     };
     use indexer_common::{
         cipher::make_cipher,
@@ -61,7 +67,7 @@ fn run() -> anyhow::Result<()> {
         application as spo_app,
         infra::{spo_client::SPOClient, storage as spo_storage},
     };
-    use std::panic;
+    use std::{num::NonZeroUsize, panic, thread};
     use tokio::{
         runtime::Builder,
         select,
@@ -73,6 +79,8 @@ fn run() -> anyhow::Result<()> {
     // Load configuration.
     let Config {
         thread_stack_size,
+        worker_threads,
+        ledger_query_concurrency,
         application_config,
         spo_config,
         infra_config,
@@ -118,7 +126,23 @@ fn run() -> anyhow::Result<()> {
         secret,
     } = infra_config;
 
+    // Resolve the worker-thread count explicitly (issue #595) so the ledger-query semaphore can be
+    // sized relative to it. In standalone the chain-indexer, wallet-indexer and API share this one
+    // runtime, so keeping a worker free for liveness under an API-driven ledger-query storm also
+    // protects the indexing tasks.
+    let worker_threads = worker_threads.map(NonZeroUsize::get).unwrap_or_else(|| {
+        thread::available_parallelism()
+            .map(NonZeroUsize::get)
+            .unwrap_or(1)
+    });
+
+    let ledger_query_permits =
+        ledger_query_concurrency.unwrap_or_else(|| permits_for_worker_threads(worker_threads));
+    info!(worker_threads, ledger_query_permits = ledger_query_permits.get(); "runtime concurrency");
+    let ledger_query_limiter = LedgerQueryLimiter::new(ledger_query_permits);
+
     let runtime = Builder::new_multi_thread()
+        .worker_threads(worker_threads)
         .enable_all()
         .thread_stack_size(thread_stack_size as usize)
         .build()
@@ -180,7 +204,12 @@ fn run() -> anyhow::Result<()> {
         let indexer_api = task::spawn({
             let subscriber = pub_sub.subscriber();
             let storage = api_storage::Storage::new(cipher.clone(), pool.clone());
-            let api = AxumApi::new(api_config, storage, subscriber.clone());
+            let api = AxumApi::new(
+                api_config,
+                storage,
+                subscriber.clone(),
+                ledger_query_limiter,
+            );
 
             api_app::run(application_config.clone().into(), api, subscriber)
         });

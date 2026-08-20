@@ -183,6 +183,11 @@ where
             .map_err_into_server_error(|| format!("get ledger state at block {}", self.hash))?
             .some_or_server_error(|| format!("no ledger state for block {}", self.hash))?;
 
+        // Bound concurrent ledger-DB work (issue #595): hold a permit across the availability
+        // check, load, and zswap-state extraction below so this unauthenticated field cannot
+        // occupy every runtime worker via block_in_place.
+        let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
+
         // Verify the root node is still in the ledger DB before loading: loading culled state
         // panics inside storage-core rather than returning an error, so this check is what
         // turns a block beyond the chain-indexer's ledger_state_retention into a clean client

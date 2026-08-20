@@ -233,6 +233,7 @@ where
     ) -> Result<impl Stream<Item = ApiResult<BridgeBalance>> + use<'a, S, B>, ApiError> {
         let storage = cx.get_storage::<S>();
         let subscriber = cx.get_subscriber::<B>();
+        let ledger_query_limiter = cx.get_ledger_query_limiter();
         let address = address
             .hex_decode::<UnshieldedAddress>()
             .map_err_into_client_error(|| "invalid recipient address")?;
@@ -244,20 +245,26 @@ where
                 .get_bridge_balance(address)
                 .await
                 .map_err_into_server_error(|| "get bridge balance")?;
-            initial.balance = match storage
-                .get_highest_ledger_state()
-                .await
-                .map_err_into_server_error(|| "get highest ledger state")?
-            {
-                Some((protocol_version, ledger_state_key)) => {
-                    indexer_common::domain::ledger::LedgerState::load(
-                        &ledger_state_key,
-                        protocol_version.ledger_version(),
-                    )
-                    .map_err_into_server_error(|| "load ledger state")?
-                    .bridge_receiving(address)
+            // Bound concurrent ledger-DB work (issue #595): acquire a permit only around each
+            // load, never across the `yield` or the `live.try_next().await` wait below, so a
+            // long-lived subscription never pins a permit while idle.
+            initial.balance = {
+                let _ledger_permit = ledger_query_limiter.acquire().await;
+                match storage
+                    .get_highest_ledger_state()
+                    .await
+                    .map_err_into_server_error(|| "get highest ledger state")?
+                {
+                    Some((protocol_version, ledger_state_key)) => {
+                        indexer_common::domain::ledger::LedgerState::load(
+                            &ledger_state_key,
+                            protocol_version.ledger_version(),
+                        )
+                        .map_err_into_server_error(|| "load ledger state")?
+                        .bridge_receiving(address)
+                    }
+                    None => 0,
                 }
-                None => 0,
             };
             yield BridgeBalance::from(initial);
 
@@ -289,20 +296,23 @@ where
                     .get_bridge_balance(address)
                     .await
                     .map_err_into_server_error(|| "get bridge balance (live)")?;
-                updated.balance = match storage
-                    .get_highest_ledger_state()
-                    .await
-                    .map_err_into_server_error(|| "get highest ledger state (live)")?
-                {
-                    Some((protocol_version, ledger_state_key)) => {
-                        indexer_common::domain::ledger::LedgerState::load(
-                            &ledger_state_key,
-                            protocol_version.ledger_version(),
-                        )
-                        .map_err_into_server_error(|| "load ledger state (live)")?
-                        .bridge_receiving(address)
+                updated.balance = {
+                    let _ledger_permit = ledger_query_limiter.acquire().await;
+                    match storage
+                        .get_highest_ledger_state()
+                        .await
+                        .map_err_into_server_error(|| "get highest ledger state (live)")?
+                    {
+                        Some((protocol_version, ledger_state_key)) => {
+                            indexer_common::domain::ledger::LedgerState::load(
+                                &ledger_state_key,
+                                protocol_version.ledger_version(),
+                            )
+                            .map_err_into_server_error(|| "load ledger state (live)")?
+                            .bridge_receiving(address)
+                        }
+                        None => 0,
                     }
-                    None => 0,
                 };
                 yield BridgeBalance::from(updated);
             }
