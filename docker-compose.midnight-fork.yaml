@@ -1,0 +1,141 @@
+# Run the cloud-mode indexer stack against a forked Midnight network brought
+# up by midnight-node's local-environment tooling (`midnight-up`).
+#
+# The fork publishes its connection contract as an env-file manifest
+# (<midnight-node>/local-environment/artifacts/<network>.manifest.env). Run
+# this overlay as its own compose project, sourcing that manifest:
+#
+#   docker compose --env-file <midnight-node>/local-environment/artifacts/mainnet.manifest.env \
+#     -f docker-compose.midnight-fork.yaml up -d
+#
+# or use `just fork-up` (see docs/running-against-a-fork.md).
+#
+# Only chain-indexer joins the fork's docker network; postgres, nats,
+# wallet-indexer, and indexer-api stay on this project's private network.
+# Keeping this a separate project from the fork means either side can be
+# restarted without tearing down the other. All defaults below are for local
+# fork testing only.
+
+name: midnight-indexer-fork
+
+x-fork-infra-env: &fork-infra-env
+  APP__INFRA__STORAGE__HOST: "postgres"
+  APP__INFRA__STORAGE__PASSWORD: "${APP__INFRA__STORAGE__PASSWORD:-indexer}"
+  APP__INFRA__PUB_SUB__URL: "nats:4222"
+  APP__INFRA__PUB_SUB__PASSWORD: "${APP__INFRA__PUB_SUB__PASSWORD:-indexer}"
+
+# Must contain hex letters (a-f): an all-digit value gets type-inferred as an
+# integer by the config loader and rejected at boot.
+x-fork-secret-env: &fork-secret-env
+  APP__INFRA__SECRET: "${APP__INFRA__SECRET:-c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ffee0000}"
+
+services:
+  chain-indexer:
+    image: "${IMAGE_REGISTRY:-midnightntwrk}/chain-indexer:${INDEXER_TAG:-4.3.3}"
+    # The fork lives in another compose project, so there is no depends_on
+    # health gate for the node; retry until it is reachable instead.
+    restart: "on-failure"
+    depends_on:
+      postgres:
+        condition: "service_healthy"
+      nats:
+        condition: "service_started"
+    environment:
+      <<: *fork-infra-env
+      RUST_LOG: "chain_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info"
+      APP__APPLICATION__NETWORK_ID: "${MIDNIGHT_FORK_NETWORK_ID:?source the fork manifest via --env-file}"
+      APP__INFRA__NODE__URL: "${MIDNIGHT_FORK_NODE_WS:?source the fork manifest via --env-file}"
+    networks:
+      - default
+      - fork
+    healthcheck:
+      test: ["CMD-SHELL", "cat /var/run/chain-indexer/running"]
+      start_interval: "5s"
+      start_period: "30s"
+      interval: "5s"
+      timeout: "2s"
+      retries: 2
+
+  wallet-indexer:
+    image: "${IMAGE_REGISTRY:-midnightntwrk}/wallet-indexer:${INDEXER_TAG:-4.3.3}"
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: "service_healthy"
+      nats:
+        condition: "service_started"
+    environment:
+      <<: [*fork-infra-env, *fork-secret-env]
+      RUST_LOG: "wallet_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info"
+    healthcheck:
+      test: ["CMD-SHELL", "cat /var/run/wallet-indexer/running"]
+      start_interval: "5s"
+      start_period: "30s"
+      interval: "5s"
+      timeout: "2s"
+      retries: 2
+
+  indexer-api:
+    image: "${IMAGE_REGISTRY:-midnightntwrk}/indexer-api:${INDEXER_TAG:-4.3.3}"
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: "service_healthy"
+      nats:
+        condition: "service_started"
+    ports:
+      - "${INDEXER_API_PORT:-8088}:8088"
+    environment:
+      <<: [*fork-infra-env, *fork-secret-env]
+      RUST_LOG: "indexer_api=debug,indexer_common=debug,fastrace_opentelemetry=off,info"
+      APP__APPLICATION__NETWORK_ID: "${MIDNIGHT_FORK_NETWORK_ID:?source the fork manifest via --env-file}"
+    healthcheck:
+      test: ["CMD-SHELL", "cat /var/run/indexer-api/running"]
+      start_interval: "5s"
+      start_period: "30s"
+      interval: "5s"
+      timeout: "2s"
+      retries: 2
+
+  postgres:
+    image: "postgres:17.1-alpine"
+    restart: "always"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: "indexer"
+      POSTGRES_DB: "indexer"
+      POSTGRES_PASSWORD: "${APP__INFRA__STORAGE__PASSWORD:-indexer}"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U indexer"]
+      interval: "5s"
+      timeout: "2s"
+      retries: 2
+    security_opt:
+      - no-new-privileges:true
+
+  nats:
+    image: "nats:2.12.3"
+    restart: "always"
+    command:
+      [
+        "--user",
+        "indexer",
+        "--pass",
+        "${APP__INFRA__PUB_SUB__PASSWORD:-indexer}",
+        "-js",
+      ]
+    volumes:
+      - nats-data:/tmp/nats
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  postgres-data:
+  nats-data:
+
+networks:
+  default:
+  fork:
+    name: "${MIDNIGHT_FORK_NETWORK:?source the fork manifest via --env-file}"
+    external: true
