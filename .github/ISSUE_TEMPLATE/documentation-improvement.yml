@@ -4,7 +4,7 @@ title: "[Docs] "
 type: Task
 labels:
   - status:untriaged
-  - area:documentation
+  - documentation
   - component:indexer
 body:
   - type: input
