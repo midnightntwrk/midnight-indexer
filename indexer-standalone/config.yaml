@@ -9,6 +9,10 @@ application:
   # Recent blocks whose ledger states stay loadable (gc roots). Must comfortably exceed
   # the dust_generations max_snapshot_age.
   ledger_state_retention: 1000
+  # Exit (so the orchestrator restarts us) if the block-apply loop makes no progress for this long
+  # while the node has finalized blocks we have not applied yet. Recovers a silent apply-loop stall
+  # that otherwise keeps the process alive with /ready latched. "0s" disables the watchdog.
+  stalled_apply_timeout: "180s"
   active_wallets_query_delay: "500ms"
   active_wallets_ttl: "30m"
   transaction_batch_size: 50

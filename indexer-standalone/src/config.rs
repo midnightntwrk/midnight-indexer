@@ -50,6 +50,8 @@ pub struct ApplicationConfig {
     pub gc_bound: Duration,
     #[serde(default = "ledger_state_retention_default")]
     pub ledger_state_retention: NonZeroUsize,
+    #[serde(with = "humantime_serde", default = "stalled_apply_timeout_default")]
+    pub stalled_apply_timeout: Duration,
     #[serde(with = "humantime_serde")]
     pub active_wallets_query_delay: Duration,
     #[serde(with = "humantime_serde")]
@@ -65,6 +67,10 @@ fn gc_bound_default() -> Duration {
 
 fn ledger_state_retention_default() -> NonZeroUsize {
     NonZeroUsize::new(1000).expect("1000 is not zero")
+}
+
+fn stalled_apply_timeout_default() -> Duration {
+    Duration::from_secs(180)
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -93,6 +99,7 @@ impl From<ApplicationConfig> for chain_app::Config {
             caught_up_leeway,
             gc_bound,
             ledger_state_retention,
+            stalled_apply_timeout,
             ..
         } = config;
 
@@ -103,6 +110,7 @@ impl From<ApplicationConfig> for chain_app::Config {
             caught_up_leeway,
             gc_bound,
             ledger_state_retention,
+            stalled_apply_timeout,
         }
     }
 }
