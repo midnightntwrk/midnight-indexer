@@ -1,0 +1,214 @@
+# This file is part of https://github.com/midnightntwrk/midnight-indexer
+# Copyright (C) Midnight Foundation
+# SPDX-License-Identifier: Apache-2.0
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# QA sync-compatibility stack: a local indexer of a chosen version indexing a REMOTE
+# chain from genesis, to prove that version can sync that chain at all.
+#
+# Driven by `qa/tests/utils/sync/harness.ts` (`bun run test:sync`), which supplies every
+# variable below and picks the profile. It is not meant to be brought up by hand, but
+# `docker compose --profile cloud -f qa/docker/docker-compose-sync.yaml up` works if the
+# SYNC_* and APP__* variables are exported.
+#
+# Two profiles:
+#   cloud      - chain-indexer + wallet-indexer + indexer-api + postgres + nats. The
+#                default, because it mirrors what is actually deployed and carries no
+#                spo-indexer.
+#   standalone - a single indexer-standalone container (SQLite, in-memory pub/sub).
+#                Note it cannot opt out of its SPO task, which talks to
+#                APP__INFRA__SPO_NODE__URL and takes the whole process down on failure.
+#
+# Host ports are offset so this never collides with the root docker-compose.yaml stack:
+#   8188 -> indexer API 8088, 9100 -> metrics 9000, 5433 -> postgres, 4422 -> nats.
+#
+# Progress is read from the Prometheus endpoint on the metrics port
+# (indexer_block_height, indexer_node_block_height, indexer_caught_up), which is why
+# APP__TELEMETRY__METRICS__ENABLED is on for the container the harness scrapes.
+#
+# `restart: "no"` on every indexer service is deliberate: a crash must stay crashed so
+# the harness can read the exit code instead of watching a container loop.
+#
+# Unlike the root docker-compose.yaml, secrets are passed as plain container environment
+# rather than through /run/secrets files. That file's rationale is about not exposing a
+# developer's real, reused secrets in a container's /proc/<pid>/environ; here the harness
+# generates fresh random values per run, they unlock nothing outside this throwaway
+# stack, and the stack is destroyed with its volumes when the run ends.
+
+services:
+  chain-indexer:
+    profiles:
+      - cloud
+    depends_on:
+      postgres:
+        condition: "service_healthy"
+      nats:
+        condition: "service_started"
+    image: "${SYNC_IMAGE_REGISTRY:-midnightntwrk}/chain-indexer:${SYNC_INDEXER_TAG:?SYNC_INDEXER_TAG must be set}"
+    restart: "no"
+    # Always re-resolve the tag: this suite reports on published images, and
+    # `just build-docker-image` tags local builds :latest and :<short-sha>, which
+    # compose would otherwise reuse from the local store without a word.
+    pull_policy: always
+    ports:
+      - "${SYNC_METRICS_PORT:-9100}:9000"
+    environment:
+      RUST_LOG: "chain_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info"
+      # Without this the indexer defaults to network_id "undeployed" (chain-indexer/config.yaml)
+      # and builds its ledger state for the wrong network while indexing this chain.
+      APP__APPLICATION__NETWORK_ID: "${SYNC_NETWORK_ID:?SYNC_NETWORK_ID must be set}"
+      APP__INFRA__NODE__URL: "${SYNC_NODE_URL:?SYNC_NODE_URL must be set}"
+      APP__INFRA__STORAGE__HOST: "postgres"
+      APP__INFRA__STORAGE__PASSWORD: $APP__INFRA__STORAGE__PASSWORD
+      APP__INFRA__PUB_SUB__URL: "nats:4222"
+      APP__INFRA__PUB_SUB__PASSWORD: $APP__INFRA__PUB_SUB__PASSWORD
+      APP__TELEMETRY__METRICS__ENABLED: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "cat /var/run/chain-indexer/running"]
+      start_interval: "2s"
+      start_period: "30s"
+      interval: "5s"
+      timeout: "2s"
+      retries: 2
+
+  wallet-indexer:
+    profiles:
+      - cloud
+    depends_on:
+      postgres:
+        condition: "service_healthy"
+      nats:
+        condition: "service_started"
+    image: "${SYNC_IMAGE_REGISTRY:-midnightntwrk}/wallet-indexer:${SYNC_INDEXER_TAG:?SYNC_INDEXER_TAG must be set}"
+    restart: "no"
+    # Always re-resolve the tag: this suite reports on published images, and
+    # `just build-docker-image` tags local builds :latest and :<short-sha>, which
+    # compose would otherwise reuse from the local store without a word.
+    pull_policy: always
+    environment:
+      RUST_LOG: "wallet_indexer=info,indexer_common=info,fastrace_opentelemetry=off,info"
+      APP__INFRA__SECRET: $APP__INFRA__SECRET
+      APP__INFRA__STORAGE__HOST: "postgres"
+      APP__INFRA__STORAGE__PASSWORD: $APP__INFRA__STORAGE__PASSWORD
+      APP__INFRA__PUB_SUB__URL: "nats:4222"
+      APP__INFRA__PUB_SUB__PASSWORD: $APP__INFRA__PUB_SUB__PASSWORD
+    healthcheck:
+      test: ["CMD-SHELL", "cat /var/run/wallet-indexer/running"]
+      start_interval: "2s"
+      start_period: "30s"
+      interval: "5s"
+      timeout: "2s"
+      retries: 2
+
+  indexer-api:
+    profiles:
+      - cloud
+    depends_on:
+      postgres:
+        condition: "service_healthy"
+      nats:
+        condition: "service_started"
+    image: "${SYNC_IMAGE_REGISTRY:-midnightntwrk}/indexer-api:${SYNC_INDEXER_TAG:?SYNC_INDEXER_TAG must be set}"
+    restart: "no"
+    # Always re-resolve the tag: this suite reports on published images, and
+    # `just build-docker-image` tags local builds :latest and :<short-sha>, which
+    # compose would otherwise reuse from the local store without a word.
+    pull_policy: always
+    ports:
+      - "${SYNC_API_PORT:-8188}:8088"
+    environment:
+      RUST_LOG: "indexer_api=info,indexer_common=info,fastrace_opentelemetry=off,info"
+      APP__APPLICATION__NETWORK_ID: "${SYNC_NETWORK_ID:?SYNC_NETWORK_ID must be set}"
+      APP__INFRA__SECRET: $APP__INFRA__SECRET
+      APP__INFRA__STORAGE__HOST: "postgres"
+      APP__INFRA__STORAGE__PASSWORD: $APP__INFRA__STORAGE__PASSWORD
+      APP__INFRA__PUB_SUB__URL: "nats:4222"
+      APP__INFRA__PUB_SUB__PASSWORD: $APP__INFRA__PUB_SUB__PASSWORD
+    healthcheck:
+      test: ["CMD-SHELL", "cat /var/run/indexer-api/running"]
+      start_interval: "2s"
+      start_period: "30s"
+      interval: "5s"
+      timeout: "2s"
+      retries: 2
+
+  indexer-standalone:
+    profiles:
+      - standalone
+    image: "${SYNC_IMAGE_REGISTRY:-midnightntwrk}/indexer-standalone:${SYNC_INDEXER_TAG:?SYNC_INDEXER_TAG must be set}"
+    restart: "no"
+    # Always re-resolve the tag: this suite reports on published images, and
+    # `just build-docker-image` tags local builds :latest and :<short-sha>, which
+    # compose would otherwise reuse from the local store without a word.
+    pull_policy: always
+    ports:
+      - "${SYNC_API_PORT:-8188}:8088"
+      - "${SYNC_METRICS_PORT:-9100}:9000"
+    environment:
+      RUST_LOG: "indexer_standalone=debug,chain_indexer=debug,indexer_api=debug,wallet_indexer=debug,indexer_common=debug,fastrace_opentelemetry=off,info"
+      APP__APPLICATION__NETWORK_ID: "${SYNC_NETWORK_ID:?SYNC_NETWORK_ID must be set}"
+      APP__INFRA__SECRET: $APP__INFRA__SECRET
+      APP__INFRA__NODE__URL: "${SYNC_NODE_URL:?SYNC_NODE_URL must be set}"
+      # The SPO task is not optional in this binary and a failure here exits the whole
+      # process, so it is pointed at the same node. blockfrost_id only has to be non-empty.
+      APP__INFRA__SPO_NODE__URL: "${SYNC_NODE_URL:?SYNC_NODE_URL must be set}"
+      APP__INFRA__SPO_NODE__BLOCKFROST_ID: "${APP__INFRA__SPO_NODE__BLOCKFROST_ID:-dummy-not-using-spo}"
+      APP__TELEMETRY__METRICS__ENABLED: "true"
+    # No volume on /data: the image chowns it to uid 10001, which a plain named volume
+    # would mount back as root-owned. A fresh-sync test wants a clean database anyway.
+    healthcheck:
+      test: ["CMD-SHELL", "cat /var/run/indexer-standalone/running"]
+      start_interval: "2s"
+      start_period: "30s"
+      interval: "5s"
+      timeout: "2s"
+      retries: 2
+
+  postgres:
+    profiles:
+      - cloud
+    image: "postgres:17.1-alpine"
+    restart: "always"
+    ports:
+      - "${SYNC_POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres_sync_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: "indexer"
+      POSTGRES_DB: "indexer"
+      POSTGRES_PASSWORD: $APP__INFRA__STORAGE__PASSWORD
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U indexer"]
+      interval: "3s"
+      timeout: "2s"
+      retries: 20
+    security_opt:
+      - no-new-privileges:true
+
+  nats:
+    profiles:
+      - cloud
+    image: "nats:2.12.3"
+    restart: "always"
+    command:
+      ["--user", "indexer", "--pass", $APP__INFRA__PUB_SUB__PASSWORD, "-js"]
+    ports:
+      - "${SYNC_NATS_PORT:-4422}:4222"
+    volumes:
+      - nats_sync_data:/tmp/nats
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  postgres_sync_data:
+  nats_sync_data:
