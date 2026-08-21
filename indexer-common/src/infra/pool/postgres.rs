@@ -61,6 +61,13 @@ impl PostgresPool {
 
         Ok(pool)
     }
+
+    /// The pool for write statements executed outside a transaction. Postgres handles
+    /// concurrent writers itself, so this is the same pool as `Deref`; it exists so code
+    /// shared with the SQLite pool (which splits reads and writes) compiles against both.
+    pub fn writer(&self) -> &sqlx::PgPool {
+        &self.0
+    }
 }
 
 impl Deref for PostgresPool {

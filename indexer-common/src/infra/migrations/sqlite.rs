@@ -17,14 +17,14 @@ use thiserror::Error;
 
 /// Run the database migrations for SQLite.
 pub async fn run(pool: &SqlitePool) -> Result<(), Error> {
-    sqlx::migrate!("migrations/sqlite").run(&**pool).await?;
+    sqlx::migrate!("migrations/sqlite").run(pool.writer()).await?;
     Ok(())
 }
 
 /// Run the database migrations for SQLite for the ledger DB.
 pub async fn run_for_ledger_db(pool: &SqlitePool) -> Result<(), Error> {
     sqlx::migrate!("migrations/sqlite-ledger-db")
-        .run(&**pool)
+        .run(pool.writer())
         .await?;
     Ok(())
 }
