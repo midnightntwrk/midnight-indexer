@@ -25,7 +25,6 @@ use parity_scale_codec::Decode;
 use subxt::error::RuntimeApiError;
 
 pub async fn make_block_details(
-    authorities: &mut Option<Vec<[u8; 32]>>,
     block: &OnlineClientAtBlock,
     content: Option<&ContentSource>,
 ) -> Result<BlockDetails, SubxtNodeError> {
@@ -96,6 +95,7 @@ pub async fn make_block_details(
         })
         .collect::<Vec<_>>();
 
+    let mut new_session = false;
     let mut dust_registration_events = vec![];
     let mut system_transactions_from_events = vec![];
 
@@ -127,7 +127,7 @@ pub async fn make_block_details(
 
         match event {
             Event::Session(NewSession { .. }) => {
-                *authorities = None;
+                new_session = true;
             }
 
             // System transaction created by the node (not from extrinsics).
@@ -187,6 +187,7 @@ pub async fn make_block_details(
 
     Ok(BlockDetails {
         timestamp,
+        new_session,
         transactions,
         dust_registration_events,
         bridge_events: vec![],
