@@ -15,7 +15,7 @@ use crate::{
     domain::storage::Storage,
     infra::api::{
         ApiResult, ContextExt, OptionExt, ResultExt,
-        v4::{HexEncodable, HexEncoded, decode_session_id, viewing_key::ViewingKey},
+        v4::{HexEncodable, HexEncoded, decode_session, viewing_key::ViewingKey},
     },
 };
 use async_graphql::{Context, InputObject, Object, scalar};
@@ -39,7 +39,8 @@ impl<S> Mutation<S>
 where
     S: Storage,
 {
-    /// Connect the wallet with the given viewing key and return a session ID.
+    /// Connect the wallet with the given viewing key and return a session token that any
+    /// indexer-api instance sharing the same secret can validate.
     #[trace]
     async fn connect(
         &self,
@@ -62,42 +63,31 @@ where
 
         let storage = cx.get_storage::<S>();
 
-        let session_id = storage
+        let (wallet_id, session_token) = storage
             .connect_wallet(&viewing_key, start_index)
             .await
             .map_err_into_server_error(|| "connect wallet")?;
 
-        let wallet_id = storage
-            .resolve_session_id(session_id)
-            .await
-            .map_err_into_server_error(|| "resolve session ID")?
-            .some_or_client_error(|| "unknown or expired session ID")?;
-
         debug!(wallet_id:%; "wallet connected");
 
-        Ok(session_id.hex_encode())
+        Ok(session_token.hex_encode())
     }
 
-    /// Disconnect the wallet with the given session ID.
+    /// Disconnect the wallet with the given session token or legacy session ID. Best effort: a
+    /// session token cannot be revoked and stays valid on all instances until it expires.
     #[trace]
     async fn disconnect(&self, cx: &Context<'_>, session_id: HexEncoded) -> ApiResult<Unit> {
-        let session_id =
-            decode_session_id(session_id).map_err_into_client_error(|| "invalid session ID")?;
+        let session =
+            decode_session(session_id).map_err_into_client_error(|| "invalid session ID")?;
 
-        let storage = cx.get_storage::<S>();
-
-        let wallet_id = storage
-            .resolve_session_id(session_id)
+        cx.get_storage::<S>()
+            .disconnect_wallet(session.as_ref(), cx.get_session_token_ttl())
             .await
-            .map_err_into_server_error(|| "resolve session ID")?
+            .map_err_into_server_error(|| "disconnect wallet")?
+            .then_some(())
             .some_or_client_error(|| "unknown or expired session ID")?;
 
-        storage
-            .disconnect_wallet(session_id)
-            .await
-            .map_err_into_server_error(|| "disconnect wallet")?;
-
-        debug!(wallet_id:%; "wallet disconnected");
+        debug!("wallet disconnected");
 
         Ok(Unit)
     }

@@ -38,7 +38,7 @@ use crate::{
         storage::{NoopStorage, Storage},
     },
     infra::api::{
-        ApiResult, ContextExt, Metrics, OptionExt, ResultExt, SubscriptionConfig,
+        ApiResult, ContextExt, Metrics, OptionExt, ResultExt, SessionTokenTtl, SubscriptionConfig,
         progress_cache::ProgressCache,
         quota::{PerConnectionCounter, SubscriptionQuotas},
         v4::{
@@ -69,13 +69,14 @@ use bech32::{Bech32, Bech32m, Hrp};
 use const_hex::FromHexError;
 use derive_more::{AsRef, Debug, Display};
 use indexer_common::domain::{
-    ByteArrayLenError, ByteVec, CardanoRewardAddress as DomainCardanoRewardAddress, NetworkId,
-    NoopSubscriber, SessionId, Subscriber,
+    ByteVec, CardanoRewardAddress as DomainCardanoRewardAddress, NetworkId, NoopSubscriber,
+    Subscriber,
 };
 use serde::{Deserialize, Serialize};
 use std::{
     any::type_name,
     sync::{Arc, atomic::AtomicBool},
+    time::Duration,
 };
 use thiserror::Error;
 
@@ -380,6 +381,7 @@ pub fn make_app<S, B>(
     subscription_config: SubscriptionConfig,
     quotas: SubscriptionQuotas,
     progress_cache: ProgressCache,
+    session_token_ttl: Duration,
 ) -> Router<Arc<AtomicBool>>
 where
     S: Storage,
@@ -414,6 +416,7 @@ where
         .data(subscriber)
         .data(metrics)
         .data(subscription_config)
+        .data(SessionTokenTtl(session_token_ttl))
         .data(quotas)
         .data(progress_cache)
         .limit_complexity(max_complexity)
@@ -511,19 +514,23 @@ where
     .extension(async_graphql::extensions::Tracing)
 }
 
-fn decode_session_id(session_id: HexEncoded) -> Result<SessionId, DecodeSessionIdError> {
-    let session_id = session_id.hex_decode::<Vec<u8>>()?;
-    let session_id = SessionId::try_from(session_id.as_slice())?;
-    Ok(session_id)
+/// Decode a hex-encoded session, either a sealed session token or a legacy 32-byte session ID.
+fn decode_session(session_id: HexEncoded) -> Result<ByteVec, DecodeSessionError> {
+    let session = session_id.hex_decode::<ByteVec>()?;
+    // The shortest valid session is the legacy 32-byte session ID.
+    if session.as_ref().len() < 32 {
+        return Err(DecodeSessionError::TooShort);
+    }
+    Ok(session)
 }
 
 #[derive(Debug, Error)]
-enum DecodeSessionIdError {
+enum DecodeSessionError {
     #[error("cannot hex-decode session ID")]
     HexDecode(#[from] HexDecodeError),
 
-    #[error("cannot convert into session ID")]
-    ByteArrayLen(#[from] ByteArrayLenError),
+    #[error("session ID too short")]
+    TooShort,
 }
 
 /// Resolve the block height for the given optional block offset. If it is a block height, it is

@@ -1162,11 +1162,13 @@ type MiscContractEvent implements ContractEvent @beta {
 
 type Mutation {
 	"""
-	Connect the wallet with the given viewing key and return a session ID.
+	Connect the wallet with the given viewing key and return a session token that any
+	indexer-api instance sharing the same secret can validate.
 	"""
 	connect(viewingKey: ViewingKey!, options: ConnectOptions): HexEncoded!
 	"""
-	Disconnect the wallet with the given session ID.
+	Disconnect the wallet with the given session token or legacy session ID. Best effort: a
+	session token cannot be revoked and stays valid on all instances until it expires.
 	"""
 	disconnect(sessionId: HexEncoded!): Unit!
 }

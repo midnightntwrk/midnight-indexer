@@ -67,6 +67,9 @@ infra:
     quota:
       max_concurrent_per_connection: 20
       max_session_subscriptions_per_minute: 10
+    # Maximum age of the sealed session tokens returned by `connect`. Bounds the token
+    # lifetime, because `disconnect` cannot revoke tokens held by other instances.
+    session_token_ttl: "7days"
 
 telemetry:
   tracing:

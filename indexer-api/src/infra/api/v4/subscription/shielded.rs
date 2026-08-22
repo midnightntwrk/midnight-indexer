@@ -17,7 +17,7 @@ use crate::{
     infra::api::{
         ApiError, ApiResult, ContextExt, OptionExt, ResultExt,
         v4::{
-            HexEncoded, decode_session_id,
+            HexEncoded, decode_session,
             merkle_tree_collapsed_update::{CollapsedMerkleTree, MerkleTreeCollapsedUpdate},
             transaction::RegularTransaction,
         },
@@ -34,7 +34,7 @@ use futures::{
     future::ok,
     stream::{self, TryStreamExt},
 };
-use indexer_common::domain::{Subscriber, WalletIndexed};
+use indexer_common::domain::{SessionId, Subscriber, WalletIndexed};
 use log::{debug, warn};
 use std::{future::ready, marker::PhantomData, pin::pin};
 use stream_cancel::{StreamExt as _, Trigger, Tripwire};
@@ -141,19 +141,25 @@ where
     {
         cx.get_metrics().wallets_connected.increment(1);
 
-        let session_id =
-            decode_session_id(session_id).map_err_into_client_error(|| "invalid session ID")?;
+        let session =
+            decode_session(session_id).map_err_into_client_error(|| "invalid session ID")?;
+
+        // Per-session quota key: the legacy 32-byte session ID itself, or for a sealed token its
+        // unique AEAD tail.
+        let session = session.as_ref();
+        let quota_key = SessionId::try_from(&session[session.len() - 32..])
+            .expect("session is at least 32 bytes");
 
         let quota_guard = cx
             .get_subscription_quotas()
-            .try_acquire(cx.get_per_connection_counter(), Some(session_id))
+            .try_acquire(cx.get_per_connection_counter(), Some(quota_key))
             .map_err_into_client_error(|| "subscription limit exceeded")?;
 
         let wallet_id = cx
             .get_storage::<S>()
-            .resolve_session_id(session_id)
+            .resolve_session(session, cx.get_session_token_ttl())
             .await
-            .map_err_into_server_error(|| "resolve session ID")?
+            .map_err_into_server_error(|| "resolve session")?
             .some_or_client_error(|| "unknown or expired session ID")?;
         let index = index.unwrap_or_default();
 
