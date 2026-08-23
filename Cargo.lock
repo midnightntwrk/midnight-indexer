@@ -2654,7 +2654,7 @@ dependencies = [
  "log",
  "rustversion",
  "windows-link",
- "windows-result 0.4.1",
+ "windows-result",
 ]
 
 [[package]]
@@ -3208,7 +3208,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.57.0",
+ "windows-core",
 ]
 
 [[package]]
@@ -3462,11 +3462,11 @@ dependencies = [
  "midnight-onchain-state 3.0.0",
  "midnight-onchain-state 4.0.0",
  "midnight-serialize",
- "midnight-storage 2.0.1",
+ "midnight-storage",
  "midnight-storage-core",
  "midnight-transient-crypto 2.2.0",
  "midnight-transient-crypto 3.0.0",
- "midnight-zswap 8.1.0",
+ "midnight-zswap 8.1.1",
  "midnight-zswap 9.0.0",
  "opentelemetry",
  "opentelemetry-otlp",
@@ -3489,6 +3489,7 @@ dependencies = [
  "tracing-subscriber",
  "trait-variant",
  "uuid",
+ "v8-to-v9-state-translation",
 ]
 
 [[package]]
@@ -3514,6 +3515,7 @@ name = "indexer-tests"
 version = "4.4.0-rc.2"
 dependencies = [
  "anyhow",
+ "bech32",
  "clap",
  "derive_more 2.1.1",
  "fs_extra",
@@ -4522,9 +4524,9 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger"
-version = "8.1.0"
+version = "8.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2182054f3a43ccabac514448fff2487437be293f517a01afc23905df701e8548"
+checksum = "479798394847a6686bb9fabda270d16f8525457e9adcc9d2c3486b2422cc4e1c"
 dependencies = [
  "anyhow",
  "derive-where",
@@ -4540,9 +4542,9 @@ dependencies = [
  "midnight-ledger-static 9.0.0",
  "midnight-onchain-runtime 3.1.0",
  "midnight-serialize",
- "midnight-storage 2.0.1",
+ "midnight-storage",
  "midnight-transient-crypto 2.2.0",
- "midnight-zswap 8.1.0",
+ "midnight-zswap 8.1.1",
  "rand 0.8.6",
  "rayon",
  "serde",
@@ -4592,7 +4594,7 @@ dependencies = [
  "midnight-ledger-static 10.0.0",
  "midnight-onchain-runtime 4.0.0",
  "midnight-serialize",
- "midnight-storage 2.0.2",
+ "midnight-storage",
  "midnight-transient-crypto 2.2.0",
  "midnight-transient-crypto 3.0.0",
  "midnight-zswap 9.0.0",
@@ -4624,7 +4626,7 @@ dependencies = [
  "midnight-onchain-state 3.0.0",
  "midnight-onchain-vm 3.1.0",
  "midnight-serialize",
- "midnight-storage 2.0.1",
+ "midnight-storage",
  "midnight-transient-crypto 2.2.0",
  "rand 0.8.6",
  "serde",
@@ -4649,7 +4651,7 @@ dependencies = [
  "midnight-onchain-state 4.0.0",
  "midnight-onchain-vm 4.0.0",
  "midnight-serialize",
- "midnight-storage 2.0.2",
+ "midnight-storage",
  "midnight-transient-crypto 3.0.0",
  "rand 0.8.6",
  "serde",
@@ -4669,7 +4671,7 @@ dependencies = [
  "midnight-base-crypto",
  "midnight-coin-structure 2.0.1",
  "midnight-serialize",
- "midnight-storage 2.0.1",
+ "midnight-storage",
  "midnight-transient-crypto 2.2.0",
  "rand 0.8.6",
  "serde",
@@ -4687,7 +4689,7 @@ dependencies = [
  "midnight-base-crypto",
  "midnight-coin-structure 3.0.0",
  "midnight-serialize",
- "midnight-storage 2.0.2",
+ "midnight-storage",
  "midnight-transient-crypto 2.2.0",
  "midnight-transient-crypto 3.0.0",
  "rand 0.8.6",
@@ -4709,7 +4711,7 @@ dependencies = [
  "midnight-coin-structure 2.0.1",
  "midnight-onchain-state 3.0.0",
  "midnight-serialize",
- "midnight-storage 2.0.1",
+ "midnight-storage",
  "midnight-transient-crypto 2.2.0",
  "rand 0.8.6",
  "rpds",
@@ -4730,7 +4732,7 @@ dependencies = [
  "midnight-coin-structure 3.0.0",
  "midnight-onchain-state 4.0.0",
  "midnight-serialize",
- "midnight-storage 2.0.2",
+ "midnight-storage",
  "midnight-transient-crypto 3.0.0",
  "rand 0.8.6",
  "rpds",
@@ -4804,32 +4806,13 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage"
-version = "2.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "210e601a89aee79ce2b007cf96c1a56c23baa306b0c40b9b98d12c27e18d1981"
-dependencies = [
- "crypto",
- "derive-where",
- "hashbrown 0.16.1",
- "midnight-base-crypto",
- "midnight-serialize",
- "midnight-storage-core",
- "parking_lot",
- "rand 0.8.6",
- "serde",
- "sha2 0.10.9",
- "sysinfo 0.34.2",
- "tempfile",
-]
-
-[[package]]
-name = "midnight-storage"
 version = "2.0.2"
 source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-9.1.0.0-rc.4#cd652d7f97b34b805bb5f0310ce7434eb883af38"
 dependencies = [
  "crypto",
  "derive-where",
  "digest 0.11.3",
+ "hashbrown 0.17.1",
  "midnight-base-crypto",
  "midnight-serialize",
  "midnight-storage-core",
@@ -4837,7 +4820,7 @@ dependencies = [
  "rand 0.8.6",
  "serde",
  "sha2 0.11.0",
- "sysinfo 0.39.6",
+ "sysinfo",
  "tempfile",
 ]
 
@@ -4863,7 +4846,7 @@ dependencies = [
  "rand 0.8.6",
  "serde",
  "sha2 0.11.0",
- "sysinfo 0.39.6",
+ "sysinfo",
  "tempfile",
 ]
 
@@ -5028,9 +5011,9 @@ dependencies = [
 
 [[package]]
 name = "midnight-zswap"
-version = "8.1.0"
+version = "8.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c83f946d8ac03abea38ca470599801fa08e91e2ddf3cb0963027a7701180c7c"
+checksum = "07ff4a06f9d1dcb857be73dd926fcb233b61af3d2a8ab0103b5e39725cd4feb8"
 dependencies = [
  "derive-where",
  "fake",
@@ -5043,7 +5026,7 @@ dependencies = [
  "midnight-ledger-static 9.0.0",
  "midnight-onchain-runtime 3.1.0",
  "midnight-serialize",
- "midnight-storage 2.0.1",
+ "midnight-storage",
  "midnight-transient-crypto 2.2.0",
  "rand 0.8.6",
  "serde",
@@ -5068,7 +5051,7 @@ dependencies = [
  "midnight-ledger-static 10.0.0",
  "midnight-onchain-runtime 4.0.0",
  "midnight-serialize",
- "midnight-storage 2.0.2",
+ "midnight-storage",
  "midnight-transient-crypto 2.2.0",
  "midnight-transient-crypto 3.0.0",
  "midnight-zkir",
@@ -8231,19 +8214,6 @@ dependencies = [
 
 [[package]]
 name = "sysinfo"
-version = "0.34.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4b93974b3d3aeaa036504b8eefd4c039dced109171c1ae973f1dc63b2c7e4b2"
-dependencies = [
- "libc",
- "memchr",
- "ntapi",
- "objc2-core-foundation",
- "windows 0.57.0",
-]
-
-[[package]]
-name = "sysinfo"
 version = "0.39.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2071df9448915b71c4fe6d25deaf1c22f12bd234f01540b77312bb8e41361e6"
@@ -8254,7 +8224,7 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-io-kit",
  "objc2-open-directory",
- "windows 0.62.2",
+ "windows",
 ]
 
 [[package]]
@@ -9095,6 +9065,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "v8-to-v9-state-translation"
+version = "0.1.0"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?rev=da96e33d78ee9b7d3867b15c1037510d499cd909#da96e33d78ee9b7d3867b15c1037510d499cd909"
+dependencies = [
+ "midnight-base-crypto",
+ "midnight-ledger",
+ "midnight-ledger-v9",
+ "midnight-onchain-state 3.0.0",
+ "midnight-onchain-state 4.0.0",
+ "midnight-serialize",
+ "midnight-storage",
+]
+
+[[package]]
 name = "valuable"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9478,22 +9462,12 @@ checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
 name = "windows"
-version = "0.57.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12342cb4d8e3b046f3d80effd474a7a02447231330ef77d71daa6fbc40681143"
-dependencies = [
- "windows-core 0.57.0",
- "windows-targets 0.52.6",
-]
-
-[[package]]
-name = "windows"
 version = "0.62.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "527fadee13e0c05939a6a05d5bd6eec6cd2e3dbd648b9f8e447c6518133d8580"
 dependencies = [
  "windows-collections",
- "windows-core 0.62.2",
+ "windows-core",
  "windows-future",
  "windows-numerics",
 ]
@@ -9504,19 +9478,7 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23b2d95af1a8a14a3c7367e1ed4fc9c20e0a26e79551b1454d72583c97cc6610"
 dependencies = [
- "windows-core 0.62.2",
-]
-
-[[package]]
-name = "windows-core"
-version = "0.57.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2ed2439a290666cd67ecce2b0ffaad89c2a56b976b736e6ece670297897832d"
-dependencies = [
- "windows-implement 0.57.0",
- "windows-interface 0.57.0",
- "windows-result 0.1.2",
- "windows-targets 0.52.6",
+ "windows-core",
 ]
 
 [[package]]
@@ -9525,10 +9487,10 @@ version = "0.62.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8e83a14d34d0623b51dce9581199302a221863196a1dde71a7663a4c2be9deb"
 dependencies = [
- "windows-implement 0.60.2",
- "windows-interface 0.59.3",
+ "windows-implement",
+ "windows-interface",
  "windows-link",
- "windows-result 0.4.1",
+ "windows-result",
  "windows-strings",
 ]
 
@@ -9538,20 +9500,9 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e1d6f90251fe18a279739e78025bd6ddc52a7e22f921070ccdc67dde84c605cb"
 dependencies = [
- "windows-core 0.62.2",
+ "windows-core",
  "windows-link",
  "windows-threading",
-]
-
-[[package]]
-name = "windows-implement"
-version = "0.57.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9107ddc059d5b6fbfbffdfa7a7fe3e22a226def0b2608f72e9d552763d3e1ad7"
-dependencies = [
- "proc-macro2",
- "quote 1.0.45",
- "syn 2.0.117",
 ]
 
 [[package]]
@@ -9559,17 +9510,6 @@ name = "windows-implement"
 version = "0.60.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "053e2e040ab57b9dc951b72c264860db7eb3b0200ba345b4e4c3b14f67855ddf"
-dependencies = [
- "proc-macro2",
- "quote 1.0.45",
- "syn 2.0.117",
-]
-
-[[package]]
-name = "windows-interface"
-version = "0.57.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29bee4b38ea3cde66011baa44dba677c432a78593e202392d1e9070cf2a7fca7"
 dependencies = [
  "proc-macro2",
  "quote 1.0.45",
@@ -9599,7 +9539,7 @@ version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e2e40844ac143cdb44aead537bbf727de9b044e107a0f1220392177d15b0f26"
 dependencies = [
- "windows-core 0.62.2",
+ "windows-core",
  "windows-link",
 ]
 
@@ -9610,17 +9550,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "02752bf7fbdcce7f2a27a742f798510f3e5ad88dbe84871e5168e2120c3d5720"
 dependencies = [
  "windows-link",
- "windows-result 0.4.1",
+ "windows-result",
  "windows-strings",
-]
-
-[[package]]
-name = "windows-result"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e383302e8ec8515204254685643de10811af0ed97ea37210dc26fb0032647f8"
-dependencies = [
- "windows-targets 0.52.6",
 ]
 
 [[package]]

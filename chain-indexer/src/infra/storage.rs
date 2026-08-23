@@ -523,7 +523,13 @@ async fn save_regular_transaction(
     )
     .await?;
 
-    save_dust_generation_info(&transaction.ledger_events, transaction_id, tx).await?;
+    save_dust_generation_info(
+        &transaction.ledger_events,
+        transaction.protocol_version.ledger_version().dust_epoch(),
+        transaction_id,
+        tx,
+    )
+    .await?;
 
     save_dust_nullifiers(&transaction.ledger_events, transaction_id, block_id, tx).await?;
 
@@ -549,7 +555,13 @@ async fn save_system_transaction(
 
     save_ledger_events(&transaction.ledger_events, &[], &[], transaction_id, tx).await?;
 
-    save_dust_generation_info(&transaction.ledger_events, transaction_id, tx).await
+    save_dust_generation_info(
+        &transaction.ledger_events,
+        transaction.protocol_version.ledger_version().dust_epoch(),
+        transaction_id,
+        tx,
+    )
+    .await
 }
 
 /// Save the contract actions and their balances, returning the freshly
@@ -911,9 +923,18 @@ fn correlate_contract_action_ids(
         .collect()
 }
 
+/// `dust_epoch` is the incarnation of the DUST generation tree these events
+/// belong to, taken from the ledger version the transaction was applied against
+/// (see `LedgerVersion::dust_epoch`). A hard fork that wipes dust starts the
+/// tree over, and rows from the previous epoch stay behind un-retired -- the
+/// wipe happens inside the state translation, so no `DustGenerationDtimeUpdate`
+/// ever fires for them. Stamping the epoch is what lets readers ignore them
+/// instead of double-counting balances and serving indices into a tree that no
+/// longer exists.
 #[trace(properties = { "transaction_id": "{transaction_id}" })]
 async fn save_dust_generation_info(
     ledger_events: &[LedgerEvent],
+    dust_epoch: i64,
     transaction_id: i64,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
@@ -940,9 +961,10 @@ async fn save_dust_generation_info(
                         backing_night,
                         initial_value,
                         dtime,
-                        transaction_id
+                        transaction_id,
+                        dust_epoch
                     )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                 "};
 
                 let dtime = if generation_info.dtime == u64::MAX {
@@ -963,6 +985,7 @@ async fn save_dust_generation_info(
                     .bind(U128BeBytes::from(&output.initial_value))
                     .bind(dtime)
                     .bind(transaction_id)
+                    .bind(dust_epoch)
                     .execute(&mut **tx)
                     .await?;
             }
@@ -974,11 +997,13 @@ async fn save_dust_generation_info(
                     UPDATE dust_generation_info
                     SET dtime = $1
                     WHERE night_utxo_hash = $2
+                    AND dust_epoch = $3
                 "};
 
                 sqlx::query(query)
                     .bind(generation_info.dtime as i64)
                     .bind(generation_info.night_utxo_hash.as_ref())
+                    .bind(dust_epoch)
                     .execute(&mut **tx)
                     .await?;
             }

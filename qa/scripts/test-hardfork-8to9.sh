@@ -151,6 +151,33 @@ submit_tx() {
     -d "$NODE_RPC_WS_COMPOSE"
 }
 
+# Re-register the source wallet's DUST address after the fork.
+#
+# The 8 -> 9 state translation *wipes* the ledger's dust state (midnight-node
+# #2012, backported as #2057), and the node's cnight-observation v2 migration
+# only replays cNIGHT's slice of the generating set. The genesis dev wallets hold
+# *native* NIGHT, whose generation entries nothing restores -- so they cross the
+# boundary holding NIGHT but generating no DUST, and cannot pay a fee. Without
+# this step the post-fork send in Step 7 fails for lack of DUST, which looks like
+# a fork bug but is not one.
+#
+# The registration funds itself from the retroactive DUST its now-generationless
+# NIGHT accrued (`--funding-seed` omitted), which is the same path a real holder
+# takes after the wipe. Mirrors step 5c of the node's own
+# `util/toolkit/tests/hardfork_e2e.rs`.
+register_dust_address() {
+  local toolkit_tag="$1"
+  echo ">>> Re-registering the source wallet's DUST address (post-wipe)..."
+  docker run --rm --network "${NETWORK_NAME}" -v "${TMPDIR}:/out" \
+    "${IMAGE_REGISTRY}/midnight-node-toolkit:${toolkit_tag}" \
+    generate-txs \
+    --fetch-cache inmemory \
+    register-dust-address \
+    --wallet-seed "0000000000000000000000000000000000000000000000000000000000000001" \
+    -s "$NODE_RPC_WS_COMPOSE" \
+    -d "$NODE_RPC_WS_COMPOSE"
+}
+
 # --- Step 1: ledger-8 chain-spec from the old node ---
 echo ""
 echo ">>> Step 1: Building ledger-8 chain-spec from node ${FROM_NODE_TAG}..."
@@ -296,6 +323,17 @@ if [ "$POST_SPEC" -lt 2000000 ]; then
   echo "ERROR: post-upgrade specVersion ${POST_SPEC} is still ledger-8 (< 2_000_000)." >&2
   exit 1
 fi
+
+# --- Step 6b: restart DUST generation for the source wallet ---
+# Must happen before any post-fork send: see register_dust_address() above.
+echo ""
+echo ">>> Step 6b: Re-registering the source wallet's DUST address..."
+pause "About to re-register the source wallet's DUST address."
+register_dust_address "$TO_TOOLKIT_TAG"
+# The sender returns once the registration is finalized, but the re-registered
+# NIGHT only starts generating from that block's time -- at the tip there is
+# still nothing accrued to spend. Give it a few blocks.
+sleep 18
 
 # --- Step 7: submit v9 transactions ---
 echo ""

@@ -13,11 +13,22 @@
 
 //! State translation from ledger v8 to ledger v9.
 //!
-//! # Provenance — keep in sync with the node
+//! # Provenance — keep in sync with the ledger team's crate
 //!
 //! Re-ported from the node's `ledger/helpers/src/state_translation_v8_to_v9.rs`
 //! (`midnightntwrk/midnight-node` PR #1925, commit `74a91156`; the node itself
-//! ported it from `midnight-ledger` PR #539). The **only** semantic deltas from
+//! ported it from `midnight-ledger` PR #539).
+//!
+//! **That node file no longer exists.** PR #2054 (backported as #2060, first
+//! shipped in `node-2.1.0-beta.1`, commit `e01e41f8`) deleted it and took a
+//! direct dependency on the ledger team's `v8-to-v9-state-translation` crate
+//! (`midnightntwrk/midnight-ledger`, rev
+//! `da96e33d78ee9b7d3867b15c1037510d499cd909`, which lives only on that repo's
+//! `state-translation/v8-to-v9` branch), declared a no-behaviour-change
+//! refactor. That crate rev — not the node — is the upstream to diff this file
+//! against from now on.
+//!
+//! The **only** semantic deltas from
 //! the node copy are the import aliases below (mapping the translation's
 //! `ledger_v8` / `ledger_v9` / `onchain_state_v8` / `onchain_state_v9` /
 //! `storage` / `serialize` names onto this workspace's package aliases) and the
@@ -30,8 +41,10 @@
 //! tags, same field mapping, same `INITIAL_PARAMETERS` reads — because the
 //! indexer re-derives and compares `ledger_state.root()` against the node's value
 //! at the fork boundary, so any drift breaks the boundary permanently. If the
-//! node's table changes, re-sync this file and regenerate the golden-root fixture
-//! (see `docs/hardfork-ledger-8-to-9.md`, Decision 3).
+//! upstream table changes, re-sync this file and regenerate the golden-root
+//! fixtures (`indexer-common/tests/golden_v8_to_v9_*_root.raw`, pinned by
+//! `LedgerState::translate`'s test), then re-run the devnet rehearsal in
+//! `docs/hardfork-devnet-rehearsal-8to9.md`.
 //!
 //! ## State shape differences (only stored types listed)
 //!
@@ -43,12 +56,14 @@
 //! | ContractOperation            | `contract-operation[v4]`             | `contract-operation[v6]`             | single `v2` key -> `{ v2, v3, ir }`; v8 key maps to `v2`, new `v3`/`ir` empty |
 //! | ContractMaintenanceAuthority | `contract-maintenance-authority[v1]` | `contract-maintenance-authority[v2]` | `committee: Vec<VerifyingKey>` -> `Vec<ContractMaintenanceVerifyingKey>` (Schnorr/ECDSA sum) |
 //!
-//! Everything else (zswap, utxo, dust, replay_protection, treasury,
-//! unclaimed_block_rewards) is tag-stable and passes through `recast`.
+//! Everything else (zswap, utxo, replay_protection, treasury,
+//! unclaimed_block_rewards) is tag-stable and passes through `recast`. `dust`
+//! is the exception: it is tag-stable but deliberately *wiped* rather than
+//! carried over (see [`LedgerStateTl::finalize`]).
 
 // Map the upstream translation crate names onto this workspace's package
 // aliases (the node's equivalent block maps them onto its own). `midnight-storage`
-// 2.0.1 (`state-translation` feature) is the single storage wrapper backing both
+// 2.0.2 (`state-translation` feature) is the single storage wrapper backing both
 // ledger majors — the same `storage-core` instance `v1_1::LedgerDb` implements, so
 // the v8 and v9 states and the translation share one arena.
 use midnight_ledger_v8 as ledger_v8;
@@ -347,7 +362,14 @@ impl<D: DB>
             },
             utxo: recast(&source.utxo)?,
             replay_protection: recast(&source.replay_protection)?,
-            dust: recast(&source.dust)?,
+            // The hardfork wipes dust: the v8 dust state is dropped and replaced
+            // with the same empty state genesis starts from. Dust generation for
+            // still-locked cNIGHT is re-applied afterwards by the node's
+            // `pallet_cnight_observation::migrations::v2` (arriving here as
+            // `CNightGeneratesDustUpdate` system transactions over the blocks
+            // following the boundary); dust UTxOs (balances) are not restored -
+            // they regenerate from the re-applied generation entries.
+            dust: Sp::new(ledger_v9::dust::DustState::default()),
         }))
     }
 }
@@ -799,5 +821,96 @@ mod tests {
         let v9_rt: ledger_v9::structure::LedgerState<InMemoryDB> =
             serialize::tagged_deserialize(&mut &buf[..]).expect("v9 deserialize");
         assert_eq!(v9_rt.network_id, v9.network_id);
+    }
+
+    /// The translation wipes dust: whatever generation/utxo state v8 held, the
+    /// v9 side comes out as the empty state genesis starts from.
+    ///
+    /// Ported from the node's test of the same name (`midnight-node` PR #2012,
+    /// backported as #2057). The node's `pallet_cnight_observation` v2 migration
+    /// — which replays cNIGHT dust generation across the blocks after the
+    /// boundary — is built entirely on this holding, so a silent revert to
+    /// `recast(&source.dust)` would desynchronise the indexer from the node for
+    /// good.
+    #[test]
+    fn dust_state_is_wiped() {
+        let mut v8 = ledger_v8::structure::LedgerState::<InMemoryDB>::new("test-network");
+        let mut dust = (*v8.dust).clone();
+        dust.generation.generating_tree_first_free = 7;
+        dust.utxo.commitments_first_free = 3;
+        v8.dust = Sp::new(dust);
+
+        let v9 = translate_to_completion(v8);
+
+        assert_eq!(*v9.dust, ledger_v9::dust::DustState::default());
+    }
+
+    /// Cross-validation for the golden-root fixtures: run this file's re-ported
+    /// table and the ledger team's upstream `v8-to-v9-state-translation` crate
+    /// (the one `node-2.1.0-beta.1` translates with) over the same real devnet
+    /// ledger-8 genesis, and assert both arrive at the same arena root.
+    ///
+    /// Without this, `test_translate`'s golden fixtures only pin *our own*
+    /// output — they would happily bless a drift from the node. With it, the
+    /// goldens are anchored to upstream, and the root printed below is the value
+    /// to write into `tests/golden_v8_to_v9_devnet_root.raw` when it legitimately
+    /// moves.
+    #[test]
+    fn matches_upstream_crate_on_devnet_genesis() {
+        fn upstream(
+            v8: ledger_v8::structure::LedgerState<InMemoryDB>,
+        ) -> ledger_v9::structure::LedgerState<InMemoryDB> {
+            let tl_state = TypedTranslationState::<
+                ledger_v8::structure::LedgerState<InMemoryDB>,
+                ledger_v9::structure::LedgerState<InMemoryDB>,
+                v8_to_v9_state_translation::StateTranslationTable,
+                InMemoryDB,
+            >::start(Sp::new(v8))
+            .expect("start upstream translation");
+
+            let cost = CostDuration::from_picoseconds(1_000_000_000_000);
+            tl_state
+                .run(cost)
+                .expect("upstream translation")
+                .result()
+                .expect("get upstream result")
+                .expect("upstream translation did not complete")
+                .deref()
+                .clone()
+        }
+
+        let raw = std::fs::read(format!(
+            "{}/tests/v8_genesis_devnet_0_22_0.raw",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("read v8 devnet genesis fixture");
+        let v8: ledger_v8::structure::LedgerState<InMemoryDB> =
+            serialize::tagged_deserialize(&mut &raw[..]).expect("deserialize v8 devnet genesis");
+
+        // Compare the same way `application.rs` compares against the node: the
+        // serialized arena key of the translated state.
+        use crate::domain::ledger::SerializableExt;
+        let root = |state: ledger_v9::structure::LedgerState<InMemoryDB>| {
+            midnight_storage_core_v1::storage::default_storage::<InMemoryDB>()
+                .alloc(state)
+                .as_typed_key()
+                .serialize()
+                .expect("serialize v9 arena key")
+        };
+
+        let ours = root(translate_to_completion(v8.clone()));
+        let theirs = root(upstream(v8));
+
+        assert_eq!(
+            ours, theirs,
+            "the re-ported table diverged from the upstream v8-to-v9-state-translation crate"
+        );
+        println!(
+            "v8 -> v9 devnet root (both tables): {}",
+            ours.0
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>()
+        );
     }
 }

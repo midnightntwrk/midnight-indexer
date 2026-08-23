@@ -77,6 +77,14 @@ reqwest                = { workspace = true }
 tempfile               = { workspace = true }
 testcontainers         = { workspace = true }
 testcontainers-modules = { workspace = true, features = [ "postgres" ] }
+# The ledger team's upstream v8->v9 translation, at the exact rev midnight-node
+# pins (PR #2054/#2060, shipped in node-2.1.0-beta.1). Test-only: it backs
+# `matches_upstream_crate_on_devnet_genesis`, which is what makes the golden-root
+# fixtures authoritative rather than self-blessed. Note this rev lives only on the
+# ledger repo's `state-translation/v8-to-v9` branch, so `cargo test` needs network
+# and the branch must survive; drop this dep and run the check by hand if that
+# becomes a problem.
+v8-to-v9-state-translation = { git = "https://github.com/midnightntwrk/midnight-ledger", rev = "da96e33d78ee9b7d3867b15c1037510d499cd909" }
 thiserror              = { workspace = true }
 tokio                  = { workspace = true, features = [ "macros", "rt-multi-thread" ] }
 

@@ -5,6 +5,24 @@ This runbook is the release gate for an indexer build that supports the ledger
 enacts the ledger-9 runtime through governance, then submits ledger-9 traffic.
 The indexer must continue indexing across the boundary.
 
+## Automated equivalent
+
+`indexer-tests/tests/hardfork_e2e.rs` runs the same crossing from cargo, against
+locally built binaries instead of a candidate image:
+
+```bash
+cargo build -p indexer-standalone --features standalone
+cargo nextest run -p indexer-tests --features standalone --run-ignored all hardfork
+```
+
+It is `#[ignore]`d (it boots containers and takes ~5 minutes) and needs Docker
+plus the `midnight-node:1.0.0` and migration-node/toolkit images. It asserts more
+than this runbook does — the node's `DustReapplyCompleted` count, that the
+indexer's rebuilt dust generation tree matches it, that no block in the replay
+window is missing, and that DUST generation is live again afterwards. Use it
+while developing; use the runbook below to gate a release, since only the
+runbook exercises the actual candidate *image*.
+
 ## Required inputs
 
 - A candidate indexer image tag, built from the release commit.
@@ -37,6 +55,10 @@ pre-fork traffic, runtime upgrade, and post-fork traffic.
 - The chain begins below runtime `specVersion` `2_000_000`.
 - Ledger-8 transactions are accepted and indexed before the upgrade.
 - Governance changes the runtime to `specVersion` `2_001_000` or later.
+- The source wallet's DUST address re-registers after the fork. The translation
+  wipes ledger dust state and the node's cnight-observation v2 migration replays
+  only cNIGHT's slice, so the genesis dev wallets cross the boundary holding
+  NIGHT but generating no DUST and cannot pay a fee until they re-register.
 - Ledger-9 transactions are accepted and indexed after the upgrade.
 - `chain-indexer` logs contain none of: `translate ledger state`, `ledger state
   root mismatch`, or `zswap state root mismatch`.

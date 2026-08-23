@@ -2657,14 +2657,25 @@ mod tests {
              regenerate the fixture and re-check against the node"
         );
 
-        // Populated, NODE-VALIDATED coverage: a devnet ledger-8 genesis
+        // Populated, UPSTREAM-VALIDATED coverage: a devnet ledger-8 genesis
         // (extracted from node-0.22.0, `ledger-state[v13]`, ~67 KB) exercises the
         // table's MPT walking — contracts, bridge_receiving, treasury — that the
-        // empty state does not. The pinned v9 root below was produced by the
-        // node's own `StateTranslationTable` (midnight-node `fc39e708`, the 2.1.0
-        // migration runtime) over this same blob and matches byte-for-byte, so
-        // this fixture is authoritative for the translation itself. (The full
-        // live-fork `apply + 1` RPC-format check is still Phase 3.)
+        // empty state does not.
+        //
+        // The pinned v9 root below was reproduced byte-for-byte by the ledger
+        // team's `v8-to-v9-state-translation` crate (`midnightntwrk/midnight-ledger`
+        // rev `da96e33d`) over this same blob — the crate `node-2.1.0-beta.1`
+        // itself translates with, so this fixture is authoritative for the
+        // translation. It moved when the ledger 8 -> 9 dust wipe landed
+        // (midnight-node #2012, backported as #2057): the v8 dust state is
+        // dropped rather than recast, which changes the arena root over any blob
+        // whose dust is non-empty.
+        //
+        // To re-derive after an upstream change, add
+        //   v8-to-v9-state-translation = { git = "https://github.com/midnightntwrk/midnight-ledger", rev = "<rev>" }
+        // to indexer-common's dev-dependencies and run both tables over this blob
+        // (see `state_translation_v8_to_v9`'s `matches_upstream_crate_on_devnet_genesis`).
+        // (The full live-fork `apply + 1` RPC-format check is still Phase 3.)
         let v8_devnet = std::fs::read(format!(
             "{}/tests/v8_genesis_devnet_0_22_0.raw",
             env!("CARGO_MANIFEST_DIR")

@@ -515,6 +515,17 @@ where
     *parent_block_timestamp = block.timestamp;
     block.ledger_parameters = ledger_parameters.serialize()?;
     block.zswap_end_index = ledger_state.zswap_first_free();
+    // These two are NOT monotonic across the ledger 8 -> 9 boundary: the fork
+    // wipes dust state, so both `first_free` counters reset to zero and the
+    // node's cNIGHT replay refills them (a measured 85 -> 52 on the dev chain).
+    // Post-fork indices therefore name different leaves than the same indices
+    // did pre-fork.
+    //
+    // Nothing here can be treated as a cursor across the boundary. That is why
+    // `dust_generation_info` rows carry a `dust_epoch` and every dust query
+    // scopes to the live one; a consumer that caches an index of its own still
+    // has to discard it at the fork. The per-block root check below cannot help
+    // - these counters are the indexer's own projection, not ledger state.
     block.dust_commitment_end_index = ledger_state.dust_commitments_first_free();
     block.dust_generation_end_index = ledger_state.dust_generations_first_free();
     block.dust_commitment_merkle_tree_root = ledger_state
