@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.4.0-rc.3] - 2026-08-24
+
+### 🚀 Features
+
+- *(indexer-common)* Source secrets from files via `APP__*_FILE` environment variables (#1074).
+
+### 🐛 Bug Fixes
+
+- *(indexer-common)* Use the node-identical stateless cost for `block_fullness` accumulation (#1443).
+- *(indexer-standalone)* Fix SQLite deadlocks and socket bloat in standalone mode (#1094).
+
+### ⚙️ Miscellaneous Tasks
+
+- Add standard issue templates and label-automation dispatchers (#1438).
+
 ## [4.4.0-rc.2] - 2026-08-06
 
 ### 🚀 Features
