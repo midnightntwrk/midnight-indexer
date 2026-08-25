@@ -40,6 +40,16 @@ use std::marker::PhantomData;
 
 const DEFAULT_PERFORMANCE_LIMIT: i64 = 20;
 
+/// Maximum number of epochs a single range query may span.
+///
+/// The SPO series resolvers (`registered_totals_series`, `registered_spo_series`) expand the
+/// half-open `[from_epoch, to_epoch]` window into one row per epoch via `generate_series`, then
+/// materialise every row with `fetch_all`. Without a cap, a single ~100-byte unauthenticated
+/// request (e.g. `toEpoch: 9223372036854775807`) can pin a database connection for
+/// minutes-to-hours and drive `indexer-api` toward OOM (GHSA-6746-qxvv-3hwg). No legitimate
+/// caller needs a wider window; requests beyond this bound are rejected as client errors.
+const MAX_EPOCH_SPAN: i64 = 10_000;
+
 /// GraphQL queries.
 pub struct Query<S> {
     _s: PhantomData<S>,
@@ -688,6 +698,8 @@ where
         from_epoch: i64,
         to_epoch: i64,
     ) -> ApiResult<Vec<RegisteredTotals>> {
+        validate_epoch_span(from_epoch, to_epoch)?;
+
         let storage = cx.get_storage::<S>();
 
         let totals = storage
@@ -706,6 +718,8 @@ where
         from_epoch: i64,
         to_epoch: i64,
     ) -> ApiResult<Vec<RegisteredStat>> {
+        validate_epoch_span(from_epoch, to_epoch)?;
+
         let storage = cx.get_storage::<S>();
 
         let stats = storage
@@ -724,6 +738,8 @@ where
         from_epoch: i64,
         to_epoch: i64,
     ) -> ApiResult<Vec<PresenceEvent>> {
+        validate_epoch_span(from_epoch, to_epoch)?;
+
         let storage = cx.get_storage::<S>();
 
         let events = storage
@@ -783,6 +799,22 @@ where
     }
 }
 
+/// Reject epoch ranges wider than [`MAX_EPOCH_SPAN`] before they are expanded into per-epoch
+/// rows. Bounds are accepted in either order (the storage layer normalises them), so the span is
+/// computed from the ordered bounds; `saturating_sub` keeps extreme inputs such as `i64::MAX` /
+/// `i64::MIN` from overflowing and simply saturates them into the rejected range.
+fn validate_epoch_span(from_epoch: i64, to_epoch: i64) -> ApiResult<()> {
+    let span = from_epoch
+        .max(to_epoch)
+        .saturating_sub(from_epoch.min(to_epoch));
+
+    (span <= MAX_EPOCH_SPAN)
+        .then_some(())
+        .some_or_client_error(|| {
+            format!("epoch range too large: span {span} exceeds the maximum of {MAX_EPOCH_SPAN}")
+        })
+}
+
 /// Normalize hex string by stripping 0x prefix and lowercasing.
 fn normalize_hex(input: &str) -> String {
     let s = input
@@ -791,4 +823,35 @@ fn normalize_hex(input: &str) -> String {
         .strip_prefix("0X")
         .unwrap_or(input);
     s.to_ascii_lowercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MAX_EPOCH_SPAN, validate_epoch_span};
+    use crate::infra::api::ApiError;
+
+    #[test]
+    fn accepts_spans_within_bound() {
+        assert!(validate_epoch_span(0, 0).is_ok());
+        assert!(validate_epoch_span(10, 20).is_ok());
+        assert!(validate_epoch_span(0, MAX_EPOCH_SPAN).is_ok());
+        // Bounds may arrive reversed; the span is orientation-independent.
+        assert!(validate_epoch_span(MAX_EPOCH_SPAN, 0).is_ok());
+    }
+
+    #[test]
+    fn rejects_spans_beyond_bound_as_client_error() {
+        for (from, to) in [
+            (0, MAX_EPOCH_SPAN + 1),
+            (0, i64::MAX),
+            (i64::MIN, 0),
+            // Extreme opposite bounds must not overflow when the span is computed.
+            (i64::MIN, i64::MAX),
+        ] {
+            assert!(
+                matches!(validate_epoch_span(from, to), Err(ApiError::Client(_))),
+                "expected client error for range ({from}, {to})",
+            );
+        }
+    }
 }
