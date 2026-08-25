@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.3.800-rc.1] - 2026-08-25
+
+Security release candidate for the ledger-v8 mainnet line, cut on top of `4.3.7`. It carries a
+single fix — no feature delta, no schema change (still 68 GraphQL definitions / 4 migrations), so
+it deploys over the current mainnet build without migration work.
+
+### 🐛 Bug Fixes
+
+- *(indexer-api)* Reject unbounded epoch range queries in the SPO series resolvers
+  (`registeredTotalsSeries`, `registeredSpoSeries`, `registeredPresence`). A single unauthenticated
+  request with an unbounded `toEpoch` could pin a database connection for minutes-to-hours and drive
+  `indexer-api` toward OOM. Spans wider than 10,000 epochs are now rejected as client errors
+  (GHSA-6746-qxvv-3hwg)
+
 ## [4.3.7] - 2026-08-17
 
 Ledger-v8 maintenance release for the mainnet line: `v4.3.3-hotfix` (the emergency build mainnet has
