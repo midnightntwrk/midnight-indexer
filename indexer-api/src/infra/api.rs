@@ -29,7 +29,7 @@ use crate::{
 };
 use async_graphql::{Context, dataloader::DataLoader};
 use axum::{
-    Router,
+    Extension, Router,
     body::Body,
     extract::{OriginalUri, State},
     http::{StatusCode, Uri},
@@ -56,7 +56,7 @@ use std::{
         Arc,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use thiserror::Error;
 use tokio::{
@@ -108,6 +108,7 @@ where
             max_depth,
             subscription_config,
             quota_config,
+            ready_max_lag,
         } = self.config;
 
         let app = make_app(
@@ -120,6 +121,7 @@ where
             max_depth,
             subscription_config,
             quota_config,
+            ready_max_lag,
         );
 
         let listener = TcpListener::bind((address, port))
@@ -151,6 +153,17 @@ pub struct Config {
 
     #[serde(rename = "quota")]
     pub quota_config: QuotaConfig,
+
+    /// `/ready` is 200 only while we are caught up *and* the latest indexed
+    /// block is no older than this (wall clock vs block timestamp). A cached
+    /// `caught_up` flag alone stays `true` after chain-indexer stalls
+    /// (midnight-indexer#1397).
+    #[serde(with = "humantime_serde", default = "default_ready_max_lag")]
+    pub ready_max_lag: Duration,
+}
+
+fn default_ready_max_lag() -> Duration {
+    Duration::from_secs(120)
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -272,6 +285,7 @@ fn make_app<S, B>(
     max_depth: usize,
     subscription_config: SubscriptionConfig,
     quota_config: QuotaConfig,
+    ready_max_lag: Duration,
 ) -> Router
 where
     S: Storage,
@@ -280,6 +294,11 @@ where
     let ledger_state_cache = LedgerStateCache::default();
     let quotas = SubscriptionQuotas::new(quota_config);
     let progress_cache = ProgressCache::new(subscription_config.progress_cache);
+
+    let ready_check = ReadyCheck {
+        latest: storage.clone(),
+        max_lag: ready_max_lag,
+    };
 
     let v4_app = v4::make_app(
         network_id,
@@ -297,11 +316,12 @@ where
     // ServiceBuilder together, so we use `Router::layer` with the inverted (bottom to top) order.
     Router::new()
         .route("/live", get(live))
-        .route("/ready", get(ready))
+        .route("/ready", get(ready::<S>))
         .nest("/api/v3", v4_app.clone()) // v3 is an alias to v4 for backwards compatibility.
         .nest("/api/v4", v4_app)
         .route("/api/{*rest}", any(redirect_api_to_latest))
         .with_state(caught_up)
+        .layer(Extension(ready_check))
         .layer(FastraceLayer::default())
         .layer(
             ServiceBuilder::new()
@@ -312,6 +332,32 @@ where
         .layer(CompressionLayer::new())
 }
 
+#[derive(Clone)]
+struct ReadyCheck<T> {
+    latest: T,
+    max_lag: Duration,
+}
+
+/// Narrow read used by `/ready` so the HTTP handler can be tested without a
+/// full `Storage` implementation.
+trait LatestBlockTimestamp
+where
+    Self: Clone + Send + Sync + 'static,
+{
+    fn latest_block_timestamp(
+        &self,
+    ) -> impl std::future::Future<Output = Result<Option<u64>, sqlx::Error>> + Send;
+}
+
+impl<S> LatestBlockTimestamp for S
+where
+    S: Storage,
+{
+    async fn latest_block_timestamp(&self) -> Result<Option<u64>, sqlx::Error> {
+        Ok(self.get_latest_block().await?.map(|block| block.timestamp))
+    }
+}
+
 // Returns 200 when reachable. If the runtime is parked (e.g. storage-core deadlock during
 // `creating dust generations collapsed update`), this handler does not run; kubelet's
 // liveness probe times out and the pod is terminated and recreated.
@@ -319,15 +365,73 @@ async fn live() -> impl IntoResponse {
     StatusCode::OK.into_response()
 }
 
-async fn ready(State(caught_up): State<Arc<AtomicBool>>) -> impl IntoResponse {
-    if !caught_up.load(Ordering::Acquire) {
-        (
+/// 200 only while caught up *and* the latest indexed block is still recent.
+/// `/live` is "process is up"; `/ready` is "we are still following the chain".
+async fn ready<T>(
+    State(caught_up): State<Arc<AtomicBool>>,
+    Extension(ready_check): Extension<ReadyCheck<T>>,
+) -> impl IntoResponse
+where
+    T: LatestBlockTimestamp,
+{
+    let caught_up = caught_up.load(Ordering::Acquire);
+    if !caught_up {
+        return (
             StatusCode::SERVICE_UNAVAILABLE,
             "indexer has not yet caught up with the node",
         )
-            .into_response()
+            .into_response();
+    }
+
+    let latest = match ready_check.latest.latest_block_timestamp().await {
+        Ok(timestamp_ms) => timestamp_ms,
+        Err(error) => {
+            error!(error = error.as_chain(); "cannot load latest block for readiness");
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "indexer is not following the chain",
+            )
+                .into_response();
+        }
+    };
+
+    match readiness(true, latest, unix_now_ms(), ready_check.max_lag) {
+        Ok(()) => StatusCode::OK.into_response(),
+        Err(message) => (StatusCode::SERVICE_UNAVAILABLE, message).into_response(),
+    }
+}
+
+fn unix_now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// `/ready` decision, factored out of the HTTP handler so it can be tested
+/// without standing up storage or axum.
+///
+/// Block timestamps are milliseconds since Unix epoch, matching the rest of
+/// the indexer.
+fn readiness(
+    caught_up: bool,
+    latest_block_timestamp_ms: Option<u64>,
+    now_ms: u64,
+    max_lag: Duration,
+) -> Result<(), &'static str> {
+    if !caught_up {
+        return Err("indexer has not yet caught up with the node");
+    }
+
+    let Some(timestamp_ms) = latest_block_timestamp_ms else {
+        return Err("indexer has not indexed any blocks");
+    };
+
+    let lag_ms = now_ms.saturating_sub(timestamp_ms);
+    if lag_ms > max_lag.as_millis() as u64 {
+        Err("indexer is not following the chain")
     } else {
-        StatusCode::OK.into_response()
+        Ok(())
     }
 }
 
@@ -632,11 +736,25 @@ pub struct InnerApiError(String, #[source] Option<Arc<dyn StdError + Send + Sync
 
 #[cfg(test)]
 mod tests {
-    use crate::infra::api::redirect_api_to_latest;
-    use axum::{
-        extract::OriginalUri,
-        http::{StatusCode, Uri, header},
+    use super::{
+        LatestBlockTimestamp, ReadyCheck, live, readiness, ready, redirect_api_to_latest,
+        unix_now_ms,
     };
+    use axum::{
+        Extension, Router,
+        body::{Body, to_bytes},
+        extract::OriginalUri,
+        http::{Request, StatusCode, Uri, header},
+        routing::get,
+    };
+    use std::{
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
+        time::Duration,
+    };
+    use tower::ServiceExt;
 
     /// Regression for #1085, an unrecognised path under `/api/v4` must not redirect to a
     /// `/api/v4/v4/...` URL (which would loop indefinitely). Same guard applies to `/api/v3`.
@@ -658,6 +776,262 @@ mod tests {
         assert_eq!(
             response.headers().get(header::LOCATION).unwrap(),
             "/api/v4/foo"
+        );
+    }
+
+    fn assert_ready(caught_up: bool, timestamp_ms: Option<u64>, now_ms: u64, max_lag_secs: u64) {
+        assert!(
+            readiness(
+                caught_up,
+                timestamp_ms,
+                now_ms,
+                Duration::from_secs(max_lag_secs)
+            )
+            .is_ok()
+        );
+    }
+
+    fn assert_not_ready(
+        caught_up: bool,
+        timestamp_ms: Option<u64>,
+        now_ms: u64,
+        max_lag_secs: u64,
+        message: &str,
+    ) {
+        let error = readiness(
+            caught_up,
+            timestamp_ms,
+            now_ms,
+            Duration::from_secs(max_lag_secs),
+        )
+        .expect_err("expected not ready");
+        assert_eq!(error, message);
+    }
+
+    #[test]
+    fn ready_requires_caught_up() {
+        let now = 1_700_000_000_000;
+        assert_not_ready(
+            false,
+            Some(now),
+            now,
+            120,
+            "indexer has not yet caught up with the node",
+        );
+    }
+
+    #[test]
+    fn ready_requires_an_indexed_block() {
+        assert_not_ready(
+            true,
+            None,
+            1_700_000_000_000,
+            120,
+            "indexer has not indexed any blocks",
+        );
+    }
+
+    #[test]
+    fn ready_when_caught_up_and_latest_block_is_fresh() {
+        let now = 1_700_000_000_000;
+        assert_ready(true, Some(now - 30_000), now, 120);
+        assert_ready(true, Some(now), now, 120);
+        // Equal to the lag limit still counts as following.
+        assert_ready(true, Some(now - 120_000), now, 120);
+        // Chain time slightly ahead of wall clock (clock skew) is not stale.
+        assert_ready(true, Some(now + 5_000), now, 120);
+    }
+
+    #[test]
+    fn not_ready_when_latest_block_is_stale() {
+        let now = 1_700_000_000_000;
+        assert_not_ready(
+            true,
+            Some(now - 120_001),
+            now,
+            120,
+            "indexer is not following the chain",
+        );
+        // Frozen at the last good block while the chain moved on (#1397).
+        assert_not_ready(
+            true,
+            Some(now - 23 * 60 * 60 * 1000),
+            now,
+            120,
+            "indexer is not following the chain",
+        );
+    }
+
+    #[derive(Clone)]
+    struct FakeLatest {
+        timestamp_ms: Option<u64>,
+        fail: bool,
+    }
+
+    impl LatestBlockTimestamp for FakeLatest {
+        async fn latest_block_timestamp(&self) -> Result<Option<u64>, sqlx::Error> {
+            if self.fail {
+                return Err(sqlx::Error::Protocol("forced failure".into()));
+            }
+            Ok(self.timestamp_ms)
+        }
+    }
+
+    fn ready_app(caught_up: bool, latest: FakeLatest) -> Router {
+        Router::new()
+            .route("/live", get(live))
+            .route("/ready", get(ready::<FakeLatest>))
+            .with_state(Arc::new(AtomicBool::new(caught_up)))
+            .layer(Extension(ReadyCheck {
+                latest,
+                max_lag: Duration::from_secs(120),
+            }))
+    }
+
+    async fn get_path(app: Router, path: &str) -> (StatusCode, String) {
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(path)
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("oneshot");
+        let status = response.status();
+        let body = to_bytes(response.into_body(), 1024).await.expect("body");
+        (status, String::from_utf8(body.to_vec()).expect("utf8"))
+    }
+
+    #[tokio::test]
+    async fn ready_http_503_until_caught_up_even_if_tip_is_fresh() {
+        let (status, body) = get_path(
+            ready_app(
+                false,
+                FakeLatest {
+                    timestamp_ms: Some(unix_now_ms()),
+                    fail: false,
+                },
+            ),
+            "/ready",
+        )
+        .await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body, "indexer has not yet caught up with the node");
+    }
+
+    #[tokio::test]
+    async fn ready_http_skips_storage_when_not_caught_up() {
+        let (status, body) = get_path(
+            ready_app(
+                false,
+                FakeLatest {
+                    timestamp_ms: None,
+                    fail: true,
+                },
+            ),
+            "/ready",
+        )
+        .await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body, "indexer has not yet caught up with the node");
+    }
+
+    #[tokio::test]
+    async fn ready_http_503_when_no_blocks_are_indexed() {
+        let (status, body) = get_path(
+            ready_app(
+                true,
+                FakeLatest {
+                    timestamp_ms: None,
+                    fail: false,
+                },
+            ),
+            "/ready",
+        )
+        .await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body, "indexer has not indexed any blocks");
+    }
+
+    #[tokio::test]
+    async fn ready_http_200_when_caught_up_and_following() {
+        let (status, body) = get_path(
+            ready_app(
+                true,
+                FakeLatest {
+                    timestamp_ms: Some(unix_now_ms() - 15_000),
+                    fail: false,
+                },
+            ),
+            "/ready",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.is_empty());
+    }
+
+    #[tokio::test]
+    async fn ready_http_503_when_tip_is_frozen() {
+        // Same failure mode as #1397: caught_up stays true, last indexed block ages out.
+        let (status, body) = get_path(
+            ready_app(
+                true,
+                FakeLatest {
+                    timestamp_ms: Some(unix_now_ms() - 23 * 60 * 60 * 1000),
+                    fail: false,
+                },
+            ),
+            "/ready",
+        )
+        .await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body, "indexer is not following the chain");
+    }
+
+    #[tokio::test]
+    async fn ready_http_503_when_latest_block_cannot_be_read() {
+        let (status, body) = get_path(
+            ready_app(
+                true,
+                FakeLatest {
+                    timestamp_ms: Some(unix_now_ms()),
+                    fail: true,
+                },
+            ),
+            "/ready",
+        )
+        .await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body, "indexer is not following the chain");
+    }
+
+    #[tokio::test]
+    async fn live_stays_200_when_ready_is_not() {
+        let app = ready_app(
+            false,
+            FakeLatest {
+                timestamp_ms: None,
+                fail: true,
+            },
+        );
+        let (status, _) = get_path(app, "/live").await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    #[test]
+    fn caught_up_flag_can_flip_back_to_not_ready() {
+        // Mirrors indexer-api storing BlockIndexed.caught_up: once true, a later
+        // false must make /ready fail again (falling behind the node).
+        let flag = Arc::new(AtomicBool::new(true));
+        assert!(flag.load(Ordering::Acquire));
+        flag.store(false, Ordering::Release);
+        assert_not_ready(
+            flag.load(Ordering::Acquire),
+            Some(unix_now_ms()),
+            unix_now_ms(),
+            120,
+            "indexer has not yet caught up with the node",
         );
     }
 }

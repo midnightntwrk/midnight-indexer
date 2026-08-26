@@ -58,6 +58,10 @@ infra:
     request_body_limit: "1MiB"
     max_complexity: 200
     max_depth: 15
+    # /ready is 200 only while caught up *and* the latest indexed block is no
+    # older than this. Stops traffic going to an indexer frozen at a stalled
+    # height (midnight-indexer#1397).
+    ready_max_lag: "2m"
     subscription:
       blocks:
         batch_size: 20
