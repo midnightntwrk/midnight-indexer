@@ -20,7 +20,15 @@ use indexer_common::domain::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContractAction {
     pub address: SerializedContractAddress,
+
+    /// The serialized contract state, empty as long as the node did not have one for `address`,
+    /// which happens for actions from segments that failed to apply. Such actions never reach
+    /// storage; see `LedgerState::apply_regular_transaction`.
     pub state: SerializedContractState,
+
+    /// The ID of the segment this action belongs to.
+    pub segment: u16,
+
     pub zswap_state: SerializedZswapState,
     pub extracted_balances: Vec<ContractBalance>,
     pub attributes: ContractAttributes,
@@ -31,6 +39,7 @@ impl From<indexer_common::domain::ContractAction> for ContractAction {
         Self {
             address: contract_action.address,
             state: contract_action.state,
+            segment: contract_action.segment,
             zswap_state: Default::default(),
             extracted_balances: Default::default(),
             attributes: contract_action.attributes,

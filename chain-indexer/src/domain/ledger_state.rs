@@ -11,12 +11,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{RegularTransaction, SystemTransaction, Transaction, node};
+use crate::domain::{ContractAction, RegularTransaction, SystemTransaction, Transaction, node};
 use derive_more::derive::{Deref, From};
 use fastrace::trace;
 use indexer_common::domain::{
     ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, BlockHash, LedgerVersion,
     NetworkId, SerializedContractAddress, SerializedLedgerStateKey, TransactionHash,
+    TransactionResult,
     ledger::{self, LedgerParameters},
 };
 use std::ops::DerefMut;
@@ -175,6 +176,12 @@ impl LedgerState {
             )
             .map_err(|error| Error::ApplyRegularTransaction(Some(transaction.hash), error))?;
 
+        // Drop contract actions from segments that did not apply: these were rolled back by the
+        // ledger and hence never took effect. A deploy in a failing segment, for example, leaves
+        // the node without any state for its contract address, which must neither be looked up
+        // below nor be reported to API consumers.
+        retain_applied_contract_actions(&mut transaction.contract_actions, &transaction_result);
+
         // Update transaction.
         transaction.transaction_result = transaction_result;
         transaction.zswap_merkle_tree_root = self
@@ -200,28 +207,31 @@ impl LedgerState {
                 .map_err(|error| Error::ExtractContractZswapState(transaction.hash, error))?;
             contract_action.zswap_state = zswap_state;
 
-            // TODO: Workaround until we filter failed contract actions (empty state means failed).
-            if !contract_action.state.is_empty() {
-                let contract_state = ledger::ContractState::deserialize(
-                    &contract_action.state,
-                    transaction.protocol_version.ledger_version(),
-                )
-                .map_err(|error| {
-                    Error::DeserializeContractState(
-                        transaction.hash,
-                        contract_action.address.clone(),
-                        error,
-                    )
-                })?;
-                let balances = contract_state.balances().map_err(|error| {
-                    Error::GetContractBalances(
-                        transaction.hash,
-                        contract_action.address.clone(),
-                        error,
-                    )
-                })?;
-                contract_action.extracted_balances = balances;
+            // Actions from failed segments are gone by now, so every remaining one must have a
+            // state on the node. If not, our view of the ledger disagrees with the node's, which
+            // is not something we can silently index around.
+            if contract_action.state.is_empty() {
+                return Err(Error::MissingContractState(
+                    transaction.hash,
+                    contract_action.address.clone(),
+                ));
             }
+
+            let contract_state = ledger::ContractState::deserialize(
+                &contract_action.state,
+                transaction.protocol_version.ledger_version(),
+            )
+            .map_err(|error| {
+                Error::DeserializeContractState(
+                    transaction.hash,
+                    contract_action.address.clone(),
+                    error,
+                )
+            })?;
+            let balances = contract_state.balances().map_err(|error| {
+                Error::GetContractBalances(transaction.hash, contract_action.address.clone(), error)
+            })?;
+            contract_action.extracted_balances = balances;
         }
 
         Ok(Transaction::Regular(transaction.into()))
@@ -299,6 +309,9 @@ pub enum Error {
         #[source] indexer_common::domain::ledger::Error,
     ),
 
+    #[error("no contract state for transaction {0} and contract address {1}")]
+    MissingContractState(TransactionHash, SerializedContractAddress),
+
     #[error("cannot get contract balances for transaction {0} and contract address {1}")]
     GetContractBalances(
         TransactionHash,
@@ -310,4 +323,63 @@ pub enum Error {
 fn stringify_hash(hash: &Option<TransactionHash>) -> String {
     hash.map(|hash| hash.to_string())
         .unwrap_or_else(|| "<hash unavailable>".to_string())
+}
+
+/// Only keep contract actions from segments which were applied to the ledger state.
+fn retain_applied_contract_actions(
+    contract_actions: &mut Vec<ContractAction>,
+    transaction_result: &TransactionResult,
+) {
+    contract_actions
+        .retain(|contract_action| transaction_result.segment_succeeded(contract_action.segment));
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::domain::{ContractAction, ledger_state::retain_applied_contract_actions};
+    use indexer_common::domain::{ContractAttributes, TransactionResult};
+
+    /// A contract action from a segment which failed to apply was rolled back by the ledger, hence
+    /// it must not be indexed. Notably a deploy only takes effect in its fallible segment, so a
+    /// failing one leaves the node without any state for the deployed contract.
+    #[test]
+    fn test_retain_applied_contract_actions() {
+        let contract_actions = || {
+            vec![
+                contract_action(1, ContractAttributes::Deploy),
+                contract_action(2, ContractAttributes::Update),
+            ]
+        };
+
+        let mut actions = contract_actions();
+        retain_applied_contract_actions(&mut actions, &TransactionResult::Success);
+        assert_eq!(segments(&actions), vec![1, 2]);
+
+        let mut actions = contract_actions();
+        retain_applied_contract_actions(&mut actions, &TransactionResult::Failure);
+        assert!(actions.is_empty());
+
+        let mut actions = contract_actions();
+        let partial_success = TransactionResult::PartialSuccess(vec![(1, false), (2, true)]);
+        retain_applied_contract_actions(&mut actions, &partial_success);
+        assert_eq!(segments(&actions), vec![2]);
+    }
+
+    fn contract_action(segment: u16, attributes: ContractAttributes) -> ContractAction {
+        ContractAction {
+            address: Default::default(),
+            state: Default::default(),
+            segment,
+            zswap_state: Default::default(),
+            extracted_balances: Default::default(),
+            attributes,
+        }
+    }
+
+    fn segments(contract_actions: &[ContractAction]) -> Vec<u16> {
+        contract_actions
+            .iter()
+            .map(|contract_action| contract_action.segment)
+            .collect()
+    }
 }

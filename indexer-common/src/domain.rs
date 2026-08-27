@@ -180,6 +180,23 @@ pub enum TransactionResult {
     Failure,
 }
 
+impl TransactionResult {
+    /// Whether the segment with the given ID was applied to the ledger state. Segments of a failed
+    /// transaction, as well as failed segments of a partially successful one, were rolled back and
+    /// hence never took effect.
+    pub fn segment_succeeded(&self, segment: u16) -> bool {
+        match self {
+            Self::Success => true,
+
+            Self::PartialSuccess(segments) => segments
+                .iter()
+                .any(|&(id, success)| id == segment && success),
+
+            Self::Failure => false,
+        }
+    }
+}
+
 /// The variant of a transaction: regular or system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Type)]
 #[cfg_attr(feature = "cloud", sqlx(type_name = "TRANSACTION_VARIANT"))]
@@ -192,7 +209,16 @@ pub enum TransactionVariant {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContractAction {
     pub address: SerializedContractAddress,
+
+    /// The serialized contract state, empty if the node did not have one for `address`. This can
+    /// legitimately happen for an action from a segment that failed to apply, because such an
+    /// action was rolled back; these get filtered out once the transaction result is known.
     pub state: SerializedContractState,
+
+    /// The ID of the segment this action belongs to; used to filter out actions from segments that
+    /// failed to apply.
+    pub segment: u16,
+
     pub attributes: ContractAttributes,
 }
 
@@ -351,4 +377,25 @@ pub struct DustOutput {
 pub enum LedgerEventGrouping {
     Zswap,
     Dust,
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::domain::TransactionResult;
+
+    #[test]
+    fn test_segment_succeeded() {
+        assert!(TransactionResult::Success.segment_succeeded(0));
+        assert!(TransactionResult::Success.segment_succeeded(1));
+
+        assert!(!TransactionResult::Failure.segment_succeeded(0));
+        assert!(!TransactionResult::Failure.segment_succeeded(1));
+
+        let partial_success = TransactionResult::PartialSuccess(vec![(0, true), (1, false)]);
+        assert!(partial_success.segment_succeeded(0));
+        assert!(!partial_success.segment_succeeded(1));
+
+        // A segment which is not part of the result at all cannot have been applied.
+        assert!(!partial_success.segment_succeeded(2));
+    }
 }

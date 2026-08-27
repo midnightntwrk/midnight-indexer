@@ -21,6 +21,7 @@ use crate::{
 };
 use fastrace::trace;
 use futures::{StreamExt, TryStreamExt};
+use log::warn;
 use midnight_coin_structure_v2::{coin::Info, contract::ContractAddress};
 use midnight_ledger_v8::structure::{
     ContractAction as ContractActionV8, StandardTransaction as StandardTransactionV8,
@@ -30,7 +31,7 @@ use midnight_serialize_v1::tagged_deserialize;
 use midnight_storage_core_v1::db::DB;
 use midnight_transient_crypto_v2::{encryption::SecretKey, proofs::Proof};
 use midnight_zswap_v8::Offer as OfferV8;
-use std::error::Error as StdError;
+use std::{error::Error as StdError, str};
 
 #[derive(Debug, Clone)]
 pub enum Transaction {
@@ -77,6 +78,11 @@ impl Transaction {
     }
 
     /// Get the contract actions; this involves node calls.
+    ///
+    /// The given `get_contract_state` may yield `None` for a contract the node does not know,
+    /// which happens for actions from a segment that failed to apply, because these were rolled
+    /// back. Such actions are returned with an empty state and must be filtered out by the caller
+    /// once the transaction result is known.
     #[trace]
     pub async fn contract_actions<E, F>(
         &self,
@@ -84,60 +90,64 @@ impl Transaction {
     ) -> Result<Vec<ContractAction>, Error>
     where
         E: StdError + 'static + Send + Sync,
-        F: Future<Output = Result<SerializedContractState, E>>,
+        F: Future<Output = Result<Option<SerializedContractState>, E>>,
     {
         match self {
             Self::V8(transaction) => match transaction {
                 TransactionV8::Standard(standard_transaction) => {
+                    let get_contract_state = &get_contract_state;
+
                     let contract_actions = futures::stream::iter(standard_transaction.actions())
-                        .then(|(_, contract_action)| async {
+                        .then(|(segment, contract_action)| async move {
                             match contract_action {
                                 ContractActionV8::Deploy(deploy) => {
                                     let address = serialize_contract_address(deploy.address())?;
-                                    let state = get_contract_state(address.clone()).await.map_err(
-                                        |error| {
+                                    let state = get_contract_state(address.clone())
+                                        .await
+                                        .map_err(|error| {
                                             Error::GetContractState(address.clone(), error.into())
-                                        },
-                                    )?;
+                                        })?
+                                        .unwrap_or_default();
 
                                     Ok::<_, Error>(ContractAction {
                                         address,
                                         state,
+                                        segment,
                                         attributes: ContractAttributes::Deploy,
                                     })
                                 }
 
                                 ContractActionV8::Call(call) => {
                                     let address = serialize_contract_address(call.address)?;
-                                    let state = get_contract_state(address.clone()).await.map_err(
-                                        |error| {
+                                    let state = get_contract_state(address.clone())
+                                        .await
+                                        .map_err(|error| {
                                             Error::GetContractState(address.clone(), error.into())
-                                        },
-                                    )?;
-                                    let entry_point =
-                                        String::from_utf8(call.entry_point.as_ref().to_owned())
-                                            .map_err(|error| {
-                                                Error::FromUtf8("EntryPointBufV8", error)
-                                            })?;
+                                        })?
+                                        .unwrap_or_default();
+                                    let entry_point = decode_entry_point(call.entry_point.as_ref());
 
                                     Ok(ContractAction {
                                         address,
                                         state,
+                                        segment,
                                         attributes: ContractAttributes::Call { entry_point },
                                     })
                                 }
 
                                 ContractActionV8::Maintain(update) => {
                                     let address = serialize_contract_address(update.address)?;
-                                    let state = get_contract_state(address.clone()).await.map_err(
-                                        |error| {
+                                    let state = get_contract_state(address.clone())
+                                        .await
+                                        .map_err(|error| {
                                             Error::GetContractState(address.clone(), error.into())
-                                        },
-                                    )?;
+                                        })?
+                                        .unwrap_or_default();
 
                                     Ok(ContractAction {
                                         address,
                                         state,
+                                        segment,
                                         attributes: ContractAttributes::Update,
                                     })
                                 }
@@ -225,6 +235,25 @@ fn serialize_contract_address(
         .map_err(|error| Error::Serialize("ContractAddress", error))
 }
 
+/// Decode the entry point of a contract call into the text the API exposes.
+///
+/// An entry point is an arbitrary byte string: a contract can be deployed with one which is not
+/// valid UTF-8 and then be called. Hence this must not be able to fail, because a transaction must
+/// never be able to stop indexing. Invalid bytes are replaced, which only affects how such an
+/// entry point is displayed; nothing keys off it.
+fn decode_entry_point(entry_point: &[u8]) -> String {
+    match str::from_utf8(entry_point) {
+        Ok(entry_point) => entry_point.to_owned(),
+
+        Err(_) => {
+            let hex = const_hex::encode(entry_point);
+            let lossy = String::from_utf8_lossy(entry_point).into_owned();
+            warn!(hex:%, lossy:%; "entry point is not valid UTF-8");
+            lossy
+        }
+    }
+}
+
 fn can_decrypt_v8<D: DB>(key: &SecretKey, offer: &OfferV8<Proof, D>) -> bool {
     let outputs = offer.outputs.iter().filter_map(|o| o.ciphertext.clone());
     let transient = offer.transient.iter().filter_map(|o| o.ciphertext.clone());
@@ -239,7 +268,10 @@ fn can_decrypt_v8<D: DB>(key: &SecretKey, offer: &OfferV8<Proof, D>) -> bool {
 #[cfg(test)]
 mod tests {
     use crate::{
-        domain::{LedgerVersion, ViewingKey, ledger::Transaction},
+        domain::{
+            LedgerVersion, ViewingKey,
+            ledger::{Transaction, transaction::decode_entry_point},
+        },
         error::BoxError,
     };
     use anyhow::Context;
@@ -363,5 +395,16 @@ mod tests {
             .encryption_secret_key
             .repr()
             .into()
+    }
+
+    /// A contract can be deployed with an entry point which is not valid UTF-8 and then be called,
+    /// so decoding it must never fail: no transaction may be able to stop indexing.
+    #[test]
+    fn test_decode_entry_point() {
+        assert_eq!(decode_entry_point(b"transfer"), "transfer");
+        assert_eq!(decode_entry_point(b""), "");
+        assert_eq!(decode_entry_point("\u{1f680}".as_bytes()), "\u{1f680}");
+        assert_eq!(decode_entry_point(b"transfer\xff"), "transfer\u{fffd}");
+        assert_eq!(decode_entry_point(b"\xff\xfe"), "\u{fffd}\u{fffd}");
     }
 }
