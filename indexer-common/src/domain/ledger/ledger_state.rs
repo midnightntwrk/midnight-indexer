@@ -624,10 +624,15 @@ impl LedgerState {
                     whitelist: None,
                 };
 
-                // The stateless `cost` estimates verifier-key sizes, under-costing
-                // contract calls; `cost_with_state` reads them from the ledger state.
-                // The ledger has no state-aware `fees`, so the fee is computed from
-                // the cost the same way `Transaction::fees` does.
+                // Must match the node byte-for-byte: the node feeds `block_fullness`
+                // with the stateless `cost`, and fee prices derive from this
+                // accumulator — a state-aware cost diverges on contract calls and
+                // poisons all fee-derived ledger values (shielded-sre#515).
+                let fullness_cost = transaction
+                    .cost(&ledger_state.parameters, true)
+                    .map_err(|error| Error::TransactionCost(error.into()))?;
+                // State-aware cost (accurate for contract calls) — for the reported
+                // `fees` only, never for consensus-relevant state.
                 let cost = transaction
                     .cost_with_state(&ledger_state.parameters, ledger_state, true)
                     .map_err(|error| Error::TransactionCost(error.into()))?;
@@ -670,7 +675,7 @@ impl LedgerState {
 
                 // Only count cost for successful/partial transactions (match node behavior)
                 let block_fullness = if should_count_cost {
-                    *block_fullness + cost
+                    *block_fullness + fullness_cost
                 } else {
                     *block_fullness
                 };
@@ -2504,6 +2509,29 @@ fn dag_is_complete(
 
 #[cfg(test)]
 mod tests {
+    /// Regression scaffold for shielded-sre#515: the node feeds `block_fullness`
+    /// with the stateless `Transaction::cost`; a state-aware cost diverges on
+    /// contract calls and poisons fee-derived dust commitments.
+    ///
+    /// To arm: commit `tests/contract_deploy_tx.raw` + `tests/contract_call_tx.raw`
+    /// (generated against `tests/genesis_state.raw`), drop the `#[ignore]`, apply
+    /// both, then assert (1) `cost != cost_with_state` for the call tx and
+    /// (2) accumulated `block_fullness` equals the sum of the stateless costs.
+    /// On-chain repro: stagenet txs 0733c136… / 3c0898a7… (blocks 33532/33537).
+    #[test]
+    #[ignore = "requires contract deploy/call fixtures; see doc comment"]
+    fn block_fullness_uses_stateless_cost_node_parity() {
+        let deploy =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/contract_deploy_tx.raw");
+        let call =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/contract_call_tx.raw");
+        assert!(
+            deploy.exists() && call.exists(),
+            "contract fixtures missing — generate per the doc comment above"
+        );
+        unimplemented!("apply genesis + deploy + call; assert invariants 1 and 2 per doc comment");
+    }
+
     use crate::{
         domain::{
             AddressOrContract, LedgerEventAttributes, LedgerVersion,

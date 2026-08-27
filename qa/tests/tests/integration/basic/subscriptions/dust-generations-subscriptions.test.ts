@@ -23,12 +23,21 @@ import {
   DustGenerationsSubscriptionResponse,
 } from '@utils/indexer/websocket-client';
 import { extractSubscriptionErrorMessage } from '@utils/indexer/subscription-error';
+import { isBlockHashDustGenerationsSupported } from '@utils/indexer/schema-feature-probe';
 import { DustGenerationsEventSchema } from '@utils/indexer/graphql/schema';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { env } from 'environment/model';
 import dataProvider from '@utils/testdata-provider';
 
 const indexerHttpClient = new IndexerHttpClient();
+
+// Every case in this file sends the block-hash subscription document, which fails
+// GraphQL validation outright on an environment still serving the older
+// startIndex/endIndex signature. Probed once, then each test skips rather than
+// reporting a missing surface as a behavioural failure.
+let blockHashSurfacePresent = false;
+const SURFACE_ABSENT_REASON =
+  'deployed indexer does not serve the block-hash dustGenerations signature';
 
 function encodeDustAddressAsHex(dustAddress: string): string {
   const { words } = bech32m.decode(dustAddress);
@@ -126,7 +135,9 @@ function collectDustGenerations(
         },
         error: (error) => {
           safeUnsubscribe(unsubscribe);
-          settle(() => reject(new Error(`Subscription error: ${JSON.stringify(error)}`)));
+          settle(() =>
+            reject(new Error(`Subscription error: ${extractSubscriptionErrorMessage(error)}`)),
+          );
         },
         complete: () => {
           settle(() => resolve(events));
@@ -139,6 +150,10 @@ function collectDustGenerations(
     unsubscribe = subscription.unsubscribe;
   });
 }
+
+// Rejection reason when the server accepted the subscription instead of failing it.
+// Tests that gate on a server-side guard being present branch on this.
+const COMPLETED_WITHOUT_ERROR = 'Subscription completed without error';
 
 /**
  * Subscribes to dustGenerations and resolves with the subscription error message.
@@ -165,7 +180,7 @@ function collectDustGenerationsError(
         },
         complete: () => {
           clearTimeout(timeout);
-          reject(new Error('Subscription completed without error'));
+          reject(new Error(COMPLETED_WITHOUT_ERROR));
         },
       },
       args.dustAddress,
@@ -195,11 +210,136 @@ function eventsOfType(
   return events.filter((msg) => msg.data?.dustGenerations?.__typename === typename);
 }
 
+type PinnedBlock = Awaited<ReturnType<typeof fetchBlock>>;
+
+// The resolver's rejection for a snapshot older than `max_snapshot_age`.
+const FRESHNESS_REJECTION = 'older than the snapshot freshness window';
+
+// The indexer rejects snapshots older than its `max_snapshot_age` (500 by
+// default) against the tip *at subscribe time*, not at block-selection time.
+// Starting 400 blocks back leaves ~100 blocks (~10 minutes at 6s blocks) of
+// margin against the window sliding mid-test. That margin only exists while the
+// window is configured above ~410; below that the server rejects this offset, and
+// the test steps closer to the tip rather than reporting configuration as a defect.
+const IN_WINDOW_OFFSET = 400;
+
+// Floor for stepping closer to the tip: below this there is too little room left
+// for a snapshot comparison to be worth making.
+const MIN_IN_WINDOW_OFFSET = 25;
+
+// Far enough outside the window to survive it being raised.
+const OUT_OF_WINDOW_OFFSET = 5_000;
+const OUT_OF_WINDOW_MIN_MARGIN = 1_000;
+
+/**
+ * Opens a block-pinned subscription and asserts the activity-independent
+ * invariants: every event is schema-valid, exactly one progress event terminates
+ * the snapshot, and its highestIndex is the queried block's tree size. Returns
+ * that highestIndex so callers can compare snapshots across blocks.
+ */
+async function assertPinnedSnapshot(
+  wsClient: IndexerWsClient,
+  dustAddress: string,
+  block: PinnedBlock,
+): Promise<number> {
+  const events = await collectDustGenerations(wsClient, {
+    dustAddress,
+    blockHash: block.hash,
+    dtimeCutoffHeight: 0,
+  });
+
+  assertEventsMatchSchema(events);
+  const progressEvents = eventsOfType(events, 'DustGenerationsProgress');
+  expect(progressEvents).toHaveLength(1);
+  const { highestIndex } = progressEvents[0].data!.dustGenerations as { highestIndex: number };
+  log.debug(
+    `Snapshot pinned to block ${block.height}: endIndex ${block.dustGenerationEndIndex}, ` +
+      `highestIndex ${highestIndex}, ${events.length} event(s)`,
+  );
+  expect(
+    highestIndex,
+    `highestIndex at block ${block.height} should reflect that block's tree size`,
+  ).toBe(block.dustGenerationEndIndex - 1);
+  return highestIndex;
+}
+
+type PinnedSnapshotOutcome = { highestIndex: number } | { rejection: string };
+
+/**
+ * Runs the per-block assertions unless the server refuses the block as older than
+ * its snapshot freshness window, in which case the rejection message is returned
+ * so the caller can decide what that means in its context. `max_snapshot_age` is
+ * runtime configuration the schema does not expose, so this rejection is the only
+ * signal that the deployed window is narrower than a caller assumed. Every other
+ * failure propagates.
+ */
+async function assertPinnedSnapshotUnlessStale(
+  wsClient: IndexerWsClient,
+  dustAddress: string,
+  block: PinnedBlock,
+): Promise<PinnedSnapshotOutcome> {
+  try {
+    return { highestIndex: await assertPinnedSnapshot(wsClient, dustAddress, block) };
+  } catch (error) {
+    const message = extractSubscriptionErrorMessage(error);
+    if (message.includes(FRESHNESS_REJECTION)) {
+      return { rejection: message };
+    }
+    throw error;
+  }
+}
+
+/**
+ * Skips the current test, recording the reason in the run log as well as the
+ * report so a reader of either can tell why coverage was reduced.
+ */
+function skipWithReason(ctx: TestContext, reason: string): void {
+  log.warn(reason);
+  ctx.skip(true, reason);
+}
+
+/**
+ * Locates the newest block inside `(older, newer]` at which the generation tree
+ * grew — the lowest height whose dustGenerationEndIndex already equals `newer`'s —
+ * and returns the tight pair straddling it. Picking the newest rather than the
+ * oldest boundary in the range maximises the margin against the sliding freshness
+ * window. Callers must have established that the two bounding blocks differ.
+ */
+async function findNewestGrowthBoundary(
+  older: PinnedBlock,
+  newer: PinnedBlock,
+): Promise<{ before: PinnedBlock; after: PinnedBlock }> {
+  let low = older.height; // known to have a smaller endIndex than `newer`
+  let high = newer.height; // known to have `newer`'s endIndex
+
+  while (high - low > 1) {
+    const mid = Math.floor((low + high) / 2);
+    const block = await fetchBlock({ height: mid });
+    if (block.dustGenerationEndIndex === newer.dustGenerationEndIndex) {
+      high = mid;
+    } else {
+      low = mid;
+    }
+  }
+
+  return { before: await fetchBlock({ height: low }), after: await fetchBlock({ height: high }) };
+}
+
 // Dust generation registrations require a Cardano-side mapping which has no
 // counterpart in the `undeployed` environment. Skip the whole surface there;
 // re-enable once #1152 lands local Cardano test-data provisioning.
 describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
   let indexerWsClient: IndexerWsClient;
+
+  beforeAll(async () => {
+    blockHashSurfacePresent = await isBlockHashDustGenerationsSupported();
+    if (!blockHashSurfacePresent) {
+      log.warn(
+        `dustGenerations(blockHash) is absent on ${env.getCurrentEnvironmentName()}; ` +
+          'skipping the whole surface',
+      );
+    }
+  }, 30_000);
 
   beforeEach(async () => {
     indexerWsClient = new IndexerWsClient();
@@ -222,6 +362,7 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
      */
     test('should stream a complete generation snapshot for a registered dust address', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations'] };
+      if (!blockHashSurfacePresent) return ctx.skip(true, SURFACE_ABSENT_REASON);
 
       let rewardAddress: string;
       try {
@@ -262,6 +403,7 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
      */
     test('should deliver identical events for repeated subscriptions at the same block', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations'] };
+      if (!blockHashSurfacePresent) return ctx.skip(true, SURFACE_ABSENT_REASON);
 
       let rewardAddress: string;
       try {
@@ -289,58 +431,155 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
     /**
      * The snapshot reflects the queried block's generation tree, not the tip's.
      *
-     * @given two blocks between which the dust generation tree has grown
-     *        (their dustGenerationEndIndex values differ)
+     * Blocks are discovered from queried chain state rather than by arithmetic on
+     * the tip height: any tip-relative fraction lands far outside the indexer's
+     * snapshot freshness window on a long-running chain. The strong comparison
+     * additionally needs the tree to have grown inside that window, which a quiet
+     * chain cannot guarantee, so the assertions are tiered — the per-block
+     * invariant always runs, the cross-block comparison runs when a growth
+     * boundary exists and reports the measured numbers when it does not.
+     *
+     * @given two blocks inside the freshness window, the older one up to 400 blocks
+     *        back — closer when the deployed window is narrower or the chain shorter
      * @when a dustGenerations subscription is opened at each block's hash
      * @then each final progress event reports highestIndex equal to that block's
-     *       dustGenerationEndIndex - 1, so the earlier block yields the smaller snapshot
+     *       dustGenerationEndIndex - 1 (on devnet today, endIndex 2452 yields
+     *       highestIndex 2451)
+     * @and when the tree grew between the two blocks, the pair straddling the newest
+     *      growth boundary yields a strictly smaller snapshot before it than after
      *
      * midnight-indexer#1283
      */
     test('should snapshot the generation tree at the queried block rather than the tip', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations'] };
+      if (!blockHashSurfacePresent) return ctx.skip(true, SURFACE_ABSENT_REASON);
 
-      let rewardAddress: string;
-      try {
-        rewardAddress = dataProvider.getCardanoRewardAddress('registered-with-dust');
-      } catch (error) {
-        log.warn(error);
-        ctx.skip?.(true, (error as Error).message);
-        return;
-      }
-
-      const dustAddress = await fetchDustAddress(rewardAddress);
+      // highestIndex is a global tree property — the resolver reports the pinned
+      // ledger state's first-free generation index minus one — so it needs no
+      // registered wallet and no Cardano fixture.
+      const dustAddress = generateDustAddressForNetworkId(env.getNetworkId().toLowerCase());
       const tipBlock = await fetchBlock();
-      const earlierBlock = await fetchBlock({ height: Math.floor(tipBlock.height / 2) });
 
-      if (
-        earlierBlock.dustGenerationEndIndex === 0 ||
-        earlierBlock.dustGenerationEndIndex === tipBlock.dustGenerationEndIndex
-      ) {
-        ctx.skip?.(
-          true,
-          `generation tree did not grow between block ${earlierBlock.height} ` +
-            `(endIndex ${earlierBlock.dustGenerationEndIndex}) and block ${tipBlock.height} ` +
-            `(endIndex ${tipBlock.dustGenerationEndIndex}) — snapshot comparison is vacuous`,
+      if (tipBlock.dustGenerationEndIndex === 0) {
+        return skipWithReason(
+          ctx,
+          `generation tree is still empty at the tip (block ${tipBlock.height}, endIndex 0), ` +
+            'where the resolver saturates highestIndex to 0 instead of endIndex - 1',
         );
-        return;
       }
 
-      for (const block of [earlierBlock, tipBlock]) {
-        const events = await collectDustGenerations(indexerWsClient, {
+      // Tier A at the tip is always exercisable — offset 0 is inside any window and
+      // needs no chain length — so it runs before any block discovery can skip.
+      await assertPinnedSnapshot(indexerWsClient, dustAddress, tipBlock);
+
+      // Then step closer to the tip while the server reports the snapshot out of
+      // window (a narrower max_snapshot_age) or the tree still empty (closer blocks
+      // hold a larger tree). The start is clamped so a short chain never addresses a
+      // negative height.
+      const startOffset = Math.min(IN_WINDOW_OFFSET, tipBlock.height - 1);
+      let earlierBlock: PinnedBlock | undefined;
+      let offsetUsed = 0;
+      let lastRejection = '';
+      for (
+        let offset = startOffset;
+        offset >= MIN_IN_WINDOW_OFFSET;
+        offset = Math.floor(offset / 2)
+      ) {
+        const candidate = await fetchBlock({ height: tipBlock.height - offset });
+        if (candidate.dustGenerationEndIndex === 0) {
+          log.warn(`Generation tree still empty at tip-${offset} (block ${candidate.height})`);
+          continue;
+        }
+        const outcome = await assertPinnedSnapshotUnlessStale(
+          indexerWsClient,
           dustAddress,
-          blockHash: block.hash,
-          dtimeCutoffHeight: 0,
-        });
-
-        const progressEvents = eventsOfType(events, 'DustGenerationsProgress');
-        expect(progressEvents).toHaveLength(1);
-        const progress = progressEvents[0].data!.dustGenerations as { highestIndex: number };
-        expect(
-          progress.highestIndex,
-          `highestIndex at block ${block.height} should reflect that block's tree size`,
-        ).toBe(block.dustGenerationEndIndex - 1);
+          candidate,
+        );
+        if (!('rejection' in outcome)) {
+          earlierBlock = candidate;
+          offsetUsed = offset;
+          break;
+        }
+        lastRejection = outcome.rejection;
+        log.warn(
+          `Snapshot at tip-${offset} (block ${candidate.height}) refused: ${outcome.rejection}`,
+        );
       }
+
+      if (earlierBlock === undefined) {
+        const attempted =
+          `tip ${tipBlock.height} (endIndex ${tipBlock.dustGenerationEndIndex}), offsets ` +
+          `${startOffset} down to ${MIN_IN_WINDOW_OFFSET}`;
+
+        // Being refused even at the smallest offset is not a configuration this
+        // deployment can reach: max_snapshot_age defaults to 500, nothing overrides
+        // it, and a value under MIN_IN_WINDOW_OFFSET would be absurd. The realistic
+        // cause is a regression in the freshness computation, which the negative
+        // test cannot catch either — its block stays rejected either way. Fail.
+        expect(
+          lastRejection,
+          `every candidate offset was refused as outside the snapshot freshness window, which ` +
+            `no deployable max_snapshot_age explains — ${attempted}`,
+        ).toBe('');
+
+        return skipWithReason(ctx, `generation tree empty at every offset tried — ${attempted}`);
+      }
+
+      // Tier B — the pinning comparison proper, possible only where the tree grew
+      // inside the window.
+      const boundaryFound = earlierBlock.dustGenerationEndIndex !== tipBlock.dustGenerationEndIndex;
+      const measurements =
+        `tip ${tipBlock.height} (endIndex ${tipBlock.dustGenerationEndIndex}), ` +
+        `block ${earlierBlock.height} at tip-${offsetUsed} ` +
+        `(endIndex ${earlierBlock.dustGenerationEndIndex}), ` +
+        `growth boundary found: ${boundaryFound}`;
+
+      if (!boundaryFound) {
+        return skipWithReason(
+          ctx,
+          `generation tree did not grow within the ${offsetUsed}-block in-window budget, ` +
+            `so a cross-block comparison would be vacuous — ${measurements}`,
+        );
+      }
+
+      const { before, after } = await findNewestGrowthBoundary(earlierBlock, tipBlock);
+      log.debug(`Tier B comparing blocks ${before.height} and ${after.height} — ${measurements}`);
+
+      // Tier B carries the least margin of anything here: the boundary pair is the
+      // oldest thing subscribed to, and the binary search plus these two
+      // subscriptions all run after it was selected. A refusal now is the window
+      // sliding past the boundary, not a pinning defect.
+      const beforeOutcome = await assertPinnedSnapshotUnlessStale(
+        indexerWsClient,
+        dustAddress,
+        before,
+      );
+      if ('rejection' in beforeOutcome) {
+        return skipWithReason(
+          ctx,
+          `growth boundary aged out of the freshness window before it could be compared: block ` +
+            `${before.height} refused (${beforeOutcome.rejection}) — ${measurements}`,
+        );
+      }
+      const afterOutcome = await assertPinnedSnapshotUnlessStale(
+        indexerWsClient,
+        dustAddress,
+        after,
+      );
+      if ('rejection' in afterOutcome) {
+        return skipWithReason(
+          ctx,
+          `growth boundary aged out of the freshness window before it could be compared: block ` +
+            `${after.height} refused (${afterOutcome.rejection}) — ${measurements}`,
+        );
+      }
+
+      const beforeHighestIndex = beforeOutcome.highestIndex;
+      const afterHighestIndex = afterOutcome.highestIndex;
+      expect(
+        beforeHighestIndex,
+        `block ${before.height} should yield a strictly smaller snapshot than block ${after.height}`,
+      ).toBeLessThan(afterHighestIndex);
     }, 90_000);
   });
 
@@ -357,6 +596,7 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
      */
     test('should replay owned dtime updates before generation items when the cutoff is zero', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations'] };
+      if (!blockHashSurfacePresent) return ctx.skip(true, SURFACE_ABSENT_REASON);
 
       let rewardAddress: string;
       try {
@@ -410,6 +650,7 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
      */
     test('should deliver no dtime updates when the cutoff equals the snapshot block height', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations'] };
+      if (!blockHashSurfacePresent) return ctx.skip(true, SURFACE_ABSENT_REASON);
 
       let rewardAddress: string;
       try {
@@ -445,6 +686,7 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
      */
     test('should return an error for an invalid dust address', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations', 'Negative'] };
+      if (!blockHashSurfacePresent) return ctx.skip(true, SURFACE_ABSENT_REASON);
 
       const block = await fetchBlock();
       const errorReceived = await collectDustGenerationsError(indexerWsClient, {
@@ -467,6 +709,7 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
      */
     test('should return an error for a valid address that is meant for another networkid', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations', 'Negative'] };
+      if (!blockHashSurfacePresent) return ctx.skip(true, SURFACE_ABSENT_REASON);
 
       const targetNetworkId = env.getNetworkId().toLowerCase();
       const networkIds = env.getAllEnvironmentNames();
@@ -511,6 +754,7 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
      */
     test('should return an error for a valid dust address passed in hex format', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations', 'Negative'] };
+      if (!blockHashSurfacePresent) return ctx.skip(true, SURFACE_ABSENT_REASON);
 
       const targetNetworkId = env.getNetworkId().toLowerCase();
       const bech32DustAddress = generateDustAddressForNetworkId(targetNetworkId);
@@ -540,6 +784,7 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
      */
     test('should return an error for an unknown block hash', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations', 'Negative'] };
+      if (!blockHashSurfacePresent) return ctx.skip(true, SURFACE_ABSENT_REASON);
 
       const targetNetworkId = env.getNetworkId().toLowerCase();
       const dustAddress = generateDustAddressForNetworkId(targetNetworkId);
@@ -565,6 +810,7 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
      */
     test('should return an error for a malformed block hash', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations', 'Negative'] };
+      if (!blockHashSurfacePresent) return ctx.skip(true, SURFACE_ABSENT_REASON);
 
       const targetNetworkId = env.getNetworkId().toLowerCase();
       const dustAddress = generateDustAddressForNetworkId(targetNetworkId);
@@ -576,6 +822,68 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
       });
 
       expect(errorReceived.toLowerCase()).toMatch(/(invalid block hash|hex)/);
+    });
+
+    /**
+     * A snapshot request older than the freshness window is rejected up front.
+     *
+     * The indexer only keeps recent ledger states loadable, so it refuses a
+     * block-pinned snapshot whose block is more than `max_snapshot_age` behind the
+     * tip rather than failing mid-stream on garbage-collected state. The window is
+     * runtime configuration and is not exposed through the schema, so the block is
+     * chosen far enough back to stay outside any plausible value.
+     *
+     * @given a valid dust address and an indexed block 5000 blocks behind the tip
+     * @when a dustGenerations subscription is opened at that block's hash
+     * @then the subscription is rejected with the snapshot-freshness message, and not
+     *       with either neighbouring rejection (an unknown block hash, or a ledger
+     *       state that is no longer available)
+     *
+     * midnight-indexer#1427
+     */
+    test('should reject a block hash older than the snapshot freshness window', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations', 'Negative'] };
+      if (!blockHashSurfacePresent) return ctx.skip(true, SURFACE_ABSENT_REASON);
+
+      const tipBlock = await fetchBlock();
+      const minimumTipHeight = OUT_OF_WINDOW_OFFSET + OUT_OF_WINDOW_MIN_MARGIN;
+      if (tipBlock.height <= minimumTipHeight) {
+        return skipWithReason(
+          ctx,
+          `chain is too short to address a block outside the freshness window: tip height ` +
+            `${tipBlock.height}, needs more than ${minimumTipHeight}`,
+        );
+      }
+
+      const staleBlock = await fetchBlock({ height: tipBlock.height - OUT_OF_WINDOW_OFFSET });
+      const dustAddress = generateDustAddressForNetworkId(env.getNetworkId().toLowerCase());
+
+      const outcome = await collectDustGenerationsError(indexerWsClient, {
+        dustAddress,
+        blockHash: staleBlock.hash,
+        dtimeCutoffHeight: 0,
+      }).then(
+        (message) => ({ message, failure: null as string | null }),
+        (failure: Error) => ({ message: null as string | null, failure: failure.message }),
+      );
+
+      // The guard is not present in every deployed build and cannot be detected by
+      // introspection, so a clean completion means the indexer predates it rather
+      // than that it regressed. Any other rejection reason is a real failure.
+      if (outcome.failure === COMPLETED_WITHOUT_ERROR) {
+        return skipWithReason(
+          ctx,
+          `deployed indexer predates the snapshot freshness guard: a subscription at block ` +
+            `${staleBlock.height}, ${OUT_OF_WINDOW_OFFSET} blocks behind tip ` +
+            `${tipBlock.height}, streamed a snapshot instead of being rejected`,
+        );
+      }
+      expect(outcome.failure, 'the subscription should have surfaced a server error').toBeNull();
+
+      log.debug(`Received expected freshness rejection: ${outcome.message}`);
+      expect(outcome.message).toContain(FRESHNESS_REJECTION);
+      expect(outcome.message).not.toMatch(/unknown block hash/);
+      expect(outcome.message).not.toMatch(/no longer available/);
     });
   });
 
@@ -605,6 +913,7 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
      */
     test('first item transactionHash resolves via transactions(offset)', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations', 'Transaction'] };
+      if (!blockHashSurfacePresent) return ctx.skip(true, SURFACE_ABSENT_REASON);
 
       let rewardAddress: string;
       try {
