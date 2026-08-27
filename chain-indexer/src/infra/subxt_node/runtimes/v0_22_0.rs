@@ -24,6 +24,7 @@ use indexer_common::domain::{
     TermsAndConditionsHash,
 };
 use itertools::Itertools;
+use log::warn;
 use parity_scale_codec::Decode;
 use subxt::error::RuntimeApiError;
 
@@ -195,7 +196,7 @@ pub fn decode_slot(mut slot: &[u8]) -> Result<u64, SubxtNodeError> {
 pub async fn get_contract_state(
     address: SerializedContractAddress,
     block: &OnlineClientAtBlock,
-) -> Result<SerializedContractState, SubxtNodeError> {
+) -> Result<Option<SerializedContractState>, SubxtNodeError> {
     let get_state = super::runtime_0_22_0::runtime_apis()
         .midnight_runtime_api()
         .get_contract_state(address.as_slice().into());
@@ -204,11 +205,19 @@ pub async fn get_contract_state(
         .runtime_apis()
         .call(get_state)
         .await
-        .map_err(|error| SubxtNodeError::GetContractState(address.clone(), error.into()))?
-        .map_err(|error| SubxtNodeError::GetContractState(address, format!("{error:?}").into()))?
-        .into();
+        .map_err(|error| SubxtNodeError::GetContractState(address.clone(), error.into()))?;
 
-    Ok(state)
+    // The ledger API errs for a contract the node does not know, e.g. one deployed by a segment
+    // that failed to apply. This must not be fatal: no transaction, however crafted, may stop
+    // ingestion. Callers treat a missing state as "action rolled back" and drop the action.
+    match state {
+        Ok(state) => Ok(Some(state.into())),
+
+        Err(error) => {
+            warn!(address:%, error:?; "no contract state");
+            Ok(None)
+        }
+    }
 }
 
 pub async fn get_zswap_merkle_tree_root(
