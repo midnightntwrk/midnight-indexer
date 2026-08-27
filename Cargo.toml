@@ -110,13 +110,17 @@ trait-variant               = { version = "0.1" }
 uuid                        = { version = "1.23", features = [ "serde" ] }
 walkdir                     = { version = "2.5" }
 
-# DRAFT (chore/justin-ledger-rc4): rc.3 -> rc.4 bump. Picks up the ledger dust
-# registration accounting fix. Mirrors midnight-node#2022; not verified with a
-# real `cargo` resolve/build yet - see the DRAFT TODO below.
-#
 # Ledger 9.1.0.0-rc.4, the ledger team's published patch set; the v8/v9
 # coexistence shape traces to midnight-ledger#580. The rc crates aren't on
-# crates.io yet, hence git tags.
+# crates.io yet, hence git tags. rc.3 -> rc.4 picks up the ledger dust
+# registration accounting fix, mirroring midnight-node#2022.
+#
+# These pins match midnight-node 2.1.0-beta.1 crate for crate — same rc.4 tag on
+# every v9-side crate, same `=8.1.1` / `=3.0.0` / `=3.1.0` v8 side, same
+# `layout-v2` + `gc-v1` on storage-core, same `v8-to-v9-state-translation` rev.
+# They have to: the indexer re-derives the translated arena root and compares it
+# against the node's at the fork boundary. Re-check that parity against the
+# node's workspace Cargo.toml whenever either side moves.
 #
 # rc.4 tags only the workspace (`ledger-9.1.0.0-rc.4`) - there are no per-crate
 # rc.4 tags - so every v9-side crate points at that single tag (also more
@@ -128,11 +132,10 @@ walkdir                     = { version = "2.5" }
 # turned the ledger workspace's intra-repo deps into path deps on `digest 0.11`,
 # while the crates.io releases of the same version numbers are on `digest 0.10`;
 # cargo can't patch a path dep inside a git source, so without these two the
-# v8<->v9 state translation stops type-checking.
-# DRAFT TODO: these patches replace storage for BOTH majors, but this workspace
-# still resolves v8 storage from crates.io (midnight-storage_v2 2.0.1 /
-# midnight-storage-core_v1 1.2). Verify the v8 side still resolves and builds -
-# may need bumping those two [workspace.dependencies] reqs to the rc.4 versions.
+# v8<->v9 state translation stops type-checking. Both majors therefore share one
+# `midnight-storage` 2.0.2 / `midnight-storage-core` 1.2.0 instance resolved from
+# rc.4 rather than crates.io - which is what the node does too, and is required
+# for the v8 and v9 states and the translation to share one arena.
 #
 # Entries without package/version replace their registry crate outright
 # (base-crypto, base-crypto-derive, serialize, zkir, storage, storage-core;
