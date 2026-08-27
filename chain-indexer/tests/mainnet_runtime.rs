@@ -15,15 +15,17 @@
 //! 1_774_492 (protocol version 1_000_000) — must be ingestible. Indexer versions without
 //! node 1.0 support fail here, either with `ProtocolVersionError::Unsupported(1_000_000)`
 //! or with subxt metadata validation errors.
+//!
+//! This file does **not** cover the 2026-07-20 upgrade *boundary* (enactment block
+//! 1_774_491 with a contract action). That lives in
+//! `chain-indexer/src/infra/subxt_node/runtime_upgrade_boundary.rs` and runs from
+//! recorded fixtures in `just test` (midnight-indexer#1402).
 
 #![cfg(any(feature = "cloud", feature = "standalone"))]
 
 use anyhow::Context;
 use chain_indexer::{
-    domain::{
-        BlockRef,
-        node::{Node, Transaction},
-    },
+    domain::node::Node,
     infra::subxt_node::{Config, SubxtNode},
 };
 use fs_extra::dir::{CopyOptions, copy};
@@ -102,77 +104,6 @@ async fn test_finalized_blocks_node_1_0() -> anyhow::Result<()> {
             .context("stream of finalized blocks must not end")?;
         assert_eq!(u32::from(block.protocol_version), 1_000_000);
     }
-
-    Ok(())
-}
-
-/// Ingest the exact mainnet blocks at the runtime upgrade boundary via the public mainnet
-/// RPC. This covers both v4.0.x outage failure modes on the very blocks where they occurred:
-/// block 1_774_491 contains a contract call, so ingesting it exercises the node 0.22
-/// `get_contract_state` runtime API against a chain that already runs the 1.0 runtime
-/// ("The static Runtime API address used is not compatible with the live chain" on v4.0.x);
-/// block 1_774_492 is the first block built by the 1.0 runtime ("unsupported protocol
-/// version 1000000" on v4.0.x).
-///
-/// Requires network access, hence ignored by default; run explicitly:
-/// `cargo nextest run -p chain-indexer --features cloud --run-ignored all -E
-/// 'test(test_mainnet_runtime_upgrade_boundary)'`
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "requires network access to the public mainnet RPC"]
-async fn test_mainnet_runtime_upgrade_boundary() -> anyhow::Result<()> {
-    const CONTRACT_ADDRESS: &str =
-        "9ef16e583fbc361ba6016b2751e6f26a5ab2bbf2f7102ea5e28dc8810696eb9c";
-
-    let _ledger_db = init_ledger_db().await?;
-
-    let config = Config {
-        url: "wss://rpc.mainnet.midnight.network".to_string(),
-        reconnect_max_delay: Duration::from_secs(1),
-        reconnect_max_attempts: 3,
-        subscription_recovery_timeout: Duration::from_secs(30),
-    };
-    let mut node = SubxtNode::new(config).await.context("create SubxtNode")?;
-
-    let after = BlockRef {
-        hash: const_hex::decode_to_array::<_, 32>(
-            "e23dc07f65b1194d134b6d9b3c2f7433329d0512896a1c4543048a166d4fabd9",
-        )
-        .expect("valid block hash")
-        .into(),
-        height: 1_774_490,
-    };
-    let blocks = node.finalized_blocks(Some(after));
-    let mut blocks = pin!(blocks);
-
-    let block = blocks
-        .try_next()
-        .await
-        .context("get mainnet block 1_774_491")?
-        .context("stream of finalized blocks must not end")?;
-    assert_eq!(block.height, 1_774_491);
-    assert_eq!(u32::from(block.protocol_version), 22_000);
-    let contract_action = block
-        .transactions
-        .iter()
-        .filter_map(|transaction| match transaction {
-            Transaction::Regular(transaction) => Some(&transaction.contract_actions),
-            Transaction::System(_) => None,
-        })
-        .flatten()
-        .find(|contract_action| {
-            contract_action.address.as_ref()
-                == const_hex::decode(CONTRACT_ADDRESS).expect("valid address")
-        })
-        .context("mainnet block 1_774_491 must contain the known contract call")?;
-    assert!(!contract_action.state.as_ref().is_empty());
-
-    let block = blocks
-        .try_next()
-        .await
-        .context("get mainnet block 1_774_492")?
-        .context("stream of finalized blocks must not end")?;
-    assert_eq!(block.height, 1_774_492);
-    assert_eq!(u32::from(block.protocol_version), 1_000_000);
 
     Ok(())
 }
