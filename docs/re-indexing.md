@@ -5,9 +5,21 @@ and no SQL migration can invent it. The indexer then has to be re-indexed from
 genesis, which means **wiping both stores together** and letting chain-indexer
 rebuild them from the node.
 
+> [!CAUTION]
+> **Despite living in `migrations/`, `008`/`010_contract_state_keys.sql` converts
+> nothing.** It drops the contract-state blob columns and adds empty key columns.
+> Your existing contract states are not carried forward and cannot be recovered
+> afterwards, by any version. Do not read "migration" here as "upgrade in place".
+
 This is the only such change so far — see [When a re-index is
 required](#when-a-re-index-is-required) — but the procedure applies to any future
 one.
+
+Since v4.4.0 the indexer refuses to apply that migration to a database that still
+holds contract states as blobs, so an accidental in-place upgrade fails safe and
+leaves the database readable by the version that wrote it. Every component that
+migrates on startup — chain-indexer, wallet-indexer, indexer-api, spo-indexer —
+performs the check, so it does not matter which one starts first.
 
 ## Why both stores, always together
 
@@ -22,11 +34,15 @@ The ledger DB is a content-addressed arena of ledger nodes. Rows in the indexer
 DB point into it: `blocks.ledger_state_key`, and — since contract states became
 arena keys — `contract_actions.state_key` and `contract_actions.zswap_state_key`.
 
-Wiping only one of them leaves dangling references in whichever survives. Keys
-pointing at nodes that are gone do not read back as empty or as an error: they
-**panic inside storage-core** when the pointer is used. In cloud both stores live
-in one database, so a drop takes care of itself; in standalone they are two files
-and it is easy to delete one and keep the other. Don't.
+Wiping only one of them leaves dangling references in whichever survives, and
+nothing good follows. On chain-indexer's startup path the missing ledger state is
+caught and reported — `no persisted ledger state root found within the retention
+window; the ledger DB cannot be resumed` — but a key whose node is gone is only
+checked for loadability where the code does so explicitly; elsewhere using the
+pointer **panics inside storage-core** rather than reading back empty or
+returning an error. In cloud both stores live in one database, so a drop takes
+care of itself; in standalone they are two files and it is easy to delete one and
+keep the other. Don't.
 
 ## When a re-index is required
 
@@ -56,19 +72,54 @@ window, and note that during a long re-index `gc_bound: "0s"` is **not** a safe
 shortcut: retention-window unpersists keep producing garbage, so with gc off the
 ledger DB grows without bound.
 
-### cloud
+### cloud — sync a new instance and cut over (preferred)
 
-1. Stop chain-indexer, wallet-indexer and indexer-api. Leaving indexer-api up
-   against a half-wiped database is what turns a maintenance window into an
-   incident.
-2. Drop and recreate the database (or drop the schema), so that the indexer
-   tables and `ledger_db_nodes` / `ledger_db_roots` all go together.
-3. Start chain-indexer with `run_migrations: true`. It creates the schema and
+Every deployed environment runs two indexer instances behind
+`indexer.<env>.midnight.network`, and new versions go to the secondary first (see
+`qa/tests/environment/model.ts`). Use that: the re-index happens on the secondary
+while the primary keeps serving, so the downtime is zero and the rollback is
+"don't promote".
+
+1. **Recreate the secondary's database empty.** Drop and recreate it (or drop the
+   schema) so the indexer tables and `ledger_db_nodes` / `ledger_db_roots` go
+   together.
+
+   > [!WARNING]
+   > Do **not** clone, restore or replicate the primary's database onto the
+   > secondary to "get a head start". A copy carries the primary's blob-era
+   > contract actions, the migration is refused, and the sync window is wasted.
+   > Empty is the point.
+
+2. Deploy the new version to the secondary with `run_migrations: true`. It creates
+   the schema and begins at genesis.
+3. Watch it converge: `indexer_uncaptured_contract_state_count` flat at zero, gc
+   passes keeping up, and the ledger DB's node count settling rather than
+   trending.
+4. Verify before promoting, ideally against the primary — see
+   [Verifying](#verifying).
+5. Promote the secondary to primary.
+
+### cloud — in place (single instance only)
+
+Only when there is no second instance to sync. This costs a full re-index of
+downtime and has no rollback: once the schema is migrated, the previous version
+cannot read the database either.
+
+1. **Back up the database first.** It is the only way back.
+2. Stop chain-indexer, wallet-indexer, indexer-api and spo-indexer. Leaving any of
+   them up against a half-wiped database is what turns a maintenance window into
+   an incident.
+3. Drop and recreate the database (or drop the schema), so that the indexer tables
+   and `ledger_db_nodes` / `ledger_db_roots` all go together.
+4. Start chain-indexer with `run_migrations: true`. It creates the schema and
    begins at genesis.
-4. Start wallet-indexer and indexer-api once chain-indexer reports
-   `caught_up`. Until then indexer-api's `/ready` returns 503 by design.
+5. Start the others once chain-indexer reports `caught_up`. Until then
+   indexer-api's `/ready` returns 503 by design.
 
 ### standalone
+
+Standalone has no second instance, so this is in place by necessity. Back up both
+files first if the data matters.
 
 1. Stop the indexer.
 2. Delete **both** files, and their SQLite sidecars:
@@ -77,8 +128,10 @@ ledger DB grows without bound.
    rm -f /data/indexer.sqlite* /data/ledger-db.sqlite*
    ```
 
-   The glob matters: `-wal` and `-shm` files carry committed pages, so removing
-   only the main file can resurrect part of the old database.
+   The glob is not a nicety. On a freshly stopped indexer almost the whole ledger
+   DB can still be in the WAL — a 4 KB `ledger-db.sqlite` next to a 2.8 MB
+   `ledger-db.sqlite-wal` is normal — so deleting only the main file leaves most
+   of the old database behind, not merely part of it.
 
 3. Start the indexer. It creates both files and begins at genesis.
 
@@ -102,6 +155,25 @@ ledger DB grows without bound.
 - `indexer_uncaptured_contract_state_count` stays flat. It counts contract
   addresses per block for which no state could be captured; a rising rate means
   states are silently not being captured and `state` is reading back empty.
+
+- **The strongest check, and the only one that uses real states: compare what the
+  two instances serve.** While the primary still runs the old version, the same
+  contract action can be read from both, and the bytes must match exactly — the
+  arena round trip is supposed to be lossless, and this is where that claim meets
+  production-sized states rather than test ones.
+
+  ```bash
+  Q='{"query":"query{ contractAction(address:\"<hex address>\"){ address state zswapState } }"}'
+  curl -s -X POST https://indexer.<env>.midnight.network/api/v4/graphql \
+      -H 'Content-Type: application/json' -d "$Q" > primary.json
+  curl -s -X POST https://indexer-<colour>.<env>.midnight.network/api/v4/graphql \
+      -H 'Content-Type: application/json' -d "$Q" > secondary.json
+  diff primary.json secondary.json && echo "identical"
+  ```
+
+  Run it over a set of addresses, favouring contracts with many actions and large
+  states. A difference is a promotion blocker: it means a state does not survive
+  the round trip, which no amount of re-indexing will fix.
 
 ## See also
 
