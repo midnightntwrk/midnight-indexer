@@ -15,7 +15,7 @@ This is the only such change so far — see [When a re-index is
 required](#when-a-re-index-is-required) — but the procedure applies to any future
 one.
 
-Since v4.4.0 the indexer refuses to apply that migration to a database that still
+The indexer refuses to apply that migration to a database that still
 holds contract states as blobs, so an accidental in-place upgrade fails safe and
 leaves the database readable by the version that wrote it. Every component that
 migrates on startup — chain-indexer, wallet-indexer, indexer-api, spo-indexer —
@@ -46,7 +46,8 @@ keep the other. Don't.
 
 ## When a re-index is required
 
-- **Contract states stored as arena keys** (v4.4.0). `contract_actions.state` and
+- **Contract states stored as arena keys** (the release that introduces
+  `008`/`010_contract_state_keys.sql`). `contract_actions.state` and
   `contract_actions.zswap_state` held a full serialized state per action, one copy
   per action even when the state had not changed — on preprod 301 GB of a 292 GB
   database, with individual states reported at around 860 KB. Both columns are
