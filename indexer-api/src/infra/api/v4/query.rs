@@ -334,8 +334,9 @@ where
             .collect::<Result<Vec<_>, _>>()
             .map_err_into_client_error(|| "invalid Cardano reward address")?;
 
+        let ledger_version = current_ledger_version(storage).await?;
         let status_list = storage
-            .get_dust_generation_status(&address, LedgerVersion::LATEST)
+            .get_dust_generation_status(&address, ledger_version)
             .await
             .map_err_into_server_error(|| "get DUST generation status")?;
 
@@ -367,8 +368,9 @@ where
             .collect::<Result<Vec<_>, _>>()
             .map_err_into_client_error(|| "invalid Cardano reward address")?;
 
+        let ledger_version = current_ledger_version(storage).await?;
         let data = storage
-            .get_dust_generations(&addresses, LedgerVersion::LATEST)
+            .get_dust_generations(&addresses, ledger_version)
             .await
             .map_err_into_server_error(|| "get DUST generations")?;
 
@@ -1101,6 +1103,24 @@ fn normalize_hex(input: &str) -> String {
         .strip_prefix("0X")
         .unwrap_or(input);
     s.to_ascii_lowercase()
+}
+
+/// The ledger version the chain is currently on.
+///
+/// The DUST queries used to hardcode `LedgerVersion::LATEST`, which picks the
+/// wrong `dust_parameters` on a chain that has not forked yet and - since dust
+/// rows are scoped to their epoch (`LedgerVersion::dust_epoch`) - would read
+/// from an epoch that does not exist there. Falls back to `LATEST` only when
+/// there is no indexed state at all, where there are no dust rows either way.
+async fn current_ledger_version<S: Storage>(storage: &S) -> ApiResult<LedgerVersion> {
+    let ledger_version = storage
+        .get_highest_ledger_state()
+        .await
+        .map_err_into_server_error(|| "get highest ledger state")?
+        .map(|(protocol_version, _)| protocol_version.ledger_version())
+        .unwrap_or(LedgerVersion::LATEST);
+
+    Ok(ledger_version)
 }
 
 #[cfg(test)]

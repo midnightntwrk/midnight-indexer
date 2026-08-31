@@ -29,6 +29,7 @@ impl DustStorage for Storage {
         cardano_reward_addresses: &[CardanoRewardAddress],
         ledger_version: LedgerVersion,
     ) -> Result<Vec<DustGenerationStatus>, sqlx::Error> {
+        let dust_epoch = ledger_version.dust_epoch();
         // Get DUST parameters for the given protocol version.
         let dust_params = ledger::dust_parameters(ledger_version)
             .expect("DUST parameters should be available for supported protocol version");
@@ -64,17 +65,23 @@ impl DustStorage for Storage {
 
             // Query active generation info if registered.
             if registered {
+                // Scoped to the live dust epoch. Without it a fork that wipes
+                // dust leaves the previous epoch's rows behind un-retired, and
+                // this `ORDER BY ctime DESC` would keep answering from whichever
+                // side happened to sort first.
                 let generation_query = indoc! {"
                     SELECT value, ctime
                     FROM dust_generation_info
                     WHERE owner = $1
                     AND dtime IS NULL
+                    AND dust_epoch = $2
                     ORDER BY ctime DESC
                     LIMIT 1
                 "};
 
                 let result = sqlx::query_as::<_, (U128BeBytes, i64)>(generation_query)
                     .bind(dust_address.as_ref())
+                    .bind(dust_epoch)
                     .fetch_optional(&*self.pool)
                     .await?;
 

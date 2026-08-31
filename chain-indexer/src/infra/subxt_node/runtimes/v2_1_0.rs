@@ -42,7 +42,7 @@ pub async fn make_block_details(
             pallet_midnight_system::pallet::{
                 Call::send_mn_system_transaction, Event::SystemTransactionApplied,
             },
-            pallet_session::pallet::Event::NewSession,
+            pallet_partner_chains_session::pallet::Event::NewSession,
         },
         timestamp,
     };

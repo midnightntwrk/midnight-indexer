@@ -35,6 +35,16 @@ midnight-onchain-runtime_v4  = { workspace = true }
 midnight-onchain-state_v4    = { workspace = true }
 midnight-transient-crypto_v3 = { workspace = true }
 midnight-zswap_v9            = { workspace = true }
+# The ledger team's v8->v9 translation table. Unpublished and in no release tag
+# — it lives only on the ledger repo's `state-translation/v8-to-v9` branch — so
+# it is pinned by rev, exactly as midnight-node does it. Keep this rev equal to
+# the node's (`midnight-node`'s workspace Cargo.toml): the indexer re-derives the
+# translated arena root and compares it against the node's at the fork boundary,
+# so the two must translate with the same table. Its own requirements resolve
+# through the workspace `[patch.crates-io]` rc pins, sharing one
+# `midnight-storage` / `midnight-onchain-state` instance with the rest of the
+# graph.
+v8-to-v9-state-translation = { git = "https://github.com/midnightntwrk/midnight-ledger", rev = "da96e33d78ee9b7d3867b15c1037510d499cd909" }
 async-nats                   = { workspace = true, optional = true }
 chacha20poly1305             = { workspace = true, features = [ "std" ] }
 const-hex                    = { workspace = true, features = [ "serde" ] }
