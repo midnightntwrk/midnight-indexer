@@ -588,11 +588,9 @@ async fn init() -> anyhow::Result<SqlitePool> {
     .await
     .context("init ledger db")?;
 
-    SqlitePool::new(SqliteConfig {
-        cnn_url: env_var("SPIKE_INDEXER_DB")?,
-    })
-    .await
-    .context("create indexer pool")
+    SqlitePool::new(SqliteConfig::with_url(env_var("SPIKE_INDEXER_DB")?))
+        .await
+        .context("create indexer pool")
 }
 
 /// Push the global arena's pending writes to SQL, so the measurement `LedgerDb` can see them.
@@ -612,11 +610,9 @@ async fn local_storage(
 }
 
 async fn plain_ledger_db(cnn_url: &str) -> anyhow::Result<v1_1::LedgerDb> {
-    let pool = SqlitePool::new(SqliteConfig {
-        cnn_url: cnn_url.to_owned(),
-    })
-    .await
-    .context("create ledger db pool")?;
+    let pool = SqlitePool::new(SqliteConfig::with_url(cnn_url))
+        .await
+        .context("create ledger db pool")?;
 
     Ok(v1_1::LedgerDb::new(pool))
 }
