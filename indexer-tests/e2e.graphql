@@ -631,6 +631,7 @@ subscription ShieldedTransactionsSubscription($sessionId: HexEncoded!) {
             highestEndIndex
             highestCheckedEndIndex
             highestRelevantEndIndex
+            protocolVersion
         }
     }
 }
@@ -729,6 +730,7 @@ subscription UnshieldedTransactionsSubscription($address: UnshieldedAddress!) {
         __typename
         ... on UnshieldedTransactionsProgress {
             highestTransactionId
+            protocolVersion
         }
     }
 }
@@ -767,6 +769,7 @@ subscription DustGenerationsSubscription(
         }
         ... on DustGenerationsProgress {
             highestIndex
+            protocolVersion
         }
         ... on DustGenerationDtimeUpdateItem {
             generationMtIndex
