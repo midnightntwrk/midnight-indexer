@@ -745,160 +745,138 @@ mod apply_transactions_tblock_tests {
         testing::{Malformed, NETWORK_ID, dust_registration, init_ledger_db, malformed},
     };
 
-    // Block time of every test block, in seconds. Each test sets its parent block time relative to
+    // Block time of every test block, in seconds. Each case sets its parent block time relative to
     // it, and the bumped `tblock` is `parent + 12s`.
     const NOW: u64 = 1_800_000_000;
 
-    // Only the first regular transaction is verified at the bumped `tblock`: with the parent block
-    // in the previous 6s slot that is `NOW + 6s`, so a dust `ctime` of `NOW + 4s` passes as the
-    // first transaction and fails as the second.
+    // The bump only decides which `tblock` `well_formed` tries first: a transaction the ledger
+    // admits at some instant is applied whether or not the bump moves that `tblock` out of its
+    // window, since a failed check is retried at the ends of the window. `apply` still checks the
+    // intent TTL against the block time. A transaction with no valid instant is rejected with the
+    // error from the first `tblock`, which the bump does choose.
     #[tokio::test(flavor = "multi_thread")]
-    async fn only_the_first_regular_transaction_is_verified_at_the_bumped_tblock()
+    async fn well_formed_is_retried_at_the_window_ends_whether_or_not_bumped()
     -> Result<(), BoxError> {
         let _ledger_db = init_ledger_db().await?;
-        let parent_block_time = NOW - 6;
-
-        for ledger_version in [LedgerVersion::V8, LedgerVersion::V9] {
-            let protocol_version = skewing_protocol_version(ledger_version);
-            let dust_ahead = dust_registration(ledger_version, NOW + 60, NOW + 4).await?;
-            let dust_current = dust_registration(ledger_version, NOW + 60, NOW).await?;
-
-            let apply = |transactions: &[&SerializedTransaction], bump_first_regular_tblock| {
-                apply(
-                    protocol_version,
-                    transactions,
-                    parent_block_time,
-                    bump_first_regular_tblock,
-                )
-            };
-
-            assert_eq!(
-                apply(&[&dust_ahead], true)?,
-                Ok(vec![TransactionResult::Success]),
-                "{ledger_version}: first, bumped"
-            );
-            assert_eq!(
-                apply(&[&dust_ahead], false)?,
-                Err(Malformed::OutOfDustValidityWindow),
-                "{ledger_version}: first, not bumped"
-            );
-            assert_eq!(
-                apply(&[&dust_current, &dust_ahead], true)?,
-                Err(Malformed::OutOfDustValidityWindow),
-                "{ledger_version}: second, bumped"
-            );
-        }
-
-        Ok(())
-    }
-
-    // A skewing runtime verifies the first regular transaction at the bumped `tblock`, `NOW + 6s`
-    // with the parent block in the previous 6s slot, and an unskewed one at the block time: an
-    // intent TTL of `NOW + 2s` passes only on the latter.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn unskewed_runtime_verifies_the_first_regular_transaction_at_the_block_time()
-    -> Result<(), BoxError> {
-        let _ledger_db = init_ledger_db().await?;
-        let parent_block_time = NOW - 6;
 
         for ledger_version in [LedgerVersion::V8, LedgerVersion::V9] {
             let skewing = skewing_protocol_version(ledger_version);
             let unskewed = unskewed_protocol_version(ledger_version);
-            let transaction = dust_registration(ledger_version, NOW + 2, NOW).await?;
 
-            let apply = |protocol_version| {
-                apply(
-                    protocol_version,
-                    &[&transaction],
-                    parent_block_time,
-                    should_bump_first_regular_tblock(1, protocol_version),
-                )
-            };
+            // Intent TTL and dust ctime in seconds.
+            let dust_ahead = dust_registration(ledger_version, NOW + 60, NOW + 4).await?;
+            let dust_current = dust_registration(ledger_version, NOW + 60, NOW).await?;
+            let ttl_soon = dust_registration(ledger_version, NOW + 2, NOW).await?;
+            let ttl_passed = dust_registration(ledger_version, NOW - 5, NOW - 18).await?;
+            let dust_recent = dust_registration(ledger_version, NOW + 40, NOW - 5).await?;
+            let never_valid = dust_registration(ledger_version, NOW + 2, NOW + 4).await?;
 
-            assert_eq!(
-                apply(skewing)?,
-                Err(Malformed::IntentTtlExpired),
-                "{ledger_version}: {skewing:?}"
-            );
-            assert_eq!(
-                apply(unskewed)?,
-                Ok(vec![TransactionResult::Success]),
-                "{ledger_version}: {unskewed:?}"
-            );
-        }
+            use TransactionResult::{Failure, Success};
+            let cases = [
+                // With the parent block in the previous 6s slot the bumped `tblock` is `NOW + 6s`:
+                // a dust ctime of `NOW + 4s` passes there and is retried at the block time.
+                (
+                    "dust ahead, first, bumped",
+                    skewing,
+                    vec![&dust_ahead],
+                    NOW - 6,
+                    Ok(vec![Success]),
+                ),
+                (
+                    "dust ahead, first, not bumped",
+                    unskewed,
+                    vec![&dust_ahead],
+                    NOW - 6,
+                    Ok(vec![Success]),
+                ),
+                // An intent TTL of `NOW + 2s` fails at the bumped `tblock` and is retried at the
+                // TTL.
+                (
+                    "ttl soon, bumped",
+                    skewing,
+                    vec![&ttl_soon],
+                    NOW - 6,
+                    Ok(vec![Success]),
+                ),
+                (
+                    "ttl soon, not bumped",
+                    unskewed,
+                    vec![&ttl_soon],
+                    NOW - 6,
+                    Ok(vec![Success]),
+                ),
+                // With the two slots before the block skipped the bumped `tblock` is `NOW - 6s`,
+                // before the block time: an intent TTL of `NOW - 5s` passes `well_formed` there
+                // and at the retried TTL, but `apply` fails it at the block time.
+                (
+                    "ttl passed, bumped",
+                    skewing,
+                    vec![&ttl_passed],
+                    NOW - 18,
+                    Ok(vec![Failure]),
+                ),
+                (
+                    "ttl passed, not bumped",
+                    unskewed,
+                    vec![&ttl_passed],
+                    NOW - 18,
+                    Ok(vec![Failure]),
+                ),
+                // A dust ctime of `NOW - 5s` fails at that bumped `tblock` and is retried at the
+                // TTL.
+                (
+                    "dust recent, bumped",
+                    skewing,
+                    vec![&dust_recent],
+                    NOW - 18,
+                    Ok(vec![Success]),
+                ),
+                (
+                    "dust recent, not bumped",
+                    unskewed,
+                    vec![&dust_recent],
+                    NOW - 18,
+                    Ok(vec![Success]),
+                ),
+                // A dust ctime past the intent TTL is never valid: the bumped `tblock` `NOW + 6s`
+                // fails on the TTL, the block time on the dust ctime.
+                (
+                    "never valid, bumped",
+                    skewing,
+                    vec![&never_valid],
+                    NOW - 6,
+                    Err(Malformed::IntentTtlExpired),
+                ),
+                (
+                    "never valid, not bumped",
+                    unskewed,
+                    vec![&never_valid],
+                    NOW - 6,
+                    Err(Malformed::OutOfDustValidityWindow),
+                ),
+            ];
 
-        Ok(())
-    }
+            for (name, protocol_version, transactions, parent_block_time, expected) in cases {
+                assert_eq!(
+                    apply(
+                        protocol_version,
+                        &transactions,
+                        parent_block_time,
+                        should_bump_first_regular_tblock(1, protocol_version),
+                    )?,
+                    expected,
+                    "{ledger_version}: {name}"
+                );
+            }
 
-    // The bumped `tblock` is `parent + 12s`, not `block + 12s`: when the two 6s slots before the
-    // block are skipped, the parent block is 18s earlier and the bumped `tblock` is `NOW - 6s`, so
-    // an intent TTL of `NOW - 5s` passes `well_formed` when bumped although it lies before the
-    // block time. `apply` checks the TTL against the block time and records the transaction as
-    // failed.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn bumped_tblock_is_based_on_the_parent_block_time() -> Result<(), BoxError> {
-        let _ledger_db = init_ledger_db().await?;
-        let parent_block_time = NOW - 18;
-
-        for ledger_version in [LedgerVersion::V8, LedgerVersion::V9] {
-            let protocol_version = skewing_protocol_version(ledger_version);
-            let transaction = dust_registration(ledger_version, NOW - 5, parent_block_time).await?;
-
-            let apply = |bump_first_regular_tblock| {
-                apply(
-                    protocol_version,
-                    &[&transaction],
-                    parent_block_time,
-                    bump_first_regular_tblock,
-                )
-            };
-
-            assert_eq!(
-                apply(true)?,
-                Ok(vec![TransactionResult::Failure]),
-                "{ledger_version}: bumped"
-            );
-            assert_eq!(
-                apply(false)?,
-                Err(Malformed::IntentTtlExpired),
-                "{ledger_version}: not bumped"
-            );
-        }
-
-        Ok(())
-    }
-
-    // When the two 6s slots before the block are skipped, the parent block is 18s earlier and the
-    // bumped `tblock` `NOW - 6s` lies before the block time: a dust `ctime` of `NOW - 5s` passes at
-    // the block time but fails when bumped.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn bumped_tblock_before_the_block_time_rejects_a_later_dust_ctime() -> Result<(), BoxError>
-    {
-        let _ledger_db = init_ledger_db().await?;
-        let parent_block_time = NOW - 18;
-
-        for ledger_version in [LedgerVersion::V8, LedgerVersion::V9] {
-            let protocol_version = skewing_protocol_version(ledger_version);
-            let transaction = dust_registration(ledger_version, NOW + 40, NOW - 5).await?;
-
-            let apply = |bump_first_regular_tblock| {
-                apply(
-                    protocol_version,
-                    &[&transaction],
-                    parent_block_time,
-                    bump_first_regular_tblock,
-                )
-            };
-
-            assert_eq!(
-                apply(true)?,
-                Err(Malformed::OutOfDustValidityWindow),
-                "{ledger_version}: bumped"
-            );
-            assert_eq!(
-                apply(false)?,
-                Ok(vec![TransactionResult::Success]),
-                "{ledger_version}: not bumped"
+            // As the second regular transaction `dust_ahead` is never bumped and is retried too.
+            // Every test transaction registers the same seeded dust key and the ledger versions
+            // differ on whether the second registration applies, so only `well_formed` admitting
+            // it is checked.
+            let results = apply(skewing, &[&dust_current, &dust_ahead], NOW - 6, true)?;
+            assert!(
+                matches!(results, Ok(ref results) if results.len() == 2),
+                "{ledger_version}: dust ahead, second, bumped: {results:?}"
             );
         }
 
