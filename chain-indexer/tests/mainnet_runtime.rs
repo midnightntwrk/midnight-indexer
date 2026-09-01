@@ -242,6 +242,7 @@ async fn init_ledger_db() -> anyhow::Result<tempfile::TempDir> {
     ledger_db::init(ledger_db::Config {
         cache_max_nodes: 1_024,
         cnn_url,
+        vacuum_on_startup: false,
     })
     .await
     .context("init ledger db")?;

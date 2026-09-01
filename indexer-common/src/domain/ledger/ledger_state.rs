@@ -467,6 +467,32 @@ impl LedgerState {
             .map(|wanted| raise_root_counts(&default_storage::<v1_1::LedgerDb>(), &wanted))
     }
 
+    /// The keys of all stored gc root rows, straight from the DB - no in-memory root-count
+    /// deltas merged in, unlike [Self::persisted_root_hashes]. See [Self::sweep_stray_roots]
+    /// for the ordering this enables.
+    pub fn stored_root_keys() -> Vec<Vec<u8>> {
+        v1_1::LedgerDb::new(crate::infra::ledger_db::pool()).root_keys()
+    }
+
+    /// Delete the given stray gc root rows - stored roots outside the retention window, which
+    /// never get an unpersist ([RootCountRepair::strays]) and would pin their DAGs forever.
+    /// Returns the number of deleted roots.
+    ///
+    /// Call BEFORE this process's first flush (in particular before
+    /// [Self::repair_root_counts]): rows deleted then carry only dead runs' accounting, since
+    /// any live in-memory root delta held by a concurrent component (e.g. wallet-indexer's
+    /// `ChildRef` charged keys in standalone mode) is still unflushed, so a later flush
+    /// recreates its row from zero and stays balanced. Deleting after a flush can split a
+    /// component's +1 (already merged into the row and gone from the cache) from its pending
+    /// -1, tripping storage-core's non-negative root count assert.
+    ///
+    /// A window root shared with pre-window blocks keeps its full stored count and may pin
+    /// one snapshot's DAG; accepted, since lowering counts risks the resync the repair
+    /// machinery exists to avoid.
+    pub fn sweep_stray_roots(doomed: &[Vec<u8>]) -> u64 {
+        v1_1::LedgerDb::new(crate::infra::ledger_db::pool()).delete_roots(doomed)
+    }
+
     fn arena_root_hash(
         key: &SerializedLedgerStateKey,
         ledger_version: LedgerVersion,
@@ -2405,8 +2431,9 @@ pub struct RootCountRepair {
     /// raise, are never checked, so they never land here.
     pub culled_roots: usize,
 
-    /// Root rows outside the window. Left alone - nothing will ever unpersist them, so they leak
-    /// disk, but deleting one that is still needed costs a resync.
+    /// Root rows outside the window. Normally zero: the startup sweep deletes them before the
+    /// repair runs (see [LedgerState::sweep_stray_roots]). Non-zero only when the sweep was
+    /// skipped because no window root was stored (mis-paired or fresh DB).
     pub strays: usize,
 }
 
@@ -2629,6 +2656,7 @@ mod tests {
             ledger_db::init(ledger_db::Config {
                 cache_max_nodes: 1_024,
                 cnn_url: sqlite_ledger_db_file,
+                vacuum_on_startup: false,
             })
             .await
             .expect("ledger DB can be initialized");
@@ -2811,6 +2839,7 @@ mod tests {
             ledger_db::init(ledger_db::Config {
                 cache_max_nodes: 1_024,
                 cnn_url: sqlite_ledger_db_file,
+                vacuum_on_startup: false,
             })
             .await
             .expect("ledger DB can be initialized");
@@ -2951,6 +2980,7 @@ mod tests {
             ledger_db::init(ledger_db::Config {
                 cache_max_nodes: 1_024,
                 cnn_url: sqlite_ledger_db_file,
+                vacuum_on_startup: false,
             })
             .await
             .expect("ledger DB can be initialized");
@@ -3757,6 +3787,44 @@ mod root_count_repair_tests {
         Ok(())
     }
 
+    /// The snapshot-then-delete sweep removes exactly the roots outside the window - whatever
+    /// their stored count - and leaves window roots untouched, also when the doomed set spans
+    /// several delete batches.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sweep_deletes_only_strays() -> Result<(), Box<dyn StdError>> {
+        let (pool, storage) = pool_and_storage().await?;
+        let kept = persisted_root(&storage, 42);
+        let stray = persisted_root(&storage, 43);
+        let multi_count_stray = persisted_root(&storage, 44);
+        set_stored_root_count(&pool, &multi_count_stray.hash(), 3);
+
+        // Push the doomed set past one delete batch (BATCH_INSERT_SIZE = 1000).
+        for n in 0..1050_u32 {
+            let mut bytes = [0xd0; 32];
+            bytes[..4].copy_from_slice(&n.to_be_bytes());
+            set_stored_root_count(&pool, &arena_hash(bytes), 1);
+        }
+
+        let db = LedgerDb::new(pool.clone());
+        let window = std::collections::HashSet::from([kept.hash().0.to_vec()]);
+        let doomed = db
+            .root_keys()
+            .into_iter()
+            .filter(|key| !window.contains(key))
+            .collect::<Vec<_>>();
+        let swept = db.delete_roots(&doomed);
+
+        assert_eq!(swept, 1052);
+        assert_eq!(stored_root_count(&pool, &kept.hash()).await?, Some(1));
+        assert_eq!(stored_root_count(&pool, &stray.hash()).await?, None);
+        assert_eq!(
+            stored_root_count(&pool, &multi_count_stray.hash()).await?,
+            None
+        );
+
+        Ok(())
+    }
+
     /// Repairing is idempotent: a second pass over an already-repaired DB changes nothing.
     #[tokio::test(flavor = "multi_thread")]
     async fn repair_is_idempotent() -> Result<(), Box<dyn StdError>> {
@@ -3816,6 +3884,7 @@ mod root_count_repair_tests {
         ledger_db::init(ledger_db::Config {
             cache_max_nodes: 1_024,
             cnn_url,
+            vacuum_on_startup: false,
         })
         .await
         .context("init ledger DB")?;
