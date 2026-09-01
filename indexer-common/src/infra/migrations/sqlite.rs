@@ -16,8 +16,8 @@ use indoc::indoc;
 use sqlx::migrate::MigrateError;
 use thiserror::Error;
 
-/// Version of `010_contract_state_keys.sql`, which drops the contract-state blob columns.
-const CONTRACT_STATE_KEYS_VERSION: i64 = 10;
+/// Version of `011_contract_state_keys.sql`, which drops the contract-state blob columns.
+const CONTRACT_STATE_KEYS_VERSION: i64 = 11;
 
 /// Run the database migrations for SQLite.
 pub async fn run(pool: &SqlitePool) -> Result<(), Error> {
@@ -37,7 +37,7 @@ pub async fn run_for_ledger_db(pool: &SqlitePool) -> Result<(), Error> {
     Ok(())
 }
 
-/// Refuse to apply `010_contract_state_keys.sql` to a database that still stores contract states
+/// Refuse to apply `011_contract_state_keys.sql` to a database that still stores contract states
 /// as blobs.
 ///
 /// That migration drops `state` and `zswap_state` without converting them - the arena nodes their
@@ -114,7 +114,7 @@ pub enum Error {
 
     #[error(
         "refusing to migrate: this database stores contract states as blobs, which \
-         010_contract_state_keys.sql drops without converting them; the blobs cannot be \
+         011_contract_state_keys.sql drops without converting them; the blobs cannot be \
          recreated. Sync a new indexer from genesis and cut over, or - for a single instance - \
          wipe both the indexer database and the ledger DB and re-index from genesis. See \
          docs/re-indexing.md"
