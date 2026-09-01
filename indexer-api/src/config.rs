@@ -27,9 +27,10 @@ pub struct Config {
     pub max_blocking_threads: Option<NonZeroUsize>,
 
     /// Maximum concurrent ledger-DB-backed GraphQL queries (issue #595). `None` defaults to half
-    /// of the storage pool's `max_connections`, the pool the ledger DB shares with every other
-    /// resolver. Must stay below `max_blocking_threads`, or ledger queries can still exhaust the
-    /// blocking pool and wedge the runtime.
+    /// of the storage pool's `max_connections` — the pool the ledger DB shares with every other
+    /// resolver — less `contract_state_cache.max_concurrent_loads`, which bounds arena loads
+    /// against that same pool. Must stay below `max_blocking_threads`, or ledger queries can still
+    /// exhaust the blocking pool and wedge the runtime.
     #[serde(default)]
     pub ledger_query_concurrency: Option<NonZeroUsize>,
 

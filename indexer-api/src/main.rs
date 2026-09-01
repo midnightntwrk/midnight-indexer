@@ -98,8 +98,20 @@ fn run() -> anyhow::Result<()> {
     let ledger_db_max_connections = NonZeroUsize::new(storage_config.max_connections as usize)
         .context("storage max_connections must be greater than zero")?;
 
-    let ledger_query_permits = ledger_query_concurrency
-        .unwrap_or_else(|| default_permits(ledger_db_max_connections, max_blocking_threads));
+    // The contract state cache bounds its own arena loads against this same pool, so the ledger
+    // bound budgets against it rather than alongside it: otherwise the two independent limiters
+    // sum to more of the pool than either accounts for.
+    let contract_state_loads = api_config
+        .contract_state_cache_config
+        .max_concurrent_loads();
+
+    let ledger_query_permits = ledger_query_concurrency.unwrap_or_else(|| {
+        default_permits(
+            ledger_db_max_connections,
+            contract_state_loads,
+            max_blocking_threads,
+        )
+    });
     validate_permits(ledger_query_permits, max_blocking_threads)
         .context("validate ledger_query_concurrency")?;
     info!(

@@ -57,6 +57,15 @@ pub struct ContractStateCacheConfig {
     max_concurrent_loads: usize,
 }
 
+impl ContractStateCacheConfig {
+    /// Concurrent arena loads this cache admits. Read by the ledger-query bound, which shares the
+    /// same connection pool and blocking threads and so has to budget against it rather than
+    /// alongside it (issue #595).
+    pub fn max_concurrent_loads(&self) -> usize {
+        self.max_concurrent_loads
+    }
+}
+
 /// Per-process cache of contract and zswap states resolved from the ledger arena, keyed by arena
 /// key.
 #[derive(Clone)]

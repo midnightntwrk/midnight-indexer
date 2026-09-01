@@ -57,34 +57,46 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 /// only real user is the `block_in_place` core handoff of a ledger walk.
 pub const DEFAULT_MAX_BLOCKING_THREADS: NonZeroUsize = NonZeroUsize::new(64).unwrap();
 
-/// Fraction of the ledger DB's connection pool that ledger queries may occupy by default. Walks
-/// get half; the rest stays available to every other resolver sharing that pool, so a ledger query
-/// storm degrades into latency for ledger queries rather than connection starvation for the whole
-/// API — readiness probes included.
-const LEDGER_POOL_SHARE: usize = 2;
+/// Fraction of the ledger DB's connection pool that *all* arena work may occupy by default. It
+/// gets half; the rest stays available to every other resolver sharing that pool, so an arena
+/// storm degrades into latency for arena work rather than connection starvation for the whole API
+/// — readiness probes included.
+///
+/// The budget is shared, not per-limiter: [`ContractStateCache`](super::contract_state_cache)
+/// bounds its own arena loads with a second semaphore, and the connection pool and the blocking
+/// pool see the sum. [`default_permits`] therefore subtracts that cache's allowance rather than
+/// claiming the whole half for ledger queries.
+const ARENA_POOL_SHARE: usize = 2;
 
 /// Blocking threads left outside the ledger-query budget when the connection pool would otherwise
 /// justify more permits than the pool cap allows, so a small `max_blocking_threads` still leaves
 /// room for the core handoffs of unrelated blocking work.
 const BLOCKING_POOL_RESERVE: usize = 1;
 
-/// Default number of concurrent ledger queries: half the ledger DB's connection pool, capped below
-/// `max_blocking_threads` and clamped to at least one.
+/// Default number of concurrent ledger queries: the arena's share of the ledger DB's connection
+/// pool, less what [`ContractStateCache`](super::contract_state_cache) may already be loading,
+/// capped below `max_blocking_threads` and clamped to at least one.
 ///
 /// Sized off connections, not cores and not the blocking pool. A walk is I/O-bound — a long chain
 /// of dependent round-trips — so connections are the resource it contends for, shared in cloud
-/// with every other resolver (`max_connections: 25`, halved here to 12). Sizing off
-/// `worker_threads` would serialize every ledger query on a two-core pod; sizing off the blocking
-/// pool would admit more walks than there are connections to serve them.
+/// with every other resolver. Sizing off `worker_threads` would serialize every ledger query on a
+/// two-core pod; sizing off the blocking pool would admit more walks than there are connections to
+/// serve them.
 ///
-/// In standalone the ledger DB is SQLite with a single connection, so the same rule lands on one
-/// permit — walks already serialize on that connection, and admitting more would only pin blocking
-/// threads waiting for it.
+/// `contract_state_loads` is that cache's own bound. Both limiters draw on one connection pool and
+/// one blocking pool, so the default budgets against it: in cloud, 25 connections give the arena
+/// 12, of which the cache holds 6, leaving 6 here — 12 of 25 in total rather than 18.
+///
+/// In standalone the ledger DB is SQLite pinned to a single connection, so the subtraction floors
+/// out at one permit — walks already serialize on that connection, and admitting more would only
+/// pin blocking threads waiting for it.
 pub fn default_permits(
     ledger_db_max_connections: NonZeroUsize,
+    contract_state_loads: usize,
     max_blocking_threads: NonZeroUsize,
 ) -> NonZeroUsize {
-    let by_connections = ledger_db_max_connections.get() / LEDGER_POOL_SHARE;
+    let arena_budget = ledger_db_max_connections.get() / ARENA_POOL_SHARE;
+    let by_connections = arena_budget.saturating_sub(contract_state_loads);
     let by_blocking_pool = max_blocking_threads
         .get()
         .saturating_sub(BLOCKING_POOL_RESERVE);
@@ -253,34 +265,52 @@ mod tests {
     /// The cloud ledger DB shares the API's Postgres pool; see `indexer-api/config.yaml`.
     const CLOUD_MAX_CONNECTIONS: NonZeroUsize = NonZeroUsize::new(25).unwrap();
 
+    /// `contract_state_cache.max_concurrent_loads` in both `config.yaml`s.
+    const CONTRACT_STATE_LOADS: usize = 6;
+
     #[test]
-    fn permits_default_to_half_the_connection_pool() {
+    fn permits_default_to_the_arena_share_less_the_contract_state_cache() {
+        // 25 connections give the arena 12; the contract state cache already holds 6 of them.
         assert_eq!(
-            default_permits(CLOUD_MAX_CONNECTIONS, DEFAULT_MAX_BLOCKING_THREADS).get(),
-            12
-        );
-        assert_eq!(
-            default_permits(NonZeroUsize::new(10).unwrap(), DEFAULT_MAX_BLOCKING_THREADS).get(),
-            5
+            default_permits(
+                CLOUD_MAX_CONNECTIONS,
+                CONTRACT_STATE_LOADS,
+                DEFAULT_MAX_BLOCKING_THREADS
+            )
+            .get(),
+            6
         );
     }
 
     #[test]
-    fn permits_leave_connections_for_the_rest_of_the_api() {
-        // The regression this guards: sizing off the blocking pool admitted 32 concurrent walks
-        // against a 25-connection pool shared with every other resolver and the readiness probe.
-        let permits = default_permits(CLOUD_MAX_CONNECTIONS, DEFAULT_MAX_BLOCKING_THREADS);
+    fn permits_and_contract_state_loads_together_leave_the_pool_headroom() {
+        // The regression this guards: the two arena limiters are independent, so the connection
+        // pool sees their sum. Sized apart they were 12 + 6 of 25, leaving the rest of the API
+        // seven connections.
+        let permits = default_permits(
+            CLOUD_MAX_CONNECTIONS,
+            CONTRACT_STATE_LOADS,
+            DEFAULT_MAX_BLOCKING_THREADS,
+        );
+
+        let arena_total = permits.get() + CONTRACT_STATE_LOADS;
         assert!(
-            permits.get() < CLOUD_MAX_CONNECTIONS.get(),
-            "ledger walks must not be able to claim the whole connection pool"
+            arena_total <= CLOUD_MAX_CONNECTIONS.get() / ARENA_POOL_SHARE,
+            "arena work claimed {arena_total} of {CLOUD_MAX_CONNECTIONS} connections, over its share"
         );
     }
 
     #[test]
     fn permits_never_zero_on_a_single_connection_pool() {
-        // Standalone: SQLite with one connection, which already serializes walks.
+        // Standalone: SQLite pinned to one connection, which already serializes walks. The
+        // subtraction must floor at one rather than deadlocking the resolvers at zero.
         assert_eq!(
-            default_permits(NonZeroUsize::MIN, DEFAULT_MAX_BLOCKING_THREADS).get(),
+            default_permits(
+                NonZeroUsize::MIN,
+                CONTRACT_STATE_LOADS,
+                DEFAULT_MAX_BLOCKING_THREADS
+            )
+            .get(),
             1
         );
     }
@@ -290,7 +320,7 @@ mod tests {
         // A hand-lowered `max_blocking_threads` must not leave the default failing its own
         // validation: the connection pool would justify 12 permits, the pool cap allows 3.
         let max_blocking_threads = NonZeroUsize::new(4).unwrap();
-        let permits = default_permits(CLOUD_MAX_CONNECTIONS, max_blocking_threads);
+        let permits = default_permits(CLOUD_MAX_CONNECTIONS, 0, max_blocking_threads);
 
         assert_eq!(permits.get(), 3);
         assert!(validate_permits(permits, max_blocking_threads).is_ok());
@@ -300,7 +330,11 @@ mod tests {
     fn permits_are_independent_of_the_core_count() {
         // The regression this guards: sizing off `worker_threads` gave a two-core pod exactly one
         // concurrent ledger query, serializing every wallet sync.
-        let permits = default_permits(CLOUD_MAX_CONNECTIONS, DEFAULT_MAX_BLOCKING_THREADS);
+        let permits = default_permits(
+            CLOUD_MAX_CONNECTIONS,
+            CONTRACT_STATE_LOADS,
+            DEFAULT_MAX_BLOCKING_THREADS,
+        );
         assert!(
             permits.get() > 1,
             "the default bound must not serialize ledger queries"

@@ -38,9 +38,10 @@ pub struct Config {
     pub max_blocking_threads: Option<NonZeroUsize>,
 
     /// Maximum concurrent ledger-DB-backed GraphQL queries (issue #595). `None` defaults to half
-    /// of the ledger DB's connection pool, which for standalone's SQLite is one connection, hence
-    /// one permit. Must stay below `max_blocking_threads`, or ledger queries can still exhaust the
-    /// blocking pool and wedge the runtime.
+    /// of the ledger DB's connection pool less `contract_state_cache.max_concurrent_loads`; for
+    /// standalone's SQLite that is one connection, hence one permit. Must stay below
+    /// `max_blocking_threads`, or ledger queries can still exhaust the blocking pool and wedge the
+    /// runtime.
     #[serde(default)]
     pub ledger_query_concurrency: Option<NonZeroUsize>,
 

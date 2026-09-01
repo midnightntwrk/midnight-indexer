@@ -8,10 +8,12 @@ thread_stack_size: "24MiB"
 #
 # Max concurrent ledger-DB-backed GraphQL queries (issue #595): the bound that stops
 # unauthenticated ledger queries from exhausting the blocking pool and wedging the
-# runtime. Unset = half of infra.storage.max_connections below (so 12), leaving the
-# rest of that pool for other resolvers and the readiness probe. Must stay below
-# max_blocking_threads; startup fails otherwise.
-# ledger_query_concurrency: 12
+# runtime. Unset = half of infra.storage.max_connections below, less the contract
+# state cache's max_concurrent_loads, which bounds arena loads against the same pool
+# (so 25/2 - 6 = 6). Arena work then holds at most half the pool between the two
+# limiters, leaving the rest for other resolvers and the readiness probe. Must stay
+# below max_blocking_threads; startup fails otherwise.
+# ledger_query_concurrency: 6
 
 application:
   network_id: "undeployed"

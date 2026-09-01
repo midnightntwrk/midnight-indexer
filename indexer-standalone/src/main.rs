@@ -142,8 +142,19 @@ fn run() -> anyhow::Result<()> {
     let ledger_db_max_connections = NonZeroUsize::new(ledger_db::MAX_CONNECTIONS as usize)
         .expect("ledger DB pool holds at least one connection");
 
-    let ledger_query_permits = ledger_query_concurrency
-        .unwrap_or_else(|| default_permits(ledger_db_max_connections, max_blocking_threads));
+    // The contract state cache bounds its own arena loads against this same single-connection
+    // ledger DB, so the ledger bound budgets against it rather than alongside it.
+    let contract_state_loads = api_config
+        .contract_state_cache_config
+        .max_concurrent_loads();
+
+    let ledger_query_permits = ledger_query_concurrency.unwrap_or_else(|| {
+        default_permits(
+            ledger_db_max_connections,
+            contract_state_loads,
+            max_blocking_threads,
+        )
+    });
     validate_permits(ledger_query_permits, max_blocking_threads)
         .context("validate ledger_query_concurrency")?;
     info!(
