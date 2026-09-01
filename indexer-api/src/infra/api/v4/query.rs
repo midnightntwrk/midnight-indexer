@@ -118,7 +118,8 @@ where
             .some_or_server_error(|| "no ledger state available")?;
 
         // Bound concurrent ledger-DB work (issue #595): hold a permit across the Merkle-tree walk
-        // so unauthenticated queries cannot occupy every runtime worker via block_in_place.
+        // so unauthenticated queries cannot exhaust the blocking pool that block_in_place hands the
+        // worker's core to, and wedge the runtime.
         let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
 
         cx.get_ledger_state_cache()
@@ -390,7 +391,8 @@ where
             .some_or_server_error(|| "no ledger state available")?;
 
         // Bound concurrent ledger-DB work (issue #595): hold a permit across the Merkle-tree walk
-        // so unauthenticated queries cannot occupy every runtime worker via block_in_place.
+        // so unauthenticated queries cannot exhaust the blocking pool that block_in_place hands the
+        // worker's core to, and wedge the runtime.
         let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
 
         cx.get_ledger_state_cache()
@@ -424,7 +426,8 @@ where
             .some_or_server_error(|| "no ledger state available")?;
 
         // Bound concurrent ledger-DB work (issue #595): hold a permit across the Merkle-tree walk
-        // so unauthenticated queries cannot occupy every runtime worker via block_in_place.
+        // so unauthenticated queries cannot exhaust the blocking pool that block_in_place hands the
+        // worker's core to, and wedge the runtime.
         let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
 
         cx.get_ledger_state_cache()
@@ -946,15 +949,15 @@ where
         // Override `balance` with the authoritative remaining-claimable from the ledger's
         // `bridge_receiving` map (net of fees, zero once fully claimed). `deposited - claimed` over
         // events would instead carry the bridge fee as a residual.
-        //
-        // Bound concurrent ledger-DB work (issue #595): hold a permit across the ledger-state load.
-        let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
         balance.balance = match storage
             .get_highest_ledger_state()
             .await
             .map_err_into_server_error(|| "get highest ledger state")?
         {
             Some((protocol_version, ledger_state_key)) => {
+                // Bound concurrent ledger-DB work (issue #595): acquire after the SQL above, so
+                // the permit covers the ledger walk and not a Postgres round-trip.
+                let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
                 ledger::LedgerState::load(&ledger_state_key, protocol_version.ledger_version())
                     .map_err_into_server_error(|| "load ledger state")?
                     .bridge_receiving(address)

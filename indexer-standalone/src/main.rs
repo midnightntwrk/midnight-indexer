@@ -51,7 +51,10 @@ fn run() -> anyhow::Result<()> {
         infra::{
             api::{
                 AxumApi,
-                ledger_query_limit::{LedgerQueryLimiter, permits_for_worker_threads},
+                ledger_query_limit::{
+                    DEFAULT_MAX_BLOCKING_THREADS, LedgerQueryLimiter, default_permits,
+                    validate_permits,
+                },
             },
             storage as api_storage,
         },
@@ -67,7 +70,7 @@ fn run() -> anyhow::Result<()> {
         application as spo_app,
         infra::{spo_client::SPOClient, storage as spo_storage},
     };
-    use std::{num::NonZeroUsize, panic, thread};
+    use std::{num::NonZeroUsize, panic};
     use tokio::{
         runtime::Builder,
         select,
@@ -79,7 +82,7 @@ fn run() -> anyhow::Result<()> {
     // Load configuration.
     let Config {
         thread_stack_size,
-        worker_threads,
+        max_blocking_threads,
         ledger_query_concurrency,
         application_config,
         spo_config,
@@ -126,23 +129,32 @@ fn run() -> anyhow::Result<()> {
         secret,
     } = infra_config;
 
-    // Resolve the worker-thread count explicitly (issue #595) so the ledger-query semaphore can be
-    // sized relative to it. In standalone the chain-indexer, wallet-indexer and API share this one
-    // runtime, so keeping a worker free for liveness under an API-driven ledger-query storm also
-    // protects the indexing tasks.
-    let worker_threads = worker_threads.map(NonZeroUsize::get).unwrap_or_else(|| {
-        thread::available_parallelism()
-            .map(NonZeroUsize::get)
-            .unwrap_or(1)
-    });
+    // Cap the blocking pool explicitly (issue #595): a ledger walk occupies a blocking thread for
+    // its whole duration via the `block_in_place` core handoff. In standalone the chain-indexer,
+    // wallet-indexer, spo-indexer and API share this one runtime and this one pool, so bounding
+    // API-driven ledger queries also keeps the indexing tasks scheduled under a query storm.
+    let max_blocking_threads = max_blocking_threads.unwrap_or(DEFAULT_MAX_BLOCKING_THREADS);
 
-    let ledger_query_permits =
-        ledger_query_concurrency.unwrap_or_else(|| permits_for_worker_threads(worker_threads));
-    info!(worker_threads, ledger_query_permits = ledger_query_permits.get(); "runtime concurrency");
+    // The standalone ledger DB is SQLite, one connection wide, so the default lands on a single
+    // permit: walks already serialize on that connection and admitting more would only pin
+    // blocking threads waiting for it.
+    let ledger_db_max_connections = NonZeroUsize::new(pool::sqlite::MAX_CONNECTIONS as usize)
+        .expect("SQLite pool holds at least one connection");
+
+    let ledger_query_permits = ledger_query_concurrency
+        .unwrap_or_else(|| default_permits(ledger_db_max_connections, max_blocking_threads));
+    validate_permits(ledger_query_permits, max_blocking_threads)
+        .context("validate ledger_query_concurrency")?;
+    info!(
+        max_blocking_threads = max_blocking_threads.get(),
+        ledger_db_max_connections = ledger_db_max_connections.get(),
+        ledger_query_permits = ledger_query_permits.get();
+        "runtime concurrency"
+    );
     let ledger_query_limiter = LedgerQueryLimiter::new(ledger_query_permits);
 
     let runtime = Builder::new_multi_thread()
-        .worker_threads(worker_threads)
+        .max_blocking_threads(max_blocking_threads.get())
         .enable_all()
         .thread_stack_size(thread_stack_size as usize)
         .build()

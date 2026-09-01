@@ -185,7 +185,7 @@ where
 
         // Bound concurrent ledger-DB work (issue #595): hold a permit across the availability
         // check, load, and zswap-state extraction below so this unauthenticated field cannot
-        // occupy every runtime worker via block_in_place.
+        // exhaust the blocking pool that block_in_place hands the worker's core to.
         let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
 
         // Verify the root node is still in the ledger DB before loading: loading culled state

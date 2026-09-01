@@ -45,7 +45,10 @@ fn run() -> anyhow::Result<()> {
             self,
             api::{
                 AxumApi,
-                ledger_query_limit::{LedgerQueryLimiter, permits_for_worker_threads},
+                ledger_query_limit::{
+                    DEFAULT_MAX_BLOCKING_THREADS, LedgerQueryLimiter, default_permits,
+                    validate_permits,
+                },
             },
         },
     };
@@ -56,7 +59,7 @@ fn run() -> anyhow::Result<()> {
         telemetry,
     };
     use log::info;
-    use std::{num::NonZeroUsize, thread, time::Duration};
+    use std::{num::NonZeroUsize, time::Duration};
     use tokio::runtime::Builder;
 
     // Load configuration.
@@ -64,7 +67,7 @@ fn run() -> anyhow::Result<()> {
     info!(config:?; "starting");
     let Config {
         thread_stack_size,
-        worker_threads,
+        max_blocking_threads,
         ledger_query_concurrency,
         application_config,
         infra_config,
@@ -84,22 +87,31 @@ fn run() -> anyhow::Result<()> {
         secret,
     } = infra_config;
 
-    // Resolve the worker-thread count explicitly (issue #595): with an implicit count we cannot
-    // size the ledger-query semaphore relative to it, and unbounded ledger queries can occupy
-    // every worker via `block_in_place` and wedge the runtime.
-    let worker_threads = worker_threads.map(NonZeroUsize::get).unwrap_or_else(|| {
-        thread::available_parallelism()
-            .map(NonZeroUsize::get)
-            .unwrap_or(1)
-    });
+    // Cap the blocking pool explicitly (issue #595): a ledger walk occupies a blocking thread for
+    // its whole duration via the `block_in_place` core handoff, and tokio's default of 512 at the
+    // configured stack size is more thread stacks than this process can afford.
+    let max_blocking_threads = max_blocking_threads.unwrap_or(DEFAULT_MAX_BLOCKING_THREADS);
 
-    let ledger_query_permits =
-        ledger_query_concurrency.unwrap_or_else(|| permits_for_worker_threads(worker_threads));
-    info!(worker_threads, ledger_query_permits = ledger_query_permits.get(); "runtime concurrency");
+    // The ledger DB shares this pool with every other resolver (`ledger_db::init` below is handed
+    // the same pool), so the ledger-query bound is sized off it: admitting more walks than there
+    // are connections to serve them starves the rest of the API instead of bounding anything.
+    let ledger_db_max_connections = NonZeroUsize::new(storage_config.max_connections as usize)
+        .context("storage max_connections must be greater than zero")?;
+
+    let ledger_query_permits = ledger_query_concurrency
+        .unwrap_or_else(|| default_permits(ledger_db_max_connections, max_blocking_threads));
+    validate_permits(ledger_query_permits, max_blocking_threads)
+        .context("validate ledger_query_concurrency")?;
+    info!(
+        max_blocking_threads = max_blocking_threads.get(),
+        ledger_db_max_connections = ledger_db_max_connections.get(),
+        ledger_query_permits = ledger_query_permits.get();
+        "runtime concurrency"
+    );
     let ledger_query_limiter = LedgerQueryLimiter::new(ledger_query_permits);
 
     let runtime = Builder::new_multi_thread()
-        .worker_threads(worker_threads)
+        .max_blocking_threads(max_blocking_threads.get())
         .enable_all()
         .thread_stack_size(thread_stack_size as usize)
         .build()

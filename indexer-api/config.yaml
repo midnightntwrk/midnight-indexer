@@ -1,14 +1,17 @@
 thread_stack_size: "24MiB"
 
-# Tokio worker threads. Unset = number of CPU cores. Set explicitly to make the
-# ledger_query_concurrency default (below) predictable regardless of host size.
-# worker_threads: 8
+# Cap for the Tokio blocking pool. Unset = 64, rather than tokio's default of 512,
+# which at the thread_stack_size above would be ~12GiB of thread stacks. A ledger
+# walk holds one of these threads for its whole duration (block_in_place hands the
+# worker's core to a blocking thread), so this is the resource that runs out first.
+# max_blocking_threads: 64
 #
-# Max concurrent ledger-DB-backed GraphQL queries (issue #595): the bound that
-# stops unauthenticated ledger queries from occupying every worker via
-# block_in_place and wedging the runtime. Unset = worker_threads - 1, keeping one
-# worker free to serve /live and /ready under load. Must stay below worker_threads.
-# ledger_query_concurrency: 7
+# Max concurrent ledger-DB-backed GraphQL queries (issue #595): the bound that stops
+# unauthenticated ledger queries from exhausting the blocking pool and wedging the
+# runtime. Unset = half of infra.storage.max_connections below (so 12), leaving the
+# rest of that pool for other resolvers and the readiness probe. Must stay below
+# max_blocking_threads; startup fails otherwise.
+# ledger_query_concurrency: 12
 
 application:
   network_id: "undeployed"

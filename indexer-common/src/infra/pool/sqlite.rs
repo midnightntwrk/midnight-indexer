@@ -22,6 +22,10 @@ use thiserror::Error;
 ///
 /// To use as `&sqlx::SqlitePool` in `Query::execute`, use its `Deref` implementation: `&*pool` or
 /// `pool.deref()`. If an owned `sqlx::SqlitePool` is needed, use `Into::into`.
+/// Connections held by a [SqlitePool]. SQLite serializes writers anyway, so the pool is one
+/// connection wide; callers that size work against the ledger DB read this rather than assume it.
+pub const MAX_CONNECTIONS: u32 = 1;
+
 #[derive(Debug, Clone, Into)]
 pub struct SqlitePool(sqlx::SqlitePool);
 
@@ -31,7 +35,7 @@ impl SqlitePool {
         let connect_options =
             SqliteConnectOptions::try_from(config).map_err(Error::ConvertConfig)?;
         let inner = SqlitePoolOptions::new()
-            .max_connections(1)
+            .max_connections(MAX_CONNECTIONS)
             .connect_with(connect_options)
             .await?;
         let pool = SqlitePool(inner);
