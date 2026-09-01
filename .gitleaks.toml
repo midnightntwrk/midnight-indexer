@@ -1,0 +1,16 @@
+[extend]
+useDefault = true
+
+# Reviewed 2026-08-10: the entries below are public on-chain data captured as QA
+# expectations - Midnight contract/token-type hashes and Cardano *testnet*
+# stake/payment addresses - which gitleaks' entropy-based `generic-api-key` rule
+# reads as credentials. No live secrets. See the `Scan` workflow.
+
+# File-level, not directory-level: new fixtures under qa/tests/data/ stay scanned
+# unless they are added here deliberately.
+[[allowlists]]
+description = "QA static fixtures: public chain addresses and token-type hashes"
+paths = [
+  '''^qa/tests/data/static/qanet/cardano-stake-addresses\.jsonc$''',
+  '''^qa/tests/data/static/qanet/token-holding-contracts\.jsonc$''',
+]

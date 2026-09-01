@@ -211,15 +211,12 @@ jobs:
           docker version
           docker compose version
 
-      - name: Set up environment
-        run: |
-          version=$(grep '^version.*=' Cargo.toml | sed -E 's/version.*=.*"(.*)"/\1/')
-          echo "VERSION=$version" | tee -a "$GITHUB_ENV"
-
       - name: Validate Docker Compose syntax
+        env:
+          PROFILE: ${{ matrix.profile }}
         run: |
-          echo "Validating Docker Compose syntax for ${{ matrix.profile }} profile..."
-          docker compose --profile ${{ matrix.profile }} config --quiet
+          echo "Validating Docker Compose syntax for $PROFILE profile..."
+          docker compose --profile "$PROFILE" config --quiet
           echo "Docker Compose syntax validation completed successfully"
 
       - name: Login to GHCR
@@ -229,51 +226,31 @@ jobs:
           username: MidnightCI
           password: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
 
-      - name: Setup Docker Metadata
-        id: meta
-        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
-        env:
-          DOCKER_METADATA_SHORT_SHA_LENGTH: 8
+      - name: Derive image tags
+        id: tags
+        uses: ./.github/actions/derive-image-tags
         with:
-          tags: |
-            type=semver,pattern={{version}}
-            ${{ github.ref_type != 'tag' && format('type=sha,prefix={0}-,format=short', env.VERSION) || '' }}
+          node_tag: ${{ inputs.node_tag }}
 
-      - name: Set up Indexer Tag to target
-        run: |
-          echo "Raw tags output: ${{ steps.meta.outputs.tags }}"
-
-          # Filter "latest" for release tags
-          INDEXER_TAG=$(echo "${{ steps.meta.outputs.tags }}" | grep -v '^$' | grep -v '^latest$' | head -n1)
-
-          if [ -z "$INDEXER_TAG" ]; then
-            echo "Failed to extract INDEXER_TAG from tags output"
-            echo "Available tags:"
-            echo "${{ steps.meta.outputs.tags }}"
-            exit 1
-          fi
-
-          echo "Using INDEXER_TAG=$INDEXER_TAG"
-          echo "INDEXER_TAG=$INDEXER_TAG" >> "$GITHUB_ENV"
-
-      - name: Set up Node Tag to target
+      - name: Export tags to the compose environment
         env:
-          NODE_TAG_INPUT: ${{ github.event.inputs.node_tag }}
+          INDEXER_TAG: ${{ steps.tags.outputs.indexer_tag }}
+          NODE_TAG: ${{ steps.tags.outputs.node_tag }}
         run: |
-          # Use workflow dispatch input if provided, otherwise read from NODE_VERSIONS file
-          if [ -n "$NODE_TAG_INPUT" ]; then
-            echo "Using node tag from workflow dispatch: $NODE_TAG_INPUT"
-            echo "NODE_TAG=$NODE_TAG_INPUT" >> "$GITHUB_ENV"
-          else
-            echo "Reading node tag from NODE_VERSIONS file..."
-            node_tag=$(tail -n 1 NODE_VERSIONS)
-            echo "Using node tag: $node_tag"
-            echo "NODE_TAG=$node_tag" >> "$GITHUB_ENV"
-          fi
+          # Every `docker compose` invocation below interpolates these, so they
+          # have to be on the environment rather than passed per-step. Safe to
+          # put on the environment file: derive-image-tags rejects any tag
+          # outside [A-Za-z0-9._-], so neither can carry a newline.
+          {
+            echo "INDEXER_TAG=$INDEXER_TAG"
+            echo "NODE_TAG=$NODE_TAG"
+          } >> "$GITHUB_ENV"
 
       - name: Set image registry
+        env:
+          REF_TYPE: ${{ github.ref_type }}
         run: |
-          if [ "${{ github.ref_type }}" != "tag" ]; then
+          if [ "$REF_TYPE" != "tag" ]; then
             echo "IMAGE_REGISTRY=ghcr.io/midnight-ntwrk" >> "$GITHUB_ENV"
           fi
 
@@ -281,12 +258,14 @@ jobs:
         uses: ./.github/actions/init-env
 
       - name: Docker Compose Up
+        env:
+          PROFILE: ${{ matrix.profile }}
         run: |
           echo "Compose up with:"
           echo "- Indexer tag: $INDEXER_TAG"
           echo "- Node tag   : $NODE_TAG"
           echo "- Registry   : ${IMAGE_REGISTRY:-midnightntwrk}"
-          docker compose --profile "${{ matrix.profile }}" up -d
+          docker compose --profile "$PROFILE" up -d
 
       - name: Show running containers
         run: docker compose ps
@@ -315,3 +294,51 @@ jobs:
       - name: Tear down
         if: always()
         run: docker compose down -v
+
+  qa-undeployed:
+    name: QA smoke + integration (undeployed)
+    # needs build-and-push, NOT merge-manifests: this runner is amd64 and the
+    # <tag>-amd64 images already exist by then, so the suite runs concurrently
+    # with the manifest merge rather than after it. docker-compose-validation
+    # deliberately stays on merge-manifests, so the merged multi-arch manifest
+    # still has a consumer that exercises it.
+    #
+    # This does NOT overlap the arm64 QEMU builds: `needs` cannot name one leg
+    # of a matrix, so it waits on all ten. Overlapping them means splitting
+    # build-and-push into per-arch jobs - a bigger change to the release path,
+    # not attempted here.
+    needs: build-and-push
+    # Tag builds have their own release verification flow.
+    if: github.ref_type != 'tag'
+    runs-on: ubuntu-latest
+    # Legal here in a way it is not on a job with `uses:`, which is the whole
+    # reason this used to be a separate workflow_run-triggered workflow: a
+    # failing QA suite must never red the image pipeline.
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Derive image tags
+        id: tags
+        uses: ./.github/actions/derive-image-tags
+        with:
+          node_tag: ${{ inputs.node_tag }}
+
+      - name: Run QA suites against the freshly built images
+        uses: ./.github/actions/qa-integration-tests
+        with:
+          target_env: undeployed
+          # Per-arch tag: see the `needs:` note above.
+          indexer_tag: ${{ steps.tags.outputs.indexer_tag }}-amd64
+          node_tag: ${{ steps.tags.outputs.node_tag }}
+          node_toolkit_tag: ${{ steps.tags.outputs.node_toolkit_tag }}
+          publish_to_xray: "false"
+          packages_read_token: ${{ secrets.MIDNIGHTCI_PACKAGES_READ }}
+          app_infra_secret: ${{ secrets.APP__INFRA__SECRET }}
+          storage_password: ${{ secrets.APP__INFRA__STORAGE__PASSWORD }}
+          pub_sub_password: ${{ secrets.APP__INFRA__PUB_SUB__PASSWORD }}
