@@ -39,6 +39,7 @@ use crate::{
     },
     infra::api::{
         ApiResult, ContextExt, Metrics, OptionExt, ResultExt, SubscriptionConfig,
+        contract_state_cache::ContractStateCache,
         progress_cache::ProgressCache,
         quota::{PerConnectionCounter, SubscriptionQuotas},
         v4::{
@@ -380,6 +381,7 @@ pub fn make_app<S, B>(
     subscription_config: SubscriptionConfig,
     quotas: SubscriptionQuotas,
     progress_cache: ProgressCache,
+    contract_state_cache: ContractStateCache,
 ) -> Router<Arc<AtomicBool>>
 where
     S: Storage,
@@ -416,6 +418,7 @@ where
         .data(subscription_config)
         .data(quotas)
         .data(progress_cache)
+        .data(contract_state_cache)
         .limit_complexity(max_complexity)
         .limit_depth(max_depth)
         .limit_recursive_depth(max_depth)

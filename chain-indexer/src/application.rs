@@ -25,9 +25,12 @@ use anyhow::{Context, bail};
 use async_stream::stream;
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{Stream, StreamExt, TryStreamExt, future::ok};
-use indexer_common::domain::{
-    BlockIndexed, BridgeEventIndexed, LedgerVersion, NetworkId, Publisher,
-    SerializedLedgerStateKey, UnshieldedUtxoIndexed,
+use indexer_common::{
+    domain::{
+        BlockIndexed, BridgeEventIndexed, LedgerVersion, NetworkId, Publisher,
+        SerializedLedgerStateKey, UnshieldedUtxoIndexed,
+    },
+    infra::ledger_db,
 };
 use log::{debug, info, warn};
 use parking_lot::RwLock;
@@ -36,7 +39,7 @@ use std::{
     collections::{HashSet, VecDeque},
     error::Error as StdError,
     future::ready,
-    num::NonZeroUsize,
+    num::{NonZeroU32, NonZeroUsize},
     pin::pin,
     sync::Arc,
     time::{Duration, Instant},
@@ -55,10 +58,24 @@ pub struct Config {
     pub caught_up_max_distance: u32,
     pub caught_up_leeway: u32,
 
-    /// Per-block time budget for the storage-core gc-v1 mark-and-sweep pass.
-    /// Set to "0s" to disable garbage collection.
+    /// Time budget for one storage-core gc-v1 mark-and-sweep pass, per block covered by that pass.
+    /// The pass gets `gc_bound * gc_interval`. Set to "0s" to disable garbage collection — but note
+    /// that is not safe during a long re-index, since retention-window unpersists keep producing
+    /// garbage that then never gets reclaimed.
     #[serde(with = "humantime_serde")]
     pub gc_bound: Duration,
+
+    /// Run gc every N blocks, with N times the budget, rather than every block. The duty cycle is
+    /// the same either way, but far fewer `GcState::run` entries means far fewer partial marks: gc
+    /// refuses to sweep until a mark completes, the budget is only checked between batches, and
+    /// `GcState` is memory-only, so a restart discards a partial mark entirely. `1` restores
+    /// per-block passes.
+    pub gc_interval: NonZeroU32,
+
+    /// Sample the arena size metrics every N blocks, or never if `0`. Each sample counts the rows in
+    /// `ledger_db_nodes`, which is a full scan proportional to the size of the arena, so this is
+    /// deliberately opt-in and deliberately not tied to the gc interval.
+    pub arena_metrics_interval: u32,
 
     /// How many recent blocks' ledger state keys stay persisted as gc roots before the oldest
     /// is unpersisted. Must comfortably exceed indexer-api's block-hash snapshot reads, e.g.
@@ -79,6 +96,8 @@ pub async fn run(
         caught_up_max_distance,
         caught_up_leeway,
         gc_bound,
+        gc_interval,
+        arena_metrics_interval,
         ledger_state_retention,
     } = config;
 
@@ -102,6 +121,23 @@ pub async fn run(
         .await
         .context("get highest block timestamp")?
         .unwrap_or(0);
+
+    // Refuse to resume a database written before contract states were referenced by ledger-arena
+    // key. Those rows carried the state as a blob in columns that no longer exist, and the blobs
+    // cannot be recreated: their arena nodes were garbage collected and nothing can replay the
+    // chain for them. Failing here turns "you must re-index" into an actionable message instead of
+    // contract states silently reading back empty.
+    if storage
+        .contract_actions_without_state_keys_exist()
+        .await
+        .context("check for contract actions without state keys")?
+    {
+        bail!(
+            "found contract actions with no contract state key; they were indexed by a version \
+             that stored contract states as blobs, which cannot be converted. Wipe both the \
+             indexer database and the ledger DB and re-index from genesis; see docs/re-indexing.md"
+        );
+    }
 
     // Initialize metrics.
     let transaction_count = storage
@@ -225,6 +261,8 @@ pub async fn run(
             let mut blocks = pin!(blocks);
             let mut caught_up = false;
             let mut parent_block_timestamp = initial_parent_block_timestamp;
+            let mut blocks_since_gc = 0;
+            let mut blocks_since_arena_metrics = 0;
 
             loop {
                 let (next_ledger_state, new_ledger_state_key) = get_and_index_block(
@@ -260,18 +298,41 @@ pub async fn run(
                     }
                 }
 
-                // Run a time-bounded mark-and-sweep pass; skip when disabled.
-                if !gc_bound.is_zero() {
+                blocks_since_gc += 1;
+                blocks_since_arena_metrics += 1;
+
+                // Run a time-bounded mark-and-sweep pass every gc_interval blocks, with the budget
+                // for all of them; skip when disabled.
+                if !gc_bound.is_zero() && blocks_since_gc >= gc_interval.get() {
                     let started = Instant::now();
-                    let nodes_culled = LedgerState::gc(gc_bound);
+                    let nodes_culled = LedgerState::gc(gc_bound * blocks_since_gc);
                     let elapsed = started.elapsed();
-                    metrics.record_gc(elapsed, nodes_culled);
+                    blocks_since_gc = 0;
+
+                    // Root rows grow with *distinct* contract states rather than with actions,
+                    // because per-action roots are content-addressed and refcounted. They are also
+                    // never unpersisted, so this only ever goes up and is the number to watch. The
+                    // scan is what gc itself does on every rescan, so it adds nothing asymptotically.
+                    let root_count = LedgerState::persisted_root_hashes().len();
+                    metrics.record_gc(elapsed, nodes_culled, root_count);
                     if nodes_culled > 0 {
                         debug!(
                             nodes_culled,
-                            elapsed:?;
+                            elapsed:?,
+                            root_count;
                             "gc pass culled orphan arena nodes"
                         );
+                    }
+                }
+
+                // Sample the arena size, which is a full scan, so only on its own opt-in interval.
+                if arena_metrics_interval > 0
+                    && blocks_since_arena_metrics >= arena_metrics_interval
+                {
+                    blocks_since_arena_metrics = 0;
+                    if let Some(node_count) = ledger_db::node_count() {
+                        metrics.record_arena_node_count(node_count);
+                        debug!(node_count; "sampled ledger DB node count");
                     }
                 }
             }
@@ -470,7 +531,7 @@ where
     };
 
     // Apply transactions to ledger state with special handling for genesis block.
-    let (transactions, ledger_parameters) = if block.height == 0 {
+    let (mut transactions, ledger_parameters) = if block.height == 0 {
         // At genesis compare ledger state roots of genesis and block from node to detect whether
         // genesis already includes transactions (post-block-0) or not (pre-block-0).
 
@@ -559,6 +620,25 @@ where
             local_zswap_merkle_tree_root,
         );
     }
+
+    // Capture the ledger-arena key and balances of each contract action's contract state. This
+    // happens once per block, deliberately after the root validations above and after the genesis
+    // branch (which replaces `ledger_state`), and before the `persist()` below whose
+    // `flush_all_changes_to_db` gets the newly rooted nodes into SQL ahead of `save_block`. There
+    // is no per-action flush to add: that call flushes the whole write cache.
+    //
+    // Ordering arena-flush before SQL-commit means a crash between them can never leave a key in
+    // SQL without its node; the benign inverse — a rooted node with no row referencing it — is
+    // possible and permanent. Re-indexing a block yields the *same* content-addressed key and a
+    // second `persist()`, taking the root count from 1 to 2. That is semantically free because
+    // these roots are never unpersisted, so the write path needs no dedup logic. Note this is the
+    // exact inverse of the ledger-state retention invariant above, where a double persist *would*
+    // corrupt the root count balance.
+    let uncaptured = ledger_state
+        .capture_contract_state_keys(&mut transactions)
+        .context("capture contract state keys")?;
+    metrics.record_uncaptured_contract_states(uncaptured);
+    let transactions = transactions;
 
     // Determine whether caught up, also allowing to fall back a little in that state.
     // Use saturating subtraction to handle the case where streams are temporarily out of order.

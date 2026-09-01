@@ -20,8 +20,8 @@ use fastrace::trace;
 use futures::{Stream, TryStreamExt};
 use indexer_common::{
     domain::{
-        BlockHash, ContractAttributes, ProtocolVersion, SerializedContractAddress,
-        SerializedTransactionIdentifier, TransactionHash,
+        BlockHash, ContractAttributes, SerializedContractAddress, SerializedTransactionIdentifier,
+        TransactionHash,
     },
     stream::flatten_chunks,
 };
@@ -39,9 +39,9 @@ impl ContractActionStorage for Storage {
             SELECT
                 id,
                 address,
-                state,
+                state_key,
                 attributes,
-                zswap_state,
+                zswap_state_key,
                 transaction_id
             FROM contract_actions
             WHERE contract_actions.address = $1
@@ -70,9 +70,9 @@ impl ContractActionStorage for Storage {
             SELECT
                 contract_actions.id,
                 address,
-                state,
+                state_key,
                 attributes,
-                zswap_state,
+                zswap_state_key,
                 transaction_id
             FROM contract_actions
             WHERE address = $1
@@ -96,9 +96,9 @@ impl ContractActionStorage for Storage {
             SELECT
                 contract_actions.id,
                 address,
-                state,
+                state_key,
                 attributes,
-                zswap_state,
+                zswap_state_key,
                 transaction_id
             FROM contract_actions
             INNER JOIN transactions ON transactions.id = transaction_id
@@ -125,9 +125,9 @@ impl ContractActionStorage for Storage {
             SELECT
                 contract_actions.id,
                 address,
-                state,
+                state_key,
                 attributes,
-                zswap_state,
+                zswap_state_key,
                 transaction_id
             FROM contract_actions
             INNER JOIN transactions ON transactions.id = transaction_id
@@ -158,9 +158,9 @@ impl ContractActionStorage for Storage {
             SELECT
                 contract_actions.id,
                 address,
-                state,
+                state_key,
                 attributes,
-                zswap_state,
+                zswap_state_key,
                 transaction_id
             FROM contract_actions
             INNER JOIN transactions ON transactions.id = transaction_id
@@ -184,8 +184,8 @@ impl ContractActionStorage for Storage {
         address: &SerializedContractAddress,
         hash: BlockHash,
     ) -> Result<bool, sqlx::Error> {
-        // Existence-only variant of the "as of" lookup above: avoids fetching the state and
-        // zswap state blobs when only presence matters.
+        // Existence-only variant of the "as of" lookup above: avoids fetching a row at all when
+        // only presence matters.
         let query = indoc! {"
             SELECT 1
             FROM contract_actions
@@ -214,9 +214,9 @@ impl ContractActionStorage for Storage {
             SELECT
                 contract_actions.id,
                 address,
-                state,
+                state_key,
                 attributes,
-                zswap_state,
+                zswap_state_key,
                 transaction_id
             FROM contract_actions
             INNER JOIN transactions ON transactions.id = transaction_id
@@ -245,9 +245,9 @@ impl ContractActionStorage for Storage {
             SELECT
                 contract_actions.id,
                 address,
-                state,
+                state_key,
                 attributes,
-                zswap_state,
+                zswap_state_key,
                 transaction_id
             FROM contract_actions
             WHERE address =
@@ -284,9 +284,9 @@ impl ContractActionStorage for Storage {
             SELECT
                 contract_actions.id,
                 address,
-                state,
+                state_key,
                 attributes,
-                zswap_state,
+                zswap_state_key,
                 transaction_id
             FROM contract_actions
             WHERE address = $1
@@ -318,9 +318,9 @@ impl ContractActionStorage for Storage {
             SELECT
                 contract_actions.id,
                 address,
-                state,
+                state_key,
                 attributes,
-                zswap_state,
+                zswap_state_key,
                 contract_actions.transaction_id
             FROM contract_actions
             INNER JOIN regular_transactions ON regular_transactions.id = contract_actions.transaction_id
@@ -335,9 +335,9 @@ impl ContractActionStorage for Storage {
             SELECT
                 contract_actions.id,
                 address,
-                state,
+                state_key,
                 attributes,
-                zswap_state,
+                zswap_state_key,
                 contract_actions.transaction_id
             FROM contract_actions
             INNER JOIN regular_transactions ON regular_transactions.id = contract_actions.transaction_id
@@ -368,9 +368,9 @@ impl ContractActionStorage for Storage {
             SELECT
                 id,
                 address,
-                state,
+                state_key,
                 attributes,
-                zswap_state,
+                zswap_state_key,
                 transaction_id
             FROM contract_actions
             WHERE transaction_id = $1
@@ -383,6 +383,7 @@ impl ContractActionStorage for Storage {
             .await
     }
 
+    #[trace(properties = { "ids": "{ids:?}" })]
     async fn get_contract_actions_by_transaction_ids(
         &self,
         ids: &[u64],
@@ -456,30 +457,6 @@ impl ContractActionStorage for Storage {
 
         Ok(id.map(|(id,)| id as u64))
     }
-
-    #[trace(properties = { "transaction_id": "{transaction_id}" })]
-    async fn get_protocol_version_by_transaction_id(
-        &self,
-        transaction_id: u64,
-    ) -> Result<Option<ProtocolVersion>, sqlx::Error> {
-        let query = indoc! {"
-            SELECT protocol_version
-            FROM transactions
-            WHERE id = $1
-        "};
-
-        let protocol_version = sqlx::query_as::<_, (i64,)>(query)
-            .bind(transaction_id as i64)
-            .fetch_optional(&*self.pool)
-            .await?;
-
-        protocol_version
-            .map(|(protocol_version,)| {
-                ProtocolVersion::try_from(protocol_version)
-                    .map_err(|error| sqlx::Error::Decode(error.into()))
-            })
-            .transpose()
-    }
 }
 
 impl Storage {
@@ -498,9 +475,9 @@ impl Storage {
             SELECT
                 contract_actions.id,
                 address,
-                state,
+                state_key,
                 attributes,
-                zswap_state,
+                zswap_state_key,
                 transaction_id
             FROM contract_actions
             INNER JOIN transactions ON transactions.id = transaction_id
@@ -522,6 +499,7 @@ impl Storage {
     }
 
     #[cfg(feature = "cloud")]
+    #[trace(properties = { "ids": "{ids:?}" })]
     async fn fetch_contract_actions_by_transaction_ids(
         &self,
         ids: &[u64],
@@ -532,9 +510,9 @@ impl Storage {
             SELECT
                 id,
                 address,
-                state,
+                state_key,
                 attributes,
-                zswap_state,
+                zswap_state_key,
                 transaction_id
             FROM contract_actions
             WHERE transaction_id = ANY($1)
@@ -545,6 +523,7 @@ impl Storage {
     }
 
     #[cfg(feature = "standalone")]
+    #[trace(properties = { "ids": "{ids:?}" })]
     async fn fetch_contract_actions_by_transaction_ids(
         &self,
         ids: &[u64],
@@ -561,9 +540,9 @@ impl Storage {
             SELECT
                 id,
                 address,
-                state,
+                state_key,
                 attributes,
-                zswap_state,
+                zswap_state_key,
                 transaction_id
             FROM contract_actions
             WHERE transaction_id IN (SELECT id FROM transaction_ids)
