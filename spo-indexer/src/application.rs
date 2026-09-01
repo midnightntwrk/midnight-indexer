@@ -82,7 +82,19 @@ pub async fn run(
     loop {
         select! {
             result = process_next_epoch(poll_interval, &client, &storage) => {
-                result?;
+                // Transient failures (sqlite busy under write contention, node RPC hiccups)
+                // must not kill the whole standalone process; retry next interval. The
+                // backoff races SIGTERM so shutdown is not delayed by up to poll_interval.
+                if let Err(error) = result {
+                    error!("epoch processing failed, retrying next interval: {error:#}");
+                    select! {
+                        _ = sleep(poll_interval) => {}
+                        _ = sigterm.recv() => {
+                            warn!("SIGTERM received");
+                            return Ok(());
+                        }
+                    }
+                }
             }
             _ = sigterm.recv() => {
                 warn!("SIGTERM received");
