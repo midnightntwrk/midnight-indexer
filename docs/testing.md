@@ -54,6 +54,20 @@ that the zswap/state-root match guards each block.
 `indexer-tests/src/main.rs` (the `e2e` bin) can point the same suite at a **deployed** indexer
 (`--host/--port/--network-id`), but no workflow wires it up - it is a manual tool.
 
+## Runtime-upgrade boundary (mainnet 2026-07-20)
+
+The 2026-07-20 outage (#1397) is guarded by
+`chain-indexer/src/infra/subxt_node/runtime_upgrade_boundary.rs`. It replays recorded
+headers, `spec_version`s and extrinsics for mainnet `1,774,490..=1,774,492` from
+`chain-indexer/tests/fixtures/mainnet_runtime_upgrade/` — no live RPC.
+
+`just test` (both `ci-cloud.yaml` and `ci-standalone.yaml`) runs it. A revert of the
+content-vs-state pairing from #1346 fails that job.
+
+`chain-indexer/tests/mainnet_runtime.rs::test_finalized_blocks_node_1_0` only checks that
+post-upgrade node 1.0 blocks ingest. It never crosses the boundary and is not this
+coverage.
+
 ## The QA TypeScript suite (`qa/tests/`)
 
 - **smoke** - `/ready`, schema introspection, schema-change / deprecation detection.

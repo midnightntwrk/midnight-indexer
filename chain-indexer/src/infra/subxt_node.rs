@@ -14,6 +14,9 @@
 mod header;
 mod runtimes;
 
+#[cfg(test)]
+mod runtime_upgrade_boundary;
+
 use crate::{
     domain::{
         BlockRef, SystemParametersChange,
@@ -195,19 +198,9 @@ impl SubxtNode {
             .protocol_version()?
             .ok_or(SubxtNodeError::MissingProtocolVersionHeader)?;
         // Two runtime versions are in play at a runtime-upgrade enactment block, and every call
-        // below must pick the one matching what it touches:
-        //
-        // - `content_node_version` decodes bytes produced by the runtime that BUILT this block, as
-        //   recorded in the MNSV digest: extrinsics, events and header digests.
-        // - `state_node_version` addresses the runtime present in this block's STATE. At an
-        //   enactment block `set_code` landed inside this very block, so every RPC at this hash
-        //   (runtime API, storage, metadata) already executes against the next runtime, whose
-        //   version is therefore newer than the MNSV digest's.
-        //
-        // Away from enactment blocks the two are equal; getting the pairing wrong there is
-        // invisible, which is exactly why each call site names the version it needs.
-        let content_node_version = protocol_version.node_version();
-        let state_node_version = ProtocolVersion::try_from(block.spec_version())?.node_version();
+        // below must pick the one matching what it touches. See `block_runtime_versions`.
+        let (content_node_version, state_node_version) =
+            block_runtime_versions(protocol_version, block.spec_version())?;
         let ledger_version = protocol_version.ledger_version();
 
         if content_node_version != state_node_version {
@@ -890,6 +883,24 @@ async fn make_system_transaction(
     };
 
     Ok(Transaction::System(transaction))
+}
+
+/// Pair the runtime that *built* a block with the runtime present in that block's *state*.
+///
+/// - `content` comes from the MNSV digest: extrinsics, events and header digests.
+/// - `state` comes from `state_getRuntimeVersion` / `spec_version` at this hash. At an
+///   enactment block `set_code` has already landed, so every RPC at this hash executes
+///   against the next runtime (#1346, midnight-indexer#1397).
+///
+/// Away from enactment blocks the two are equal.
+pub(crate) fn block_runtime_versions(
+    digest_protocol_version: ProtocolVersion,
+    spec_version: u32,
+) -> Result<(NodeVersion, NodeVersion), ProtocolVersionError> {
+    Ok((
+        digest_protocol_version.node_version(),
+        ProtocolVersion::try_from(spec_version)?.node_version(),
+    ))
 }
 
 #[trace]

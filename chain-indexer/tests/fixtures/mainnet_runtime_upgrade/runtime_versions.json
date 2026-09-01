@@ -1,0 +1,17 @@
+{
+  "1774490": {
+    "hash": "e23dc07f65b1194d134b6d9b3c2f7433329d0512896a1c4543048a166d4fabd9",
+    "specVersion": 22000,
+    "transactionVersion": 2
+  },
+  "1774491": {
+    "hash": "40e3f67939e6f53e9f36b0a19fd27d484d29c008698f3a2336c5f2529a85dd23",
+    "specVersion": 1000000,
+    "transactionVersion": 3
+  },
+  "1774492": {
+    "hash": "380266656e11208adbcaa5ab62a6beb9c09ef86de1cb886eac721099177a1a0b",
+    "specVersion": 1000000,
+    "transactionVersion": 3
+  }
+}
