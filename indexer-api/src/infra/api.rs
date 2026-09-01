@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod contract_state_cache;
 pub mod ledger_query_limit;
 pub mod progress_cache;
 pub mod quota;
@@ -19,6 +20,7 @@ pub mod v4;
 use crate::{
     domain::{Api, LedgerStateCache, storage::Storage},
     infra::api::{
+        contract_state_cache::{ContractStateCache, ContractStateCacheConfig},
         ledger_query_limit::LedgerQueryLimiter,
         progress_cache::{ProgressCache, ProgressCacheConfig},
         quota::{PerConnectionCounter, QuotaConfig, SubscriptionQuotas},
@@ -117,6 +119,7 @@ where
             max_depth,
             subscription_config,
             quota_config,
+            contract_state_cache_config,
         } = self.config;
 
         let app = make_app(
@@ -130,6 +133,7 @@ where
             max_depth,
             subscription_config,
             quota_config,
+            contract_state_cache_config,
         );
 
         let listener = TcpListener::bind((address, port))
@@ -161,6 +165,9 @@ pub struct Config {
 
     #[serde(rename = "quota")]
     pub quota_config: QuotaConfig,
+
+    #[serde(rename = "contract_state_cache")]
+    pub contract_state_cache_config: ContractStateCacheConfig,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -283,6 +290,7 @@ fn make_app<S, B>(
     max_depth: usize,
     subscription_config: SubscriptionConfig,
     quota_config: QuotaConfig,
+    contract_state_cache_config: ContractStateCacheConfig,
 ) -> Router
 where
     S: Storage,
@@ -291,6 +299,7 @@ where
     let ledger_state_cache = LedgerStateCache::default();
     let quotas = SubscriptionQuotas::new(quota_config);
     let progress_cache = ProgressCache::new(subscription_config.progress_cache);
+    let contract_state_cache = ContractStateCache::new(contract_state_cache_config);
 
     let v4_app = v4::make_app(
         network_id,
@@ -303,6 +312,7 @@ where
         subscription_config,
         quotas,
         progress_cache,
+        contract_state_cache,
     );
 
     // For some reason the FastraceLayer and RequestBodyLimitLayer cannot be put into a
@@ -436,6 +446,8 @@ trait ContextExt {
 
     fn get_ledger_state_cache(&self) -> &LedgerStateCache;
 
+    fn get_contract_state_cache(&self) -> &ContractStateCache;
+
     fn get_metrics(&self) -> &Metrics;
 
     fn get_subscription_config(&self) -> &SubscriptionConfig;
@@ -536,6 +548,11 @@ impl ContextExt for Context<'_> {
     fn get_progress_cache(&self) -> &ProgressCache {
         self.data::<ProgressCache>()
             .expect("ProgressCache is stored in Context")
+    }
+
+    fn get_contract_state_cache(&self) -> &ContractStateCache {
+        self.data::<ContractStateCache>()
+            .expect("ContractStateCache is stored in Context")
     }
 
     fn get_per_connection_counter(&self) -> &Arc<AtomicUsize> {

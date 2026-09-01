@@ -59,6 +59,12 @@ where
     /// Get the number of stored contract actions: deploys, calls, updates.
     async fn get_contract_action_count(&self) -> Result<(u64, u64, u64), sqlx::Error>;
 
+    /// Whether any stored contract action predates contract states being referenced by
+    /// ledger-arena key, i.e. has neither key set. Such rows were written by a version that stored
+    /// the states as blobs; those blobs are gone and cannot be recreated, so the database must be
+    /// re-indexed rather than resumed.
+    async fn contract_actions_without_state_keys_exist(&self) -> Result<bool, sqlx::Error>;
+
     /// Get the latest D-Parameter.
     async fn get_latest_d_parameter(&self) -> Result<Option<DParameter>, sqlx::Error>;
 

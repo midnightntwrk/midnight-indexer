@@ -464,6 +464,10 @@ type ContractCall implements ContractAction {
 	"""
 	address: HexEncoded!
 	"""
+	The entry point.
+	"""
+	entryPoint: String!
+	"""
 	The hex-encoded serialized state.
 	"""
 	state: HexEncoded!
@@ -471,10 +475,6 @@ type ContractCall implements ContractAction {
 	The hex-encoded serialized contract-specific zswap state.
 	"""
 	zswapState: HexEncoded!
-	"""
-	The entry point.
-	"""
-	entryPoint: String!
 	"""
 	Transaction for this contract call.
 	"""

@@ -231,6 +231,7 @@ where
                     snapshot_block_id,
                     0,
                     batch_size,
+                    protocol_version.ledger_version(),
                 )
                 .await;
             let mut updates = pin!(updates);
@@ -246,7 +247,13 @@ where
             //    Merkle tree updates (pinned to the block) filling the non-owned gaps.
             let mut cursor = 0u64;
             let entries = storage
-                .get_dust_generation_entries(&dust_address_bytes, 0, last_index, batch_size)
+                .get_dust_generation_entries(
+                    &dust_address_bytes,
+                    0,
+                    last_index,
+                    batch_size,
+                    protocol_version.ledger_version(),
+                )
                 .await;
             let mut entries = pin!(entries);
             while let Some(entry) = entries

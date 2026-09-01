@@ -12,12 +12,14 @@
 // limitations under the License.
 
 mod contract_state;
+mod contract_zswap_state;
 mod ledger_state;
 mod secret_key;
 mod state_translation_v8_to_v9;
 mod transaction;
 
 pub use contract_state::*;
+pub use contract_zswap_state::*;
 pub use ledger_state::*;
 pub use secret_key::*;
 pub use transaction::*;
@@ -25,7 +27,8 @@ pub use transaction::*;
 use crate::{
     domain::{
         ByteArrayLenError, ByteVec, LedgerVersion, SerializedContractAddress,
-        SerializedLedgerStateKey, dust::DustParameters,
+        SerializedContractStateKey, SerializedLedgerStateKey, SerializedZswapStateKey,
+        dust::DustParameters,
     },
     error::BoxError,
 };
@@ -66,6 +69,15 @@ type IntentV9<D> =
 pub enum Error {
     #[error("cannot load ledger state for key {}", const_hex::encode(.0))]
     LoadLedgerState(SerializedLedgerStateKey, #[source] io::Error),
+
+    #[error("cannot load contract state for key {0}")]
+    LoadContractState(SerializedContractStateKey, #[source] io::Error),
+
+    #[error("cannot load contract zswap state for key {0}")]
+    LoadContractZswapState(SerializedZswapStateKey, #[source] io::Error),
+
+    #[error("contract state key {0} carries no known contract state tag")]
+    UnknownContractStateKeyTag(SerializedContractStateKey),
 
     #[error("cannot serialize {0}")]
     Serialize(&'static str, #[source] io::Error),

@@ -135,11 +135,12 @@ fn run() -> anyhow::Result<()> {
     // API-driven ledger queries also keeps the indexing tasks scheduled under a query storm.
     let max_blocking_threads = max_blocking_threads.unwrap_or(DEFAULT_MAX_BLOCKING_THREADS);
 
-    // The standalone ledger DB is SQLite, one connection wide, so the default lands on a single
-    // permit: walks already serialize on that connection and admitting more would only pin
-    // blocking threads waiting for it.
-    let ledger_db_max_connections = NonZeroUsize::new(pool::sqlite::MAX_CONNECTIONS as usize)
-        .expect("SQLite pool holds at least one connection");
+    // The standalone ledger DB is SQLite pinned to a single connection — storage-core assumes a
+    // single writer, see `ledger_db::init` — so the default lands on one permit: walks already
+    // serialize on that connection and admitting more would only pin blocking threads waiting for
+    // it. Note this is the ledger DB's own pool, not the main storage pool, which is wider.
+    let ledger_db_max_connections = NonZeroUsize::new(ledger_db::MAX_CONNECTIONS as usize)
+        .expect("ledger DB pool holds at least one connection");
 
     let ledger_query_permits = ledger_query_concurrency
         .unwrap_or_else(|| default_permits(ledger_db_max_connections, max_blocking_threads));

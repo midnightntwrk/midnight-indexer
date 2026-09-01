@@ -15,14 +15,16 @@ use crate::{
     domain::{
         AddressOrContract, ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome,
         ByteArray, ByteVec, IntentHash, LedgerEvent, LedgerEventAttributes, LedgerVersion,
-        NetworkId, Nonce, SerializedContractAddress, SerializedLedgerParameters,
-        SerializedLedgerStateKey, SerializedTransaction, SerializedZswapMerkleTreeRoot,
-        SerializedZswapState, TokenType, TransactionResult, UnshieldedAddress, UnshieldedUtxo,
+        NetworkId, Nonce, SerializedContractAddress, SerializedContractStateKey,
+        SerializedLedgerParameters, SerializedLedgerStateKey, SerializedTransaction,
+        SerializedZswapMerkleTreeRoot, SerializedZswapState, SerializedZswapStateKey, TokenType,
+        TransactionResult, UnshieldedAddress, UnshieldedUtxo,
         bridge::BridgeClaim,
         dust::{self},
         ledger::{
-            Error, IntentV8, IntentV9, SerializableExt, TaggedSerializableExt, TransactionV8,
-            TransactionV9,
+            ContractState, ContractZswapState, Error, IntentV8, IntentV9, LedgerDbContractState,
+            SerializableExt, TaggedSerializableExt, TransactionV8, TransactionV9,
+            contract_state::ContractStateArenaKey,
         },
     },
     infra::ledger_db::v1_1,
@@ -624,10 +626,15 @@ impl LedgerState {
                     whitelist: None,
                 };
 
-                // The stateless `cost` estimates verifier-key sizes, under-costing
-                // contract calls; `cost_with_state` reads them from the ledger state.
-                // The ledger has no state-aware `fees`, so the fee is computed from
-                // the cost the same way `Transaction::fees` does.
+                // Must match the node byte-for-byte: the node feeds `block_fullness`
+                // with the stateless `cost`, and fee prices derive from this
+                // accumulator — a state-aware cost diverges on contract calls and
+                // poisons all fee-derived ledger values (shielded-sre#515).
+                let fullness_cost = transaction
+                    .cost(&ledger_state.parameters, true)
+                    .map_err(|error| Error::TransactionCost(error.into()))?;
+                // State-aware cost (accurate for contract calls) — for the reported
+                // `fees` only, never for consensus-relevant state.
                 let cost = transaction
                     .cost_with_state(&ledger_state.parameters, ledger_state, true)
                     .map_err(|error| Error::TransactionCost(error.into()))?;
@@ -670,7 +677,7 @@ impl LedgerState {
 
                 // Only count cost for successful/partial transactions (match node behavior)
                 let block_fullness = if should_count_cost {
-                    *block_fullness + cost
+                    *block_fullness + fullness_cost
                 } else {
                     *block_fullness
                 };
@@ -885,6 +892,148 @@ impl LedgerState {
                 .serialize()
                 .map_err(|error| Error::Serialize("DustGenerationMerkleTreeRoot", error)),
         }
+    }
+
+    /// The given contract's state and the ledger-arena key referencing it, or `None` if the
+    /// contract is not in this ledger state — a failed action, or an address that does not (yet)
+    /// exist. Today that case is represented as an empty `state` blob.
+    ///
+    /// The returned node is rooted, so it survives garbage collection independently of the ledger
+    /// state it came from. Rooting is intentionally never balanced by an unpersist: a contract
+    /// state must stay readable for as long as the action referencing it exists, which is
+    /// forever. Re-indexing a block therefore takes an existing root's count from K to K+1, which
+    /// is semantically free precisely because these roots are never released — the exact inverse
+    /// of the ledger-state retention invariant, where a double persist would corrupt the balance.
+    ///
+    /// Content addressing does the deduplication: consecutive identical states are one node with
+    /// one root row whose count is the number of actions sharing it.
+    /// Returns the key together with the state itself, rather than only the key, so that anything
+    /// derived from the state — the token balances, for instance — comes off the pointer that is
+    /// already in hand. Loading it back by key instead would be a second arena lookup for a node
+    /// that has been rooted but not yet flushed, which is only safe while it happens to still be
+    /// cached.
+    #[trace(properties = { "address": "{address}" })]
+    pub fn contract_state(
+        &self,
+        address: &SerializedContractAddress,
+    ) -> Result<Option<(SerializedContractStateKey, LedgerDbContractState)>, Error> {
+        // ORDER IS LOAD-BEARING: `persist()` before `as_typed_key()`. `ContractState`'s own node
+        // payload is under storage-core's small-object limit, so beforehand its key is an
+        // `ArenaKey::Direct` that inlines the payload instead of referencing a row; `persist()`
+        // promotes it to a `Ref`. Getting this backwards yields a fat key over an unrooted subtree.
+        //
+        // `lookup_sp` hands back the `Sp` that is already in the map, so nothing is hashed,
+        // copied or re-allocated here.
+        match self {
+            Self::V8 { ledger_state, .. } => {
+                let address = ContractAddressV8::deserialize(&mut address.as_ref(), 0)
+                    .map_err(|error| Error::Deserialize("ContractAddressV8", error))?;
+
+                ledger_state
+                    .contract
+                    .lookup_sp(&address)
+                    .map(|mut contract_state| {
+                        contract_state.persist();
+                        let key = contract_state
+                            .as_typed_key()
+                            .tagged_serialize()
+                            .map(SerializedContractStateKey::from)
+                            .map_err(|error| Error::Serialize("ContractStateKeyV8", error))?;
+
+                        Ok((key, ContractState::V3(contract_state)))
+                    })
+                    .transpose()
+            }
+
+            Self::V9 { ledger_state, .. } => {
+                let address = ContractAddressV9::deserialize(&mut address.as_ref(), 0)
+                    .map_err(|error| Error::Deserialize("ContractAddressV9", error))?;
+
+                ledger_state
+                    .contract
+                    .lookup_sp(&address)
+                    .map(|mut contract_state| {
+                        contract_state.persist();
+                        let key = contract_state
+                            .as_typed_key()
+                            .tagged_serialize()
+                            .map(SerializedContractStateKey::from)
+                            .map_err(|error| Error::Serialize("ContractStateKeyV9", error))?;
+
+                        Ok((key, ContractState::V4(contract_state)))
+                    })
+                    .transpose()
+            }
+        }
+    }
+
+    /// The ledger-arena key of the given contract's filtered zswap state, always available: unlike
+    /// the contract state this value is *constructed* from the global commitment tree rather than
+    /// resident, so it exists even for a failed action, matching what is stored today.
+    ///
+    /// Because it is constructed, its nodes are new to the arena and referenced by nothing else,
+    /// so it has to be allocated rather than looked up. `alloc` is content-addressed and
+    /// idempotent and the SQL write is an upsert, so an identical value maps onto an identical key
+    /// and is stored once however often it is captured.
+    #[trace(properties = { "address": "{address}" })]
+    pub fn contract_zswap_state_key(
+        &self,
+        address: &SerializedContractAddress,
+    ) -> Result<SerializedZswapStateKey, Error> {
+        let storage = default_storage::<v1_1::LedgerDb>();
+
+        // As above: persist before taking the key.
+        let key = match self {
+            Self::V8 { ledger_state, .. } => {
+                let address = ContractAddressV8::deserialize(&mut address.as_ref(), 0)
+                    .map_err(|error| Error::Deserialize("ContractAddressV8", error))?;
+
+                let mut contract_zswap_state = ZswapStateV8::new();
+                contract_zswap_state.coin_coms = ledger_state.zswap.filter(&[address]);
+
+                let mut contract_zswap_state = storage.alloc(contract_zswap_state);
+                contract_zswap_state.persist();
+                contract_zswap_state
+                    .as_typed_key()
+                    .tagged_serialize()
+                    .map_err(|error| Error::Serialize("ZswapStateKeyV8", error))?
+            }
+
+            Self::V9 { ledger_state, .. } => {
+                let address = ContractAddressV9::deserialize(&mut address.as_ref(), 0)
+                    .map_err(|error| Error::Deserialize("ContractAddressV9", error))?;
+
+                let mut contract_zswap_state = ZswapStateV9::new();
+                contract_zswap_state.coin_coms = ledger_state.zswap.filter(&[address]);
+
+                let mut contract_zswap_state = storage.alloc(contract_zswap_state);
+                contract_zswap_state.persist();
+                contract_zswap_state
+                    .as_typed_key()
+                    .tagged_serialize()
+                    .map_err(|error| Error::Serialize("ZswapStateKeyV9", error))?
+            }
+        };
+
+        Ok(key.into())
+    }
+
+    /// Whether the node a contract state key points at is still present in the ledger DB. Must be
+    /// checked before loading: `get_lazy` hands back a lazy pointer without reading anything, so a
+    /// missing node surfaces as a panic inside storage-core when the pointer is used, not as an
+    /// error.
+    pub fn contract_state_loadable(key: &SerializedContractStateKey) -> Result<bool, Error> {
+        let hash = ContractStateArenaKey::deserialize(key)?.hash().to_owned();
+
+        Ok(default_storage::<v1_1::LedgerDb>().with_backend(|b| b.get(&hash).is_some()))
+    }
+
+    /// Whether the node a contract zswap state key points at is still present in the ledger DB.
+    /// See [Self::contract_state_loadable].
+    pub fn contract_zswap_state_loadable(key: &SerializedZswapStateKey) -> Result<bool, Error> {
+        let hash = ContractZswapState::arena_key(key)?.key.hash().to_owned();
+
+        Ok(default_storage::<v1_1::LedgerDb>().with_backend(|b| b.get(&hash).is_some()))
     }
 
     /// Extract the zswap state for the given contract address.
@@ -2504,15 +2653,39 @@ fn dag_is_complete(
 
 #[cfg(test)]
 mod tests {
+    /// Regression scaffold for shielded-sre#515: the node feeds `block_fullness`
+    /// with the stateless `Transaction::cost`; a state-aware cost diverges on
+    /// contract calls and poisons fee-derived dust commitments.
+    ///
+    /// To arm: commit `tests/contract_deploy_tx.raw` + `tests/contract_call_tx.raw`
+    /// (generated against `tests/genesis_state.raw`), drop the `#[ignore]`, apply
+    /// both, then assert (1) `cost != cost_with_state` for the call tx and
+    /// (2) accumulated `block_fullness` equals the sum of the stateless costs.
+    /// On-chain repro: stagenet txs 0733c136… / 3c0898a7… (blocks 33532/33537).
+    #[test]
+    #[ignore = "requires contract deploy/call fixtures; see doc comment"]
+    fn block_fullness_uses_stateless_cost_node_parity() {
+        let deploy =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/contract_deploy_tx.raw");
+        let call =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/contract_call_tx.raw");
+        assert!(
+            deploy.exists() && call.exists(),
+            "contract fixtures missing — generate per the doc comment above"
+        );
+        unimplemented!("apply genesis + deploy + call; assert invariants 1 and 2 per doc comment");
+    }
+
     use crate::{
         domain::{
             AddressOrContract, LedgerEventAttributes, LedgerVersion,
             ledger::{
-                LedgerState,
+                LedgerState, contract_state,
                 ledger_state::{make_contract_event_attributes, take_either_address},
             },
         },
         error::BoxError,
+        infra::ledger_db::v1_1,
     };
     use anyhow::Context;
     use midnight_base_crypto_v1::{
@@ -2591,11 +2764,9 @@ mod tests {
                 .display()
                 .to_string();
 
-            let pool = SqlitePool::new(pool::sqlite::Config {
-                cnn_url: sqlite_file,
-            })
-            .await
-            .context("create pool")?;
+            let pool = SqlitePool::new(pool::sqlite::Config::with_url(sqlite_file))
+                .await
+                .context("create pool")?;
             migrations::sqlite::run(&pool)
                 .await
                 .context("run migrations")?;
@@ -2659,14 +2830,25 @@ mod tests {
              regenerate the fixture and re-check against the node"
         );
 
-        // Populated, NODE-VALIDATED coverage: a devnet ledger-8 genesis
+        // Populated, UPSTREAM-VALIDATED coverage: a devnet ledger-8 genesis
         // (extracted from node-0.22.0, `ledger-state[v13]`, ~67 KB) exercises the
         // table's MPT walking — contracts, bridge_receiving, treasury — that the
-        // empty state does not. The pinned v9 root below was produced by the
-        // node's own `StateTranslationTable` (midnight-node `fc39e708`, the 2.1.0
-        // migration runtime) over this same blob and matches byte-for-byte, so
-        // this fixture is authoritative for the translation itself. (The full
-        // live-fork `apply + 1` RPC-format check is still Phase 3.)
+        // empty state does not.
+        //
+        // The pinned v9 root below was reproduced byte-for-byte by the ledger
+        // team's `v8-to-v9-state-translation` crate (`midnightntwrk/midnight-ledger`
+        // rev `da96e33d`) over this same blob — the crate `node-2.1.0-beta.1`
+        // itself translates with, so this fixture is authoritative for the
+        // translation. It moved when the ledger 8 -> 9 dust wipe landed
+        // (midnight-node #2012, backported as #2057): the v8 dust state is
+        // dropped rather than recast, which changes the arena root over any blob
+        // whose dust is non-empty.
+        //
+        // To re-derive after an upstream change, add
+        //   v8-to-v9-state-translation = { git = "https://github.com/midnightntwrk/midnight-ledger", rev = "<rev>" }
+        // to indexer-common's dev-dependencies and run both tables over this blob
+        // (see `state_translation_v8_to_v9`'s `matches_upstream_crate_on_devnet_genesis`).
+        // (The full live-fork `apply + 1` RPC-format check is still Phase 3.)
         let v8_devnet = std::fs::read(format!(
             "{}/tests/v8_genesis_devnet_0_22_0.raw",
             env!("CARGO_MANIFEST_DIR")
@@ -3005,6 +3187,274 @@ mod tests {
         );
 
         Ok(())
+    }
+
+    /// The property the key-instead-of-blob change rests on: capturing a contract state's arena
+    /// key, dropping the ledger state it came from, then reloading and re-serializing must yield
+    /// exactly the bytes that state serializes to. It also covers the rooting, since the ledger
+    /// state whose `contract` map held the node is gone by the time the key is used.
+    ///
+    /// This goes through the real `v1_1::LedgerDb`, so it exercises the depth-0 `get_lazy` path
+    /// that made lazily reloaded Merkle trees serve stale hashes (#1265).
+    #[cfg(any(feature = "cloud", feature = "standalone"))]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn contract_state_key_round_trips_through_the_ledger_db() -> Result<(), BoxError> {
+        use crate::domain::{
+            SerializedContractStateKey,
+            ledger::{LedgerDbContractState, SerializableExt, TaggedSerializableExt},
+        };
+        use midnight_base_crypto_v1::hash::HashOutput;
+        use midnight_coin_structure_v2::{
+            coin::{TokenType as MidnightTokenType, UnshieldedTokenType},
+            contract::ContractAddress as ContractAddressV8,
+        };
+        use midnight_onchain_runtime_v3::state::ContractState as ContractStateV3;
+        use midnight_storage_core_v1::{DefaultDB, storage::default_storage};
+
+        const AMOUNT: u128 = 1_000_000;
+
+        let _ledger_db = init_ledger_db().await?;
+
+        let address = ContractAddressV8(HashOutput([9; 32]));
+        let serialized_address = address.serialize()?;
+
+        // The same logical state in the in-memory arena: content addressing is backend-independent
+        // (both arenas hash with `DefaultHasher`), so this is what the reload must serialize to.
+        let expected = {
+            let mut contract_state = ContractStateV3::<DefaultDB>::default();
+            contract_state.balance = contract_state.balance.insert(
+                MidnightTokenType::Unshielded(UnshieldedTokenType(HashOutput([7; 32]))),
+                AMOUNT,
+            );
+            contract_state.tagged_serialize()?
+        };
+
+        let mut state = LedgerState::new("undeployed".try_into()?, LedgerVersion::V8)
+            .expect("ledger state can be constructed");
+        match &mut state {
+            LedgerState::V8 { ledger_state, .. } => {
+                let mut contract_state = ContractStateV3::default();
+                contract_state.balance = contract_state.balance.insert(
+                    MidnightTokenType::Unshielded(UnshieldedTokenType(HashOutput([7; 32]))),
+                    AMOUNT,
+                );
+                ledger_state.contract = ledger_state.contract.insert(address, contract_state);
+            }
+            LedgerState::V9 { .. } => unreachable!("constructed as V8"),
+        }
+
+        let (key, captured) = state
+            .contract_state(&serialized_address)?
+            .expect("the contract is in the ledger state");
+
+        // Anything derived from the state comes off the pointer the accessor hands back, without a
+        // second arena lookup for a node that is rooted but not yet flushed.
+        assert_eq!(captured.serialize()?, expected);
+
+        // Capturing the same state again is idempotent in the key — it is content-addressed — and
+        // takes the root count to two rather than replacing it. That is safe only because these
+        // roots are never unpersisted, which is the exact inverse of the ledger-state retention
+        // invariant, and it is what lets a re-indexed block need no dedup logic on the write path.
+        assert_eq!(
+            state
+                .contract_state(&serialized_address)?
+                .expect("the contract is in the ledger state")
+                .0,
+            key
+        );
+
+        // `persist()` flushes the arena's pending writes, which is what gets the newly rooted
+        // contract state node into SQL; one flush per block covers all of that block's actions.
+        let (state, _) = state.persist()?;
+        drop(state);
+
+        let hash = contract_state::ContractStateArenaKey::deserialize(&key)?
+            .hash()
+            .to_owned();
+        assert_eq!(
+            default_storage::<v1_1::LedgerDb>()
+                .with_backend(|b| b.get_roots())
+                .get(&hash)
+                .copied(),
+            Some(2),
+            "two captures of one state share a single root row whose count is two"
+        );
+
+        assert!(
+            LedgerState::contract_state_loadable(&key)?,
+            "the captured key must be loadable after its ledger state is gone"
+        );
+
+        let reloaded = LedgerDbContractState::load_prefetched(&key)?;
+        assert_eq!(
+            reloaded.serialize()?,
+            expected,
+            "re-serializing the reloaded contract state must be byte-identical"
+        );
+
+        // Field reads must survive the lazy reload too, not just the byte-level walk.
+        let balances = reloaded.balances()?;
+        assert_eq!(balances.len(), 1);
+        assert_eq!(balances[0].amount, AMOUNT);
+
+        // An absent contract yields no key rather than an error, which is how a failed action is
+        // represented.
+        let absent = ContractAddressV8(HashOutput([1; 32])).serialize()?;
+        let state = LedgerState::load(
+            &LedgerState::new("undeployed".try_into()?, LedgerVersion::V8)
+                .expect("ledger state can be constructed")
+                .persist()?
+                .1,
+            LedgerVersion::V8,
+        )?;
+        assert!(state.contract_state(&absent)?.is_none());
+
+        // A key whose node was never written is reported as not loadable rather than panicking on
+        // use.
+        let unknown = SerializedContractStateKey::from({
+            let mut bytes = key.as_ref().to_vec();
+            *bytes.last_mut().expect("key is not empty") ^= 0xff;
+            bytes
+        });
+        assert!(!LedgerState::contract_state_loadable(&unknown)?);
+
+        Ok(())
+    }
+
+    /// A contract's zswap state is constructed rather than resident, so it is allocated into the
+    /// arena. Capturing it must round-trip to exactly the bytes `extract_contract_zswap_state`
+    /// produces today, and identical values must map onto identical keys.
+    #[cfg(any(feature = "cloud", feature = "standalone"))]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn contract_zswap_state_key_round_trips_and_dedups() -> Result<(), BoxError> {
+        use crate::domain::ledger::{ContractZswapState, SerializableExt};
+        use midnight_base_crypto_v1::hash::HashOutput;
+        use midnight_coin_structure_v2::contract::ContractAddress as ContractAddressV8;
+        use midnight_transient_crypto_v2::curve::Fr;
+        use std::ops::Deref;
+
+        const LEAVES: u64 = 12;
+
+        let _ledger_db = init_ledger_db().await?;
+
+        let serialized_address = ContractAddressV8(HashOutput([9; 32])).serialize()?;
+
+        let mut state = LedgerState::new("undeployed".try_into()?, LedgerVersion::V8)
+            .expect("ledger state can be constructed");
+        match &mut state {
+            LedgerState::V8 { ledger_state, .. } => {
+                let mut zswap = ledger_state.zswap.deref().to_owned();
+                zswap.coin_coms = (0..LEAVES).fold(zswap.coin_coms.clone(), |tree, i| {
+                    tree.try_update(i, &Fr::from(i + 1), None)
+                        .expect("insert coin commitment")
+                });
+                zswap.first_free = LEAVES;
+                ledger_state.zswap = Sp::new(zswap);
+            }
+            LedgerState::V9 { .. } => unreachable!("constructed as V8"),
+        }
+
+        let expected = state.extract_contract_zswap_state(&serialized_address)?;
+
+        let key = state.contract_zswap_state_key(&serialized_address)?;
+        // Allocation is content-addressed, so capturing the same value again yields the same key.
+        assert_eq!(state.contract_zswap_state_key(&serialized_address)?, key);
+
+        let (state, _) = state.persist()?;
+        drop(state);
+
+        assert!(LedgerState::contract_zswap_state_loadable(&key)?);
+
+        let reloaded = ContractZswapState::load_prefetched(&key)?;
+        assert_eq!(
+            reloaded.serialize()?,
+            expected,
+            "re-serializing the reloaded zswap state must be byte-identical to what is stored today"
+        );
+
+        Ok(())
+    }
+
+    #[cfg(feature = "cloud")]
+    async fn init_ledger_db()
+    -> Result<testcontainers::ContainerAsync<testcontainers_modules::postgres::Postgres>, BoxError>
+    {
+        use crate::infra::{ledger_db, migrations, pool::postgres::PostgresPool};
+        use sqlx::postgres::PgSslMode;
+        use std::time::Duration;
+        use testcontainers::{ImageExt, runners::AsyncRunner};
+        use testcontainers_modules::postgres::Postgres;
+
+        let postgres_container = Postgres::default()
+            .with_db_name("indexer")
+            .with_user("indexer")
+            .with_password(env!("APP__INFRA__STORAGE__PASSWORD"))
+            .with_tag("17.1-alpine")
+            .start()
+            .await
+            .context("start Postgres container")?;
+        let postgres_port = postgres_container
+            .get_host_port_ipv4(5432)
+            .await
+            .context("get Postgres port")?;
+
+        let config = crate::infra::pool::postgres::Config {
+            host: "localhost".to_string(),
+            port: postgres_port,
+            dbname: "indexer".to_string(),
+            user: "indexer".to_string(),
+            password: env!("APP__INFRA__STORAGE__PASSWORD").into(),
+            sslmode: PgSslMode::Prefer,
+            max_connections: 10,
+            idle_timeout: Duration::from_secs(60),
+            max_lifetime: Duration::from_secs(5 * 60),
+        };
+
+        let pool = PostgresPool::new(config).await.context("create pool")?;
+        migrations::postgres::run(&pool)
+            .await
+            .context("run migrations")?;
+
+        ledger_db::init(
+            ledger_db::Config {
+                cache_max_nodes: 1_024,
+            },
+            pool,
+        );
+
+        Ok(postgres_container)
+    }
+
+    #[cfg(feature = "standalone")]
+    async fn init_ledger_db() -> Result<tempfile::TempDir, BoxError> {
+        use crate::infra::{
+            ledger_db, migrations,
+            pool::{self, sqlite::SqlitePool},
+        };
+
+        let temp_dir = tempfile::tempdir().context("cannot create tempdir")?;
+        let sqlite_file = temp_dir.path().join("indexer.sqlite").display().to_string();
+        let sqlite_ledger_db_file = temp_dir
+            .path()
+            .join("ledger-db.sqlite")
+            .display()
+            .to_string();
+
+        let pool = SqlitePool::new(pool::sqlite::Config::with_url(sqlite_file))
+            .await
+            .context("create pool")?;
+        migrations::sqlite::run(&pool)
+            .await
+            .context("run migrations")?;
+
+        ledger_db::init(ledger_db::Config {
+            cache_max_nodes: 1_024,
+            cnn_url: sqlite_ledger_db_file,
+        })
+        .await
+        .context("init ledger db")?;
+
+        Ok(temp_dir)
     }
 
     /// Overflow in any dimension clamps to the corresponding limit; resulting `NormalizedCost`

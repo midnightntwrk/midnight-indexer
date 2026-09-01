@@ -13,639 +13,57 @@
 
 //! State translation from ledger v8 to ledger v9.
 //!
-//! # Provenance — keep in sync with the node
+//! # Provenance
 //!
-//! Re-ported from the node's `ledger/helpers/src/state_translation_v8_to_v9.rs`
-//! (`midnightntwrk/midnight-node` PR #1925, commit `74a91156`; the node itself
-//! ported it from `midnight-ledger` PR #539). The **only** semantic deltas from
-//! the node copy are the import aliases below (mapping the translation's
-//! `ledger_v8` / `ledger_v9` / `onchain_state_v8` / `onchain_state_v9` /
-//! `storage` / `serialize` names onto this workspace's package aliases) and the
-//! [`translate_ledger_state`] driver at the bottom (the indexer holds the typed
-//! `LedgerState` in memory, so it skips the node's pallet-arena-root
-//! decode/encode). The body is otherwise line-for-line the node's; only
-//! whitespace differs (this repo's rustfmt vs the node's tabs).
+//! The translation table is the ledger team's
+//! [`v8_to_v9_state_translation::StateTranslationTable`], pinned by rev to the
+//! exact crate `node-2.1.0-beta.1` migrates with (`midnight-node` PR #2054,
+//! backported as #2060, replaced the node's own copy with this crate). This
+//! module used to carry a re-ported copy of that table; it now depends on the
+//! upstream crate directly, so there is one implementation rather than two to
+//! keep in sync.
 //!
-//! The translation logic MUST stay semantically identical to the node's — same
-//! tags, same field mapping, same `INITIAL_PARAMETERS` reads — because the
-//! indexer re-derives and compares `ledger_state.root()` against the node's value
-//! at the fork boundary, so any drift breaks the boundary permanently. If the
-//! node's table changes, re-sync this file and regenerate the golden-root fixture
-//! (see `docs/hardfork-ledger-8-to-9.md`, Decision 3).
+//! Only the [`translate_ledger_state`] driver below is ours. Upstream ships the
+//! table; the node drives it in
+//! `ledger/src/host_api/migration_8_to_9.rs::migrate_state_v8_to_v9` over the
+//! pallet's serialized arena root. The indexer already holds the typed
+//! `LedgerState` in memory, so it skips that decode/encode.
 //!
-//! ## State shape differences (only stored types listed)
+//! # Why the pinning matters
 //!
-//! | type                         | v8 tag                               | v9 tag                               | change |
-//! | ---------------------------- | ------------------------------------ | ------------------------------------ | ------ |
-//! | LedgerState                  | `ledger-state[v13]`                  | `ledger-state[v18]`                  | `bridge_receiving` map gains `NightAnn` |
-//! | LedgerParameters             | `ledger-parameters[v5]`              | `ledger-parameters[v8]`              | adds `min_block_price`; `TransactionLimits` adds `max_contract_metadata_size`; `TransactionCostModel` drops `parallelism_factor`, adds `validation`/`guaranteed`/`fallible` factors |
-//! | ContractState                | `contract-state[v6]`                 | `contract-state[v8]`                 | reflows `ContractOperation` + `ContractMaintenanceAuthority` changes |
-//! | ContractOperation            | `contract-operation[v4]`             | `contract-operation[v6]`             | single `v2` key -> `{ v2, v3, ir }`; v8 key maps to `v2`, new `v3`/`ir` empty |
-//! | ContractMaintenanceAuthority | `contract-maintenance-authority[v1]` | `contract-maintenance-authority[v2]` | `committee: Vec<VerifyingKey>` -> `Vec<ContractMaintenanceVerifyingKey>` (Schnorr/ECDSA sum) |
+//! At the fork boundary the indexer re-derives `ledger_state.root()` and
+//! compares it against the node's value, so the indexer and the node MUST
+//! translate with the same table compiled against the same ledger crates. That
+//! holds today: both pin this crate at the same rev and patch every v9-side
+//! crate to `ledger-9.1.0.0-rc.4`, with `midnight-storage-core`'s `layout-v2` /
+//! `gc-v1` features matching. Any drift there breaks the boundary permanently.
 //!
-//! Everything else (zswap, utxo, dust, replay_protection, treasury,
-//! unclaimed_block_rewards) is tag-stable and passes through `recast`.
+//! When the ledger rc moves, re-check in this order: bump the workspace
+//! `[patch.crates-io]` tags, bump this crate's rev to whatever the matching node
+//! release pins, confirm [`tests::table_tags_match_types`] still passes (it
+//! rebuilds every `TranslationId` from the live crate types, so it catches a tag
+//! that drifted out from under the table's hardcoded literals), then regenerate
+//! the golden-root fixtures `indexer-common/tests/golden_v8_to_v9_*_root.raw`
+//! pinned by `LedgerState::translate`'s test and re-run the devnet rehearsal in
+//! `docs/hardfork-devnet-rehearsal-8to9.md`.
+//!
+//! # Note on dust
+//!
+//! The translation deliberately *wipes* dust rather than carrying it over: the
+//! v9 side comes out as the empty state genesis starts from (upstream's
+//! `LedgerStateTl::finalize`, from midnight-node #2012, backported as #2057).
+//! The node's `pallet_cnight_observation` v2 migration replays cNIGHT dust
+//! generation across the blocks after the boundary and is built entirely on that
+//! holding. [`tests::dust_state_is_wiped`] guards it from this side.
 
-// Map the upstream translation crate names onto this workspace's package
-// aliases (the node's equivalent block maps them onto its own). `midnight-storage`
-// 2.0.1 (`state-translation` feature) is the single storage wrapper backing both
-// ledger majors — the same `storage-core` instance `v1_1::LedgerDb` implements, so
-// the v8 and v9 states and the translation share one arena.
 use midnight_ledger_v8 as ledger_v8;
 use midnight_ledger_v9 as ledger_v9;
-use midnight_onchain_state_v3 as onchain_state_v8;
-use midnight_onchain_state_v4 as onchain_state_v9;
-use midnight_serialize_v1 as serialize;
 use midnight_storage_v2 as storage;
 
 use midnight_base_crypto_v1::cost_model::CostDuration;
-use serialize::Tagged;
-use std::ops::Deref;
-use std::{any::Any, borrow::Cow, io, marker::PhantomData};
-use storage::{
-    Storable,
-    arena::Sp,
-    db::DB,
-    merkle_patricia_trie::{self, Annotation, MerklePatriciaTrie},
-    state_translation::*,
-    storable::SizeAnn,
-    storage::{HashMap, Map, default_storage},
-};
-
-// ---------- Generic helpers (copied from the v6->v7 reference) ----------
-
-/// Recast a stored object from one type to another, requiring matching tags.
-/// Used for subtrees whose tag is unchanged between v8 and v9.
-fn recast<A: Storable<D> + Tagged, B: Storable<D> + Tagged, D: DB>(
-    a: &Sp<A, D>,
-) -> io::Result<Sp<B, D>> {
-    if A::tag() != B::tag() {
-        return io::Result::Err(io::Error::other("tags do not match"));
-    }
-    default_storage::<D>().get_lazy(&a.as_child().into())
-}
-
-/// Generic MPT translation: walks the trie, translating each entry via the
-/// table-registered translation for `A->B`, and recomputes annotations under
-/// `AnnB` from the new values.
-struct MptTl<A, B, AnnA, AnnB>(PhantomData<(A, B, AnnA, AnnB)>);
-
-impl<
-    A: Storable<D> + Tagged,
-    B: Storable<D> + Tagged,
-    AnnA: Annotation<A> + Storable<D> + Tagged,
-    AnnB: Annotation<B> + Storable<D> + Tagged,
-    D: DB,
-> DirectTranslation<MerklePatriciaTrie<A, D, AnnA>, MerklePatriciaTrie<B, D, AnnB>, D>
-    for MptTl<A, B, AnnA, AnnB>
-{
-    fn required_translations() -> Vec<TranslationId> {
-        vec![TranslationId(
-            merkle_patricia_trie::Node::<A, D, AnnA>::tag(),
-            merkle_patricia_trie::Node::<B, D, AnnB>::tag(),
-        )]
-    }
-    fn child_translations(
-        source: &MerklePatriciaTrie<A, D, AnnA>,
-    ) -> Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)> {
-        let tlids = <Self as DirectTranslation<MerklePatriciaTrie<A, D, AnnA>, _, D>>::required_translations();
-        vec![(tlids[0].clone(), source.0.upcast())]
-    }
-    fn finalize(
-        source: &MerklePatriciaTrie<A, D, AnnA>,
-        _limit: &mut CostDuration,
-        cache: &TranslationCache<D>,
-    ) -> io::Result<Option<MerklePatriciaTrie<B, D, AnnB>>> {
-        let tls = Self::child_translations(source);
-        Ok(Some(MerklePatriciaTrie(try_resopt!(
-            cache.resolve(&tls[0].0, tls[0].1.as_child())
-        ))))
-    }
-}
-
-impl<
-    A: Storable<D> + Tagged,
-    B: Storable<D> + Tagged,
-    AnnA: Storable<D> + Tagged + Annotation<A>,
-    AnnB: Storable<D> + Tagged + Annotation<B>,
-    D: DB,
->
-    DirectTranslation<
-        merkle_patricia_trie::Node<A, D, AnnA>,
-        merkle_patricia_trie::Node<B, D, AnnB>,
-        D,
-    > for MptTl<A, B, AnnA, AnnB>
-{
-    fn required_translations() -> Vec<TranslationId> {
-        let entry_tl = TranslationId(A::tag(), B::tag());
-        let self_tl = TranslationId(
-            merkle_patricia_trie::Node::<A, D, AnnA>::tag(),
-            merkle_patricia_trie::Node::<B, D, AnnB>::tag(),
-        );
-        vec![entry_tl, self_tl]
-    }
-    fn child_translations(
-        source: &merkle_patricia_trie::Node<A, D, AnnA>,
-    ) -> Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)> {
-        let tls = <Self as DirectTranslation<merkle_patricia_trie::Node::<A, D, AnnA>, _, D>>::required_translations();
-        let entry_tl = tls[0].clone();
-        let self_tl = tls[1].clone();
-        match source {
-            merkle_patricia_trie::Node::Empty => vec![],
-            merkle_patricia_trie::Node::Branch { children, .. } => children
-                .iter()
-                .map(|child| (self_tl.clone(), child.upcast()))
-                .collect(),
-            merkle_patricia_trie::Node::Extension { child, .. } => {
-                vec![(self_tl, child.upcast())]
-            }
-            merkle_patricia_trie::Node::MidBranchLeaf { value, child, .. } => {
-                vec![(entry_tl, value.upcast()), (self_tl, child.upcast())]
-            }
-            merkle_patricia_trie::Node::Leaf { value, .. } => vec![(entry_tl, value.upcast())],
-        }
-    }
-    fn finalize(
-        source: &merkle_patricia_trie::Node<A, D, AnnA>,
-        _limit: &mut CostDuration,
-        cache: &TranslationCache<D>,
-    ) -> io::Result<Option<merkle_patricia_trie::Node<B, D, AnnB>>> {
-        let tls = Self::child_translations(source);
-        Ok(Some(match source {
-            merkle_patricia_trie::Node::Empty => merkle_patricia_trie::Node::Empty,
-            merkle_patricia_trie::Node::Branch { .. } => {
-                let mut new_children =
-                    core::array::from_fn(|_| Sp::new(merkle_patricia_trie::Node::Empty));
-                for (child, new_child) in tls.iter().zip(new_children.iter_mut()) {
-                    *new_child = try_resopt!(cache.resolve(&child.0, child.1.as_child()));
-                }
-                let ann = new_children.iter().fold(AnnB::empty(), |acc, x| {
-                    acc.append(&merkle_patricia_trie::Node::<B, D, AnnB>::ann(x))
-                });
-                merkle_patricia_trie::Node::Branch {
-                    ann,
-                    children: Box::new(new_children),
-                }
-            }
-            merkle_patricia_trie::Node::Extension {
-                compressed_path, ..
-            } => {
-                let child: Sp<merkle_patricia_trie::Node<B, D, AnnB>, D> =
-                    try_resopt!(cache.resolve(&tls[0].0, tls[0].1.as_child()));
-                let ann = merkle_patricia_trie::Node::<B, D, AnnB>::ann(&child);
-                merkle_patricia_trie::Node::Extension {
-                    ann,
-                    compressed_path: compressed_path.clone(),
-                    child,
-                }
-            }
-            merkle_patricia_trie::Node::Leaf { .. } => {
-                let value = try_resopt!(cache.resolve(&tls[0].0, tls[0].1.as_child()));
-                let ann = AnnB::from_value(&value);
-                merkle_patricia_trie::Node::Leaf { ann, value }
-            }
-            merkle_patricia_trie::Node::MidBranchLeaf { .. } => {
-                let value = try_resopt!(cache.resolve(&tls[0].0, tls[0].1.as_child()));
-                let child: Sp<merkle_patricia_trie::Node<B, D, AnnB>, D> =
-                    try_resopt!(cache.resolve(&tls[1].0, tls[1].1.as_child()));
-                let ann = AnnB::from_value(&value)
-                    .append(&merkle_patricia_trie::Node::<B, D, AnnB>::ann(&child));
-                merkle_patricia_trie::Node::MidBranchLeaf { ann, value, child }
-            }
-        }))
-    }
-}
-
-/// Identity translation for a type whose serialization is unchanged across
-/// versions. Needed when an MPT's entries are tag-stable but its annotation
-/// changes (e.g. `bridge_receiving`).
-struct IdentityTl<T>(PhantomData<T>);
-
-impl<T: Storable<D> + Clone, D: DB> DirectTranslation<T, T, D> for IdentityTl<T> {
-    fn required_translations() -> Vec<TranslationId> {
-        Vec::new()
-    }
-    fn child_translations(_: &T) -> Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)> {
-        Vec::new()
-    }
-    fn finalize(
-        source: &T,
-        _limit: &mut CostDuration,
-        _cache: &TranslationCache<D>,
-    ) -> io::Result<Option<T>> {
-        Ok(Some(source.clone()))
-    }
-}
-
-// ---------- Translation IDs (shorthand) ----------
-
-struct Ids;
-
-impl Ids {
-    fn contract_mpt<D: DB>() -> TranslationId {
-        TranslationId(
-            MerklePatriciaTrie::<
-                onchain_state_v8::state::ContractState<D>,
-                D,
-                ledger_v8::annotation::NightAnn,
-            >::tag(),
-            MerklePatriciaTrie::<
-                onchain_state_v9::state::ContractState<D>,
-                D,
-                ledger_v9::annotation::NightAnn,
-            >::tag(),
-        )
-    }
-
-    fn bridge_receiving_mpt<D: DB>() -> TranslationId {
-        TranslationId(
-            MerklePatriciaTrie::<u128, D, SizeAnn>::tag(),
-            MerklePatriciaTrie::<u128, D, ledger_v9::annotation::NightAnn>::tag(),
-        )
-    }
-
-    fn parameters() -> TranslationId {
-        TranslationId(
-            ledger_v8::structure::LedgerParameters::tag(),
-            ledger_v9::structure::LedgerParameters::tag(),
-        )
-    }
-}
-
-// ---------- Top-level: LedgerState v8 -> v9 ----------
-
-struct LedgerStateTl;
-
-impl<D: DB>
-    DirectTranslation<ledger_v8::structure::LedgerState<D>, ledger_v9::structure::LedgerState<D>, D>
-    for LedgerStateTl
-{
-    fn required_translations() -> Vec<TranslationId> {
-        vec![
-            Ids::parameters(),
-            Ids::bridge_receiving_mpt::<D>(),
-            Ids::contract_mpt::<D>(),
-        ]
-    }
-
-    fn child_translations(
-        source: &ledger_v8::structure::LedgerState<D>,
-    ) -> Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)> {
-        vec![
-            (Ids::parameters(), source.parameters.upcast()),
-            (
-                Ids::bridge_receiving_mpt::<D>(),
-                source.bridge_receiving.mpt.upcast(),
-            ),
-            (Ids::contract_mpt::<D>(), source.contract.mpt.upcast()),
-        ]
-    }
-
-    fn finalize(
-        source: &ledger_v8::structure::LedgerState<D>,
-        _limit: &mut CostDuration,
-        cache: &TranslationCache<D>,
-    ) -> io::Result<Option<ledger_v9::structure::LedgerState<D>>> {
-        let Some(parameters) = cache.lookup(&Ids::parameters(), source.parameters.as_child())
-        else {
-            return Ok(None);
-        };
-        let Some(bridge_recv_mpt) = cache.lookup(
-            &Ids::bridge_receiving_mpt::<D>(),
-            source.bridge_receiving.mpt.as_child(),
-        ) else {
-            return Ok(None);
-        };
-        let Some(contract_mpt) =
-            cache.lookup(&Ids::contract_mpt::<D>(), source.contract.mpt.as_child())
-        else {
-            return Ok(None);
-        };
-
-        Ok(Some(ledger_v9::structure::LedgerState {
-            network_id: source.network_id.clone(),
-            parameters: parameters.force_downcast(),
-            locked_pool: source.locked_pool,
-            bridge_receiving: Map {
-                mpt: bridge_recv_mpt.force_downcast(),
-                key_type: PhantomData,
-            },
-            reserve_pool: source.reserve_pool,
-            block_reward_pool: source.block_reward_pool,
-            unclaimed_block_rewards: Map {
-                mpt: recast(&source.unclaimed_block_rewards.mpt)?,
-                key_type: PhantomData,
-            },
-            treasury: Map {
-                mpt: recast(&source.treasury.mpt)?,
-                key_type: PhantomData,
-            },
-            zswap: recast(&source.zswap)?,
-            contract: Map {
-                mpt: contract_mpt.force_downcast(),
-                key_type: PhantomData,
-            },
-            utxo: recast(&source.utxo)?,
-            replay_protection: recast(&source.replay_protection)?,
-            dust: recast(&source.dust)?,
-        }))
-    }
-}
-
-// ---------- LedgerParameters v8 -> v9 ----------
-
-struct LedgerParametersTl;
-
-impl<D: DB>
-    DirectTranslation<
-        ledger_v8::structure::LedgerParameters,
-        ledger_v9::structure::LedgerParameters,
-        D,
-    > for LedgerParametersTl
-{
-    fn required_translations() -> Vec<TranslationId> {
-        Vec::new()
-    }
-    fn child_translations(
-        _: &ledger_v8::structure::LedgerParameters,
-    ) -> Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)> {
-        Vec::new()
-    }
-    fn finalize(
-        source: &ledger_v8::structure::LedgerParameters,
-        _limit: &mut CostDuration,
-        _cache: &TranslationCache<D>,
-    ) -> io::Result<Option<ledger_v9::structure::LedgerParameters>> {
-        // Base-crypto-backed fields (Duration, FixedPoint, primitives) are
-        // assignable directly because `midnight-base-crypto` is unified across
-        // v8 and v9 by workspace patches. Composite types defined in `ledger`
-        // (TransactionCostModel, dust parameters, etc.) are tag-stable but not
-        // identical types, so we go through the (de)serializer.
-        //
-        // `TransactionLimits` is the exception: v9 bumped it to
-        // `transaction-limits[v3]` by adding `max_contract_metadata_size`, so
-        // it is no longer tag-stable and is rebuilt field-by-field (its other
-        // fields are unified base-crypto types).
-        Ok(Some(ledger_v9::structure::LedgerParameters {
-            // `TransactionCostModel` bumped `transaction-cost-model[v4]`->`[v5]`:
-            // v9 drops `parallelism_factor` and adds three `FixedPoint` factors.
-            // The two surviving fields are tag-stable and recast through; the new
-            // factors get the v9 INITIAL_PARAMETERS defaults.
-            cost_model: ledger_v9::structure::TransactionCostModel {
-                runtime_cost_model: recast_base(&source.cost_model.runtime_cost_model)?,
-                baseline_cost: recast_base(&source.cost_model.baseline_cost)?,
-                // NEW IN v9 — placeholder; the production value should match the
-                // value chosen for the hardfork.
-                validation_factor: ledger_v9::structure::INITIAL_PARAMETERS
-                    .cost_model
-                    .validation_factor,
-                guaranteed_factor: ledger_v9::structure::INITIAL_PARAMETERS
-                    .cost_model
-                    .guaranteed_factor,
-                fallible_factor: ledger_v9::structure::INITIAL_PARAMETERS
-                    .cost_model
-                    .fallible_factor,
-            },
-            limits: ledger_v9::structure::TransactionLimits {
-                transaction_byte_limit: source.limits.transaction_byte_limit,
-                time_to_dismiss_per_byte: source.limits.time_to_dismiss_per_byte,
-                min_time_to_dismiss: source.limits.min_time_to_dismiss,
-                block_limits: source.limits.block_limits,
-                block_withdrawal_minimum_multiple: source.limits.block_withdrawal_minimum_multiple,
-                // NEW IN v9 — placeholder; the production value should match
-                // the value chosen for the hardfork.
-                max_contract_metadata_size: ledger_v9::structure::INITIAL_PARAMETERS
-                    .limits
-                    .max_contract_metadata_size,
-            },
-            dust: recast_base(&source.dust)?,
-            fee_prices: recast_base(&source.fee_prices)?,
-            global_ttl: source.global_ttl,
-            cost_dimension_min_ratio: source.cost_dimension_min_ratio,
-            price_adjustment_a_parameter: source.price_adjustment_a_parameter,
-            cardano_to_midnight_bridge_fee_basis_points: source
-                .cardano_to_midnight_bridge_fee_basis_points,
-            c_to_m_bridge_min_amount: source.c_to_m_bridge_min_amount,
-            // NEW IN v9 — placeholder; the production value should match the
-            // value chosen for the hardfork.
-            min_block_price: ledger_v9::structure::INITIAL_PARAMETERS.min_block_price,
-        }))
-    }
-}
-
-/// Recast for tag-stable base types passed by value (cost model, limits, etc.).
-/// Not the same as `recast` above which only works for `Sp`.
-fn recast_base<A: Tagged + serialize::Serializable, B: Tagged + serialize::Deserializable>(
-    a: &A,
-) -> io::Result<B> {
-    if A::tag() != B::tag() {
-        return Err(io::Error::other("tags do not match"));
-    }
-    let mut buf = Vec::new();
-    a.serialize(&mut buf)?;
-    B::deserialize(&mut &buf[..], 0)
-}
-
-// ---------- ContractOperation v8 -> v9 ----------
-
-/// Translate a single contract operation. v9 grew `ContractOperation` from a
-/// single `v2` verifier key (`contract-operation[v4]`) to `{ v2, v3, ir }`
-/// (`contract-operation[v6]`). v8's only key is a zk-stdlib-v1 key
-/// (`verifier-key[v6]`), which v9 keeps in its `v2` slot: that slot is backed by
-/// the same `transient-crypto` 2.x crate (`transient_crypto_old`), so it is the
-/// identical type and assigns directly. The new zk-stdlib-v2 `v3` key
-/// (`verifier-key[v7]`, transient-crypto 3.x) and the `ir` slot have no v8
-/// equivalent and stay empty — v9 keys are *not* synthesized from v8 keys.
-/// (Note `ContractOperation::new(vk, ir)` sets `v3`, not `v2`, so the struct is
-/// built field-wise here.)
-fn translate_contract_operation(
-    source: &onchain_state_v8::state::ContractOperation,
-) -> onchain_state_v9::state::ContractOperation {
-    // `ContractOperation` is `#[non_exhaustive]`; `new` seeds `v3`/`ir`, and the
-    // v8 key goes into the `v2` slot field-wise.
-    let mut op = onchain_state_v9::state::ContractOperation::new(None, None);
-    op.v2 = source.v2.clone();
-    op
-}
-
-// ---------- ContractState v8 -> v9 ----------
-
-struct ContractStateTl;
-
-impl<D: DB>
-    DirectTranslation<
-        onchain_state_v8::state::ContractState<D>,
-        onchain_state_v9::state::ContractState<D>,
-        D,
-    > for ContractStateTl
-{
-    fn required_translations() -> Vec<TranslationId> {
-        Vec::new()
-    }
-    fn child_translations(
-        _: &onchain_state_v8::state::ContractState<D>,
-    ) -> Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)> {
-        Vec::new()
-    }
-    fn finalize(
-        source: &onchain_state_v8::state::ContractState<D>,
-        _limit: &mut CostDuration,
-        _cache: &TranslationCache<D>,
-    ) -> io::Result<Option<onchain_state_v9::state::ContractState<D>>> {
-        // `operations` entries (ContractOperation) changed shape, so the map
-        // is rebuilt entry-by-entry. The translation machinery can't walk these
-        // base-storable leaves nested under a contract, but a contract's
-        // operation set is small, so an in-place rebuild is fine. ChargedState
-        // and the balance map (keyed u128) are tag-stable and recast through.
-        let mut operations = HashMap::new();
-        for entry in source.operations.iter() {
-            let (key, op) = &*entry;
-            let key_v9: onchain_state_v9::state::EntryPointBuf = key[..].into();
-            operations = operations.insert(key_v9, translate_contract_operation(op));
-        }
-        let committee_v9 = source
-            .maintenance_authority
-            .committee
-            .iter()
-            .map(|vk| onchain_state_v9::state::ContractMaintenanceVerifyingKey::Schnorr(vk.clone()))
-            .collect();
-        let maintenance_authority = onchain_state_v9::state::ContractMaintenanceAuthority {
-            committee: committee_v9,
-            threshold: source.maintenance_authority.threshold,
-            counter: source.maintenance_authority.counter,
-        };
-        Ok(Some(onchain_state_v9::state::ContractState::<D> {
-            data: recast::<
-                onchain_state_v8::state::ChargedState<D>,
-                onchain_state_v9::state::ChargedState<D>,
-                D,
-            >(&Sp::new(source.data.clone()))?
-            .deref()
-            .clone(),
-            operations,
-            maintenance_authority,
-            balance: HashMap(Map {
-                mpt: recast(&source.balance.0.mpt)?,
-                key_type: PhantomData,
-            }),
-        }))
-    }
-}
-
-// ---------- Translation table ----------
-
-pub struct StateTranslationTable;
-
-impl<D: DB> TranslationTable<D> for StateTranslationTable {
-    const TABLE: &[(TranslationId, &dyn TypelessTranslation<D>)] = &[
-        // Top-level
-        (
-            TranslationId(
-                Cow::Borrowed("ledger-state[v13]"),
-                Cow::Borrowed("ledger-state[v18]"),
-            ),
-            &DirectSpTranslation::<_, _, LedgerStateTl, _>(PhantomData),
-        ),
-        // LedgerParameters
-        (
-            TranslationId(
-                Cow::Borrowed("ledger-parameters[v5]"),
-                Cow::Borrowed("ledger-parameters[v8]"),
-            ),
-            &DirectSpTranslation::<_, _, LedgerParametersTl, _>(PhantomData),
-        ),
-        // ContractState
-        (
-            TranslationId(
-                Cow::Borrowed("contract-state[v6]"),
-                Cow::Borrowed("contract-state[v8]"),
-            ),
-            &DirectSpTranslation::<_, _, ContractStateTl, _>(PhantomData),
-        ),
-        // `contract` MPT in LedgerState — entries are ContractState
-        (
-            TranslationId(
-                Cow::Borrowed("mpt(contract-state[v6],night-annotation)"),
-                Cow::Borrowed("mpt(contract-state[v8],night-annotation)"),
-            ),
-            &DirectSpTranslation::<
-                MerklePatriciaTrie<
-                    onchain_state_v8::state::ContractState<D>,
-                    D,
-                    ledger_v8::annotation::NightAnn,
-                >,
-                MerklePatriciaTrie<
-                    onchain_state_v9::state::ContractState<D>,
-                    D,
-                    ledger_v9::annotation::NightAnn,
-                >,
-                MptTl<
-                    onchain_state_v8::state::ContractState<D>,
-                    onchain_state_v9::state::ContractState<D>,
-                    ledger_v8::annotation::NightAnn,
-                    ledger_v9::annotation::NightAnn,
-                >,
-                _,
-            >(PhantomData),
-        ),
-        (
-            TranslationId(
-                Cow::Borrowed("mpt-node(contract-state[v6],night-annotation)"),
-                Cow::Borrowed("mpt-node(contract-state[v8],night-annotation)"),
-            ),
-            &DirectSpTranslation::<
-                merkle_patricia_trie::Node<
-                    onchain_state_v8::state::ContractState<D>,
-                    D,
-                    ledger_v8::annotation::NightAnn,
-                >,
-                merkle_patricia_trie::Node<
-                    onchain_state_v9::state::ContractState<D>,
-                    D,
-                    ledger_v9::annotation::NightAnn,
-                >,
-                MptTl<
-                    onchain_state_v8::state::ContractState<D>,
-                    onchain_state_v9::state::ContractState<D>,
-                    ledger_v8::annotation::NightAnn,
-                    ledger_v9::annotation::NightAnn,
-                >,
-                _,
-            >(PhantomData),
-        ),
-        // `bridge_receiving` MPT — entries unchanged (u128), annotation changes
-        // from SizeAnn to NightAnn. Needs an identity entry translation and an
-        // MptTl that re-annotates.
-        (
-            TranslationId(Cow::Borrowed("u128"), Cow::Borrowed("u128")),
-            &DirectSpTranslation::<u128, u128, IdentityTl<u128>, _>(PhantomData),
-        ),
-        (
-            TranslationId(
-                Cow::Borrowed("mpt(u128,size-annotation)"),
-                Cow::Borrowed("mpt(u128,night-annotation)"),
-            ),
-            &DirectSpTranslation::<
-                MerklePatriciaTrie<u128, D, SizeAnn>,
-                MerklePatriciaTrie<u128, D, ledger_v9::annotation::NightAnn>,
-                MptTl<u128, u128, SizeAnn, ledger_v9::annotation::NightAnn>,
-                _,
-            >(PhantomData),
-        ),
-        (
-            TranslationId(
-                Cow::Borrowed("mpt-node(u128,size-annotation)"),
-                Cow::Borrowed("mpt-node(u128,night-annotation)"),
-            ),
-            &DirectSpTranslation::<
-                merkle_patricia_trie::Node<u128, D, SizeAnn>,
-                merkle_patricia_trie::Node<u128, D, ledger_v9::annotation::NightAnn>,
-                MptTl<u128, u128, SizeAnn, ledger_v9::annotation::NightAnn>,
-                _,
-            >(PhantomData),
-        ),
-    ];
-}
+use std::io;
+use storage::{arena::Sp, db::DB, state_translation::*};
+use v8_to_v9_state_translation::StateTranslationTable;
 
 // ---------- Driver ----------
 
@@ -695,6 +113,11 @@ pub fn translate_ledger_state<D: DB>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use midnight_onchain_state_v3 as onchain_state_v8;
+    use midnight_onchain_state_v4 as onchain_state_v9;
+    use midnight_serialize_v1 as serialize;
+    use serialize::Tagged;
+    use std::{borrow::Cow, ops::Deref};
     use storage::db::InMemoryDB;
 
     fn translate_to_completion(
@@ -799,5 +222,27 @@ mod tests {
         let v9_rt: ledger_v9::structure::LedgerState<InMemoryDB> =
             serialize::tagged_deserialize(&mut &buf[..]).expect("v9 deserialize");
         assert_eq!(v9_rt.network_id, v9.network_id);
+    }
+
+    /// The translation wipes dust: whatever generation/utxo state v8 held, the
+    /// v9 side comes out as the empty state genesis starts from.
+    ///
+    /// Ported from the node's test of the same name (`midnight-node` PR #2012,
+    /// backported as #2057). The node's `pallet_cnight_observation` v2 migration
+    /// — which replays cNIGHT dust generation across the blocks after the
+    /// boundary — is built entirely on this holding, so a silent revert to
+    /// `recast(&source.dust)` would desynchronise the indexer from the node for
+    /// good.
+    #[test]
+    fn dust_state_is_wiped() {
+        let mut v8 = ledger_v8::structure::LedgerState::<InMemoryDB>::new("test-network");
+        let mut dust = (*v8.dust).clone();
+        dust.generation.generating_tree_first_free = 7;
+        dust.utxo.commitments_first_free = 3;
+        v8.dust = Sp::new(dust);
+
+        let v9 = translate_to_completion(v8);
+
+        assert_eq!(*v9.dust, ledger_v9::dust::DustState::default());
     }
 }
