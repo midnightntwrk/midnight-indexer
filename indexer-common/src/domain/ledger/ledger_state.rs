@@ -15,9 +15,10 @@ use crate::{
     domain::{
         AddressOrContract, ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome,
         ByteArray, ByteVec, IntentHash, LedgerEvent, LedgerEventAttributes, LedgerVersion,
-        NetworkId, Nonce, SerializedContractAddress, SerializedLedgerParameters,
-        SerializedLedgerStateKey, SerializedTransaction, SerializedZswapMerkleTreeRoot,
-        SerializedZswapState, TokenType, TransactionResult, UnshieldedAddress, UnshieldedUtxo,
+        NetworkId, Nonce, SerializedContractAddress, SerializedContractState,
+        SerializedLedgerParameters, SerializedLedgerStateKey, SerializedTransaction,
+        SerializedZswapMerkleTreeRoot, SerializedZswapState, TokenType, TransactionResult,
+        UnshieldedAddress, UnshieldedUtxo,
         bridge::BridgeClaim,
         dust::{self},
         ledger::{
@@ -889,6 +890,42 @@ impl LedgerState {
                 .expect("dust generation merkle tree root should exist")
                 .serialize()
                 .map_err(|error| Error::Serialize("DustGenerationMerkleTreeRoot", error)),
+        }
+    }
+
+    /// Extract the serialized contract state for the given address from the local ledger.
+    ///
+    /// Returns empty bytes when the address is not present (failed deploy or unknown
+    /// contract), matching the historical node-RPC payload for failed actions.
+    #[trace(properties = { "address": "{address}" })]
+    pub fn extract_contract_state(
+        &self,
+        address: &SerializedContractAddress,
+    ) -> Result<SerializedContractState, Error> {
+        match self {
+            Self::V8 { ledger_state, .. } => {
+                let address = ContractAddressV8::deserialize(&mut address.as_ref(), 0)
+                    .map_err(|error| Error::Deserialize("ContractAddressV8", error))?;
+
+                match ledger_state.index(address) {
+                    Some(state) => state
+                        .tagged_serialize()
+                        .map_err(|error| Error::Serialize("ContractStateV8", error)),
+                    None => Ok(Default::default()),
+                }
+            }
+
+            Self::V9 { ledger_state, .. } => {
+                let address = ContractAddressV9::deserialize(&mut address.as_ref(), 0)
+                    .map_err(|error| Error::Deserialize("ContractAddressV9", error))?;
+
+                match ledger_state.index(address) {
+                    Some(state) => state
+                        .tagged_serialize()
+                        .map_err(|error| Error::Serialize("ContractStateV9", error)),
+                    None => Ok(Default::default()),
+                }
+            }
         }
     }
 
@@ -4005,5 +4042,232 @@ mod merkle_collapsed_update_tests {
             served_root,
             "tree rebuilt from the collapsed update must match the rehashed served root",
         );
+    }
+}
+
+/// `LedgerState::extract_contract_state` (midnight-indexer#1040): local index instead of node RPC.
+#[cfg(all(test, any(feature = "cloud", feature = "standalone")))]
+mod extract_contract_state_tests {
+    use super::{
+        ContractAddressV8, ContractAddressV9, LedgerState, SerializableExt, TaggedSerializableExt,
+    };
+    use crate::{
+        domain::{
+            ByteArray, LedgerVersion, NetworkId, TokenType,
+            ledger::{ContractState, Error},
+        },
+        error::BoxError,
+        infra::ledger_db::v1_1,
+    };
+    use anyhow::Context;
+    use midnight_base_crypto_v1::hash::HashOutput;
+    use midnight_coin_structure_v2::coin::{
+        TokenType as MidnightTokenTypeV8, UnshieldedTokenType as UnshieldedTokenTypeV8,
+    };
+    use midnight_coin_structure_v3::coin::{
+        TokenType as MidnightTokenTypeV9, UnshieldedTokenType as UnshieldedTokenTypeV9,
+    };
+    use midnight_onchain_runtime_v3::state::ContractState as ContractStateV8;
+    use midnight_onchain_runtime_v4::state::ContractState as ContractStateV9;
+
+    const TOKEN_TYPE: TokenType = ByteArray([7; 32]);
+    const AMOUNT: u128 = 1_000_000;
+    const ADDRESS_BYTES: [u8; 32] = [0x42; 32];
+
+    struct LedgerStorageGuard {
+        #[cfg(feature = "cloud")]
+        _postgres: testcontainers::ContainerAsync<testcontainers_modules::postgres::Postgres>,
+        #[cfg(feature = "standalone")]
+        _temp_dir: tempfile::TempDir,
+    }
+
+    async fn init_ledger_storage() -> Result<LedgerStorageGuard, BoxError> {
+        #[cfg(feature = "cloud")]
+        {
+            use crate::infra::{ledger_db, migrations, pool::postgres::PostgresPool};
+            use sqlx::postgres::PgSslMode;
+            use std::time::Duration;
+            use testcontainers::{ImageExt, runners::AsyncRunner};
+            use testcontainers_modules::postgres::Postgres;
+
+            let postgres_container = Postgres::default()
+                .with_db_name("indexer")
+                .with_user("indexer")
+                .with_password(env!("APP__INFRA__STORAGE__PASSWORD"))
+                .with_tag("17.1-alpine")
+                .start()
+                .await
+                .context("start Postgres container")?;
+            let postgres_port = postgres_container
+                .get_host_port_ipv4(5432)
+                .await
+                .context("get Postgres port")?;
+
+            let config = crate::infra::pool::postgres::Config {
+                host: "localhost".to_string(),
+                port: postgres_port,
+                dbname: "indexer".to_string(),
+                user: "indexer".to_string(),
+                password: env!("APP__INFRA__STORAGE__PASSWORD").into(),
+                sslmode: PgSslMode::Prefer,
+                max_connections: 10,
+                idle_timeout: Duration::from_secs(60),
+                max_lifetime: Duration::from_secs(5 * 60),
+            };
+
+            let pool = PostgresPool::new(config).await.context("create pool")?;
+            migrations::postgres::run(&pool)
+                .await
+                .context("run migrations")?;
+
+            ledger_db::init(
+                ledger_db::Config {
+                    cache_max_nodes: 1_024,
+                },
+                pool,
+            );
+
+            Ok(LedgerStorageGuard {
+                _postgres: postgres_container,
+            })
+        }
+
+        #[cfg(feature = "standalone")]
+        {
+            use crate::infra::{
+                ledger_db, migrations,
+                pool::{self, sqlite::SqlitePool},
+            };
+
+            let temp_dir = tempfile::tempdir().context("cannot create tempdir")?;
+            let sqlite_file = temp_dir.path().join("indexer.sqlite").display().to_string();
+            let sqlite_ledger_db_file = temp_dir
+                .path()
+                .join("ledger-db.sqlite")
+                .display()
+                .to_string();
+
+            let pool = SqlitePool::new(pool::sqlite::Config::with_url(sqlite_file))
+                .await
+                .context("create pool")?;
+            migrations::sqlite::run(&pool)
+                .await
+                .context("run migrations")?;
+
+            ledger_db::init(ledger_db::Config {
+                cache_max_nodes: 1_024,
+                cnn_url: sqlite_ledger_db_file,
+            })
+            .await
+            .expect("ledger DB can be initialized");
+
+            Ok(LedgerStorageGuard {
+                _temp_dir: temp_dir,
+            })
+        }
+    }
+
+    fn network_id() -> NetworkId {
+        NetworkId::try_from("undeployed").expect("valid network id")
+    }
+
+    fn assert_unshielded_balance(
+        serialized: &[u8],
+        ledger_version: LedgerVersion,
+    ) -> Result<(), Error> {
+        let balances = ContractState::deserialize(serialized, ledger_version)?.balances()?;
+        assert_eq!(balances.len(), 1);
+        assert_eq!(balances[0].token_type, TOKEN_TYPE);
+        assert_eq!(balances[0].amount, AMOUNT);
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn extract_contract_state_unknown_address_is_empty() -> Result<(), BoxError> {
+        let _guard = init_ledger_storage().await?;
+
+        for ledger_version in [LedgerVersion::V8, LedgerVersion::V9] {
+            let ledger_state = LedgerState::new(network_id(), ledger_version)?;
+            let unknown = crate::domain::ByteVec::from(vec![0u8; 32]);
+            let extracted = ledger_state.extract_contract_state(&unknown)?;
+            assert!(
+                extracted.is_empty(),
+                "{ledger_version:?}: missing contract must serialize as empty bytes"
+            );
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn extract_contract_state_round_trips_v8() -> Result<(), BoxError> {
+        let _guard = init_ledger_storage().await?;
+
+        let address = ContractAddressV8(HashOutput(ADDRESS_BYTES));
+        let serialized_address = address.serialize()?;
+
+        let mut contract_state = ContractStateV8::<v1_1::LedgerDb>::default();
+        contract_state.balance = contract_state.balance.insert(
+            MidnightTokenTypeV8::Unshielded(UnshieldedTokenTypeV8(HashOutput(TOKEN_TYPE.0))),
+            AMOUNT,
+        );
+        let expected = contract_state.tagged_serialize()?;
+
+        let mut ledger_state = LedgerState::new(network_id(), LedgerVersion::V8)?;
+        match &mut ledger_state {
+            LedgerState::V8 {
+                ledger_state: inner,
+                ..
+            } => {
+                inner.contract = inner.contract.insert(address, contract_state);
+            }
+            LedgerState::V9 { .. } => unreachable!("constructed as V8"),
+        }
+
+        let extracted = ledger_state.extract_contract_state(&serialized_address)?;
+        assert_eq!(
+            extracted.as_ref(),
+            expected.as_ref(),
+            "extracted bytes must match tagged_serialize of the stored ContractState"
+        );
+        assert_unshielded_balance(&extracted, LedgerVersion::V8)?;
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn extract_contract_state_round_trips_v9() -> Result<(), BoxError> {
+        let _guard = init_ledger_storage().await?;
+
+        let address = ContractAddressV9(HashOutput(ADDRESS_BYTES));
+        let serialized_address = address.serialize()?;
+
+        let mut contract_state = ContractStateV9::<v1_1::LedgerDb>::default();
+        contract_state.balance = contract_state.balance.insert(
+            MidnightTokenTypeV9::Unshielded(UnshieldedTokenTypeV9(HashOutput(TOKEN_TYPE.0))),
+            AMOUNT,
+        );
+        let expected = contract_state.tagged_serialize()?;
+
+        let mut ledger_state = LedgerState::new(network_id(), LedgerVersion::V9)?;
+        match &mut ledger_state {
+            LedgerState::V9 {
+                ledger_state: inner,
+                ..
+            } => {
+                inner.contract = inner.contract.insert(address, contract_state);
+            }
+            LedgerState::V8 { .. } => unreachable!("constructed as V9"),
+        }
+
+        let extracted = ledger_state.extract_contract_state(&serialized_address)?;
+        assert_eq!(
+            extracted.as_ref(),
+            expected.as_ref(),
+            "extracted bytes must match tagged_serialize of the stored ContractState"
+        );
+        assert_unshielded_balance(&extracted, LedgerVersion::V9)?;
+
+        Ok(())
     }
 }

@@ -24,8 +24,7 @@ pub use transaction::*;
 
 use crate::{
     domain::{
-        ByteArrayLenError, ByteVec, LedgerVersion, SerializedContractAddress,
-        SerializedLedgerStateKey, dust::DustParameters,
+        ByteArrayLenError, ByteVec, LedgerVersion, SerializedLedgerStateKey, dust::DustParameters,
     },
     error::BoxError,
 };
@@ -75,9 +74,6 @@ pub enum Error {
 
     #[error("cannot convert {0} to UTF-8 string")]
     FromUtf8(&'static str, #[source] FromUtf8Error),
-
-    #[error("cannot get contract state from node for address {0}")]
-    GetContractState(SerializedContractAddress, #[source] BoxError),
 
     #[error(transparent)]
     ByteArrayLen(ByteArrayLenError),

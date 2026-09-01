@@ -235,8 +235,22 @@ impl LedgerState {
         transaction.estimated_fees = fees;
         transaction.bridge_claim = bridge_claim;
 
-        // Update contract actions.
+        self.fill_contract_actions_from_local_ledger(&mut transaction)?;
+
+        Ok(Transaction::Regular(transaction.into()))
+    }
+
+    /// Fill each contract action's `state` / zswap state / balances from the local ledger.
+    /// Replaces the node `get_contract_state` RPC (midnight-indexer#1040).
+    fn fill_contract_actions_from_local_ledger(
+        &self,
+        transaction: &mut RegularTransaction,
+    ) -> Result<(), Error> {
         for contract_action in transaction.contract_actions.iter_mut() {
+            contract_action.state = self
+                .extract_contract_state(&contract_action.address)
+                .map_err(|error| Error::ExtractContractState(transaction.hash, error))?;
+
             let zswap_state = self
                 .extract_contract_zswap_state(&contract_action.address)
                 .map_err(|error| Error::ExtractContractZswapState(transaction.hash, error))?;
@@ -266,7 +280,7 @@ impl LedgerState {
             }
         }
 
-        Ok(Transaction::Regular(transaction.into()))
+        Ok(())
     }
 
     #[trace(properties = {
@@ -331,6 +345,12 @@ pub enum Error {
         #[source] indexer_common::domain::ledger::Error,
     ),
 
+    #[error("cannot extract contract state for transaction {0}")]
+    ExtractContractState(
+        TransactionHash,
+        #[source] indexer_common::domain::ledger::Error,
+    ),
+
     #[error("cannot extract contract zswap state for transaction {0}")]
     ExtractContractZswapState(
         TransactionHash,
@@ -355,4 +375,165 @@ pub enum Error {
 fn stringify_hash(hash: &Option<TransactionHash>) -> String {
     hash.map(|hash| hash.to_string())
         .unwrap_or_else(|| "<hash unavailable>".to_string())
+}
+
+#[cfg(all(test, any(feature = "cloud", feature = "standalone")))]
+mod extract_contract_state_tests {
+    use super::LedgerState;
+    use crate::domain::{ContractAction, RegularTransaction};
+    use indexer_common::domain::{
+        ByteVec, ContractAttributes, LedgerVersion, NetworkId, ProtocolVersion, TransactionHash,
+    };
+
+    struct LedgerStorageGuard {
+        #[cfg(feature = "cloud")]
+        _postgres: testcontainers::ContainerAsync<testcontainers_modules::postgres::Postgres>,
+        #[cfg(feature = "standalone")]
+        _temp_dir: tempfile::TempDir,
+    }
+
+    async fn init_ledger_storage() -> LedgerStorageGuard {
+        #[cfg(feature = "cloud")]
+        {
+            use indexer_common::infra::{
+                ledger_db, migrations,
+                pool::postgres::{Config, PostgresPool},
+            };
+            use sqlx::postgres::PgSslMode;
+            use std::time::Duration;
+            use testcontainers::{ImageExt, runners::AsyncRunner};
+            use testcontainers_modules::postgres::Postgres;
+
+            let postgres_container = Postgres::default()
+                .with_db_name("indexer")
+                .with_user("indexer")
+                .with_password(env!("APP__INFRA__STORAGE__PASSWORD"))
+                .with_tag("17.1-alpine")
+                .start()
+                .await
+                .expect("start Postgres container");
+            let postgres_port = postgres_container
+                .get_host_port_ipv4(5432)
+                .await
+                .expect("get Postgres port");
+
+            let pool = PostgresPool::new(Config {
+                host: "localhost".to_string(),
+                port: postgres_port,
+                dbname: "indexer".to_string(),
+                user: "indexer".to_string(),
+                password: env!("APP__INFRA__STORAGE__PASSWORD").into(),
+                sslmode: PgSslMode::Prefer,
+                max_connections: 10,
+                idle_timeout: Duration::from_secs(60),
+                max_lifetime: Duration::from_secs(5 * 60),
+            })
+            .await
+            .expect("create pool");
+            migrations::postgres::run(&pool)
+                .await
+                .expect("run migrations");
+
+            ledger_db::init(
+                ledger_db::Config {
+                    cache_max_nodes: 1_024,
+                },
+                pool,
+            );
+
+            LedgerStorageGuard {
+                _postgres: postgres_container,
+            }
+        }
+
+        #[cfg(feature = "standalone")]
+        {
+            use indexer_common::infra::ledger_db;
+
+            let temp_dir = tempfile::tempdir().expect("create tempdir");
+            let cnn_url = temp_dir
+                .path()
+                .join("ledger-db.sqlite")
+                .display()
+                .to_string();
+
+            ledger_db::init(ledger_db::Config {
+                cache_max_nodes: 1_024,
+                cnn_url,
+            })
+            .await
+            .expect("init ledger_db");
+
+            LedgerStorageGuard {
+                _temp_dir: temp_dir,
+            }
+        }
+    }
+
+    fn empty_regular_transaction(address: ByteVec) -> RegularTransaction {
+        RegularTransaction {
+            hash: TransactionHash::from([0u8; 32]),
+            protocol_version: ProtocolVersion::V2_0(2_000_000),
+            raw: Default::default(),
+            identifiers: vec![],
+            contract_actions: vec![ContractAction {
+                address,
+                state: Default::default(),
+                zswap_state: Default::default(),
+                extracted_balances: Default::default(),
+                attributes: ContractAttributes::Call {
+                    entry_point: "test".into(),
+                },
+            }],
+            paid_fees: 0,
+            estimated_fees: 0,
+            transaction_result: Default::default(),
+            zswap_merkle_tree_root: Default::default(),
+            zswap_start_index: 0,
+            zswap_end_index: 0,
+            dust_commitment_start_index: 0,
+            dust_commitment_end_index: 0,
+            dust_generation_start_index: 0,
+            dust_generation_end_index: 0,
+            created_unshielded_utxos: vec![],
+            spent_unshielded_utxos: vec![],
+            ledger_events: vec![],
+            bridge_claim: None,
+        }
+    }
+
+    /// The apply path fills contract actions from local `LedgerState::index`. An unknown
+    /// address must keep the historical empty-state payload and skip balance extraction.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fill_contract_actions_unknown_address_is_empty() {
+        let _guard = init_ledger_storage().await;
+
+        let state = LedgerState::new(
+            NetworkId::try_from("undeployed").expect("valid network id"),
+            LedgerVersion::V9,
+        )
+        .expect("create ledger state");
+
+        let unknown_address = ByteVec::from(vec![0u8; 32]);
+        let mut transaction = empty_regular_transaction(unknown_address.clone());
+        state
+            .fill_contract_actions_from_local_ledger(&mut transaction)
+            .expect("extract from empty ledger");
+
+        assert_eq!(transaction.contract_actions[0].address, unknown_address);
+        assert!(
+            transaction.contract_actions[0].state.is_empty(),
+            "unknown contract must keep the historical empty-state payload"
+        );
+        assert!(
+            transaction.contract_actions[0]
+                .extracted_balances
+                .is_empty(),
+            "empty state skips balance extraction"
+        );
+        assert!(
+            !transaction.contract_actions[0].zswap_state.is_empty(),
+            "zswap state is still serialized from the local ledger"
+        );
+    }
 }
