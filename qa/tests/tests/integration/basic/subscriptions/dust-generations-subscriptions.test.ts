@@ -47,11 +47,6 @@ let blockHashSurfacePresent = false;
 const SURFACE_ABSENT_REASON =
   'deployed indexer does not serve the block-hash dustGenerations signature';
 
-// midnight-indexer#1463 added protocolVersion to the progress event.
-const PROGRESS_PROTOCOL_VERSION_ABSENT =
-  'DustGenerationsProgress.protocolVersion is absent on this environment (midnight-indexer#1463)';
-let progressProtocolVersionSupported = false;
-
 function encodeDustAddressAsHex(dustAddress: string): string {
   const { words } = bech32m.decode(dustAddress);
   return Buffer.from(bech32m.fromWords(words)).toString('hex');
@@ -309,6 +304,51 @@ async function assertPinnedSnapshotUnlessStale(
 }
 
 /**
+ * Collects the pinned progress events for the oldest block the deployed freshness
+ * window still accepts, preferring an older block over the tip so a pinned-block
+ * assertion is not made against a block that is also the tip. Starts
+ * `IN_WINDOW_OFFSET` back (clamped for a short chain), halves the offset on a
+ * freshness rejection, and falls back to the tip, which is inside every window.
+ */
+async function collectPinnedProgress(
+  wsClient: IndexerWsClient,
+  dustAddress: string,
+  tipBlock: PinnedBlock,
+): Promise<{ block: PinnedBlock; events: DustGenerationsSubscriptionResponse[] }> {
+  const startOffset = Math.min(IN_WINDOW_OFFSET, tipBlock.height - 1);
+
+  for (let offset = startOffset; offset >= MIN_IN_WINDOW_OFFSET; offset = Math.floor(offset / 2)) {
+    const block = await fetchBlock({ height: tipBlock.height - offset });
+    try {
+      return { block, events: await collectPinnedProgressAt(wsClient, dustAddress, block) };
+    } catch (error) {
+      const message = extractSubscriptionErrorMessage(error);
+      if (!message.includes(FRESHNESS_REJECTION)) throw error;
+      log.warn(`Snapshot at tip-${offset} (block ${block.height}) refused: ${message}`);
+    }
+  }
+
+  return {
+    block: tipBlock,
+    events: await collectPinnedProgressAt(wsClient, dustAddress, tipBlock),
+  };
+}
+
+/** One pinned progress-only subscription. Rejections propagate to the caller. */
+function collectPinnedProgressAt(
+  wsClient: IndexerWsClient,
+  dustAddress: string,
+  block: PinnedBlock,
+): Promise<DustGenerationsSubscriptionResponse[]> {
+  return collectDustGenerations(
+    wsClient,
+    { dustAddress, blockHash: block.hash, dtimeCutoffHeight: 0 },
+    30_000,
+    DUST_GENERATIONS_PROGRESS_SUBSCRIPTION,
+  );
+}
+
+/**
  * Skips the current test, recording the reason in the run log as well as the
  * report so a reader of either can tell why coverage was reduced.
  */
@@ -357,11 +397,6 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
         `dustGenerations(blockHash) is absent on ${env.getCurrentEnvironmentName()}; ` +
           'skipping the whole surface',
       );
-    }
-
-    progressProtocolVersionSupported = await isProgressProtocolVersionSupported();
-    if (!progressProtocolVersionSupported) {
-      log.warn(PROGRESS_PROTOCOL_VERSION_ABSENT);
     }
   }, 30_000);
 
@@ -604,62 +639,6 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
         beforeHighestIndex,
         `block ${before.height} should yield a strictly smaller snapshot than block ${after.height}`,
       ).toBeLessThan(afterHighestIndex);
-    }, 90_000);
-
-    /**
-     * Unlike the two transaction progress types, which report the chain tip, this
-     * one reports the protocol version of the snapshot's own block — the same
-     * pinned ledger state the collapsed update is encoded at. A dust wallet
-     * therefore observes an upgrade by re-subscribing at a newer block, not from a
-     * live update: the block-hash subscription completes once emitted.
-     *
-     * The two assertions differ in what they can catch. The collapsed update
-     * comparison is discriminating on any chain, because both values are read from
-     * the same pinned ledger state. The block comparison only diverges from the tip
-     * across a fork boundary, so on an unforked chain it pins the value while the
-     * semantics it guards would fail loudly only after an upgrade.
-     *
-     * @given a valid dust address and the latest block hash
-     * @when a dustGenerations subscription is opened pinned to that block
-     * @then the terminating progress event's protocolVersion equals that block's
-     * @and it equals the protocolVersion of its own final collapsed update, when one
-     *      is present
-     *
-     * midnight-indexer#1463
-     */
-    test('should report the pinned block protocol version in the progress event', async (ctx: TestContext) => {
-      ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations', 'Progress'] };
-      if (!blockHashSurfacePresent) return ctx.skip(true, SURFACE_ABSENT_REASON);
-      if (!progressProtocolVersionSupported) {
-        return ctx.skip(true, PROGRESS_PROTOCOL_VERSION_ABSENT);
-      }
-
-      // protocolVersion is a property of the pinned ledger state, so it needs no
-      // registered wallet and no Cardano fixture.
-      const dustAddress = generateDustAddressForNetworkId(env.getNetworkId().toLowerCase());
-      const block = await fetchBlock();
-
-      const events = await collectDustGenerations(
-        indexerWsClient,
-        { dustAddress, blockHash: block.hash, dtimeCutoffHeight: 0 },
-        30_000,
-        DUST_GENERATIONS_PROGRESS_SUBSCRIPTION,
-      );
-
-      const progressEvents = eventsOfType(events, 'DustGenerationsProgress');
-      expect(progressEvents).toHaveLength(1);
-      const progress = progressEvents[0].data!.dustGenerations as DustGenerationsProgress;
-
-      const parsed = DustGenerationsProgressWithProtocolVersionSchema.safeParse(progress);
-      expect(
-        parsed.success,
-        `Progress event schema validation failed: ${JSON.stringify(parsed.error?.format(), null, 2)}`,
-      ).toBe(true);
-
-      expect(progress.protocolVersion).toBe(block.protocolVersion);
-      if (progress.collapsedMerkleTree) {
-        expect(progress.collapsedMerkleTree.protocolVersion).toBe(progress.protocolVersion);
-      }
     }, 90_000);
   });
 
@@ -1042,5 +1021,99 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
       expect(transactions).toHaveLength(1);
       expect(transactions[0].hash).toBe(firstItem.transactionHash);
     }, 60_000);
+  });
+});
+
+// Deliberately outside the undeployed-gated describe above. That gate exists
+// because dust generation *registrations* need a Cardano-side mapping absent on
+// undeployed (#1152), and this case registers nothing: protocolVersion is a
+// property of the pinned ledger state, which every environment has. Undeployed is
+// also the only environment able to serve a locally built indexer, so inheriting
+// the gate would deny this case the one place it can run before a release ships.
+describe('dust generations progress protocol version', () => {
+  const PROGRESS_PROTOCOL_VERSION_ABSENT =
+    'DustGenerationsProgress.protocolVersion is absent on this environment (midnight-indexer#1463)';
+
+  let wsClient: IndexerWsClient;
+  let surfacePresent = false;
+  let protocolVersionPresent = false;
+
+  beforeAll(async () => {
+    surfacePresent = await isBlockHashDustGenerationsSupported();
+    protocolVersionPresent = await isProgressProtocolVersionSupported();
+    if (!surfacePresent) log.warn(SURFACE_ABSENT_REASON);
+    if (!protocolVersionPresent) log.warn(PROGRESS_PROTOCOL_VERSION_ABSENT);
+  }, 30_000);
+
+  beforeEach(async () => {
+    wsClient = new IndexerWsClient();
+    await wsClient.connectionInit();
+  }, 30_000);
+
+  afterEach(async () => {
+    await wsClient.connectionClose();
+  });
+
+  describe('a subscription pinned to a block hash', () => {
+    /**
+     * The snapshot progress event reports the protocol version of its own pinned
+     * block, not the chain tip — the same pinned ledger state its collapsed update
+     * is encoded at. A dust wallet therefore observes an upgrade by re-subscribing
+     * at a newer block rather than from a live update: this subscription completes
+     * once emitted.
+     *
+     * What the two assertions prove, stated precisely, because neither
+     * distinguishes pinned-block from tip semantics on a chain that has not forked:
+     * every block then carries the same protocol version, so both readings agree.
+     * The block comparison pins the reported value against an independently queried
+     * block, and becomes discriminating on any environment retaining history across
+     * a fork boundary. The collapsed update comparison pins internal consistency;
+     * the resolver binds one version from `get_ledger_state_at(blockHash)` and uses
+     * it for both, so it guards that they are not later sourced apart.
+     *
+     * The subscription is pinned to an older in-window block rather than the tip so
+     * the value asserted is that block's own, stepping closer to the tip only when
+     * the deployed freshness window refuses the offset.
+     *
+     * @given a valid dust address and a block hash inside the freshness window,
+     *        older than the tip where the chain and the window allow it
+     * @when a dustGenerations subscription is opened pinned to that block
+     * @then the terminating progress event's protocolVersion equals that block's
+     * @and it equals the protocolVersion of its own final collapsed update, when one
+     *      is present
+     *
+     * midnight-indexer#1463
+     */
+    test('should report the pinned block protocol version in the progress event', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations', 'Progress'] };
+      if (!surfacePresent) return ctx.skip(true, SURFACE_ABSENT_REASON);
+      if (!protocolVersionPresent) return ctx.skip(true, PROGRESS_PROTOCOL_VERSION_ABSENT);
+
+      // A well-formed address for this network is enough — the resolver reads the
+      // version from the pinned ledger state, not from anything the address owns.
+      const dustAddress = generateDustAddressForNetworkId(env.getNetworkId().toLowerCase());
+      const tipBlock = await fetchBlock();
+
+      const { block, events } = await collectPinnedProgress(wsClient, dustAddress, tipBlock);
+      log.debug(
+        `Pinned to block ${block.height} (tip ${tipBlock.height}), ` +
+          `protocolVersion ${block.protocolVersion}`,
+      );
+
+      const progressEvents = eventsOfType(events, 'DustGenerationsProgress');
+      expect(progressEvents).toHaveLength(1);
+      const progress = progressEvents[0].data!.dustGenerations as DustGenerationsProgress;
+
+      const parsed = DustGenerationsProgressWithProtocolVersionSchema.safeParse(progress);
+      expect(
+        parsed.success,
+        `Progress event schema validation failed: ${JSON.stringify(parsed.error?.format(), null, 2)}`,
+      ).toBe(true);
+
+      expect(progress.protocolVersion).toBe(block.protocolVersion);
+      if (progress.collapsedMerkleTree) {
+        expect(progress.collapsedMerkleTree.protocolVersion).toBe(progress.protocolVersion);
+      }
+    }, 90_000);
   });
 });
