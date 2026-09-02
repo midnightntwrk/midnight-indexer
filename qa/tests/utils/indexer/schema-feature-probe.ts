@@ -141,3 +141,27 @@ export async function isBlockHashDustGenerationsSupported(): Promise<boolean> {
   const dustGenerations = fields?.find((f) => f.name === 'dustGenerations');
   return dustGenerations?.args?.some((arg) => arg.name === 'blockHash') ?? false;
 }
+
+/**
+ * Whether the deployed indexer serves `protocolVersion` on progress updates.
+ *
+ * Added by midnight-indexer#1463 to the progress types of the unshielded, shielded
+ * and dust generations subscriptions, so a wallet with nothing to receive can still
+ * observe a protocol upgrade. Presence on `UnshieldedTransactionsProgress` stands
+ * for the whole change — the three fields land in one commit — which leaves the
+ * smoke check free to assert that all three types really do expose it.
+ *
+ * Probed rather than assumed: a document selecting the field fails GraphQL
+ * validation where the build has not landed, which would turn a missing surface
+ * into a suite of hard failures.
+ */
+export async function isProgressProtocolVersionSupported(): Promise<boolean> {
+  const fields = await introspectTypeFields('UnshieldedTransactionsProgress', '').catch((error) => {
+    throw new Error(
+      `progress protocolVersion probe failed against ${env.getIndexerHttpBaseURL()}: ` +
+        `${(error as Error).message}`,
+      { cause: error },
+    );
+  });
+  return fields?.some((field) => field.name === 'protocolVersion') ?? false;
+}

@@ -181,6 +181,8 @@ export interface ShieldedTransactionsProgress {
   highestZswapEndIndex: number;
   highestCheckedZswapEndIndex: number;
   highestRelevantZswapEndIndex: number;
+  /** Chain tip protocol version. Only present when the document selects it. */
+  protocolVersion?: number;
 }
 
 export type UnshieldedTransactionEvent = UnshieldedTransaction | UnshieldedTransactionsProgress;
@@ -188,6 +190,8 @@ export type UnshieldedTransactionEvent = UnshieldedTransaction | UnshieldedTrans
 export interface UnshieldedTransactionsProgress {
   __typename: 'UnshieldedTransactionsProgress';
   highestTransactionId: number;
+  /** Chain tip protocol version. Only present when the document selects it. */
+  protocolVersion?: number;
 }
 
 export interface UnshieldedTransaction {
@@ -634,6 +638,8 @@ export interface DustGenerationsProgress {
   __typename: 'DustGenerationsProgress';
   highestIndex: number;
   collapsedMerkleTree: CollapsedMerkleTree | null;
+  /** Protocol version of the snapshot's block, not the tip. Only present when selected. */
+  protocolVersion?: number;
 }
 
 export interface DustGenerationDtimeUpdateItem {

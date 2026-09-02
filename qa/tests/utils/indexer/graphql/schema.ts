@@ -433,6 +433,9 @@ export const UnshieldedTransactionsProgressSchema = z.object({
   highestTransactionId: z.number(),
 });
 
+export const UnshieldedTransactionsProgressWithProtocolVersionSchema =
+  UnshieldedTransactionsProgressSchema.extend({ protocolVersion: z.number() });
+
 export const UnshieldedTxSubscriptionResponseSchema = z.union([
   UnshieldedTransactionEventSchema,
   UnshieldedTransactionsProgressSchema,
@@ -459,6 +462,9 @@ export const ShieldedTransactionsProgressSchema = z.object({
   highestCheckedZswapEndIndex: z.number(),
   highestRelevantZswapEndIndex: z.number(),
 });
+
+export const ShieldedTransactionsProgressWithProtocolVersionSchema =
+  ShieldedTransactionsProgressSchema.extend({ protocolVersion: z.number() });
 
 export const ShieldedTransactionEventSchema = z.union([
   RelevantTransactionSchema,
@@ -510,6 +516,9 @@ export const DustGenerationsProgressSchema = z.object({
   highestIndex: z.number(),
   collapsedMerkleTree: CollapsedMerkleTreeSchema.nullable(),
 });
+
+export const DustGenerationsProgressWithProtocolVersionSchema =
+  DustGenerationsProgressSchema.extend({ protocolVersion: z.number() });
 
 export const DustGenerationDtimeUpdateItemSchema = z.object({
   __typename: z.literal('DustGenerationDtimeUpdateItem'),
