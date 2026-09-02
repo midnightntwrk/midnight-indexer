@@ -17,7 +17,10 @@ import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
 import type { TestContext } from 'vitest';
 import { env } from 'environment/model';
-import { isProgressProtocolVersionSupported } from '@utils/indexer/schema-feature-probe';
+import {
+  introspectTypeFields,
+  isProgressProtocolVersionSupported,
+} from '@utils/indexer/schema-feature-probe';
 
 /**
  * Contract guard for the progress `protocolVersion` field (midnight-indexer#1463).
@@ -25,8 +28,8 @@ import { isProgressProtocolVersionSupported } from '@utils/indexer/schema-featur
  * A wallet with nothing to receive learns about a protocol upgrade only from the
  * progress update of the subscription it holds open, so every progress type has to
  * carry the field, as a non-null Int. Deployed builds are not homogeneous, so the
- * whole file gates on the field being served at all and reports which environment
- * lacks it rather than failing there; what it then asserts is that an environment
+ * whole file gates on the field being served at all and names the environment
+ * lacking it rather than failing there; what it then asserts is that an environment
  * carrying the change carries it on all three types, with the right type.
  */
 
@@ -38,40 +41,8 @@ const PROGRESS_TYPES = [
 
 const FIELD_NAME = 'protocolVersion';
 
-const TYPE_FIELDS_QUERY = `
-  query TypeFields($name: String!) {
-    __type(name: $name) {
-      name
-      fields {
-        name
-        type {
-          kind
-          name
-          ofType {
-            kind
-            name
-          }
-        }
-      }
-    }
-  }
-`;
-
-type TypeRef = { kind: string; name: string | null; ofType: TypeRef | null };
-
-type TypeFieldsResponse = {
-  __type: { name: string; fields: { name: string; type: TypeRef }[] } | null;
-};
-
-async function introspectType(typeName: string): Promise<TypeFieldsResponse['__type']> {
-  const response = await fetch(env.getIndexerHttpBaseURL() + '/api/v4/graphql', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query: TYPE_FIELDS_QUERY, variables: { name: typeName } }),
-  });
-  const json = (await response.json()) as { data: TypeFieldsResponse };
-  return json.data.__type;
-}
+// Enough of the type reference to tell `Int!` from `Int`, `String!` or a list.
+const TYPE_SELECTION = 'type { kind name ofType { kind name } }';
 
 describe('progress protocol version schema', () => {
   let supported = false;
@@ -89,6 +60,9 @@ describe('progress protocol version schema', () => {
   for (const typeName of PROGRESS_TYPES) {
     describe(`${typeName}.${FIELD_NAME}`, () => {
       /**
+       * The progress type serves protocolVersion, typed so a consumer can rely on
+       * always receiving a number.
+       *
        * @given a deployed indexer GraphQL endpoint that serves the progress
        *        protocolVersion field
        * @when the progress type is introspected
@@ -105,18 +79,18 @@ describe('progress protocol version schema', () => {
         }
 
         log.debug(`Introspecting ${typeName} for field ${FIELD_NAME}`);
-        const type = await introspectType(typeName);
-        if (type === null) {
+        const fields = await introspectTypeFields(typeName, TYPE_SELECTION);
+        if (fields === null) {
           return ctx.skip(
             true,
             `type "${typeName}" is not served by ${env.getCurrentEnvironmentName()}`,
           );
         }
 
-        const field = type.fields.find((f) => f.name === FIELD_NAME);
+        const field = fields.find((f) => f.name === FIELD_NAME);
         expect(field, `field "${typeName}.${FIELD_NAME}" not found in schema`).toBeDefined();
-        expect(field!.type.kind, `${typeName}.${FIELD_NAME} should be non-null`).toBe('NON_NULL');
-        expect(field!.type.ofType?.name, `${typeName}.${FIELD_NAME} should be an Int`).toBe('Int');
+        expect(field!.type?.kind, `${typeName}.${FIELD_NAME} should be non-null`).toBe('NON_NULL');
+        expect(field!.type?.ofType?.name, `${typeName}.${FIELD_NAME} should be an Int`).toBe('Int');
       });
     });
   }

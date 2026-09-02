@@ -16,15 +16,25 @@
 import { env } from 'environment/model';
 import { retry } from '@utils/retry-helper';
 
-interface IntrospectedField {
+/** A GraphQL type reference as introspection reports it, unwrapped one level. */
+export interface IntrospectedTypeRef {
+  kind: string;
+  name: string | null;
+  ofType: { kind: string; name: string | null } | null;
+}
+
+export interface IntrospectedField {
   name: string;
   description?: string | null;
   args?: { name: string }[];
+  type?: IntrospectedTypeRef;
 }
 
 /**
  * Introspects the deployed schema and returns the fields of a type, or null when
- * the type does not exist. `fieldSelection` adds per-field sub-selections on top
+ * the type does not exist. Exported so a test asserting on a field's type resolves
+ * the endpoint (and honours `INDEXER_API_VERSION`) exactly as the probe gating it
+ * does — a hand-rolled fetch alongside would introspect a different API version. `fieldSelection` adds per-field sub-selections on top
  * of `name` (e.g. `description`, `args { name }`).
  *
  * Throws when the introspection itself does not succeed — a non-2xx response, a
@@ -38,7 +48,7 @@ interface IntrospectedField {
  * Uses native fetch (pattern of http-compression-probe) because the typed
  * IndexerHttpClient methods are bound to domain queries, not introspection.
  */
-async function introspectTypeFields(
+export async function introspectTypeFields(
   typeName: string,
   fieldSelection: string,
 ): Promise<IntrospectedField[] | null> {
