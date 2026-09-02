@@ -529,7 +529,12 @@ fn const_hex_decode(s: &str) -> anyhow::Result<Vec<u8>> {
 // for minutes. On a single thread those park the only worker, so the progress subscription task
 // cannot poll and its frames arrive as one drained burst — which both starves the subscription
 // this test depends on and makes the frame arrival times meaningless.
-#[tokio::test(flavor = "multi_thread")]
+//
+// `worker_threads` is pinned rather than left to the host's available parallelism: only one of
+// those blocking calls is ever in flight, so two workers keep the watcher fed on any host,
+// including a single-core one where the default pool would be one worker and the starvation
+// would return as a spurious "never backed off before the fork" failure.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "boots docker containers and drives a live runtime upgrade; run explicitly"]
 async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
     let registry = image_registry();
