@@ -86,6 +86,10 @@ pub struct DustGenerationsProgress {
     pub highest_index: u64,
     /// Final collapsed Merkle tree update covering remaining range.
     pub collapsed_merkle_tree: Option<MerkleTreeCollapsedUpdate>,
+    /// The protocol version at the snapshot's block, i.e. the one this snapshot is encoded at.
+    /// Allows a wallet without any generations to observe a protocol upgrade, which it would
+    /// otherwise only learn about from the items it receives.
+    pub protocol_version: u32,
 }
 
 /// A dust generation dtime update emitted when the backing Night UTXO is
@@ -298,6 +302,7 @@ where
             yield DustGenerationsEvent::DustGenerationsProgress(DustGenerationsProgress {
                 highest_index: last_index,
                 collapsed_merkle_tree: final_update,
+                protocol_version: protocol_version.into(),
             });
         }
     }
