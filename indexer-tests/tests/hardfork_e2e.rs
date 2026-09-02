@@ -106,6 +106,12 @@ const UNSHIELDED_PROGRESS_SUBSCRIPTION: &str = "
 
 const WS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
 
+/// Fallback for the one secret `indexer-standalone` refuses to start without. CI supplies it
+/// (`.github/actions/init-env`) and so does `qa/scripts/test-hardfork-8to9.sh`; a developer
+/// running this test by hand usually has not, and without a default the omission surfaces as a
+/// readiness timeout rather than as the configuration error it is. An ambient value still wins.
+const FALLBACK_SECRET: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
 fn image_registry() -> String {
     env::var("IMAGE_REGISTRY").unwrap_or_else(|_| "midnightntwrk".to_string())
 }
@@ -316,6 +322,18 @@ impl Harness {
         fs::read_to_string(self.temp_dir.path().join("indexer.log")).context("read indexer log")
     }
 
+    /// The last `lines` lines of the indexer's log, in order, or empty if it cannot be read.
+    ///
+    /// The log lives in the `TempDir`, which is dropped the moment this test returns `Err`, so
+    /// anything that fails has to carry the tail into its own error message or the only
+    /// explanation of the failure is deleted along with it.
+    fn indexer_log_tail(&self, lines: usize) -> String {
+        let log = self.indexer_log().unwrap_or_default();
+        let mut tail = log.lines().rev().take(lines).collect::<Vec<_>>();
+        tail.reverse();
+        tail.join("\n")
+    }
+
     /// The indexer bails on a boundary failure rather than indexing on, so a
     /// dead process *is* the failure signal. Surface the reason, not just the
     /// exit.
@@ -340,7 +358,7 @@ impl Harness {
         if let Some(indexer) = guard.as_mut()
             && let Some(status) = indexer.try_wait().context("poll indexer")?
         {
-            let tail = log.lines().rev().take(10).collect::<Vec<_>>().join("\n");
+            let tail = self.indexer_log_tail(10);
             bail!("indexer exited ({status}) at {stage}; last lines:\n{tail}");
         }
         Ok(())
@@ -666,7 +684,13 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
             .unwrap_or(false);
         Ok(ready.then_some(()))
     })
-    .await?;
+    .await
+    .with_context(|| {
+        format!(
+            "indexer-standalone never became ready; its log said:\n{}",
+            harness.indexer_log_tail(15)
+        )
+    })?;
 
     // Index a few pre-fork blocks, then read the dust generation tree size the
     // indexer reconstructed. This is the assertion the whole test rests on: if
@@ -1150,6 +1174,10 @@ fn start_indexer(dir: &Path, node_rpc_port: u16, api_port: u16) -> anyhow::Resul
             format!("ws://localhost:{node_rpc_port}"),
         )
         .env("APP__INFRA__SPO_NODE__BLOCKFROST_ID", "hardfork-e2e-dummy")
+        .env(
+            "APP__INFRA__SECRET",
+            env::var("APP__INFRA__SECRET").unwrap_or_else(|_| FALLBACK_SECRET.to_string()),
+        )
         .env(
             "APP__INFRA__STORAGE__CNN_URL",
             dir.join("indexer.sqlite").display().to_string(),
