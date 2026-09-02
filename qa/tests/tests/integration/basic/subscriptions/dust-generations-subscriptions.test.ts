@@ -23,8 +23,16 @@ import {
   DustGenerationsSubscriptionResponse,
 } from '@utils/indexer/websocket-client';
 import { extractSubscriptionErrorMessage } from '@utils/indexer/subscription-error';
-import { isBlockHashDustGenerationsSupported } from '@utils/indexer/schema-feature-probe';
-import { DustGenerationsEventSchema } from '@utils/indexer/graphql/schema';
+import {
+  isBlockHashDustGenerationsSupported,
+  isProgressProtocolVersionSupported,
+} from '@utils/indexer/schema-feature-probe';
+import {
+  DustGenerationsEventSchema,
+  DustGenerationsProgressWithProtocolVersionSchema,
+} from '@utils/indexer/graphql/schema';
+import { DUST_GENERATIONS_PROGRESS_SUBSCRIPTION } from '@utils/indexer/graphql/subscriptions';
+import type { DustGenerationsProgress } from '@utils/indexer/indexer-types';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { env } from 'environment/model';
 import dataProvider from '@utils/testdata-provider';
@@ -38,6 +46,11 @@ const indexerHttpClient = new IndexerHttpClient();
 let blockHashSurfacePresent = false;
 const SURFACE_ABSENT_REASON =
   'deployed indexer does not serve the block-hash dustGenerations signature';
+
+// midnight-indexer#1463 added protocolVersion to the progress event.
+const PROGRESS_PROTOCOL_VERSION_ABSENT =
+  'DustGenerationsProgress.protocolVersion is absent on this environment (midnight-indexer#1463)';
+let progressProtocolVersionSupported = false;
 
 function encodeDustAddressAsHex(dustAddress: string): string {
   const { words } = bech32m.decode(dustAddress);
@@ -74,9 +87,12 @@ async function fetchDustAddress(rewardAddress: string): Promise<string> {
 /**
  * Fetches the block the subscription snapshot is pinned to.
  */
-async function fetchBlock(offset?: {
+async function fetchBlock(offset?: { height: number }): Promise<{
+  hash: string;
   height: number;
-}): Promise<{ hash: string; height: number; dustGenerationEndIndex: number }> {
+  dustGenerationEndIndex: number;
+  protocolVersion: number;
+}> {
   const response = offset
     ? await indexerHttpClient.getBlockByOffset(offset)
     : await indexerHttpClient.getLatestBlock();
@@ -86,6 +102,7 @@ async function fetchBlock(offset?: {
     hash: block.hash,
     height: block.height,
     dustGenerationEndIndex: block.dustGenerationEndIndex!,
+    protocolVersion: block.protocolVersion,
   };
 }
 
@@ -104,6 +121,7 @@ function collectDustGenerations(
   wsClient: IndexerWsClient,
   args: DustGenerationsSubscriptionArgs,
   timeoutMs = 30_000,
+  queryOverride?: string,
 ): Promise<DustGenerationsSubscriptionResponse[]> {
   return new Promise((resolve, reject) => {
     const events: DustGenerationsSubscriptionResponse[] = [];
@@ -146,6 +164,7 @@ function collectDustGenerations(
       args.dustAddress,
       args.blockHash,
       args.dtimeCutoffHeight,
+      queryOverride,
     );
     unsubscribe = subscription.unsubscribe;
   });
@@ -338,6 +357,11 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
         `dustGenerations(blockHash) is absent on ${env.getCurrentEnvironmentName()}; ` +
           'skipping the whole surface',
       );
+    }
+
+    progressProtocolVersionSupported = await isProgressProtocolVersionSupported();
+    if (!progressProtocolVersionSupported) {
+      log.warn(PROGRESS_PROTOCOL_VERSION_ABSENT);
     }
   }, 30_000);
 
@@ -580,6 +604,62 @@ describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
         beforeHighestIndex,
         `block ${before.height} should yield a strictly smaller snapshot than block ${after.height}`,
       ).toBeLessThan(afterHighestIndex);
+    }, 90_000);
+
+    /**
+     * Unlike the two transaction progress types, which report the chain tip, this
+     * one reports the protocol version of the snapshot's own block — the same
+     * pinned ledger state the collapsed update is encoded at. A dust wallet
+     * therefore observes an upgrade by re-subscribing at a newer block, not from a
+     * live update: the block-hash subscription completes once emitted.
+     *
+     * The two assertions differ in what they can catch. The collapsed update
+     * comparison is discriminating on any chain, because both values are read from
+     * the same pinned ledger state. The block comparison only diverges from the tip
+     * across a fork boundary, so on an unforked chain it pins the value while the
+     * semantics it guards would fail loudly only after an upgrade.
+     *
+     * @given a valid dust address and the latest block hash
+     * @when a dustGenerations subscription is opened pinned to that block
+     * @then the terminating progress event's protocolVersion equals that block's
+     * @and it equals the protocolVersion of its own final collapsed update, when one
+     *      is present
+     *
+     * midnight-indexer#1463
+     */
+    test('should report the pinned block protocol version in the progress event', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations', 'Progress'] };
+      if (!blockHashSurfacePresent) return ctx.skip(true, SURFACE_ABSENT_REASON);
+      if (!progressProtocolVersionSupported) {
+        return ctx.skip(true, PROGRESS_PROTOCOL_VERSION_ABSENT);
+      }
+
+      // protocolVersion is a property of the pinned ledger state, so it needs no
+      // registered wallet and no Cardano fixture.
+      const dustAddress = generateDustAddressForNetworkId(env.getNetworkId().toLowerCase());
+      const block = await fetchBlock();
+
+      const events = await collectDustGenerations(
+        indexerWsClient,
+        { dustAddress, blockHash: block.hash, dtimeCutoffHeight: 0 },
+        30_000,
+        DUST_GENERATIONS_PROGRESS_SUBSCRIPTION,
+      );
+
+      const progressEvents = eventsOfType(events, 'DustGenerationsProgress');
+      expect(progressEvents).toHaveLength(1);
+      const progress = progressEvents[0].data!.dustGenerations as DustGenerationsProgress;
+
+      const parsed = DustGenerationsProgressWithProtocolVersionSchema.safeParse(progress);
+      expect(
+        parsed.success,
+        `Progress event schema validation failed: ${JSON.stringify(parsed.error?.format(), null, 2)}`,
+      ).toBe(true);
+
+      expect(progress.protocolVersion).toBe(block.protocolVersion);
+      if (progress.collapsedMerkleTree) {
+        expect(progress.collapsedMerkleTree.protocolVersion).toBe(progress.protocolVersion);
+      }
     }, 90_000);
   });
 
