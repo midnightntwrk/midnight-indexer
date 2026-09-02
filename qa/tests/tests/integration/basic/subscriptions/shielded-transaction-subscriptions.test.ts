@@ -356,10 +356,9 @@ describe('shielded transaction subscriptions', () => {
       expect(highestZswapEndIndex).toBeGreaterThan(0);
 
       // highestZswapEndIndex is exclusive, so the collapsed update query needs (highestZswapEndIndex - 1)
-      const indexerHttpClient = new IndexerHttpClient();
       const endIndex = highestZswapEndIndex - 1;
       log.debug(`Querying collapsed update with startIndex=0, endIndex=${endIndex}`);
-      const response = await indexerHttpClient.getZswapMerkleTreeCollapsedUpdate(0, endIndex);
+      const response = await httpClient.getZswapMerkleTreeCollapsedUpdate(0, endIndex);
 
       expect(response).toBeSuccess();
       expect(response.data?.zswapMerkleTreeCollapsedUpdate).toBeDefined();

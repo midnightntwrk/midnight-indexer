@@ -403,6 +403,9 @@ describe('unshielded transaction subscriptions', async () => {
       const latestBlock = await httpClient.getLatestBlock();
       expect(latestBlock).toBeSuccess();
 
+      // The frame-count and highestTransactionId assertions restate the sibling
+      // test's deliberately: this case sends a different document, so they are the
+      // preconditions the protocolVersion comparison rests on, not a copy.
       expect(messages.length).toBe(1);
       expect(messages[0]).toBeSuccess();
 
