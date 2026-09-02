@@ -45,11 +45,12 @@ use crate::{
     graphql_ws_client,
 };
 use anyhow::{Context, bail};
+use dust_generations_subscription::DustGenerationsSubscriptionDustGenerations as DustGenerations;
 use futures::{StreamExt, TryStreamExt, future::ok};
 use graphql_client::{GraphQLQuery, Response};
 use indexer_api::infra::api::v4::{
     AddressType, HexEncodable, HexEncoded, dust::DustAddress, encode_address,
-    viewing_key::ViewingKey,
+    unshielded::UnshieldedAddress, viewing_key::ViewingKey,
 };
 use indexer_common::domain::NetworkId;
 use itertools::Itertools;
@@ -953,7 +954,12 @@ async fn test_shielded_transactions_subscription(
             .map_ok(|data| data.shielded_transactions)
             .try_filter_map(|event| match event {
                 ShieldedTransactions::RelevantTransaction(t) => ok(Some(t)),
-                ShieldedTransactions::ShieldedTransactionsProgress(_) => ok(None),
+                ShieldedTransactions::ShieldedTransactionsProgress(progress) => {
+                    // Progress events carry the tip protocol version, which is how a wallet
+                    // without any relevant transactions learns about a protocol upgrade.
+                    assert!(progress.protocol_version > 0);
+                    ok(None)
+                }
             })
             .take(2)
             .take_until(sleep(Duration::from_secs(10)))
@@ -1018,6 +1024,35 @@ async fn test_unshielded_transactions_subscription(
                 .iter()
                 .any(|u| u.owner == unshielded_address)
         }));
+    }
+
+    // An address without any transactions only ever receives progress events. These carry the
+    // tip protocol version, which is the only way such a wallet learns about a protocol upgrade.
+    let network_id: NetworkId = "undeployed".try_into().unwrap();
+    let unused_address = UnshieldedAddress(encode_address(
+        [0u8; 32],
+        AddressType::Unshielded,
+        &network_id,
+    ));
+    let variables = unshielded_transactions_subscription::Variables {
+        address: unused_address,
+    };
+    let events =
+        graphql_ws_client::subscribe::<UnshieldedTransactionsSubscription>(ws_api_url, variables)
+            .await
+            .context("subscribe to unshielded transactions for an unused address")?
+            .take(1)
+            .map_ok(|data| data.unshielded_transactions)
+            .try_collect::<Vec<_>>()
+            .await
+            .context("collect unshielded transaction events for an unused address")?;
+
+    match events.first() {
+        Some(UnshieldedTransactions::UnshieldedTransactionsProgress(progress)) => {
+            assert_eq!(progress.highest_transaction_id, 0);
+            assert!(progress.protocol_version > 0);
+        }
+        event => panic!("expected an UnshieldedTransactionsProgress event, got: {event:?}"),
     }
 
     Ok(())
@@ -1104,7 +1139,7 @@ async fn test_dust_generations_subscription(
     let events = graphql_ws_client::subscribe::<DustGenerationsSubscription>(ws_api_url, variables)
         .await
         .context("subscribe to dust generations")?
-        .map_ok(|data| data.dust_generations.to_json_value())
+        .map_ok(|data| data.dust_generations)
         .take(1)
         .take_until(sleep(Duration::from_secs(5)))
         .try_collect::<Vec<_>>()
@@ -1117,12 +1152,18 @@ async fn test_dust_generations_subscription(
         "expected exactly one DustGenerationsProgress event"
     );
 
-    let event = &events[0];
-    assert_eq!(
-        event.get("__typename").and_then(|v| v.as_str()),
-        Some("DustGenerationsProgress"),
-        "expected DustGenerationsProgress for an address with no owned generations, got: {event:?}"
-    );
+    match &events[0] {
+        DustGenerations::DustGenerationsProgress(progress) => {
+            // The progress event carries the snapshot's protocol version, which is how a wallet
+            // without any generations learns about a protocol upgrade.
+            assert!(progress.protocol_version > 0);
+        }
+
+        event => panic!(
+            "expected DustGenerationsProgress for an address with no owned generations, \
+             got: {event:?}"
+        ),
+    }
 
     Ok(())
 }

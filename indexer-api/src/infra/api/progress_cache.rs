@@ -17,7 +17,7 @@
 //! shared value is at most one time-to-live stale.
 
 use crate::infra::api::ApiResult;
-use indexer_common::domain::UnshieldedAddress;
+use indexer_common::domain::{ProtocolVersion, UnshieldedAddress};
 use moka::future::Cache;
 use serde::Deserialize;
 use std::{future::Future, time::Duration};
@@ -47,6 +47,9 @@ pub struct ProgressCache {
 
     /// `UnshieldedAddress` => highest transaction ID for that address.
     unshielded: Cache<UnshieldedAddress, Option<u64>>,
+
+    /// The tip protocol version, shared by all subscribers; a single entry under the unit key.
+    protocol_version: Cache<(), Option<ProtocolVersion>>,
 }
 
 impl ProgressCache {
@@ -60,9 +63,15 @@ impl ProgressCache {
             .time_to_live(config.time_to_live)
             .build();
 
+        // Only ever holds the single unit key, so it needs no size bound; the time-to-live is
+        // what bounds staleness. A `max_capacity` of one would put the sole entry at the mercy
+        // of the admission policy for no benefit.
+        let protocol_version = Cache::builder().time_to_live(config.time_to_live).build();
+
         Self {
             shielded,
             unshielded,
+            protocol_version,
         }
     }
 
@@ -94,6 +103,20 @@ impl ProgressCache {
             .await
             .map_err(|error| (*error).clone())
     }
+
+    /// Return the cached tip protocol version, else run `query`, cache and return its result.
+    /// Unlike the other entries this one is not keyed by subscriber: the tip protocol version is
+    /// the same for everybody, so all progress streams across all subscriptions collapse into a
+    /// single database hit per time-to-live.
+    pub async fn protocol_version(
+        &self,
+        query: impl Future<Output = ApiResult<Option<ProtocolVersion>>>,
+    ) -> ApiResult<Option<ProtocolVersion>> {
+        self.protocol_version
+            .try_get_with((), query)
+            .await
+            .map_err(|error| (*error).clone())
+    }
 }
 
 #[cfg(test)]
@@ -103,7 +126,7 @@ mod tests {
         progress_cache::{ProgressCache, ProgressCacheConfig},
     };
     use futures::future::join_all;
-    use indexer_common::domain::UnshieldedAddress;
+    use indexer_common::domain::{ProtocolVersion, UnshieldedAddress};
     use std::{
         sync::atomic::{AtomicUsize, Ordering},
         time::Duration,
@@ -184,6 +207,27 @@ mod tests {
             .unwrap();
 
         assert_eq!(first, Some(7));
+        assert_eq!(second, first);
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "second read should hit the cache"
+        );
+    }
+
+    #[tokio::test]
+    async fn protocol_version_dedups_within_ttl() {
+        let cache = ProgressCache::new(config());
+        let calls = AtomicUsize::new(0);
+        let query = || async {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Ok::<_, ApiError>(Some(ProtocolVersion::V2_0(2_000_000)))
+        };
+
+        let first = cache.protocol_version(query()).await.unwrap();
+        let second = cache.protocol_version(query()).await.unwrap();
+
+        assert_eq!(first, Some(ProtocolVersion::V2_0(2_000_000)));
         assert_eq!(second, first);
         assert_eq!(
             calls.load(Ordering::SeqCst),
