@@ -34,8 +34,10 @@ export interface IntrospectedField {
  * Introspects the deployed schema and returns the fields of a type, or null when
  * the type does not exist. Exported so a test asserting on a field's type resolves
  * the endpoint (and honours `INDEXER_API_VERSION`) exactly as the probe gating it
- * does — a hand-rolled fetch alongside would introspect a different API version. `fieldSelection` adds per-field sub-selections on top
- * of `name` (e.g. `description`, `args { name }`).
+ * does — a hand-rolled fetch alongside would introspect a different API version.
+ *
+ * `fieldSelection` adds per-field sub-selections on top of `name` (e.g.
+ * `description`, `args { name }`, `type { kind name ofType { kind name } }`).
  *
  * Throws when the introspection itself does not succeed — a non-2xx response, a
  * GraphQL error, or a response carrying no `data`. Callers read null as "the
