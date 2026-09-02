@@ -52,18 +52,23 @@
 #![cfg(feature = "standalone")]
 
 use anyhow::{Context, bail};
+use futures::StreamExt;
+use indexer_api::infra::api::v4::{AddressType, encode_address};
+use indexer_common::domain::NetworkId;
+use indexer_tests::graphql_ws_client;
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
     env, fs,
     net::TcpListener,
     path::Path,
+    pin::pin,
     process::{Child, Command, Stdio},
-    sync::Mutex,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use tempfile::TempDir;
-use tokio::time::sleep;
+use tokio::{task::JoinHandle, time::sleep};
 
 /// Ledger-8 node whose `dev` preset provides the fork-from chain-spec.
 const FROM_NODE_TAG: &str = "1.0.0";
@@ -71,8 +76,30 @@ const FROM_NODE_TAG: &str = "1.0.0";
 /// Genesis-funded dev wallet the test transacts from.
 const SOURCE_SEED: &str = "0000000000000000000000000000000000000000000000000000000000000001";
 
-/// Any `spec_version` at or above this is a ledger-9 runtime.
+/// Any `spec_version` at or above this is a ledger-9 runtime. Block protocol versions share the
+/// scale, so the same threshold separates the two ledger windows in progress updates.
 const LEDGER_9_SPEC_VERSION: u64 = 2_000_000;
+
+/// Progress update interval the indexer is started with, overriding the 30s production default.
+/// Production also backs a *quiet* subscription off by up to `IDLE_BACKOFF_MAX_MULTIPLE` (8), so
+/// a real wallet can be minutes behind the fork; that latency is deliberately not what this test
+/// measures. Compressing the interval keeps the run from idling for those minutes while still
+/// exercising the same detection path.
+const PROGRESS_UPDATE_INTERVAL: &str = "2s";
+
+/// Progress-only subscription for an address that never receives a transaction: the frames it
+/// yields carry nothing but `highestTransactionId` and the tip protocol version.
+const UNSHIELDED_PROGRESS_SUBSCRIPTION: &str = "
+    subscription UnshieldedProgress($address: UnshieldedAddress!) {
+        unshieldedTransactions(address: $address) {
+            __typename
+            ... on UnshieldedTransactionsProgress {
+                highestTransactionId
+                protocolVersion
+            }
+        }
+    }
+";
 
 const WS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
 
@@ -259,6 +286,26 @@ impl Harness {
         Ok(balances)
     }
 
+    fn ws_api_url(&self) -> String {
+        format!("{}/ws", self.api_url.replacen("http://", "ws://", 1))
+    }
+
+    /// Whether this build serves `protocolVersion` on unshielded progress updates.
+    ///
+    /// Probed rather than assumed: the field arrived with midnight-indexer#1463, and asking for
+    /// it against a build that predates it fails the subscription outright.
+    async fn progress_protocol_version_supported(&self) -> anyhow::Result<bool> {
+        let data = self
+            .graphql(
+                r#"{ __type(name: "UnshieldedTransactionsProgress") { fields { name } } }"#,
+                json!({}),
+            )
+            .await?;
+        Ok(data["__type"]["fields"]
+            .as_array()
+            .is_some_and(|fields| fields.iter().any(|f| f["name"] == "protocolVersion")))
+    }
+
     async fn indexed_height(&self) -> anyhow::Result<u64> {
         let data = self.graphql("{ block { height } }", json!({})).await?;
         data["block"]["height"]
@@ -310,6 +357,65 @@ impl Harness {
             bail!("indexer exited ({status}) at {stage}; last lines:\n{tail}");
         }
         Ok(())
+    }
+}
+
+/// An unshielded progress subscription held open for the whole crossing, recording every
+/// `(highest_transaction_id, protocol_version)` frame it receives.
+///
+/// This is the wallet the field exists for: it owns an address that never transacts, so it
+/// receives nothing but progress updates and the protocol version they carry is the only thing
+/// about them that changes at a fork. The subscription is never re-established, which is what
+/// makes the observation meaningful — a reconnect would read the new version from a fresh query
+/// rather than from the stream.
+struct ProgressWatcher {
+    frames: Arc<Mutex<Vec<(u64, u64)>>>,
+    task: JoinHandle<()>,
+}
+
+impl Drop for ProgressWatcher {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+impl ProgressWatcher {
+    async fn start(ws_api_url: &str, address: &str) -> anyhow::Result<Self> {
+        let events = graphql_ws_client::subscribe_raw(
+            ws_api_url,
+            "UnshieldedProgress",
+            UNSHIELDED_PROGRESS_SUBSCRIPTION,
+            json!({ "address": address }),
+        )
+        .await
+        .context("subscribe to unshielded progress")?;
+
+        let frames = Arc::new(Mutex::new(Vec::new()));
+        let sink = frames.clone();
+
+        let task = tokio::spawn(async move {
+            let mut events = pin!(events);
+            while let Some(Ok(event)) = events.next().await {
+                let progress = &event["unshieldedTransactions"];
+                if let (Some(id), Some(version)) = (
+                    progress["highestTransactionId"].as_u64(),
+                    progress["protocolVersion"].as_u64(),
+                ) {
+                    sink.lock()
+                        .expect("progress frames mutex poisoned")
+                        .push((id, version));
+                }
+            }
+        });
+
+        Ok(Self { frames, task })
+    }
+
+    fn frames(&self) -> Vec<(u64, u64)> {
+        self.frames
+            .lock()
+            .expect("progress frames mutex poisoned")
+            .clone()
     }
 }
 
@@ -523,6 +629,22 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
         pre_fork_balances.len()
     );
 
+    // Open the idle progress subscription now, so it spans the upgrade rather than being
+    // established after it. Skipped, loudly, on a build without the field.
+    let network_id = NetworkId::try_from("undeployed").expect("undeployed is a network id");
+    let unused_address = encode_address([0u8; 32], AddressType::Unshielded, &network_id);
+    let progress = if harness.progress_protocol_version_supported().await? {
+        let watcher = ProgressWatcher::start(&harness.ws_api_url(), &unused_address).await?;
+        println!("[4] watching progress updates for an address with no transactions");
+        Some(watcher)
+    } else {
+        println!(
+            "[4] WARNING: this build does not serve UnshieldedTransactionsProgress.\
+             protocolVersion (midnight-indexer#1463), so the fork-observation check is skipped"
+        );
+        None
+    };
+
     // --- 5. Governance runtime upgrade --------------------------------------
     println!("[5] driving the governance runtime upgrade");
     // Not via `Harness::toolkit`: this one call needs the WASM bind-mounted.
@@ -585,6 +707,47 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
     .await?;
     harness.assert_indexer_healthy("post-fork")?;
     println!("[6] indexer crossed the boundary, now at height {post_fork_height}");
+
+    // --- 6b. The idle wallet observed the crossing ---------------------------
+    //
+    // Everything above proves the indexer crossed. This proves a wallet can *tell*: without the
+    // protocol version on progress updates, an address with no transactions has no way to learn
+    // that the codec its stream is encoded at has changed.
+    if let Some(progress) = &progress {
+        let frames = wait_for(
+            "a ledger-9 protocol version on the idle subscription",
+            Duration::from_secs(120),
+            || async {
+                harness.assert_indexer_healthy("progress observation")?;
+                let frames = progress.frames();
+                Ok(frames
+                    .iter()
+                    .any(|(_, version)| *version >= LEDGER_9_SPEC_VERSION)
+                    .then_some(frames))
+            },
+        )
+        .await?;
+
+        assert!(
+            frames
+                .iter()
+                .any(|(_, version)| *version < LEDGER_9_SPEC_VERSION),
+            "the subscription never reported a ledger-8 protocol version, so it cannot have \
+             observed a crossing: {frames:?}"
+        );
+        assert!(
+            frames.iter().all(|(id, _)| *id == 0),
+            "the watched address received a transaction, so any version it learned could have \
+             come from that instead of from the progress updates: {frames:?}"
+        );
+        println!(
+            "[6] idle subscription observed protocol version {:?} -> {:?} over {} frames, \
+             never receiving a transaction",
+            frames.first().map(|(_, version)| *version),
+            frames.last().map(|(_, version)| *version),
+            frames.len()
+        );
+    }
 
     // --- 7. The node's cNIGHT dust replay actually restored something -------
     //
@@ -846,6 +1009,16 @@ fn start_indexer(dir: &Path, node_rpc_port: u16, api_port: u16) -> anyhow::Resul
             format!("{WS_DIR}/indexer-standalone/config.yaml"),
         )
         .env("APP__INFRA__API__PORT", api_port.to_string())
+        // See PROGRESS_UPDATE_INTERVAL: production polls every 30s and backs a quiet
+        // subscription off to 8x that, which this test has no reason to sit through.
+        .env(
+            "APP__INFRA__API__SUBSCRIPTION__UNSHIELDED_TRANSACTIONS__PROGRESS_UPDATE_INTERVAL",
+            PROGRESS_UPDATE_INTERVAL,
+        )
+        .env(
+            "APP__INFRA__API__SUBSCRIPTION__PROGRESS_CACHE__TIME_TO_LIVE",
+            "1s",
+        )
         .env(
             "APP__INFRA__NODE__URL",
             format!("ws://localhost:{node_rpc_port}"),
