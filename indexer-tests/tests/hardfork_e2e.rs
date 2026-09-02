@@ -81,11 +81,14 @@ const SOURCE_SEED: &str = "00000000000000000000000000000000000000000000000000000
 const LEDGER_9_SPEC_VERSION: u64 = 2_000_000;
 
 /// Progress update interval the indexer is started with, overriding the 30s production default.
-/// Production also backs a *quiet* subscription off by up to `IDLE_BACKOFF_MAX_MULTIPLE` (8), so
-/// a real wallet can be minutes behind the fork; that latency is deliberately not what this test
-/// measures. Compressing the interval keeps the run from idling for those minutes while still
-/// exercising the same detection path.
-const PROGRESS_UPDATE_INTERVAL: &str = "2s";
+/// Compressing it keeps the run from idling for the minutes a production interval would need,
+/// while exercising the same detection path and the same backoff arithmetic.
+const PROGRESS_UPDATE_INTERVAL: Duration = Duration::from_secs(2);
+
+/// `indexer-api`'s idle backoff caps a quiet subscription at `IDLE_BACKOFF_MAX_MULTIPLE` (8)
+/// times the base interval, and jitters every interval by `JITTER_FRACTION` (±20%). Both live in
+/// `indexer-api/src/infra/api/v4/subscription/polling.rs`.
+const IDLE_BACKOFF_MAX_MULTIPLE: u32 = 8;
 
 /// Progress-only subscription for an address that never receives a transaction: the frames it
 /// yields carry nothing but `highestTransactionId` and the tip protocol version.
@@ -290,22 +293,6 @@ impl Harness {
         format!("{}/ws", self.api_url.replacen("http://", "ws://", 1))
     }
 
-    /// Whether this build serves `protocolVersion` on unshielded progress updates.
-    ///
-    /// Probed rather than assumed: the field arrived with midnight-indexer#1463, and asking for
-    /// it against a build that predates it fails the subscription outright.
-    async fn progress_protocol_version_supported(&self) -> anyhow::Result<bool> {
-        let data = self
-            .graphql(
-                r#"{ __type(name: "UnshieldedTransactionsProgress") { fields { name } } }"#,
-                json!({}),
-            )
-            .await?;
-        Ok(data["__type"]["fields"]
-            .as_array()
-            .is_some_and(|fields| fields.iter().any(|f| f["name"] == "protocolVersion")))
-    }
-
     async fn indexed_height(&self) -> anyhow::Result<u64> {
         let data = self.graphql("{ block { height } }", json!({})).await?;
         data["block"]["height"]
@@ -360,8 +347,35 @@ impl Harness {
     }
 }
 
-/// An unshielded progress subscription held open for the whole crossing, recording every
-/// `(highest_transaction_id, protocol_version)` frame it receives.
+/// One progress frame, with the moment it arrived. The arrival times are what make the second
+/// half of midnight-indexer#1463 observable: the tip protocol version joins each stream's idle
+/// backoff change detection, so a subscription that slept through a fork returns to the base
+/// interval instead of staying backed off at the cap.
+#[derive(Debug, Clone, Copy)]
+struct ProgressFrame {
+    highest_transaction_id: u64,
+    protocol_version: u64,
+    at: Instant,
+}
+
+/// What the watcher task has seen so far.
+#[derive(Debug, Default)]
+struct ProgressState {
+    frames: Vec<ProgressFrame>,
+
+    /// The first stream error, if any. This test's premise is that the subscription is never
+    /// re-established across a live governance runtime upgrade, which makes a dropped socket its
+    /// likeliest failure and the one most in need of a legible message — so the error is kept
+    /// rather than discarded, and the wait below fails on it instead of timing out blind.
+    error: Option<String>,
+
+    /// Whether the stream ended, for any reason. Distinguishes "closed after N frames" from
+    /// "still open, N frames, no ledger-9 version yet".
+    closed: bool,
+}
+
+/// An unshielded progress subscription held open for the whole crossing, recording every frame
+/// it receives.
 ///
 /// This is the wallet the field exists for: it owns an address that never transacts, so it
 /// receives nothing but progress updates and the protocol version they carry is the only thing
@@ -369,7 +383,7 @@ impl Harness {
 /// makes the observation meaningful — a reconnect would read the new version from a fresh query
 /// rather than from the stream.
 struct ProgressWatcher {
-    frames: Arc<Mutex<Vec<(u64, u64)>>>,
+    state: Arc<Mutex<ProgressState>>,
     task: JoinHandle<()>,
 }
 
@@ -390,33 +404,77 @@ impl ProgressWatcher {
         .await
         .context("subscribe to unshielded progress")?;
 
-        let frames = Arc::new(Mutex::new(Vec::new()));
-        let sink = frames.clone();
+        let state = Arc::new(Mutex::new(ProgressState::default()));
+        let sink = state.clone();
 
         let task = tokio::spawn(async move {
             let mut events = pin!(events);
-            while let Some(Ok(event)) = events.next().await {
-                let progress = &event["unshieldedTransactions"];
-                if let (Some(id), Some(version)) = (
-                    progress["highestTransactionId"].as_u64(),
-                    progress["protocolVersion"].as_u64(),
-                ) {
-                    sink.lock()
-                        .expect("progress frames mutex poisoned")
-                        .push((id, version));
+
+            loop {
+                match events.next().await {
+                    Some(Ok(event)) => {
+                        let progress = &event["unshieldedTransactions"];
+                        if let (Some(highest_transaction_id), Some(protocol_version)) = (
+                            progress["highestTransactionId"].as_u64(),
+                            progress["protocolVersion"].as_u64(),
+                        ) {
+                            sink.lock()
+                                .expect("progress state mutex poisoned")
+                                .frames
+                                .push(ProgressFrame {
+                                    highest_transaction_id,
+                                    protocol_version,
+                                    at: Instant::now(),
+                                });
+                        }
+                    }
+
+                    Some(Err(error)) => {
+                        let mut state = sink.lock().expect("progress state mutex poisoned");
+                        state.error = Some(format!("{error:#}"));
+                        state.closed = true;
+                        break;
+                    }
+
+                    None => {
+                        sink.lock().expect("progress state mutex poisoned").closed = true;
+                        break;
+                    }
                 }
             }
         });
 
-        Ok(Self { frames, task })
+        Ok(Self { state, task })
     }
 
-    fn frames(&self) -> Vec<(u64, u64)> {
-        self.frames
-            .lock()
-            .expect("progress frames mutex poisoned")
-            .clone()
+    /// The frames so far, plus the stream error and whether it ended.
+    fn snapshot(&self) -> (Vec<ProgressFrame>, Option<String>, bool) {
+        let state = self.state.lock().expect("progress state mutex poisoned");
+        (state.frames.clone(), state.error.clone(), state.closed)
     }
+
+    /// Describes what the subscription has done, for a failure message.
+    fn describe(&self) -> String {
+        let (frames, error, closed) = self.snapshot();
+        let versions = frames
+            .iter()
+            .map(|frame| frame.protocol_version)
+            .collect::<Vec<_>>();
+        let liveness = match (&error, closed) {
+            (Some(error), _) => format!("stream failed: {error}"),
+            (None, true) => "stream closed cleanly".to_string(),
+            (None, false) => "stream still open".to_string(),
+        };
+        format!("{} frame(s) {versions:?}, {liveness}", frames.len())
+    }
+}
+
+/// Gaps between consecutive frame arrivals, in order.
+fn frame_gaps(frames: &[ProgressFrame]) -> Vec<Duration> {
+    frames
+        .windows(2)
+        .map(|pair| pair[1].at.duration_since(pair[0].at))
+        .collect()
 }
 
 /// Poll `f` until it returns `Some`, or fail after `timeout`.
@@ -466,7 +524,12 @@ fn const_hex_decode(s: &str) -> anyhow::Result<Vec<u8>> {
         .collect()
 }
 
-#[tokio::test]
+// A multi-threaded runtime, not the `#[tokio::test]` default of one thread: every docker and
+// toolkit call below is a *blocking* `std::process::Command`, and the runtime-upgrade one runs
+// for minutes. On a single thread those park the only worker, so the progress subscription task
+// cannot poll and its frames arrive as one drained burst — which both starves the subscription
+// this test depends on and makes the frame arrival times meaningless.
+#[tokio::test(flavor = "multi_thread")]
 #[ignore = "boots docker containers and drives a live runtime upgrade; run explicitly"]
 async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
     let registry = image_registry();
@@ -629,21 +692,15 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
         pre_fork_balances.len()
     );
 
-    // Open the idle progress subscription now, so it spans the upgrade rather than being
-    // established after it. Skipped, loudly, on a build without the field.
+    // --- 4b. Hold an idle progress subscription open across the fork --------
+    //
+    // Opened now, before the upgrade, so it spans the crossing rather than being established
+    // after it. Not gated on a probe: `protocolVersion` is served by the very tree this test
+    // compiles and runs, so its absence is a defect to fail on, not an environment to skip for.
     let network_id = NetworkId::try_from("undeployed").expect("undeployed is a network id");
     let unused_address = encode_address([0u8; 32], AddressType::Unshielded, &network_id);
-    let progress = if harness.progress_protocol_version_supported().await? {
-        let watcher = ProgressWatcher::start(&harness.ws_api_url(), &unused_address).await?;
-        println!("[4] watching progress updates for an address with no transactions");
-        Some(watcher)
-    } else {
-        println!(
-            "[4] WARNING: this build does not serve UnshieldedTransactionsProgress.\
-             protocolVersion (midnight-indexer#1463), so the fork-observation check is skipped"
-        );
-        None
-    };
+    let progress = ProgressWatcher::start(&harness.ws_api_url(), &unused_address).await?;
+    println!("[4b] watching progress updates for an address with no transactions");
 
     // --- 5. Governance runtime upgrade --------------------------------------
     println!("[5] driving the governance runtime upgrade");
@@ -713,41 +770,105 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
     // Everything above proves the indexer crossed. This proves a wallet can *tell*: without the
     // protocol version on progress updates, an address with no transactions has no way to learn
     // that the codec its stream is encoded at has changed.
-    if let Some(progress) = &progress {
-        let frames = wait_for(
-            "a ledger-9 protocol version on the idle subscription",
-            Duration::from_secs(120),
-            || async {
-                harness.assert_indexer_healthy("progress observation")?;
-                let frames = progress.frames();
-                Ok(frames
-                    .iter()
-                    .any(|(_, version)| *version >= LEDGER_9_SPEC_VERSION)
-                    .then_some(frames))
-            },
-        )
-        .await?;
+    //
+    // Waits for a *second* ledger-9 frame, because the gap between the two is what shows the
+    // idle backoff reset (the other half of the change) — the frame carrying the new version is
+    // emitted with the interval already back at base, so the sleep that follows it is the
+    // measurement.
+    let frames = wait_for(
+        "two ledger-9 protocol versions on the idle subscription",
+        Duration::from_secs(120),
+        || async {
+            harness.assert_indexer_healthy("progress observation")?;
 
-        assert!(
-            frames
+            let (frames, error, closed) = progress.snapshot();
+            if let Some(error) = error {
+                bail!(
+                    "the progress subscription failed after {} frame(s): {error}",
+                    frames.len()
+                );
+            }
+            if closed {
+                bail!(
+                    "the progress subscription closed after {} frame(s) without reporting a \
+                     ledger-9 protocol version",
+                    frames.len()
+                );
+            }
+
+            let crossed = frames
                 .iter()
-                .any(|(_, version)| *version < LEDGER_9_SPEC_VERSION),
-            "the subscription never reported a ledger-8 protocol version, so it cannot have \
-             observed a crossing: {frames:?}"
-        );
-        assert!(
-            frames.iter().all(|(id, _)| *id == 0),
-            "the watched address received a transaction, so any version it learned could have \
-             come from that instead of from the progress updates: {frames:?}"
-        );
-        println!(
-            "[6] idle subscription observed protocol version {:?} -> {:?} over {} frames, \
-             never receiving a transaction",
-            frames.first().map(|(_, version)| *version),
-            frames.last().map(|(_, version)| *version),
-            frames.len()
-        );
-    }
+                .position(|frame| frame.protocol_version >= LEDGER_9_SPEC_VERSION);
+            Ok(crossed
+                .filter(|first| frames.len() > first + 1)
+                .map(|_| frames))
+        },
+    )
+    .await
+    .with_context(|| format!("idle progress subscription: {}", progress.describe()))?;
+
+    let first_ledger_9 = frames
+        .iter()
+        .position(|frame| frame.protocol_version >= LEDGER_9_SPEC_VERSION)
+        .expect("the wait above only returns once a ledger-9 frame exists");
+
+    assert!(
+        frames[..first_ledger_9]
+            .iter()
+            .any(|frame| frame.protocol_version < LEDGER_9_SPEC_VERSION),
+        "the subscription never reported a ledger-8 protocol version, so it cannot have \
+         observed a crossing: {}",
+        progress.describe()
+    );
+    assert!(
+        frames.iter().all(|frame| frame.highest_transaction_id == 0),
+        "the watched address received a transaction, so any version it learned could have come \
+         from that instead of from the progress updates: {}",
+        progress.describe()
+    );
+
+    // The protocol version also feeds idle-backoff change detection, so the fork must pull the
+    // interval back to base. Bounds are deliberately loose: the frame arrival times include
+    // request latency on top of the server's jittered sleep, so they bracket the two regimes
+    // (base 2s ±20%, cap 8x base = 16s ±20%) rather than pinning either.
+    let gaps = frame_gaps(&frames);
+    let backed_off = gaps[..first_ledger_9]
+        .iter()
+        .max()
+        .copied()
+        .unwrap_or_default();
+    let after_crossing = gaps[first_ledger_9];
+
+    assert!(
+        backed_off >= PROGRESS_UPDATE_INTERVAL * 2,
+        "the idle subscription never backed off before the fork (longest pre-fork gap {:?}, \
+         base {:?}), so the reset it is meant to demonstrate would be vacuous: {}",
+        backed_off,
+        PROGRESS_UPDATE_INTERVAL,
+        progress.describe()
+    );
+    assert!(
+        after_crossing <= PROGRESS_UPDATE_INTERVAL * 2,
+        "the protocol version moved but the poll interval stayed backed off: the gap after the \
+         first ledger-9 frame was {:?}, expected about the base interval {:?} (the pre-fork gap \
+         had reached {:?}, cap is {}x base): {}",
+        after_crossing,
+        PROGRESS_UPDATE_INTERVAL,
+        backed_off,
+        IDLE_BACKOFF_MAX_MULTIPLE,
+        progress.describe()
+    );
+
+    println!(
+        "[6b] idle subscription observed protocol version {} -> {} over {} frames, never \
+         receiving a transaction; poll gap {:?} before the crossing -> {:?} after it (base {:?})",
+        frames[0].protocol_version,
+        frames[frames.len() - 1].protocol_version,
+        frames.len(),
+        backed_off,
+        after_crossing,
+        PROGRESS_UPDATE_INTERVAL
+    );
 
     // --- 7. The node's cNIGHT dust replay actually restored something -------
     //
@@ -1013,7 +1134,7 @@ fn start_indexer(dir: &Path, node_rpc_port: u16, api_port: u16) -> anyhow::Resul
         // subscription off to 8x that, which this test has no reason to sit through.
         .env(
             "APP__INFRA__API__SUBSCRIPTION__UNSHIELDED_TRANSACTIONS__PROGRESS_UPDATE_INTERVAL",
-            PROGRESS_UPDATE_INTERVAL,
+            format!("{}s", PROGRESS_UPDATE_INTERVAL.as_secs()),
         )
         .env(
             "APP__INFRA__API__SUBSCRIPTION__PROGRESS_CACHE__TIME_TO_LIVE",
