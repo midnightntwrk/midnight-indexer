@@ -16,6 +16,7 @@ use crate::{
     domain::{self, LedgerStateCache, storage::Storage},
     infra::api::{
         ApiError, ApiResult, ContextExt, OptionExt, ResultExt,
+        ledger_query_limit::LedgerQueryLimiter,
         v4::{
             HexEncoded, decode_session_id,
             merkle_tree_collapsed_update::{CollapsedMerkleTree, MerkleTreeCollapsedUpdate},
@@ -220,6 +221,7 @@ where
     let storage = cx.get_storage::<S>();
     let subscriber = cx.get_subscriber::<B>();
     let ledger_state_cache = cx.get_ledger_state_cache();
+    let ledger_query_limiter = cx.get_ledger_query_limiter();
     let batch_size = cx
         .get_subscription_config()
         .shielded_transactions
@@ -246,6 +248,7 @@ where
                 transaction,
                 storage,
                 ledger_state_cache,
+                ledger_query_limiter,
             )
             .await?;
 
@@ -278,6 +281,7 @@ where
                     transaction,
                     storage,
                     ledger_state_cache,
+                    ledger_query_limiter,
                 )
                 .await?;
 
@@ -297,6 +301,7 @@ async fn make_relevant_transaction<S>(
     transaction: domain::RegularTransaction,
     storage: &S,
     ledger_state_cache: &LedgerStateCache,
+    ledger_query_limiter: &LedgerQueryLimiter,
 ) -> ApiResult<RelevantTransaction<S>>
 where
     S: Storage,
@@ -306,6 +311,9 @@ where
     // Only include a zswap state Merkle tree collapsed update if there is a gap between the queried
     // index and the start index of the transaction.
     let zswap_collapsed_update = if index < transaction.zswap_start_index {
+        // Bound concurrent ledger-DB work (issue #595): hold a permit only around the Merkle-tree
+        // walk, so it is released before this transaction is yielded to the client.
+        let _ledger_permit = ledger_query_limiter.acquire().await;
         let zswap_collapsed_update = ledger_state_cache
             .make_zswap_collapsed_update(
                 index,

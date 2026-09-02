@@ -12,6 +12,7 @@
 // limitations under the License.
 
 pub mod contract_state_cache;
+pub mod ledger_query_limit;
 pub mod progress_cache;
 pub mod quota;
 pub mod v4;
@@ -20,6 +21,7 @@ use crate::{
     domain::{Api, LedgerStateCache, storage::Storage},
     infra::api::{
         contract_state_cache::{ContractStateCache, ContractStateCacheConfig},
+        ledger_query_limit::LedgerQueryLimiter,
         progress_cache::{ProgressCache, ProgressCacheConfig},
         quota::{PerConnectionCounter, QuotaConfig, SubscriptionQuotas},
         v4::dataloader::{
@@ -77,14 +79,21 @@ pub struct AxumApi<S, B> {
     config: Config,
     storage: S,
     subscriber: B,
+    ledger_query_limiter: LedgerQueryLimiter,
 }
 
 impl<S, B> AxumApi<S, B> {
-    pub fn new(config: Config, storage: S, subscriber: B) -> Self {
+    pub fn new(
+        config: Config,
+        storage: S,
+        subscriber: B,
+        ledger_query_limiter: LedgerQueryLimiter,
+    ) -> Self {
         Self {
             config,
             storage,
             subscriber,
+            ledger_query_limiter,
         }
     }
 }
@@ -118,6 +127,7 @@ where
             network_id,
             self.storage,
             self.subscriber,
+            self.ledger_query_limiter,
             request_body_limit as usize,
             max_complexity,
             max_depth,
@@ -274,6 +284,7 @@ fn make_app<S, B>(
     network_id: NetworkId,
     storage: S,
     subscriber: B,
+    ledger_query_limiter: LedgerQueryLimiter,
     request_body_limit: usize,
     max_complexity: usize,
     max_depth: usize,
@@ -295,6 +306,7 @@ where
         ledger_state_cache,
         storage,
         subscriber,
+        ledger_query_limiter,
         max_complexity,
         max_depth,
         subscription_config,
@@ -445,6 +457,8 @@ trait ContextExt {
     fn get_progress_cache(&self) -> &ProgressCache;
 
     fn get_per_connection_counter(&self) -> &Arc<AtomicUsize>;
+
+    fn get_ledger_query_limiter(&self) -> &LedgerQueryLimiter;
 }
 
 impl ContextExt for Context<'_> {
@@ -546,6 +560,11 @@ impl ContextExt for Context<'_> {
             .data::<PerConnectionCounter>()
             .expect("PerConnectionCounter is stored in per-connection Data via on_connection_init")
             .0
+    }
+
+    fn get_ledger_query_limiter(&self) -> &LedgerQueryLimiter {
+        self.data::<LedgerQueryLimiter>()
+            .expect("LedgerQueryLimiter is stored in Context")
     }
 }
 

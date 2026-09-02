@@ -17,6 +17,13 @@ pub mod v1_1;
 
 use serde::Deserialize;
 
+/// Connections held by the ledger DB's pool. storage-core assumes a single writer (see [init]),
+/// so this is pinned at one rather than configurable; callers that size concurrent ledger work
+/// against it read this rather than assume it.
+#[cfg_attr(docsrs, doc(cfg(feature = "standalone")))]
+#[cfg(feature = "standalone")]
+pub const MAX_CONNECTIONS: u32 = 1;
+
 #[cfg(feature = "cloud")]
 pub fn init(config: Config, pool: crate::infra::pool::postgres::PostgresPool) {
     let Config { cache_max_nodes } = config;
@@ -52,7 +59,7 @@ pub async fn init(config: Config) -> Result<(), Error> {
     // the cross-file ordering: a ledger state is durable before its block row can be.
     let pool = sqlite::SqlitePool::new(sqlite::Config {
         cnn_url,
-        max_connections: 1,
+        max_connections: MAX_CONNECTIONS,
         synchronous_full: true,
     })
     .await?;

@@ -1,5 +1,21 @@
 thread_stack_size: "24MiB"
 
+# Cap for the Tokio blocking pool, shared by chain-indexer, wallet-indexer,
+# spo-indexer and the API. Unset = 64, rather than tokio's default of 512, which at
+# the thread_stack_size above would be ~12GiB of thread stacks. A ledger walk holds
+# one of these threads for its whole duration (block_in_place hands the worker's core
+# to a blocking thread), so this is the resource that runs out first.
+# max_blocking_threads: 64
+#
+# Max concurrent ledger-DB-backed GraphQL queries (issue #595): the bound that stops
+# unauthenticated ledger queries from exhausting the shared blocking pool and wedging
+# the runtime (which would also stall indexing). Unset = half of the ledger DB's
+# connection pool less the contract state cache's max_concurrent_loads; for SQLite
+# that is one connection, so this floors at one walk at a time — they serialize on
+# that connection regardless. Must stay below max_blocking_threads; startup fails
+# otherwise.
+# ledger_query_concurrency: 1
+
 application:
   network_id: "undeployed"
   blocks_buffer: 10

@@ -143,6 +143,7 @@ where
         let network_id = cx.get_network_id();
         let quotas = cx.get_subscription_quotas();
         let per_connection_counter = cx.get_per_connection_counter();
+        let ledger_query_limiter = cx.get_ledger_query_limiter();
 
         try_stream! {
             let _quota_guard = quotas
@@ -187,17 +188,24 @@ where
             // state panics inside storage-core rather than returning an error, so this check is
             // what turns a gc'd snapshot (possible when max_snapshot_age is misconfigured to
             // exceed the chain-indexer's ledger_state_retention) into a clean client error.
-            LedgerState::root_loadable(&ledger_state_key, protocol_version.ledger_version())
-                .map_err_into_server_error(|| "check ledger state availability")?
-                .then_some(())
-                .some_or_client_error(|| {
-                    "ledger state for this block is no longer available, re-subscribe with \
-                     a more recent block hash"
-                })?;
+            // Bound concurrent ledger-DB work (issue #595): hold a permit only around the
+            // synchronous availability check and load, and around each collapsed-update walk
+            // below — never across the `yield`s — so a slow consumer cannot pin a permit for the
+            // whole snapshot.
+            let ledger_state = {
+                let _ledger_permit = ledger_query_limiter.acquire().await;
 
-            let ledger_state =
+                LedgerState::root_loadable(&ledger_state_key, protocol_version.ledger_version())
+                    .map_err_into_server_error(|| "check ledger state availability")?
+                    .then_some(())
+                    .some_or_client_error(|| {
+                        "ledger state for this block is no longer available, re-subscribe with \
+                         a more recent block hash"
+                    })?;
+
                 LedgerState::load(&ledger_state_key, protocol_version.ledger_version())
-                    .map_err_into_server_error(|| "load ledger state at block")?;
+                    .map_err_into_server_error(|| "load ledger state at block")?
+            };
 
             // Exclusive end of the generation tree at this block.
             let end_index = ledger_state.dust_generations_first_free();
@@ -257,12 +265,15 @@ where
                 .await
                 .map_err_into_server_error(|| "get next dust generation entry")?
             {
-                let collapsed_merkle_tree = make_collapsed_update(
-                    &ledger_state,
-                    cursor,
-                    entry.generation_mt_index,
-                    protocol_version,
-                )?;
+                let collapsed_merkle_tree = {
+                    let _ledger_permit = ledger_query_limiter.acquire().await;
+                    make_collapsed_update(
+                        &ledger_state,
+                        cursor,
+                        entry.generation_mt_index,
+                        protocol_version,
+                    )?
+                };
 
                 cursor = entry.generation_mt_index + 1;
 
@@ -285,6 +296,7 @@ where
             let final_update = if end_index == 0 {
                 None
             } else {
+                let _ledger_permit = ledger_query_limiter.acquire().await;
                 make_final_collapsed_update(&ledger_state, cursor, last_index, protocol_version)?
             };
             yield DustGenerationsEvent::DustGenerationsProgress(DustGenerationsProgress {

@@ -1224,7 +1224,7 @@ dependencies = [
  "midnight-onchain-runtime 4.0.0",
  "midnight-serialize",
  "midnight-storage-core",
- "midnight-zswap 8.1.0",
+ "midnight-zswap 8.1.1",
  "midnight-zswap 9.0.0",
  "parity-scale-codec",
  "parking_lot",
