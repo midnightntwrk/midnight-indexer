@@ -142,6 +142,11 @@ where
         let ledger_state_cache = cx.get_ledger_state_cache();
         let storage = cx.get_storage::<S>();
 
+        // Bound concurrent ledger-DB work (issue #595): hold a permit across the ledger state
+        // load so this unauthenticated field cannot exhaust the blocking pool that
+        // block_in_place hands the worker's core to.
+        let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
+
         match ledger_state_cache.dust_merkle_tree_roots(storage).await {
             Ok(roots) => Ok(Some(roots.commitment_root.hex_encode())),
             Err(_) => Ok(None),
@@ -155,6 +160,11 @@ where
     ) -> ApiResult<Option<HexEncoded>> {
         let ledger_state_cache = cx.get_ledger_state_cache();
         let storage = cx.get_storage::<S>();
+
+        // Bound concurrent ledger-DB work (issue #595): hold a permit across the ledger state
+        // load so this unauthenticated field cannot exhaust the blocking pool that
+        // block_in_place hands the worker's core to.
+        let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
 
         match ledger_state_cache.dust_merkle_tree_roots(storage).await {
             Ok(roots) => Ok(Some(roots.generation_root.hex_encode())),

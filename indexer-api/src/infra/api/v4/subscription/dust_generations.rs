@@ -15,6 +15,7 @@ use crate::{
     domain::{LedgerStateCache, dust::DustGenerationDtimeUpdateEntry, storage::Storage},
     infra::api::{
         ApiResult, ContextExt, ResultExt,
+        ledger_query_limit::LedgerQueryLimiter,
         v4::{
             HexEncodable, HexEncoded, directives::beta, dust::DustAddress,
             merkle_tree_collapsed_update::MerkleTreeCollapsedUpdate,
@@ -136,6 +137,7 @@ where
         let network_id = cx.get_network_id();
         let quotas = cx.get_subscription_quotas();
         let per_connection_counter = cx.get_per_connection_counter();
+        let ledger_query_limiter = cx.get_ledger_query_limiter();
 
         let block_indexed_stream = subscriber.subscribe::<BlockIndexed>();
 
@@ -200,6 +202,7 @@ where
                     entry.generation_mt_index,
                     storage,
                     ledger_state_cache,
+                    ledger_query_limiter,
                 ).await?;
 
                 cursor = entry.generation_mt_index + 1;
@@ -242,6 +245,7 @@ where
                         entry.generation_mt_index,
                         storage,
                         ledger_state_cache,
+                        ledger_query_limiter,
                     ).await?;
 
                     cursor = entry.generation_mt_index + 1;
@@ -261,7 +265,7 @@ where
                 }
 
                 let final_update = make_final_collapsed_update(
-                    cursor, end_index, storage, ledger_state_cache,
+                    cursor, end_index, storage, ledger_state_cache, ledger_query_limiter,
                 ).await?;
 
                 yield DustGenerationsEvent::DustGenerationsProgress(DustGenerationsProgress {
@@ -294,6 +298,7 @@ where
                         entry.generation_mt_index,
                         storage,
                         ledger_state_cache,
+                        ledger_query_limiter,
                     ).await?;
 
                     cursor = entry.generation_mt_index + 1;
@@ -356,6 +361,7 @@ where
                             entry.generation_mt_index,
                             storage,
                             ledger_state_cache,
+                            ledger_query_limiter,
                         ).await?;
 
                         cursor = entry.generation_mt_index + 1;
@@ -375,7 +381,7 @@ where
                     }
 
                     let final_update = make_final_collapsed_update(
-                        cursor, end_index, storage, ledger_state_cache,
+                        cursor, end_index, storage, ledger_state_cache, ledger_query_limiter,
                     ).await?;
 
                     yield DustGenerationsEvent::DustGenerationsProgress(DustGenerationsProgress {
@@ -398,6 +404,7 @@ async fn make_collapsed_update<S: Storage>(
     entry_index: u64,
     storage: &S,
     ledger_state_cache: &LedgerStateCache,
+    ledger_query_limiter: &LedgerQueryLimiter,
 ) -> ApiResult<Option<MerkleTreeCollapsedUpdate>> {
     if cursor >= entry_index || entry_index == 0 {
         return Ok(None);
@@ -412,6 +419,9 @@ async fn make_collapsed_update<S: Storage>(
         return Ok(None);
     };
 
+    // Bound concurrent ledger-DB work (issue #595): acquire after the SQL above, so the permit
+    // covers the ledger walk only and is released before the caller yields.
+    let _ledger_permit = ledger_query_limiter.acquire().await;
     let update = ledger_state_cache
         .dust_generations_collapsed_update(cursor, entry_index - 1, storage, block.protocol_version)
         .await
@@ -426,6 +436,7 @@ async fn make_final_collapsed_update<S: Storage>(
     end_index: u64,
     storage: &S,
     ledger_state_cache: &LedgerStateCache,
+    ledger_query_limiter: &LedgerQueryLimiter,
 ) -> ApiResult<Option<MerkleTreeCollapsedUpdate>> {
     let block = storage
         .get_latest_block()
@@ -436,6 +447,9 @@ async fn make_final_collapsed_update<S: Storage>(
         return Ok(None);
     };
 
+    // Bound concurrent ledger-DB work (issue #595): acquire after the SQL above, so the permit
+    // covers the ledger walk only and is released before the caller yields.
+    let _ledger_permit = ledger_query_limiter.acquire().await;
     let update = ledger_state_cache
         .dust_generations_collapsed_update(cursor, end_index, storage, block.protocol_version)
         .await;
