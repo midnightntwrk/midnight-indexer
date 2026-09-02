@@ -48,6 +48,39 @@ pub async fn subscribe<T>(
 where
     T: GraphQLQuery,
 {
+    let QueryBody {
+        variables,
+        query,
+        operation_name,
+    } = T::build_query(variables);
+    let variables = serde_json::to_value(variables).context("serialize query variables")?;
+
+    let data = subscribe_raw(url, operation_name, query, variables).await?;
+
+    Ok(data.map(|data| {
+        data.and_then(|data| {
+            serde_json::from_value::<T::ResponseData>(data).context("deserialize response data")
+        })
+    }))
+}
+
+/// Subscribe with a query document given as text, yielding the untyped `data` of every
+/// received message.
+///
+/// The typed [subscribe] above is the default. This one exists for documents that cannot be
+/// generated from `e2e.graphql`, in particular one selecting a field the build under test may
+/// not serve: `e2e.graphql` is shared by every typed operation, so a field that has to be
+/// probed before it is requested cannot live in it.
+///
+/// `use<>`: the stream borrows nothing — the arguments are consumed into the subscribe message
+/// before the socket is read — so it must not capture their lifetimes, or callers cannot hold it
+/// past the call (e.g. move it into a spawned task).
+pub async fn subscribe_raw(
+    url: &str,
+    operation_name: &str,
+    query: &str,
+    variables: Value,
+) -> anyhow::Result<impl Stream<Item = anyhow::Result<Value>> + use<>> {
     let ws_stream = connect_graphql_ws(url)
         .await
         .context("connect graphql websocket connection")?;
@@ -57,12 +90,6 @@ where
     init_graphql_ws(&mut write, &mut read)
         .await
         .context("initialize graphql websocket connection")?;
-
-    let QueryBody {
-        variables,
-        query,
-        operation_name,
-    } = T::build_query(variables);
 
     let subscribe_message = json!({
         "type": "subscribe",
@@ -94,9 +121,7 @@ where
         })
         .try_filter_map(|message| match message {
             ServerMessage::Next { payload } => match (payload.data, payload.errors) {
-                (Some(data), None) => serde_json::from_value::<T::ResponseData>(data)
-                    .map(|data| ok(Some(data)))
-                    .unwrap_or_else(|error| err(anyhow!(error))),
+                (Some(data), None) => ok(Some(data)),
 
                 (None, Some(errors)) => err(anyhow!(
                     errors
@@ -112,6 +137,8 @@ where
             ServerMessage::Complete => ok(None),
 
             ServerMessage::Error { payload } => err(anyhow!(payload)),
+
+            ServerMessage::Other => ok(None),
         });
 
     Ok(messages)
@@ -121,9 +148,18 @@ where
 #[serde(tag = "type")]
 #[serde(rename_all = "snake_case")]
 pub enum ServerMessage {
-    Next { payload: ExecutionResult },
+    Next {
+        payload: ExecutionResult,
+    },
     Complete,
-    Error { payload: Value },
+    Error {
+        payload: Value,
+    },
+
+    /// Anything else, `ping`/`pong` keepalives in particular. A subscription held open for
+    /// minutes has to tolerate those rather than fail on them.
+    #[serde(other)]
+    Other,
 }
 
 #[derive(Debug, Deserialize)]
