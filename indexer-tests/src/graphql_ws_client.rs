@@ -15,8 +15,7 @@ use anyhow::{Context, anyhow, bail};
 use derive_more::Display;
 use futures::{
     SinkExt, Stream, StreamExt, TryStreamExt,
-    future::{err, ok},
-    stream::{SplitSink, SplitStream},
+    stream::{SplitSink, SplitStream, unfold},
 };
 use graphql_client::{GraphQLQuery, QueryBody};
 use serde::Deserialize;
@@ -35,6 +34,13 @@ type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 static CONNECTION_INIT: LazyLock<String> = LazyLock::new(|| {
     json!({
         "type": "connection_init",
+    })
+    .to_string()
+});
+
+static PONG: LazyLock<String> = LazyLock::new(|| {
+    json!({
+        "type": "pong",
     })
     .to_string()
 });
@@ -106,40 +112,81 @@ pub async fn subscribe_raw(
         .await
         .context("send subscribe message")?;
 
-    let messages = read
-        .map(|result| {
-            result
-                .context("get next message")
-                .and_then(|message| match message {
-                    Message::Text(text) => serde_json::from_str::<ServerMessage>(&text)
-                        .with_context(|| {
-                            format!("deserialize text message to ServerMessage: {text}")
-                        }),
+    // The write half is carried alongside the read half rather than dropped here: a
+    // `ping` has to be answered with a `pong`, and a dropped sink cannot answer. A
+    // `None` next-state ends the stream, so an error is terminal, as it was when this
+    // was a `try_filter_map`.
+    let messages = unfold(Some((read, write)), |state| async move {
+        let (mut read, mut write) = state?;
 
-                    _ => Err(anyhow!("unexpected non-text message")),
-                })
-        })
-        .try_filter_map(|message| match message {
-            ServerMessage::Next { payload } => match (payload.data, payload.errors) {
-                (Some(data), None) => ok(Some(data)),
+        loop {
+            let text = match read.next().await {
+                Some(Ok(Message::Text(text))) => text,
 
-                (None, Some(errors)) => err(anyhow!(
-                    errors
-                        .iter()
-                        .map(|e| e.message.to_owned())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )),
+                // Transport-level frames carry nothing for a subscriber. Keepalives and
+                // the peer's own pongs are handled by tungstenite; ignore and read on.
+                Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_))) => continue,
 
-                _ => err(anyhow!("unexpected GraphQL execution result")),
-            },
+                Some(Ok(Message::Close(_))) => return None,
 
-            ServerMessage::Complete => ok(None),
+                Some(Ok(message)) => {
+                    return Some((Err(anyhow!("unexpected message: {message:?}")), None));
+                }
 
-            ServerMessage::Error { payload } => err(anyhow!(payload)),
+                Some(Err(error)) => {
+                    return Some((Err(anyhow!(error).context("get next message")), None));
+                }
 
-            ServerMessage::Other => ok(None),
-        });
+                None => return None,
+            };
+
+            let message = match serde_json::from_str::<ServerMessage>(&text) {
+                Ok(message) => message,
+
+                // Deliberately loud: an unrecognised `type` means the server speaks a
+                // protocol this client does not, which a subscriber must not silently
+                // read as "no data".
+                Err(error) => {
+                    return Some((
+                        Err(anyhow!(error)
+                            .context(format!("deserialize text message to ServerMessage: {text}"))),
+                        None,
+                    ));
+                }
+            };
+
+            match message {
+                ServerMessage::Next { payload } => match (payload.data, payload.errors) {
+                    (Some(data), None) => return Some((Ok(data), Some((read, write)))),
+
+                    (None, Some(errors)) => {
+                        let errors = errors
+                            .iter()
+                            .map(|e| e.message.to_owned())
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        return Some((Err(anyhow!(errors)), None));
+                    }
+
+                    _ => {
+                        return Some((Err(anyhow!("unexpected GraphQL execution result")), None));
+                    }
+                },
+
+                ServerMessage::Complete => return None,
+
+                ServerMessage::Error { payload } => return Some((Err(anyhow!(payload)), None)),
+
+                ServerMessage::Ping => {
+                    if let Err(error) = write.send(Message::text(&*PONG)).await {
+                        return Some((Err(anyhow!(error).context("send pong")), None));
+                    }
+                }
+
+                ServerMessage::Pong => {}
+            }
+        }
+    });
 
     Ok(messages)
 }
@@ -156,10 +203,11 @@ pub enum ServerMessage {
         payload: Value,
     },
 
-    /// Anything else, `ping`/`pong` keepalives in particular. A subscription held open for
-    /// minutes has to tolerate those rather than fail on them.
-    #[serde(other)]
-    Other,
+    /// Keepalives from `graphql-transport-ws`. Either side may send `ping` at any time and the
+    /// receiver answers `pong`; a subscription held open for minutes has to tolerate both rather
+    /// than fail on them. Every *other* `type` still fails to deserialize, and so fails loudly.
+    Ping,
+    Pong,
 }
 
 #[derive(Debug, Deserialize)]
