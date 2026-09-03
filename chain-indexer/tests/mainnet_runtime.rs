@@ -211,6 +211,7 @@ async fn init_ledger_db()
         user: "indexer".to_string(),
         password: "postgres".to_string().into(),
         sslmode: PgSslMode::Prefer,
+        min_connections: 0,
         max_connections: 10,
         idle_timeout: Duration::from_secs(60),
         max_lifetime: Duration::from_secs(5 * 60),
