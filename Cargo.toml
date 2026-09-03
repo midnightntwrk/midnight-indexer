@@ -46,12 +46,12 @@ anyhow                      = { version = "1.0" }
 assert_matches              = { version = "1.5" }
 async-graphql               = { version = "7.2" }
 async-graphql-axum          = { version = "7.2" }
-async-nats                  = { version = "0.49" }
+async-nats                  = { version = "0.50" }
 async-stream                = { version = "0.3" }
 axum                        = { version = "0.8" }
 bech32                      = { version = "0.12" }
 bip32                       = { version = "0.5" }
-blake2                      = { version = "0.10" }
+blake2                      = { version = "0.11" }
 blockfrost                  = { version = "1.2" }
 byte-unit-serde             = { version = "0.1" }
 chacha20poly1305            = { version = "0.10" }
@@ -92,7 +92,7 @@ serde                       = { version = "1.0" }
 serde_json                  = { version = "1.0" }
 serde_with                  = { version = "3.18" }
 sha2                        = { version = "0.11" }
-sqlx                        = { version = "0.8" }
+sqlx                        = { version = "0.9" }
 stream-cancel               = { version = "0.8" }
 subxt                       = { version = "0.50" }
 tempfile                    = { version = "3.27" }
