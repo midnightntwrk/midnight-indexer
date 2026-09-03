@@ -35,6 +35,17 @@
 //! the whole test would pass vacuously against an indexer that never implemented
 //! the wipe at all.
 //!
+//! # `registeredForDustGeneration` across the boundary
+//!
+//! The root comparison covers the ledger's dust state, but not how the indexer
+//! *projects* it into `unshielded_utxos.registered_for_dust_generation`. That
+//! column is a snapshot, computed once when the UTXO is created and never
+//! updated. That is sound while the chain runs -- the ledger's `night_indices`
+//! is append-only -- but a fork that wipes dust strands every entry, so the API
+//! scopes the flag to the chain's current dust epoch. Steps 4b and 8b pin the
+//! `true` -> `false` flip across the boundary; 9b reports the post-fork side when
+//! there is any.
+//!
 //! # Requirements
 //!
 //! Docker, plus these images (see `NODE_VERSIONS` and the `*_TAG` overrides):
@@ -119,6 +130,37 @@ fn docker(args: &[&str]) -> anyhow::Result<String> {
         );
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// One unshielded output as the API reports it, reduced to the fields this test
+/// compares across the fork boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CreatedOutput {
+    output_index: u64,
+    owner: String,
+    registered_for_dust_generation: bool,
+}
+
+impl CreatedOutput {
+    /// Parse an `unshieldedCreatedOutputs` list, ordered by output index.
+    fn parse_list(value: &Value) -> anyhow::Result<Vec<Self>> {
+        let mut outputs = value
+            .as_array()
+            .context("unshieldedCreatedOutputs is not a list")?
+            .iter()
+            .map(|output| {
+                Ok(Self {
+                    output_index: output["outputIndex"].as_u64().context("no outputIndex")?,
+                    owner: output["owner"].as_str().context("no owner")?.to_owned(),
+                    registered_for_dust_generation: output["registeredForDustGeneration"]
+                        .as_bool()
+                        .context("no registeredForDustGeneration")?,
+                })
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        outputs.sort_by_key(|output| output.output_index);
+        Ok(outputs)
+    }
 }
 
 /// The docker network, node container and indexer child process, all torn down
@@ -257,6 +299,45 @@ impl Harness {
         }
 
         Ok(balances)
+    }
+
+    /// Every transaction in blocks `from..=to` that created unshielded outputs,
+    /// as `(transaction hash, outputs)`.
+    ///
+    /// Reads a fixed block range rather than looking transactions up by hash:
+    /// `transactions(offset: { hash })` is plural by design
+    /// (`get_transactions_by_hash`), because a hash is not unique across blocks,
+    /// so a range is the unambiguous way to re-read the same rows later.
+    async fn created_outputs_in_range(
+        &self,
+        from: u64,
+        to: u64,
+    ) -> anyhow::Result<Vec<(String, Vec<CreatedOutput>)>> {
+        let mut found = Vec::new();
+
+        for height in from..=to {
+            let data = self
+                .graphql(
+                    "query($h: Int!) { block(offset: { height: $h }) { transactions { hash \
+                       unshieldedCreatedOutputs { \
+                         owner outputIndex registeredForDustGeneration } } } }",
+                    json!({ "h": height }),
+                )
+                .await?;
+
+            let Some(transactions) = data["block"]["transactions"].as_array() else {
+                continue;
+            };
+            for transaction in transactions {
+                let outputs = CreatedOutput::parse_list(&transaction["unshieldedCreatedOutputs"])?;
+                if !outputs.is_empty() {
+                    let hash = transaction["hash"].as_str().context("no hash")?.to_owned();
+                    found.push((hash, outputs));
+                }
+            }
+        }
+
+        Ok(found)
     }
 
     async fn indexed_height(&self) -> anyhow::Result<u64> {
@@ -523,6 +604,46 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
         pre_fork_balances.len()
     );
 
+    // --- 4b. Pre-fork `registeredForDustGeneration` baseline ----------------
+    //
+    // The flag is a snapshot, not a live view: `registered_for_dust_generation_v8`
+    // / `_v9` (`indexer-common/src/domain/ledger/ledger_state.rs`) ask the ledger
+    // whether the new UTXO's initial nonce is in `dust.generation.night_indices`
+    // at the moment the UTXO is created, and `chain-indexer/src/infra/storage.rs`
+    // writes the answer once, on INSERT. Nothing updates that column afterwards,
+    // and the API exposes the field only through the transaction that created the
+    // UTXO -- there is no "as of now" read of it anywhere in the schema.
+    //
+    // No traffic is needed to observe this. The `dev` preset distributes its
+    // genesis NIGHT as `PayFromTreasuryUnshielded` system transactions in the
+    // first few blocks (measured: 20 single-output transactions across 4
+    // addresses in blocks 0..=5, every one of them `true`), which is exactly the
+    // cohort the wipe strands.
+    //
+    // Deliberately *not* driven by the toolkit: a pre-fork send would add a
+    // second flaky external dependency for rows the chain already provides, and
+    // post-fork the toolkit cannot reliably produce any (see step 9).
+    let pre_fork_created = harness.created_outputs_in_range(0, pre_fork_height).await?;
+    let registered_before = pre_fork_created
+        .iter()
+        .flat_map(|(_, outputs)| outputs)
+        .filter(|output| output.registered_for_dust_generation)
+        .count();
+    assert!(
+        registered_before > 0,
+        "no unshielded output indexed in blocks 0..={pre_fork_height} is registered for dust \
+         generation, so there is no row for the wipe to strand and step 8b would prove nothing: \
+         {pre_fork_created:?}"
+    );
+    println!(
+        "[4b] pre-fork baseline: {registered_before} of {} indexed unshielded outputs in blocks \
+         0..={pre_fork_height} report registeredForDustGeneration = true",
+        pre_fork_created
+            .iter()
+            .map(|(_, outputs)| outputs.len())
+            .sum::<usize>()
+    );
+
     // --- 5. Governance runtime upgrade --------------------------------------
     println!("[5] driving the governance runtime upgrade");
     // Not via `Harness::toolkit`: this one call needs the WASM bind-mounted.
@@ -708,6 +829,69 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
     );
     println!("[8] cNIGHT registrations and generation rates survived the crossing");
 
+    // --- 8b. The wipe clears `registeredForDustGeneration` ------------------
+    //
+    // The ledger's `night_indices` is append-only for the whole normal life of a
+    // chain -- "a nonce, once inserted, is never removed"
+    // (`DustGenerationState::night_indices`) -- and a later registration attaches
+    // generations only to NIGHT outputs of the registering intent itself
+    // (`apply_registration`), never to a UTXO that already exists. So the value
+    // the chain-indexer computes at creation is stable, and storing it is sound
+    // right up to a fork that wipes dust.
+    //
+    // This fork wipes it. Every stranded nonce leaves `night_indices` at once and
+    // those UTXOs stop generating DUST -- which is exactly why step 9 below has to
+    // re-register before it can pay a fee. Nothing retires the stored `true`: the
+    // wipe happens inside the state translation, not via a transaction that could
+    // emit an event.
+    //
+    // The API therefore scopes the flag to the chain's current dust epoch
+    // (`scope_to_dust_epoch` in `indexer-api`'s unshielded storage), the same
+    // mechanism `dust_epoch` already gives `dust_generation_info`. Assert the
+    // result end-to-end: the very rows that read `true` in step 4b must read
+    // `false` now, with everything else about them unchanged.
+    //
+    // The premise is that the wipe really stranded them, so check the generation
+    // set actually shrank: step 8 pinned `post_fork_generations == applied`, i.e.
+    // every surviving entry is one the node replayed for cNIGHT (measured:
+    // 85 -> 52). Without that this assertion could pass on a fork that stranded
+    // nothing.
+    assert!(
+        post_fork_generations < pre_fork_generations,
+        "the dust generation set did not shrink across the fork \
+         ({pre_fork_generations} -> {post_fork_generations}), so no pre-fork registration was \
+         stranded and there is nothing for the epoch scoping to clear"
+    );
+
+    let post_fork_created = harness.created_outputs_in_range(0, pre_fork_height).await?;
+    let expected = pre_fork_created
+        .iter()
+        .map(|(hash, outputs)| {
+            let outputs = outputs
+                .iter()
+                .map(|output| CreatedOutput {
+                    registered_for_dust_generation: false,
+                    ..output.clone()
+                })
+                .collect::<Vec<_>>();
+            (hash.clone(), outputs)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        post_fork_created, expected,
+        "after the fork wiped dust state, the {registered_before} pre-fork outputs that reported \
+         registeredForDustGeneration = true must report false -- the ledger dropped their \
+         generation entries, and their holders cannot pay a fee until they re-register. \
+         Everything else about the rows must be untouched. Before {pre_fork_created:?}, after \
+         {post_fork_created:?}"
+    );
+    println!(
+        "[8b] {} generation entries were stranded by the wipe \
+         ({pre_fork_generations} -> {post_fork_generations}); all {registered_before} pre-fork \
+         outputs in blocks 0..={pre_fork_height} now report registeredForDustGeneration = false",
+        pre_fork_generations - post_fork_generations
+    );
+
     // --- 9. The chain is still usable afterwards (best effort) --------------
     //
     // The wipe takes native NIGHT's generation entries with it and the replay
@@ -774,8 +958,11 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
             )
         });
 
-    match post_fork_traffic {
-        Ok(_) => println!("[9] post-fork ledger-9 transaction submitted"),
+    let post_fork_traffic_landed = match post_fork_traffic {
+        Ok(_) => {
+            println!("[9] post-fork ledger-9 transaction submitted");
+            true
+        }
         Err(error) => {
             let panicked = format!("{error:#}").contains("root should be in the arena");
             println!(
@@ -786,8 +973,9 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
                     ""
                 }
             );
+            false
         }
-    }
+    };
 
     // Whatever the toolkit managed, give the indexer a few more blocks so step 10
     // covers ground on both sides of the boundary.
@@ -801,6 +989,34 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
             .filter(|h| *h >= from_height + 4))
     })
     .await?;
+
+    // --- 9b. The post-fork side, when there is one --------------------------
+    //
+    // Reported, not asserted. A post-fork UTXO is the only place a `false` could
+    // show up -- the wipe stranded the dev wallets' native NIGHT, so a UTXO
+    // created for one of them after the boundary should read `false` until it
+    // re-registers -- but the only source of post-fork unshielded outputs on this
+    // chain is step 9's toolkit, which panics across the boundary about half the
+    // time. On the run that produced this test's numbers there were none at all.
+    //
+    // Asserting a polarity that is absent on half the runs would make the gate
+    // useless, and asserting one nobody has observed would be a guess, so print
+    // what is there and leave the gates to 4b and 8b.
+    if post_fork_traffic_landed {
+        let post_fork_created = harness
+            .created_outputs_in_range(post_fork_height, final_height)
+            .await?;
+        if post_fork_created.is_empty() {
+            println!(
+                "[9b] no post-fork transaction created unshielded outputs in blocks \
+                 {post_fork_height}..={final_height}"
+            );
+        } else {
+            println!("[9b] post-fork unshielded outputs: {post_fork_created:?}");
+        }
+    } else {
+        println!("[9b] no post-fork traffic landed, nothing to report");
+    }
 
     // --- 10. No gap anywhere, boundary and replay window included -----------
     //
