@@ -17,15 +17,33 @@ use indexer_common::{domain::NetworkId, infra::pool, telemetry};
 use serde::Deserialize;
 use spo_indexer::{
     application::{self as spo_app, StakeRefreshConfig},
-    infra::spo_client,
+    infra::spo_client::{self, HttpPoolConfig},
 };
-use std::{num::NonZeroUsize, time::Duration};
+use std::{
+    num::{NonZeroU32, NonZeroUsize},
+    time::Duration,
+};
 use wallet_indexer::application as wallet_app;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     #[serde(with = "byte_unit_serde")]
     pub thread_stack_size: u64,
+
+    /// Cap for the Tokio blocking pool. `None` uses
+    /// [`DEFAULT_MAX_BLOCKING_THREADS`](indexer_api::infra::api::ledger_query_limit::DEFAULT_MAX_BLOCKING_THREADS)
+    /// rather than tokio's default of 512, which at `thread_stack_size` would be gigabytes of
+    /// thread stacks. A ledger walk occupies one of these threads for its whole duration.
+    #[serde(default)]
+    pub max_blocking_threads: Option<NonZeroUsize>,
+
+    /// Maximum concurrent ledger-DB-backed GraphQL queries (issue #595). `None` defaults to half
+    /// of the ledger DB's connection pool less `contract_state_cache.max_concurrent_loads`; for
+    /// standalone's SQLite that is one connection, hence one permit. Must stay below
+    /// `max_blocking_threads`, or ledger queries can still exhaust the blocking pool and wedge the
+    /// runtime.
+    #[serde(default)]
+    pub ledger_query_concurrency: Option<NonZeroUsize>,
 
     #[serde(rename = "application")]
     pub application_config: ApplicationConfig,
@@ -48,6 +66,10 @@ pub struct ApplicationConfig {
     pub caught_up_leeway: u32,
     #[serde(with = "humantime_serde", default = "gc_bound_default")]
     pub gc_bound: Duration,
+    #[serde(default = "gc_interval_default")]
+    pub gc_interval: NonZeroU32,
+    #[serde(default)]
+    pub arena_metrics_interval: u32,
     #[serde(default = "ledger_state_retention_default")]
     pub ledger_state_retention: NonZeroUsize,
     #[serde(with = "humantime_serde")]
@@ -61,6 +83,10 @@ pub struct ApplicationConfig {
 
 fn gc_bound_default() -> Duration {
     Duration::from_millis(200)
+}
+
+fn gc_interval_default() -> NonZeroU32 {
+    NonZeroU32::new(25).expect("25 is not zero")
 }
 
 fn ledger_state_retention_default() -> NonZeroUsize {
@@ -92,6 +118,8 @@ impl From<ApplicationConfig> for chain_app::Config {
             caught_up_max_distance,
             caught_up_leeway,
             gc_bound,
+            gc_interval,
+            arena_metrics_interval,
             ledger_state_retention,
             ..
         } = config;
@@ -102,6 +130,8 @@ impl From<ApplicationConfig> for chain_app::Config {
             caught_up_max_distance,
             caught_up_leeway,
             gc_bound,
+            gc_interval,
+            arena_metrics_interval,
             ledger_state_retention,
         }
     }
@@ -173,6 +203,8 @@ pub struct SpoNodeConfig {
     #[serde(with = "humantime_serde")]
     pub reconnect_max_delay: Duration,
     pub reconnect_max_attempts: usize,
+    #[serde(default)]
+    pub http_pool: HttpPoolConfig,
 }
 
 impl From<SpoNodeConfig> for spo_client::Config {
@@ -182,6 +214,7 @@ impl From<SpoNodeConfig> for spo_client::Config {
             blockfrost_id: secrecy::SecretString::from(config.blockfrost_id),
             reconnect_max_delay: config.reconnect_max_delay,
             reconnect_max_attempts: config.reconnect_max_attempts,
+            http_pool: config.http_pool,
         }
     }
 }

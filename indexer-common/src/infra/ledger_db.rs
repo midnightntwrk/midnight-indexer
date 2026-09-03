@@ -17,9 +17,18 @@ pub mod v1_1;
 
 use serde::Deserialize;
 
+/// Connections held by the ledger DB's pool. storage-core assumes a single writer (see [init]),
+/// so this is pinned at one rather than configurable; callers that size concurrent ledger work
+/// against it read this rather than assume it.
+#[cfg_attr(docsrs, doc(cfg(feature = "standalone")))]
+#[cfg(feature = "standalone")]
+pub const MAX_CONNECTIONS: u32 = 1;
+
 #[cfg(feature = "cloud")]
 pub fn init(config: Config, pool: crate::infra::pool::postgres::PostgresPool) {
     let Config { cache_max_nodes } = config;
+
+    let _ = OBSERVER.set(v1_1::LedgerDb::new(pool.clone()));
 
     let db = v1_1::LedgerDb::new(pool);
     let _ = midnight_storage_core_v1::storage::set_default_storage(|| {
@@ -36,8 +45,27 @@ pub async fn init(config: Config) -> Result<(), Error> {
         cnn_url,
     } = config;
 
-    let pool = sqlite::SqlitePool::new(sqlite::Config { cnn_url }).await?;
+    // storage-core assumes a single writer: `flush_*` reads root counts and
+    // then writes new ones, and that read-then-write must observe its own
+    // in-progress state. With max_connections > 1, sqlx can route the read to
+    // a different connection whose WAL snapshot predates the writer, breaking
+    // the invariant and producing "roots counts can't be negative" panics.
+    //
+    // `synchronous_full`: chain-indexer commits the ledger state BEFORE the block row in the
+    // main DB and the resume path relies on the on-disk ledger DB being at least as new as
+    // the main DB. With NORMAL both files fsync independently at checkpoints, so a power
+    // loss could keep block N in the main DB while dropping N's ledger state here - the
+    // startup filter would then silently seed from an older state and diverge. FULL keeps
+    // the cross-file ordering: a ledger state is durable before its block row can be.
+    let pool = sqlite::SqlitePool::new(sqlite::Config {
+        cnn_url,
+        max_connections: MAX_CONNECTIONS,
+        synchronous_full: true,
+    })
+    .await?;
     migrations::sqlite::run_for_ledger_db(&pool).await?;
+
+    let _ = OBSERVER.set(v1_1::LedgerDb::new(pool.clone()));
 
     let db = v1_1::LedgerDb::new(pool);
     let _ = midnight_storage_core_v1::storage::set_default_storage(|| {
@@ -45,6 +73,26 @@ pub async fn init(config: Config) -> Result<(), Error> {
     });
 
     Ok(())
+}
+
+/// A second handle on the ledger DB, held only for observability: storage-core keeps its own `DB`
+/// private behind `StorageBackend`, so there is no way to ask the arena how many rows its database
+/// has.
+#[cfg_attr(docsrs, doc(cfg(any(feature = "cloud", feature = "standalone"))))]
+#[cfg(any(feature = "cloud", feature = "standalone"))]
+static OBSERVER: std::sync::OnceLock<v1_1::LedgerDb> = std::sync::OnceLock::new();
+
+/// The number of rows in `ledger_db_nodes`, or `None` before [init] has run.
+///
+/// This is a full count, not an estimate, so it is proportional to the size of the arena and has no
+/// business running per block on a large network. Sample it on an interval; see chain-indexer's
+/// `arena_metrics_interval`.
+#[cfg_attr(docsrs, doc(cfg(any(feature = "cloud", feature = "standalone"))))]
+#[cfg(any(feature = "cloud", feature = "standalone"))]
+pub fn node_count() -> Option<usize> {
+    use midnight_storage_core_v1::db::DB;
+
+    OBSERVER.get().map(|db| db.size())
 }
 
 #[derive(Debug, Clone, Deserialize)]

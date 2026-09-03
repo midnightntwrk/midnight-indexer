@@ -207,6 +207,21 @@ impl domain::storage::Storage for Storage {
     }
 
     #[trace]
+    async fn contract_actions_without_state_keys_exist(&self) -> Result<bool, sqlx::Error> {
+        let query = indoc! {"
+            SELECT 1
+            FROM contract_actions
+            WHERE state_key IS NULL AND zswap_state_key IS NULL
+            LIMIT 1
+        "};
+
+        sqlx::query(query)
+            .fetch_optional(&*self.pool)
+            .await
+            .map(|row| row.is_some())
+    }
+
+    #[trace]
     async fn get_latest_d_parameter(&self) -> Result<Option<DParameter>, sqlx::Error> {
         let query = indoc! {"
             SELECT num_permissioned_candidates, num_registered_candidates
@@ -523,7 +538,13 @@ async fn save_regular_transaction(
     )
     .await?;
 
-    save_dust_generation_info(&transaction.ledger_events, transaction_id, tx).await?;
+    save_dust_generation_info(
+        &transaction.ledger_events,
+        transaction.protocol_version.ledger_version().dust_epoch(),
+        transaction_id,
+        tx,
+    )
+    .await?;
 
     save_dust_nullifiers(&transaction.ledger_events, transaction_id, block_id, tx).await?;
 
@@ -549,7 +570,13 @@ async fn save_system_transaction(
 
     save_ledger_events(&transaction.ledger_events, &[], &[], transaction_id, tx).await?;
 
-    save_dust_generation_info(&transaction.ledger_events, transaction_id, tx).await
+    save_dust_generation_info(
+        &transaction.ledger_events,
+        transaction.protocol_version.ledger_version().dust_epoch(),
+        transaction_id,
+        tx,
+    )
+    .await
 }
 
 /// Save the contract actions and their balances, returning the freshly
@@ -570,8 +597,8 @@ async fn save_contract_actions(
             transaction_id,
             variant,
             address,
-            state,
-            zswap_state,
+            state_key,
+            zswap_state_key,
             attributes
         )
     "};
@@ -581,8 +608,8 @@ async fn save_contract_actions(
             q.push_bind(transaction_id)
                 .push_bind(ContractActionVariant::from(&action.attributes))
                 .push_bind(&action.address)
-                .push_bind(&action.state)
-                .push_bind(&action.zswap_state)
+                .push_bind(action.state_key.as_ref())
+                .push_bind(action.zswap_state_key.as_ref())
                 .push_bind(Json(&action.attributes));
         })
         .push(" RETURNING id")
@@ -911,9 +938,18 @@ fn correlate_contract_action_ids(
         .collect()
 }
 
+/// `dust_epoch` is the incarnation of the DUST generation tree these events
+/// belong to, taken from the ledger version the transaction was applied against
+/// (see `LedgerVersion::dust_epoch`). A hard fork that wipes dust starts the
+/// tree over, and rows from the previous epoch stay behind un-retired -- the
+/// wipe happens inside the state translation, so no `DustGenerationDtimeUpdate`
+/// ever fires for them. Stamping the epoch is what lets readers ignore them
+/// instead of double-counting balances and serving indices into a tree that no
+/// longer exists.
 #[trace(properties = { "transaction_id": "{transaction_id}" })]
 async fn save_dust_generation_info(
     ledger_events: &[LedgerEvent],
+    dust_epoch: i64,
     transaction_id: i64,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
@@ -940,9 +976,10 @@ async fn save_dust_generation_info(
                         backing_night,
                         initial_value,
                         dtime,
-                        transaction_id
+                        transaction_id,
+                        dust_epoch
                     )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                 "};
 
                 let dtime = if generation_info.dtime == u64::MAX {
@@ -963,6 +1000,7 @@ async fn save_dust_generation_info(
                     .bind(U128BeBytes::from(&output.initial_value))
                     .bind(dtime)
                     .bind(transaction_id)
+                    .bind(dust_epoch)
                     .execute(&mut **tx)
                     .await?;
             }
@@ -974,11 +1012,13 @@ async fn save_dust_generation_info(
                     UPDATE dust_generation_info
                     SET dtime = $1
                     WHERE night_utxo_hash = $2
+                    AND dust_epoch = $3
                 "};
 
                 sqlx::query(query)
                     .bind(generation_info.dtime as i64)
                     .bind(generation_info.night_utxo_hash.as_ref())
+                    .bind(dust_epoch)
                     .execute(&mut **tx)
                     .await?;
             }
@@ -1539,8 +1579,8 @@ mod contract_event_correlation_tests {
     fn call_action(address: &[u8], entry_point: &str) -> ContractAction {
         ContractAction {
             address: bv(address),
-            state: bv(b""),
-            zswap_state: bv(b""),
+            state_key: None,
+            zswap_state_key: None,
             extracted_balances: vec![],
             attributes: ContractAttributes::Call {
                 entry_point: entry_point.to_string(),
@@ -1551,8 +1591,8 @@ mod contract_event_correlation_tests {
     fn deploy_action(address: &[u8]) -> ContractAction {
         ContractAction {
             address: bv(address),
-            state: bv(b""),
-            zswap_state: bv(b""),
+            state_key: None,
+            zswap_state_key: None,
             extracted_balances: vec![],
             attributes: ContractAttributes::Deploy,
         }

@@ -75,6 +75,15 @@ on:
         description: Node toolkit tag (leave empty for the startup script default)
         required: false
         default: ""
+      image_registry:
+        type: string
+        description: >-
+          Registry for the indexer images (leave empty for the docker-compose
+          default, Docker Hub midnightntwrk). Per-commit main-branch builds
+          are published to GHCR only, so callers that test those images must
+          set this explicitly.
+        required: false
+        default: ""
     secrets:
       MIDNIGHTCI_PACKAGES_READ:
         required: true
@@ -116,6 +125,7 @@ jobs:
           node_tag: ${{ inputs.node_tag }}
           indexer_tag: ${{ inputs.indexer_tag }}
           node_toolkit_tag: ${{ inputs.node_toolkit_tag }}
+          image_registry: ${{ inputs.image_registry }}
           publish_to_xray: ${{ inputs.publish_to_xray }}
           packages_read_token: ${{ secrets.MIDNIGHTCI_PACKAGES_READ }}
           app_infra_secret: ${{ secrets.APP__INFRA__SECRET }}

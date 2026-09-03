@@ -108,11 +108,10 @@ async fn test_finalized_blocks_node_1_0() -> anyhow::Result<()> {
 
 /// Ingest the exact mainnet blocks at the runtime upgrade boundary via the public mainnet
 /// RPC. This covers both v4.0.x outage failure modes on the very blocks where they occurred:
-/// block 1_774_491 contains a contract call, so ingesting it exercises the node 0.22
-/// `get_contract_state` runtime API against a chain that already runs the 1.0 runtime
-/// ("The static Runtime API address used is not compatible with the live chain" on v4.0.x);
-/// block 1_774_492 is the first block built by the 1.0 runtime ("unsupported protocol
-/// version 1000000" on v4.0.x).
+/// block 1_774_491 contains a contract call, so ingesting it exercises decoding a block whose
+/// content runtime differs from its state runtime ("The static Runtime API address used is not
+/// compatible with the live chain" on v4.0.x); block 1_774_492 is the first block built by the
+/// 1.0 runtime ("unsupported protocol version 1000000" on v4.0.x).
 ///
 /// Requires network access, hence ignored by default; run explicitly:
 /// `cargo nextest run -p chain-indexer --features cloud --run-ignored all -E
@@ -164,7 +163,12 @@ async fn test_mainnet_runtime_upgrade_boundary() -> anyhow::Result<()> {
                 == const_hex::decode(CONTRACT_ADDRESS).expect("valid address")
         })
         .context("mainnet block 1_774_491 must contain the known contract call")?;
-    assert!(!contract_action.state.as_ref().is_empty());
+    // The node adapter no longer fetches contract state: it is captured from the indexer's own
+    // ledger state once per block, after all transactions are applied, so an action coming straight
+    // off the block stream carries no key yet. Asserting that guards against reintroducing a
+    // per-action runtime API call here.
+    assert!(contract_action.state_key.is_none());
+    assert!(contract_action.zswap_state_key.is_none());
 
     let block = blocks
         .try_next()

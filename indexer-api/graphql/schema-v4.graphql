@@ -464,6 +464,10 @@ type ContractCall implements ContractAction {
 	"""
 	address: HexEncoded!
 	"""
+	The entry point.
+	"""
+	entryPoint: String!
+	"""
 	The hex-encoded serialized state.
 	"""
 	state: HexEncoded!
@@ -471,10 +475,6 @@ type ContractCall implements ContractAction {
 	The hex-encoded serialized contract-specific zswap state.
 	"""
 	zswapState: HexEncoded!
-	"""
-	The entry point.
-	"""
-	entryPoint: String!
 	"""
 	Transaction for this contract call.
 	"""
@@ -909,6 +909,12 @@ type DustGenerationsProgress @beta {
 	Final collapsed Merkle tree update covering remaining range.
 	"""
 	collapsedMerkleTree: MerkleTreeCollapsedUpdate
+	"""
+	The protocol version at the snapshot's block, i.e. the one this snapshot is encoded at.
+	Allows a wallet without any generations to observe a protocol upgrade, which it would
+	otherwise only learn about from the items it receives.
+	"""
+	protocolVersion: Int!
 }
 
 type DustInitialUtxo implements DustLedgerEvent {
@@ -1826,6 +1832,14 @@ type ShieldedTransactionsProgress {
 	no relevant transactions have been indexed for the subscribing wallet.
 	"""
 	highestRelevantEndIndex: Int! @deprecated(reason: "Use highestRelevantZswapEndIndex instead")
+	"""
+	The protocol version at the tip of the chain, i.e. the one currently in effect, not the
+	one the transactions of this subscription were indexed at. Allows a wallet without any
+	relevant transactions to observe a protocol upgrade, which it would otherwise only learn
+	about from the transactions it receives. A value of zero means that no block has been
+	indexed yet.
+	"""
+	protocolVersion: Int!
 }
 
 """
@@ -2426,6 +2440,14 @@ type UnshieldedTransactionsProgress {
 	The highest transaction ID of all currently known transactions for a subscribed address.
 	"""
 	highestTransactionId: Int!
+	"""
+	The protocol version at the tip of the chain, i.e. the one currently in effect, not the
+	one the transactions of this subscription were indexed at. Allows a wallet without any
+	transactions to observe a protocol upgrade, which it would otherwise only learn about
+	from the transactions it receives. A value of zero means that no block has been indexed
+	yet.
+	"""
+	protocolVersion: Int!
 }
 
 """

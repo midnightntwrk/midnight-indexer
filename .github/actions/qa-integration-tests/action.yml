@@ -24,6 +24,13 @@ inputs:
     description: Node toolkit image tag (undeployed only; empty uses the startup script default)
     required: false
     default: ""
+  image_registry:
+    description: >-
+      Registry for the indexer images (empty uses the docker-compose default,
+      Docker Hub midnightntwrk). Per-commit main-branch builds are published to
+      GHCR only, so callers testing those images must set this explicitly.
+    required: false
+    default: ""
   publish_to_xray:
     description: Publish the test results to Xray
     required: false
@@ -76,6 +83,31 @@ runs:
         username: MidnightCI
         password: ${{ inputs.packages_read_token }}
 
+    # Pulling up front keeps registry/auth/tag failures out of the startup step
+    # (they fail here with a one-glance log instead) and lets the step timings
+    # separate download time from environment startup time. Images already
+    # present make this a cheap manifest check.
+    - name: Pull images
+      if: inputs.target_env == 'undeployed'
+      shell: bash
+      env:
+        NODE_TAG: ${{ inputs.node_tag }}
+        INDEXER_TAG: ${{ inputs.indexer_tag }}
+        NODE_TOOLKIT_TAG: ${{ inputs.node_toolkit_tag }}
+        IMAGE_REGISTRY: ${{ inputs.image_registry }}
+      run: |
+        docker compose --profile cloud pull
+        # Used by qa/scripts/startup-localenv-with-data.sh for volume setup.
+        docker pull alpine
+        # Used by the toolkit wrapper for test data generation; the registry is
+        # hardcoded there (qa/tests/utils/toolkit/toolkit-wrapper.ts) and this
+        # pull must match it. The tag default mirrors
+        # startup-localenv-with-data.sh. Docker Hub's
+        # midnightntwrk/midnight-node-toolkit cannot be used here: it only
+        # carries the toolkit's own release tags and latest-main, not the
+        # node-paired tags this action passes.
+        docker pull "ghcr.io/midnight-ntwrk/midnight-node-toolkit:${NODE_TOOLKIT_TAG:-latest-main}"
+
     - name: Startup local environment
       if: inputs.target_env == 'undeployed'
       shell: bash
@@ -83,10 +115,21 @@ runs:
         NODE_TAG: ${{ inputs.node_tag }}
         INDEXER_TAG: ${{ inputs.indexer_tag }}
         NODE_TOOLKIT_TAG: ${{ inputs.node_toolkit_tag }}
+        # Empty falls through to the docker-compose default (midnightntwrk).
+        IMAGE_REGISTRY: ${{ inputs.image_registry }}
         APP__INFRA__SECRET: ${{ inputs.app_infra_secret }}
         APP__INFRA__STORAGE__PASSWORD: ${{ inputs.storage_password }}
         APP__INFRA__PUB_SUB__PASSWORD: ${{ inputs.pub_sub_password }}
       run: |
+        # No APP__INFRA__* secrets are configured for this repo (repo and org
+        # level), leaving these empty - an empty POSTGRES_PASSWORD makes the
+        # postgres container restart-loop and the whole environment never comes
+        # up. The local environment is ephemeral, so random values suffice (same
+        # approach as .github/actions/init-env); secrets still win when present.
+        export APP__INFRA__SECRET="${APP__INFRA__SECRET:-$(openssl rand -hex 32)}"
+        export APP__INFRA__STORAGE__PASSWORD="${APP__INFRA__STORAGE__PASSWORD:-$(openssl rand -hex 32)}"
+        export APP__INFRA__PUB_SUB__PASSWORD="${APP__INFRA__PUB_SUB__PASSWORD:-$(openssl rand -hex 32)}"
+
         . ./.envrc
         echo "NODE_TAG: $NODE_TAG"
         echo "INDEXER_TAG: $INDEXER_TAG"

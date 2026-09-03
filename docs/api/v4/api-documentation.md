@@ -476,6 +476,13 @@ All ContractAction types (ContractDeploy, ContractCall, ContractUpdate) implemen
 - `zswapState`: The contract-specific zswap state at this action (HexEncoded)
 - `transaction`: The transaction that contains this action
 
+`state` and `zswapState` are resolved from the ledger on demand, so they are by
+far the most expensive fields on a contract action — a state can be around a
+megabyte. Select them only when you need them, especially on the queries that
+return many actions (`Contract.actions`, `Transaction.contractActions`) and on the
+`contractActions` subscription. Both resolve to the empty string for an action
+whose transaction failed.
+
 Contract actions can be one of three types:
 - **ContractDeploy**: Initial contract deployment
 - **ContractCall**: Invocation of a contract's entry point

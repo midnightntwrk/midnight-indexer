@@ -84,9 +84,12 @@ jobs:
         env:
           DOCKER_METADATA_SHORT_SHA_LENGTH: 8
         with:
+          # midnight-ntwrk is the legacy GitHub org: dual-publish to the
+          # current midnightntwrk org so internal consumers can migrate,
+          # then the legacy org gets sunset.
           images: |
             ghcr.io/midnight-ntwrk/${{ matrix.image.name }}
-            ${{ github.ref_type == 'tag' && format('midnightntwrk/{0}', matrix.image.name) || '' }}
+            ghcr.io/midnightntwrk/${{ matrix.image.name }}
           flavor: |
             suffix=${{ matrix.platform.suffix }}
           tags: |
@@ -176,9 +179,11 @@ jobs:
         env:
           DOCKER_METADATA_SHORT_SHA_LENGTH: 8
         with:
+          # Keep in sync with the build-and-push images list (legacy org
+          # dual-published with the current midnightntwrk org).
           images: |
             ghcr.io/midnight-ntwrk/${{ matrix.image.name }}
-            ${{ github.ref_type == 'tag' && format('midnightntwrk/{0}', matrix.image.name) || '' }}
+            ghcr.io/midnightntwrk/${{ matrix.image.name }}
           tags: |
             type=semver,pattern={{version}}
             ${{ github.ref_type != 'tag' && format('type=sha,prefix={0}-,format=short', env.VERSION) || '' }}
@@ -317,6 +322,7 @@ jobs:
     continue-on-error: true
     permissions:
       contents: read
+      packages: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -337,6 +343,13 @@ jobs:
           indexer_tag: ${{ steps.tags.outputs.indexer_tag }}-amd64
           node_tag: ${{ steps.tags.outputs.node_tag }}
           node_toolkit_tag: ${{ steps.tags.outputs.node_toolkit_tag }}
+          # Must match `Set image registry` in build-and-push: Docker Hub
+          # (midnightntwrk) only receives release-tag builds, so the per-commit
+          # <version>-<sha8> images this job tests exist on GHCR alone. This job
+          # never runs for a tag ref, so the registry is unconditional here.
+          # midnight-ntwrk is the legacy GHCR org that build-and-push still
+          # dual-publishes to; switch to midnightntwrk once it stops.
+          image_registry: ghcr.io/midnight-ntwrk
           publish_to_xray: "false"
           packages_read_token: ${{ secrets.MIDNIGHTCI_PACKAGES_READ }}
           app_infra_secret: ${{ secrets.APP__INFRA__SECRET }}

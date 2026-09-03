@@ -1,11 +1,32 @@
 thread_stack_size: "24MiB"
 
+# Cap for the Tokio blocking pool, shared by chain-indexer, wallet-indexer,
+# spo-indexer and the API. Unset = 64, rather than tokio's default of 512, which at
+# the thread_stack_size above would be ~12GiB of thread stacks. A ledger walk holds
+# one of these threads for its whole duration (block_in_place hands the worker's core
+# to a blocking thread), so this is the resource that runs out first.
+# max_blocking_threads: 64
+#
+# Max concurrent ledger-DB-backed GraphQL queries (issue #595): the bound that stops
+# unauthenticated ledger queries from exhausting the shared blocking pool and wedging
+# the runtime (which would also stall indexing). Unset = half of the ledger DB's
+# connection pool less the contract state cache's max_concurrent_loads; for SQLite
+# that is one connection, so this floors at one walk at a time — they serialize on
+# that connection regardless. Must stay below max_blocking_threads; startup fails
+# otherwise.
+# ledger_query_concurrency: 1
+
 application:
   network_id: "undeployed"
   blocks_buffer: 10
   caught_up_max_distance: 10
   caught_up_leeway: 5
+  # Budget for one gc pass per block it covers; the pass gets gc_bound * gc_interval.
   gc_bound: "200ms"
+  # Run gc every N blocks with N times the budget: same duty cycle, far fewer partial marks.
+  gc_interval: 25
+  # Sample the ledger DB node count every N blocks, or never if 0. Each sample is a full scan.
+  arena_metrics_interval: 0
   # Recent blocks whose ledger states stay loadable (gc roots). Must comfortably exceed
   # the dust_generations max_snapshot_age.
   ledger_state_retention: 1000
@@ -46,6 +67,11 @@ infra:
     # APP__INFRA__SPO_NODE__BLOCKFROST_ID env var. If you are not exercising
     # SPO features locally, any non-empty placeholder is accepted at startup,
     # e.g. APP__INFRA__SPO_NODE__BLOCKFROST_ID=dummy-not-using-spo
+    #
+    # http_pool:
+    #   max_idle_per_host: 4
+    #   idle_timeout: "30s"
+    #   tcp_keepalive: "60s"
 
   api:
     address: "0.0.0.0"
@@ -84,6 +110,16 @@ infra:
     quota:
       max_concurrent_per_connection: 20
       max_session_subscriptions_per_minute: 10
+    contract_state_cache:
+      # Byte-denominated: a contract state can be around a megabyte, so an entry count would be
+      # meaningless as a memory bound.
+      max_capacity: "512MiB"
+      # Arena keys are content-addressed, so a cached state cannot go stale; this only bounds
+      # memory, hence time-to-idle rather than time-to-live.
+      time_to_idle: "10m"
+      # Each arena load blocks a worker thread and, in cloud deployments, draws on the same
+      # connection pool as ordinary queries.
+      max_concurrent_loads: 6
 
 telemetry:
   tracing:

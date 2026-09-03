@@ -11,11 +11,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::polling::{jittered, jittered_interval, next_poll_interval};
+use super::polling::{jittered, jittered_interval, latest_protocol_version, next_poll_interval};
 use crate::{
     domain::{self, LedgerStateCache, storage::Storage},
     infra::api::{
         ApiError, ApiResult, ContextExt, OptionExt, ResultExt,
+        ledger_query_limit::LedgerQueryLimiter,
         v4::{
             HexEncoded, decode_session_id,
             merkle_tree_collapsed_update::{CollapsedMerkleTree, MerkleTreeCollapsedUpdate},
@@ -108,6 +109,13 @@ struct ShieldedTransactionsProgress {
     /// no relevant transactions have been indexed for the subscribing wallet.
     #[graphql(deprecation = "Use highestRelevantZswapEndIndex instead")]
     highest_relevant_end_index: u64,
+
+    /// The protocol version at the tip of the chain, i.e. the one currently in effect, not the
+    /// one the transactions of this subscription were indexed at. Allows a wallet without any
+    /// relevant transactions to observe a protocol upgrade, which it would otherwise only learn
+    /// about from the transactions it receives. A value of zero means that no block has been
+    /// indexed yet.
+    protocol_version: u32,
 }
 
 pub struct ShieldedTransactionsSubscription<S, B> {
@@ -213,6 +221,7 @@ where
     let storage = cx.get_storage::<S>();
     let subscriber = cx.get_subscriber::<B>();
     let ledger_state_cache = cx.get_ledger_state_cache();
+    let ledger_query_limiter = cx.get_ledger_query_limiter();
     let batch_size = cx
         .get_subscription_config()
         .shielded_transactions
@@ -239,6 +248,7 @@ where
                 transaction,
                 storage,
                 ledger_state_cache,
+                ledger_query_limiter,
             )
             .await?;
 
@@ -271,6 +281,7 @@ where
                     transaction,
                     storage,
                     ledger_state_cache,
+                    ledger_query_limiter,
                 )
                 .await?;
 
@@ -290,6 +301,7 @@ async fn make_relevant_transaction<S>(
     transaction: domain::RegularTransaction,
     storage: &S,
     ledger_state_cache: &LedgerStateCache,
+    ledger_query_limiter: &LedgerQueryLimiter,
 ) -> ApiResult<RelevantTransaction<S>>
 where
     S: Storage,
@@ -299,6 +311,9 @@ where
     // Only include a zswap state Merkle tree collapsed update if there is a gap between the queried
     // index and the start index of the transaction.
     let zswap_collapsed_update = if index < transaction.zswap_start_index {
+        // Bound concurrent ledger-DB work (issue #595): hold a permit only around the Merkle-tree
+        // walk, so it is released before this transaction is yielded to the client.
+        let _ledger_permit = ledger_query_limiter.acquire().await;
         let zswap_collapsed_update = ledger_state_cache
             .make_zswap_collapsed_update(
                 index,
@@ -341,10 +356,12 @@ where
         .progress_update_interval;
 
     // Emit progress immediately, then re-poll after a jittered interval that
-    // backs off while the indices are unchanged (idle) and resets when they move.
-    // The cache lets concurrent subscribers for the same wallet share one query.
+    // backs off while neither the indices nor the protocol version have changed (idle) and
+    // resets when either moves. A protocol upgrade counts as movement, so a subscription that
+    // was idle through a fork returns to the base interval instead of staying backed off. The
+    // cache lets concurrent subscribers for the same wallet share one query.
     let mut current_interval = base;
-    let mut last_indices = None;
+    let mut last_progress = None;
     try_stream! {
         loop {
             let indices = progress_cache
@@ -355,10 +372,12 @@ where
                         .map_err_into_server_error(|| "get highest indices")
                 })
                 .await?;
-            current_interval =
-                next_poll_interval(current_interval, base, last_indices.as_ref() != Some(&indices));
-            last_indices = Some(indices);
-            yield to_progress(indices);
+            let protocol_version = latest_protocol_version::<S>(cx).await?;
+            let progress = (indices, protocol_version);
+            let changed = last_progress.as_ref() != Some(&progress);
+            current_interval = next_poll_interval(current_interval, base, changed);
+            last_progress = Some(progress);
+            yield to_progress(indices, protocol_version);
             sleep(jittered(current_interval)).await;
         }
     }
@@ -366,6 +385,7 @@ where
 
 fn to_progress(
     (highest, highest_checked, highest_relevant): (Option<u64>, Option<u64>, Option<u64>),
+    protocol_version: u32,
 ) -> ShieldedTransactionsProgress {
     let highest_zswap_end_index = highest.unwrap_or_default();
     let highest_checked_zswap_end_index = highest_checked.unwrap_or_default();
@@ -378,6 +398,7 @@ fn to_progress(
         highest_checked_end_index: highest_checked_zswap_end_index,
         highest_relevant_zswap_end_index,
         highest_relevant_end_index: highest_relevant_zswap_end_index,
+        protocol_version,
     }
 }
 

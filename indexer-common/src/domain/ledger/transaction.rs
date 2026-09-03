@@ -14,13 +14,12 @@
 use crate::{
     domain::{
         ContractAction, ContractAttributes, LedgerVersion, SerializedContractAddress,
-        SerializedContractState, SerializedTransactionIdentifier, TransactionHash, ViewingKey,
+        SerializedTransactionIdentifier, TransactionHash, ViewingKey,
         ledger::{Error, SerializableExt, TransactionV8, TransactionV9},
     },
     infra::ledger_db::v1_1,
 };
 use fastrace::trace;
-use futures::{StreamExt, TryStreamExt};
 use midnight_coin_structure_v2::{coin::Info, contract::ContractAddress};
 use midnight_coin_structure_v3::{
     coin::Info as InfoV9, contract::ContractAddress as ContractAddressV9,
@@ -41,7 +40,6 @@ use midnight_transient_crypto_v3::{
 };
 use midnight_zswap_v8::Offer as OfferV8;
 use midnight_zswap_v9::Offer as OfferV9;
-use std::error::Error as StdError;
 
 #[derive(Debug, Clone)]
 pub enum Transaction {
@@ -103,143 +101,71 @@ impl Transaction {
         }
     }
 
-    /// Get the contract actions; this involves node calls.
+    /// Get the contract actions.
+    ///
+    /// Purely local: the contract state each action refers to is captured from the indexer's own
+    /// ledger state once per block, so no node call is involved.
     #[trace]
-    pub async fn contract_actions<E, F>(
-        &self,
-        get_contract_state: impl Fn(SerializedContractAddress) -> F,
-    ) -> Result<Vec<ContractAction>, Error>
-    where
-        E: StdError + 'static + Send + Sync,
-        F: Future<Output = Result<SerializedContractState, E>>,
-    {
+    pub fn contract_actions(&self) -> Result<Vec<ContractAction>, Error> {
         match self {
             Self::V8(transaction) => match transaction {
-                TransactionV8::Standard(standard_transaction) => {
-                    let contract_actions = futures::stream::iter(standard_transaction.actions())
-                        .then(|(_, contract_action)| async {
-                            match contract_action {
-                                ContractActionV8::Deploy(deploy) => {
-                                    let address = serialize_contract_address(deploy.address())?;
-                                    let state = get_contract_state(address.clone()).await.map_err(
-                                        |error| {
-                                            Error::GetContractState(address.clone(), error.into())
-                                        },
-                                    )?;
+                TransactionV8::Standard(standard_transaction) => standard_transaction
+                    .actions()
+                    .map(|(_, contract_action)| match contract_action {
+                        ContractActionV8::Deploy(deploy) => Ok(ContractAction {
+                            address: serialize_contract_address(deploy.address())?,
+                            attributes: ContractAttributes::Deploy,
+                        }),
 
-                                    Ok::<_, Error>(ContractAction {
-                                        address,
-                                        state,
-                                        attributes: ContractAttributes::Deploy,
-                                    })
-                                }
+                        ContractActionV8::Call(call) => {
+                            let address = serialize_contract_address(call.address)?;
+                            let entry_point =
+                                String::from_utf8(call.entry_point.as_ref().to_owned())
+                                    .map_err(|error| Error::FromUtf8("EntryPointBufV8", error))?;
 
-                                ContractActionV8::Call(call) => {
-                                    let address = serialize_contract_address(call.address)?;
-                                    let state = get_contract_state(address.clone()).await.map_err(
-                                        |error| {
-                                            Error::GetContractState(address.clone(), error.into())
-                                        },
-                                    )?;
-                                    let entry_point =
-                                        String::from_utf8(call.entry_point.as_ref().to_owned())
-                                            .map_err(|error| {
-                                                Error::FromUtf8("EntryPointBufV8", error)
-                                            })?;
+                            Ok(ContractAction {
+                                address,
+                                attributes: ContractAttributes::Call { entry_point },
+                            })
+                        }
 
-                                    Ok(ContractAction {
-                                        address,
-                                        state,
-                                        attributes: ContractAttributes::Call { entry_point },
-                                    })
-                                }
-
-                                ContractActionV8::Maintain(update) => {
-                                    let address = serialize_contract_address(update.address)?;
-                                    let state = get_contract_state(address.clone()).await.map_err(
-                                        |error| {
-                                            Error::GetContractState(address.clone(), error.into())
-                                        },
-                                    )?;
-
-                                    Ok(ContractAction {
-                                        address,
-                                        state,
-                                        attributes: ContractAttributes::Update,
-                                    })
-                                }
-                            }
-                        })
-                        .try_collect::<Vec<_>>()
-                        .await?;
-
-                    Ok(contract_actions)
-                }
+                        ContractActionV8::Maintain(update) => Ok(ContractAction {
+                            address: serialize_contract_address(update.address)?,
+                            attributes: ContractAttributes::Update,
+                        }),
+                    })
+                    .collect(),
 
                 TransactionV8::ClaimRewards(_) => Ok(vec![]),
             },
 
             Self::V9(transaction) => match transaction {
-                TransactionV9::Standard(standard_transaction) => {
-                    let contract_actions = futures::stream::iter(standard_transaction.actions())
-                        .then(|(_, contract_action)| async {
-                            match contract_action {
-                                ContractActionV9::Deploy(deploy) => {
-                                    let address = serialize_contract_address_v9(deploy.address())?;
-                                    let state = get_contract_state(address.clone()).await.map_err(
-                                        |error| {
-                                            Error::GetContractState(address.clone(), error.into())
-                                        },
-                                    )?;
+                TransactionV9::Standard(standard_transaction) => standard_transaction
+                    .actions()
+                    .map(|(_, contract_action)| match contract_action {
+                        ContractActionV9::Deploy(deploy) => Ok(ContractAction {
+                            address: serialize_contract_address_v9(deploy.address())?,
+                            attributes: ContractAttributes::Deploy,
+                        }),
 
-                                    Ok::<_, Error>(ContractAction {
-                                        address,
-                                        state,
-                                        attributes: ContractAttributes::Deploy,
-                                    })
-                                }
+                        ContractActionV9::Call(call) => {
+                            let address = serialize_contract_address_v9(call.address)?;
+                            let entry_point =
+                                String::from_utf8(call.entry_point.as_ref().to_owned())
+                                    .map_err(|error| Error::FromUtf8("EntryPointBufV9", error))?;
 
-                                ContractActionV9::Call(call) => {
-                                    let address = serialize_contract_address_v9(call.address)?;
-                                    let state = get_contract_state(address.clone()).await.map_err(
-                                        |error| {
-                                            Error::GetContractState(address.clone(), error.into())
-                                        },
-                                    )?;
-                                    let entry_point =
-                                        String::from_utf8(call.entry_point.as_ref().to_owned())
-                                            .map_err(|error| {
-                                                Error::FromUtf8("EntryPointBufV9", error)
-                                            })?;
+                            Ok(ContractAction {
+                                address,
+                                attributes: ContractAttributes::Call { entry_point },
+                            })
+                        }
 
-                                    Ok(ContractAction {
-                                        address,
-                                        state,
-                                        attributes: ContractAttributes::Call { entry_point },
-                                    })
-                                }
-
-                                ContractActionV9::Maintain(update) => {
-                                    let address = serialize_contract_address_v9(update.address)?;
-                                    let state = get_contract_state(address.clone()).await.map_err(
-                                        |error| {
-                                            Error::GetContractState(address.clone(), error.into())
-                                        },
-                                    )?;
-
-                                    Ok(ContractAction {
-                                        address,
-                                        state,
-                                        attributes: ContractAttributes::Update,
-                                    })
-                                }
-                            }
-                        })
-                        .try_collect::<Vec<_>>()
-                        .await?;
-
-                    Ok(contract_actions)
-                }
+                        ContractActionV9::Maintain(update) => Ok(ContractAction {
+                            address: serialize_contract_address_v9(update.address)?,
+                            attributes: ContractAttributes::Update,
+                        }),
+                    })
+                    .collect(),
 
                 TransactionV9::ClaimRewards(_) => Ok(vec![]),
             },
@@ -458,11 +384,9 @@ mod tests {
                 .display()
                 .to_string();
 
-            let pool = SqlitePool::new(pool::sqlite::Config {
-                cnn_url: sqlite_file,
-            })
-            .await
-            .context("create pool")?;
+            let pool = SqlitePool::new(pool::sqlite::Config::with_url(sqlite_file))
+                .await
+                .context("create pool")?;
             migrations::sqlite::run(&pool)
                 .await
                 .context("run migrations")?;

@@ -50,6 +50,16 @@ use std::marker::PhantomData;
 
 const DEFAULT_PERFORMANCE_LIMIT: i64 = 20;
 
+/// Maximum number of epochs a single range query may span.
+///
+/// The SPO series resolvers (`registered_totals_series`, `registered_spo_series`) expand the
+/// half-open `[from_epoch, to_epoch]` window into one row per epoch via `generate_series`, then
+/// materialise every row with `fetch_all`. Without a cap, a single ~100-byte unauthenticated
+/// request (e.g. `toEpoch: 9223372036854775807`) can pin a database connection for
+/// minutes-to-hours and drive `indexer-api` toward OOM (GHSA-6746-qxvv-3hwg). No legitimate
+/// caller needs a wider window; requests beyond this bound are rejected as client errors.
+const MAX_EPOCH_SPAN: i64 = 10_000;
+
 /// GraphQL queries.
 pub struct Query<S> {
     _s: PhantomData<S>,
@@ -116,6 +126,11 @@ where
             .await
             .map_err_into_server_error(|| "get highest ledger state")?
             .some_or_server_error(|| "no ledger state available")?;
+
+        // Bound concurrent ledger-DB work (issue #595): hold a permit across the Merkle-tree walk
+        // so unauthenticated queries cannot exhaust the blocking pool that block_in_place hands the
+        // worker's core to, and wedge the runtime.
+        let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
 
         cx.get_ledger_state_cache()
             .make_zswap_collapsed_update(start_index, end_index, storage, protocol_version)
@@ -324,8 +339,9 @@ where
             .collect::<Result<Vec<_>, _>>()
             .map_err_into_client_error(|| "invalid Cardano reward address")?;
 
+        let ledger_version = current_ledger_version(storage).await?;
         let status_list = storage
-            .get_dust_generation_status(&address, LedgerVersion::LATEST)
+            .get_dust_generation_status(&address, ledger_version)
             .await
             .map_err_into_server_error(|| "get DUST generation status")?;
 
@@ -357,8 +373,9 @@ where
             .collect::<Result<Vec<_>, _>>()
             .map_err_into_client_error(|| "invalid Cardano reward address")?;
 
+        let ledger_version = current_ledger_version(storage).await?;
         let data = storage
-            .get_dust_generations(&addresses, LedgerVersion::LATEST)
+            .get_dust_generations(&addresses, ledger_version)
             .await
             .map_err_into_server_error(|| "get DUST generations")?;
 
@@ -384,6 +401,11 @@ where
             .await
             .map_err_into_server_error(|| "get highest ledger state")?
             .some_or_server_error(|| "no ledger state available")?;
+
+        // Bound concurrent ledger-DB work (issue #595): hold a permit across the Merkle-tree walk
+        // so unauthenticated queries cannot exhaust the blocking pool that block_in_place hands the
+        // worker's core to, and wedge the runtime.
+        let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
 
         cx.get_ledger_state_cache()
             .dust_commitments_collapsed_update(start_index, end_index, storage, protocol_version)
@@ -414,6 +436,11 @@ where
             .await
             .map_err_into_server_error(|| "get highest ledger state")?
             .some_or_server_error(|| "no ledger state available")?;
+
+        // Bound concurrent ledger-DB work (issue #595): hold a permit across the Merkle-tree walk
+        // so unauthenticated queries cannot exhaust the blocking pool that block_in_place hands the
+        // worker's core to, and wedge the runtime.
+        let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
 
         cx.get_ledger_state_cache()
             .dust_generations_collapsed_update(start_index, end_index, storage, protocol_version)
@@ -780,6 +807,8 @@ where
         from_epoch: i64,
         to_epoch: i64,
     ) -> ApiResult<Vec<RegisteredTotals>> {
+        validate_epoch_span(from_epoch, to_epoch)?;
+
         let storage = cx.get_storage::<S>();
 
         let totals = storage
@@ -798,6 +827,8 @@ where
         from_epoch: i64,
         to_epoch: i64,
     ) -> ApiResult<Vec<RegisteredStat>> {
+        validate_epoch_span(from_epoch, to_epoch)?;
+
         let storage = cx.get_storage::<S>();
 
         let stats = storage
@@ -816,6 +847,8 @@ where
         from_epoch: i64,
         to_epoch: i64,
     ) -> ApiResult<Vec<PresenceEvent>> {
+        validate_epoch_span(from_epoch, to_epoch)?;
+
         let storage = cx.get_storage::<S>();
 
         let events = storage
@@ -940,6 +973,9 @@ where
             .map_err_into_server_error(|| "get highest ledger state")?
         {
             Some((protocol_version, ledger_state_key)) => {
+                // Bound concurrent ledger-DB work (issue #595): acquire after the SQL above, so
+                // the permit covers the ledger walk and not a Postgres round-trip.
+                let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
                 ledger::LedgerState::load(&ledger_state_key, protocol_version.ledger_version())
                     .map_err_into_server_error(|| "load ledger state")?
                     .bridge_receiving(address)
@@ -1061,6 +1097,22 @@ where
     }
 }
 
+/// Reject epoch ranges wider than [`MAX_EPOCH_SPAN`] before they are expanded into per-epoch
+/// rows. Bounds are accepted in either order (the storage layer normalises them), so the span is
+/// computed from the ordered bounds; `saturating_sub` keeps extreme inputs such as `i64::MAX` /
+/// `i64::MIN` from overflowing and simply saturates them into the rejected range.
+fn validate_epoch_span(from_epoch: i64, to_epoch: i64) -> ApiResult<()> {
+    let span = from_epoch
+        .max(to_epoch)
+        .saturating_sub(from_epoch.min(to_epoch));
+
+    (span <= MAX_EPOCH_SPAN)
+        .then_some(())
+        .some_or_client_error(|| {
+            format!("epoch range too large: span {span} exceeds the maximum of {MAX_EPOCH_SPAN}")
+        })
+}
+
 /// Normalize hex string by stripping 0x prefix and lowercasing.
 fn normalize_hex(input: &str) -> String {
     let s = input
@@ -1069,4 +1121,53 @@ fn normalize_hex(input: &str) -> String {
         .strip_prefix("0X")
         .unwrap_or(input);
     s.to_ascii_lowercase()
+}
+
+/// The ledger version the chain is currently on.
+///
+/// The DUST queries used to hardcode `LedgerVersion::LATEST`, which picks the
+/// wrong `dust_parameters` on a chain that has not forked yet and - since dust
+/// rows are scoped to their epoch (`LedgerVersion::dust_epoch`) - would read
+/// from an epoch that does not exist there. Falls back to `LATEST` only when
+/// there is no indexed state at all, where there are no dust rows either way.
+async fn current_ledger_version<S: Storage>(storage: &S) -> ApiResult<LedgerVersion> {
+    let ledger_version = storage
+        .get_highest_ledger_state()
+        .await
+        .map_err_into_server_error(|| "get highest ledger state")?
+        .map(|(protocol_version, _)| protocol_version.ledger_version())
+        .unwrap_or(LedgerVersion::LATEST);
+
+    Ok(ledger_version)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MAX_EPOCH_SPAN, validate_epoch_span};
+    use crate::infra::api::ApiError;
+
+    #[test]
+    fn accepts_spans_within_bound() {
+        assert!(validate_epoch_span(0, 0).is_ok());
+        assert!(validate_epoch_span(10, 20).is_ok());
+        assert!(validate_epoch_span(0, MAX_EPOCH_SPAN).is_ok());
+        // Bounds may arrive reversed; the span is orientation-independent.
+        assert!(validate_epoch_span(MAX_EPOCH_SPAN, 0).is_ok());
+    }
+
+    #[test]
+    fn rejects_spans_beyond_bound_as_client_error() {
+        for (from, to) in [
+            (0, MAX_EPOCH_SPAN + 1),
+            (0, i64::MAX),
+            (i64::MIN, 0),
+            // Extreme opposite bounds must not overflow when the span is computed.
+            (i64::MIN, i64::MAX),
+        ] {
+            assert!(
+                matches!(validate_epoch_span(from, to), Err(ApiError::Client(_))),
+                "expected client error for range ({from}, {to})",
+            );
+        }
+    }
 }

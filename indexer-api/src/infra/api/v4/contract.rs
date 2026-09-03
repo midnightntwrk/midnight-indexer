@@ -19,15 +19,20 @@ use crate::{
     domain::{self, storage::Storage},
     infra::api::{
         ApiResult, ContextExt, OptionExt, ResultExt,
-        v4::{HexEncodable, HexEncoded, contract_action::ContractAction, directives::beta},
+        v4::{
+            HexEncodable, HexEncoded,
+            contract_action::{ContractAction, resolve_state},
+            directives::beta,
+        },
     },
 };
 use async_graphql::{ComplexObject, Context, Enum, SimpleObject};
 use indexer_common::domain::{
     ContractMaintenanceAuthority as DomainContractMaintenanceAuthority,
     ContractMaintenanceVerifyingKey as DomainContractMaintenanceVerifyingKey,
-    SerializedContractAddress, SerializedContractState, VerifyingKeyKind as DomainVerifyingKeyKind,
-    ledger::ContractState,
+    SerializedContractAddress, SerializedContractStateKey,
+    VerifyingKeyKind as DomainVerifyingKeyKind,
+    ledger::{LedgerDbContractState, LedgerState},
 };
 use std::marker::PhantomData;
 
@@ -48,15 +53,8 @@ where
     /// The hex-encoded contract address.
     pub address: HexEncoded,
 
-    /// The hex-encoded serialized contract state as of the queried block (the latest contract
-    /// action at or before it).
-    pub state: HexEncoded,
-
     #[graphql(skip)]
-    raw_state: SerializedContractState,
-
-    #[graphql(skip)]
-    transaction_id: u64,
+    state_key: Option<SerializedContractStateKey>,
 
     #[graphql(skip)]
     raw_address: SerializedContractAddress,
@@ -72,9 +70,7 @@ where
     fn from(action: domain::ContractAction) -> Self {
         Self {
             address: action.address.hex_encode(),
-            state: action.state.hex_encode(),
-            raw_state: action.state,
-            transaction_id: action.transaction_id,
+            state_key: action.state_key,
             raw_address: action.address,
             _s: PhantomData,
         }
@@ -86,30 +82,38 @@ impl<S> Contract<S>
 where
     S: Storage,
 {
+    /// The hex-encoded serialized contract state as of the queried block (the latest contract
+    /// action at or before it).
+    async fn state(&self, cx: &Context<'_>) -> ApiResult<HexEncoded> {
+        resolve_state(self.state_key.as_ref(), cx).await
+    }
+
     /// The contract's maintenance authority as of the queried block.
+    // Loads the state without prefetching and reads one field off it. The authority is inline in
+    // the contract state's own node payload, so arena laziness faults in that node alone — no
+    // serialize, no deserialize, and no protocol version lookup either, since the arena key's tag
+    // already says which ledger version's layout it points at.
     #[graphql(directive = beta::apply())]
-    async fn maintenance_authority(
-        &self,
-        cx: &Context<'_>,
-    ) -> ApiResult<ContractMaintenanceAuthority> {
-        let storage = cx.get_storage::<S>();
+    async fn maintenance_authority(&self) -> ApiResult<ContractMaintenanceAuthority> {
+        let state_key = self
+            .state_key
+            .as_ref()
+            .some_or_client_error(|| format!("contract {} has no state", self.raw_address))?;
 
-        let protocol_version = storage
-            .get_protocol_version_by_transaction_id(self.transaction_id)
-            .await
+        // Guard the load: `load` hands back a lazy pointer without reading anything, so a node that
+        // is no longer in the ledger DB would panic inside storage-core on the first field read.
+        LedgerState::contract_state_loadable(state_key)
+            .map_err_into_server_error(|| format!("check contract state {state_key}"))?
+            .then_some(())
+            .some_or_server_error(|| {
+                format!("contract state {state_key} is no longer in the ledger DB")
+            })?;
+
+        let authority = LedgerDbContractState::load(state_key)
+            .and_then(|contract_state| contract_state.maintenance_authority())
             .map_err_into_server_error(|| {
-                format!(
-                    "get protocol version for transaction id {}",
-                    self.transaction_id
-                )
-            })?
-            .some_or_server_error(|| format!("no transaction with id {}", self.transaction_id))?;
-
-        let authority =
-            ContractState::deserialize(&self.raw_state, protocol_version.ledger_version())
-                .map_err_into_server_error(|| "deserialize contract state")?
-                .maintenance_authority()
-                .map_err_into_server_error(|| "extract contract maintenance authority")?;
+                format!("get maintenance authority of contract {}", self.raw_address)
+            })?;
 
         Ok(authority.into())
     }
