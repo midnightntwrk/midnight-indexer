@@ -18,11 +18,12 @@ use crate::{
         BlockQuery, BlockSubscription, ConnectMutation, ContractActionQuery,
         ContractActionSubscription, DParameterHistoryQuery, DisconnectMutation,
         DustCommitmentMerkleTreeUpdateQuery, DustGenerationMerkleTreeUpdateQuery,
-        DustGenerationStatusQuery, DustGenerationsQuery, DustGenerationsSubscription,
-        DustLedgerEventsSubscription, DustNullifierTransactionsSubscription,
-        ShieldedNullifierTransactionsSubscription, ShieldedTransactionsSubscription,
-        TermsAndConditionsHistoryQuery, TransactionsQuery, UnshieldedTransactionsSubscription,
-        ZswapLedgerEventsSubscription, ZswapMerkleTreeCollapsedUpdateQuery, block_query,
+        DustGenerationStatusQuery, DustGenerationsQuery, DustGenerationsSnapshotPolicyQuery,
+        DustGenerationsSubscription, DustLedgerEventsSubscription,
+        DustNullifierTransactionsSubscription, ShieldedNullifierTransactionsSubscription,
+        ShieldedTransactionsSubscription, TermsAndConditionsHistoryQuery, TransactionsQuery,
+        UnshieldedTransactionsSubscription, ZswapLedgerEventsSubscription,
+        ZswapMerkleTreeCollapsedUpdateQuery, block_query,
         block_subscription::{
             self, BlockSubscriptionBlocks, BlockSubscriptionBlocksTransactions,
             BlockSubscriptionBlocksTransactionsContractActions,
@@ -36,7 +37,8 @@ use crate::{
         contract_action_query::{self},
         contract_action_subscription, disconnect_mutation,
         dust_commitment_merkle_tree_update_query, dust_generation_merkle_tree_update_query,
-        dust_generation_status_query, dust_generations_query, dust_generations_subscription,
+        dust_generation_status_query, dust_generations_query,
+        dust_generations_snapshot_policy_query, dust_generations_subscription,
         dust_ledger_events_subscription, dust_nullifier_transactions_subscription,
         shielded_nullifier_transactions_subscription, shielded_transactions_subscription,
         transactions_query, unshielded_transactions_subscription, zswap_ledger_events_subscription,
@@ -119,6 +121,9 @@ pub async fn run(network_id: NetworkId, host: &str, port: u16, secure: bool) -> 
     test_dust_generations_query(&api_client, &api_url)
         .await
         .context("test dust generations query")?;
+    test_dust_generations_snapshot_policy_query(&api_client, &api_url)
+        .await
+        .context("test dust generations snapshot policy query")?;
     test_dust_commitment_merkle_tree_update_query(&api_client, &api_url)
         .await
         .context("test dust commitment merkle tree update query")?;
@@ -753,6 +758,25 @@ async fn test_dust_generations_query(api_client: &Client, api_url: &str) -> anyh
     let response = send_query::<DustGenerationsQuery>(api_client, api_url, variables).await?;
     assert_eq!(response.dust_generations.len(), 1);
     assert!(response.dust_generations[0].registrations.is_empty());
+
+    Ok(())
+}
+
+/// Test the dustGenerationsSnapshotPolicy query (resolves #1430).
+async fn test_dust_generations_snapshot_policy_query(
+    api_client: &Client,
+    api_url: &str,
+) -> anyhow::Result<()> {
+    let variables = dust_generations_snapshot_policy_query::Variables {};
+    let response =
+        send_query::<DustGenerationsSnapshotPolicyQuery>(api_client, api_url, variables).await?;
+
+    // Asserts the shipped default; a deployment that overrides
+    // `subscription.dust_generations.max_snapshot_age` would need this expectation updated.
+    assert_eq!(
+        response.dust_generations_snapshot_policy.max_age_blocks,
+        500
+    );
 
     Ok(())
 }
@@ -1544,6 +1568,14 @@ mod graphql {
         response_derives = "Debug, Clone, Serialize"
     )]
     pub struct DustGenerationsQuery;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        schema_path = "../indexer-api/graphql/schema-v4.graphql",
+        query_path = "./e2e.graphql",
+        response_derives = "Debug, Clone, Serialize"
+    )]
+    pub struct DustGenerationsSnapshotPolicyQuery;
 
     #[derive(GraphQLQuery)]
     #[graphql(
