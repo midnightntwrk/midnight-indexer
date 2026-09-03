@@ -1130,7 +1130,7 @@ fn normalize_hex(input: &str) -> String {
 /// rows are scoped to their epoch (`LedgerVersion::dust_epoch`) - would read
 /// from an epoch that does not exist there. Falls back to `LATEST` only when
 /// there is no indexed state at all, where there are no dust rows either way.
-async fn current_ledger_version<S: Storage>(storage: &S) -> ApiResult<LedgerVersion> {
+pub(super) async fn current_ledger_version<S: Storage>(storage: &S) -> ApiResult<LedgerVersion> {
     let ledger_version = storage
         .get_highest_ledger_state()
         .await

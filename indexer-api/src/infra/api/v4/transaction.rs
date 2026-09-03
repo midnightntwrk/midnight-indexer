@@ -21,6 +21,7 @@ use crate::{
             contract_action::ContractAction,
             directives::beta,
             ledger_events::{DustLedgerEvent, ZswapLedgerEvent},
+            query::current_ledger_version,
             unshielded::UnshieldedUtxo,
         },
     },
@@ -598,9 +599,11 @@ async fn unshielded_created_outputs<S>(
 where
     S: Storage,
 {
-    let utxos = cx
-        .get_storage::<S>()
-        .get_unshielded_utxos_created_by_transaction(id)
+    let storage = cx.get_storage::<S>();
+    let ledger_version = current_ledger_version(storage).await?;
+
+    let utxos = storage
+        .get_unshielded_utxos_created_by_transaction(id, ledger_version)
         .await
         .map_err_into_server_error(|| {
             format!("cannot get unshielded UTXOs created by transaction with ID {id}")
@@ -616,9 +619,11 @@ async fn unshielded_spent_outputs<S>(id: u64, cx: &Context<'_>) -> ApiResult<Vec
 where
     S: Storage,
 {
-    let utxos = cx
-        .get_storage::<S>()
-        .get_unshielded_utxos_spent_by_transaction(id)
+    let storage = cx.get_storage::<S>();
+    let ledger_version = current_ledger_version(storage).await?;
+
+    let utxos = storage
+        .get_unshielded_utxos_spent_by_transaction(id, ledger_version)
         .await
         .map_err_into_server_error(|| {
             format!("cannot get unshielded UTXOs spent by transaction with ID {id}")
