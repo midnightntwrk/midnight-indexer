@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.4.0-rc.5] - 2026-09-04
+
+Release candidate on top of `4.4.0-rc.4`, carrying one wallet-facing API fix found while testing
+that RC.
+
+**Drop-in over `4.4.0-rc.4`**: no new migrations and no re-index — the fix is read-time only. The
+re-index rc.4 requires still applies to anything upgrading from an earlier line.
+
+### 🐛 Bug Fixes
+
+- *(indexer-api)* Scope registeredForDustGeneration to the current DUST epoch (#1476)
+
+  `unshielded_utxos.registered_for_dust_generation` is computed once, when the UTXO is created, and
+  nothing updates it afterwards. That is sound for the normal life of a chain — the ledger's
+  `night_indices` is append-only — but not across a dust-wiping fork: the 8→9 translation replaces
+  dust state wholesale, stranding every nonce in it, and because the wipe happens inside the state
+  translation rather than via a transaction, no event fires to retire the stored `true`. The API
+  answered `true` where the ledger said `false`, telling holders they need not re-register when in
+  fact they must before they can pay a fee.
+
+  The flag is now scoped at read time to the chain's current DUST epoch, the same mechanism
+  `dust_epoch` already gives `dust_generation_info` (migration `008_dust_generation_epoch`). Read-time
+  scoping rather than a migration backfill, so re-indexing cannot rewrite the stale values and
+  deployments that already crossed the boundary on an older build are corrected without one.
+
+  `registeredForDustGeneration`'s schema description now states the epoch semantics.
+
 ## [4.4.0-rc.4] - 2026-09-02
 
 Release candidate for the ledger-v9 / node-2.x line, cut on top of `4.4.0-rc.3`.
