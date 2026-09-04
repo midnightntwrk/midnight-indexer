@@ -306,18 +306,19 @@ impl SubxtNode {
 
         // At genesis, Substrate does not emit events (Parity PR #5463). Fetch cNight
         // registrations from pallet storage instead.
-        // Also fetch the ledger state root for genesis ledger state detection.
-        let ledger_state_root = if height == 0 {
+        if height == 0 {
             let genesis_registrations =
                 runtimes::fetch_genesis_cnight_registrations(state_node_version, &block).await?;
             dust_registration_events.extend(genesis_registrations);
+        }
 
-            runtimes::get_ledger_state_root(state_node_version, &block)
-                .await?
-                .map(Into::into)
-        } else {
-            None
-        };
+        // Fetch the ledger state root for *every* block, not just genesis, so any divergence
+        // between the Node's ledger state and the one derived here by re-executing
+        // transactions fails loudly at the block where it happens, instead of silently
+        // corrupting derived data (dust commitments, ...) for the rest of the chain.
+        let ledger_state_root = runtimes::get_ledger_state_root(state_node_version, &block)
+            .await?
+            .map(Into::into);
 
         let transactions = stream::iter(transactions)
             .then(|t| make_transaction(t, protocol_version))
