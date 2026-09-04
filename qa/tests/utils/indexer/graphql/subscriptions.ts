@@ -107,6 +107,53 @@ export const UNSHIELDED_TX_SUBSCRIPTION_BY_ADDRESS = `subscription UnshieldedTxS
     }
 }`;
 
+// Progress-only documents that select `protocolVersion` on the progress updates
+// (midnight-indexer#1463). They are separate operations rather than additions to
+// the documents above on purpose: selecting a field an environment does not serve
+// fails GraphQL validation, so folding it into the shared documents would turn
+// every existing progress test into a hard failure on every environment that does
+// not yet carry the change. Consumers must gate on
+// `isProgressProtocolVersionSupported()` before sending them.
+export const UNSHIELDED_TX_PROGRESS_SUBSCRIPTION_BY_ADDRESS = `subscription UnshieldedTxProgressSubscription($ADDRESS: UnshieldedAddress) {
+    unshieldedTransactions(address: $ADDRESS) {
+        __typename
+        ... on UnshieldedTransactionsProgress {
+            highestTransactionId
+            protocolVersion
+        }
+    }
+}`;
+
+export const SHIELDED_TX_PROGRESS_SUBSCRIPTION_BY_SESSION_ID = `subscription WalletSyncProgressSubscription($SESSION_ID: String) {
+    shieldedTransactions(sessionId: $SESSION_ID) {
+        __typename
+        ... on ShieldedTransactionsProgress {
+            highestZswapEndIndex
+            highestCheckedZswapEndIndex
+            highestRelevantZswapEndIndex
+            protocolVersion
+        }
+    }
+}`;
+
+export const DUST_GENERATIONS_PROGRESS_SUBSCRIPTION = `
+  subscription DustGenerationsProgressSubscription($dustAddress: DustAddress!, $blockHash: HexEncoded!, $dtimeCutoffHeight: Int!) {
+    dustGenerations(dustAddress: $dustAddress, blockHash: $blockHash, dtimeCutoffHeight: $dtimeCutoffHeight) {
+      __typename
+      ... on DustGenerationsProgress {
+        highestIndex
+        protocolVersion
+        collapsedMerkleTree {
+          startIndex
+          endIndex
+          update
+          protocolVersion
+        }
+      }
+    }
+  }
+`;
+
 export const BLOCKS_SUBSCRIPTION_FROM_LATEST_BLOCK = `subscription BlocksSubscriptionFromLatestBlock {
    blocks {
     hash
