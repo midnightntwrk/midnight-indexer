@@ -98,12 +98,9 @@ export async function setup() {
     console.log('[SETUP] Starting toolkit container...');
     await warmupToolkit.start();
 
-    // Derive the node HTTP RPC URL from the websocket URL so the reporter
-    // can show a live percentage (e.g. "fetch progress: 39,485/715,051 (5.5%) blocks complete").
-    const nodeRpcUrl = env
-      .getNodeWebsocketBaseURL()
-      .replace(/^wss:\/\//, 'https://')
-      .replace(/^ws:\/\//, 'http://');
+    // The node's HTTP RPC URL lets the reporter show a live percentage
+    // (e.g. "fetch progress: 39,485/715,051 (5.5%) blocks complete").
+    const nodeRpcUrl = env.getNodeHttpBaseURL();
     reporter = startCacheProgressReporter(process.env.TARGET_ENV ?? 'cache', nodeRpcUrl);
 
     console.log('[SETUP] Syncing cache (please wait, this will take time)...');
