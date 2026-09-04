@@ -598,8 +598,9 @@ async fn unshielded_created_outputs<S>(
 where
     S: Storage,
 {
-    let utxos = cx
-        .get_storage::<S>()
+    let storage = cx.get_storage::<S>();
+
+    let utxos = storage
         .get_unshielded_utxos_created_by_transaction(id)
         .await
         .map_err_into_server_error(|| {
@@ -616,8 +617,9 @@ async fn unshielded_spent_outputs<S>(id: u64, cx: &Context<'_>) -> ApiResult<Vec
 where
     S: Storage,
 {
-    let utxos = cx
-        .get_storage::<S>()
+    let storage = cx.get_storage::<S>();
+
+    let utxos = storage
         .get_unshielded_utxos_spent_by_transaction(id)
         .await
         .map_err_into_server_error(|| {
