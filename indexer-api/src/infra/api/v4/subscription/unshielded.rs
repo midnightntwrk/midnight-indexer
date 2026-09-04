@@ -17,7 +17,6 @@ use crate::{
     infra::api::{
         ApiError, ApiResult, ContextExt, ResultExt,
         v4::{
-            query::current_ledger_version,
             transaction::Transaction,
             unshielded::{UnshieldedAddress, UnshieldedUtxo},
         },
@@ -238,17 +237,13 @@ where
     let id = transaction.id();
     *transaction_id = id + 1;
 
-    // Scopes `registeredForDustGeneration` to the chain's current dust epoch; see
-    // `scope_to_dust_epoch` in the unshielded storage.
-    let ledger_version = current_ledger_version(storage).await?;
-
     let created = storage
-        .get_unshielded_utxos_by_address_created_by_transaction(address, id, ledger_version)
+        .get_unshielded_utxos_by_address_created_by_transaction(address, id)
         .await
         .map_err_into_server_error(|| format!("get created UTXOs for transaction with ID {id}"))?;
 
     let spent = storage
-        .get_unshielded_utxos_by_address_spent_by_transaction(address, id, ledger_version)
+        .get_unshielded_utxos_by_address_spent_by_transaction(address, id)
         .await
         .map_err_into_server_error(|| format!("get spent UTXOs for transaction with ID {id}"))?;
 

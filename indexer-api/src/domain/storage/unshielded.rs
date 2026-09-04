@@ -18,7 +18,7 @@ use crate::domain::{
         transaction::TransactionStorage, wallet::WalletStorage,
     },
 };
-use indexer_common::domain::{LedgerVersion, UnshieldedAddress};
+use indexer_common::domain::UnshieldedAddress;
 use sqlx::Error;
 
 #[trait_variant::make(Send)]
@@ -37,21 +37,18 @@ where
     async fn get_unshielded_utxos_by_address(
         &self,
         address: UnshieldedAddress,
-        ledger_version: LedgerVersion,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
 
     /// Get unshielded UTXOs created by a specific transaction, ordered by output index.
     async fn get_unshielded_utxos_created_by_transaction(
         &self,
         transaction_id: u64,
-        ledger_version: LedgerVersion,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
 
     /// Get unshielded UTXOs spent by a specific transaction, ordered by output index.
     async fn get_unshielded_utxos_spent_by_transaction(
         &self,
         transaction_id: u64,
-        ledger_version: LedgerVersion,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
 
     /// Get unshielded UTXOs created in a specific transaction for a specific address, ordered by
@@ -60,7 +57,6 @@ where
         &self,
         address: UnshieldedAddress,
         transaction_id: u64,
-        ledger_version: LedgerVersion,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
 
     /// Get unshielded UTXOs spent in a specific transaction for a specific address, ordered by
@@ -69,7 +65,6 @@ where
         &self,
         address: UnshieldedAddress,
         transaction_id: u64,
-        ledger_version: LedgerVersion,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error>;
 }
 
@@ -78,7 +73,6 @@ impl UnshieldedUtxoStorage for NoopStorage {
     async fn get_unshielded_utxos_by_address(
         &self,
         address: UnshieldedAddress,
-        ledger_version: LedgerVersion,
     ) -> Result<Vec<UnshieldedUtxo>, Error> {
         unimplemented!()
     }
@@ -86,7 +80,6 @@ impl UnshieldedUtxoStorage for NoopStorage {
     async fn get_unshielded_utxos_created_by_transaction(
         &self,
         transaction_id: u64,
-        ledger_version: LedgerVersion,
     ) -> Result<Vec<UnshieldedUtxo>, Error> {
         unimplemented!()
     }
@@ -94,7 +87,6 @@ impl UnshieldedUtxoStorage for NoopStorage {
     async fn get_unshielded_utxos_spent_by_transaction(
         &self,
         transaction_id: u64,
-        ledger_version: LedgerVersion,
     ) -> Result<Vec<UnshieldedUtxo>, Error> {
         unimplemented!()
     }
@@ -103,7 +95,6 @@ impl UnshieldedUtxoStorage for NoopStorage {
         &self,
         address: UnshieldedAddress,
         transaction_id: u64,
-        ledger_version: LedgerVersion,
     ) -> Result<Vec<UnshieldedUtxo>, Error> {
         unimplemented!()
     }
@@ -112,7 +103,6 @@ impl UnshieldedUtxoStorage for NoopStorage {
         &self,
         address: UnshieldedAddress,
         transaction_id: u64,
-        ledger_version: LedgerVersion,
     ) -> Result<Vec<UnshieldedUtxo>, Error> {
         unimplemented!()
     }

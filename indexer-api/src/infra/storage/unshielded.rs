@@ -16,17 +16,19 @@ use crate::{
     infra::storage::Storage,
 };
 use fastrace::trace;
-use indexer_common::domain::{LedgerVersion, ProtocolVersion, UnshieldedAddress};
+use indexer_common::domain::{ProtocolVersion, UnshieldedAddress};
 use indoc::indoc;
 use sqlx::FromRow;
 
-/// A `unshielded_utxos` row plus the protocol version of the transaction that
-/// created it, which is what its dust epoch is derived from.
+/// A `unshielded_utxos` row plus the protocol versions needed for dust-epoch
+/// scoping. Both versions are selected in the UTXO query so scoping does not add
+/// another database round trip.
 #[derive(Debug, FromRow)]
 struct UnshieldedUtxoRow {
     #[sqlx(flatten)]
     utxo: UnshieldedUtxo,
     creating_protocol_version: i64,
+    current_protocol_version: i64,
 }
 
 /// Report `registered_for_dust_generation` only to readers in the dust epoch the
@@ -54,24 +56,24 @@ struct UnshieldedUtxoRow {
 /// (migration `008_dust_generation_epoch`), handled the same way and for the same
 /// reason -- at read time, so the answer is right for data indexed by an older
 /// build and stays right across a re-index.
-fn scope_to_dust_epoch(
-    rows: Vec<UnshieldedUtxoRow>,
-    ledger_version: LedgerVersion,
-) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
-    let dust_epoch = ledger_version.dust_epoch();
-
+fn scope_to_dust_epoch(rows: Vec<UnshieldedUtxoRow>) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
     rows.into_iter()
         .map(
             |UnshieldedUtxoRow {
                  mut utxo,
                  creating_protocol_version,
+                 current_protocol_version,
              }| {
                 let created_in = ProtocolVersion::try_from(creating_protocol_version)
                     .map_err(|error| sqlx::Error::Decode(error.into()))?
                     .ledger_version()
                     .dust_epoch();
+                let current = ProtocolVersion::try_from(current_protocol_version)
+                    .map_err(|error| sqlx::Error::Decode(error.into()))?
+                    .ledger_version()
+                    .dust_epoch();
 
-                utxo.registered_for_dust_generation &= created_in == dust_epoch;
+                utxo.registered_for_dust_generation &= created_in == current;
 
                 Ok(utxo)
             },
@@ -84,7 +86,6 @@ impl UnshieldedUtxoStorage for Storage {
     async fn get_unshielded_utxos_by_address(
         &self,
         address: UnshieldedAddress,
-        ledger_version: LedgerVersion,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
         let query = indoc! {"
             SELECT
@@ -98,7 +99,9 @@ impl UnshieldedUtxoStorage for Storage {
                 unshielded_utxos.ctime,
                 unshielded_utxos.initial_nonce,
                 unshielded_utxos.registered_for_dust_generation,
-                transactions.protocol_version AS creating_protocol_version
+                transactions.protocol_version AS creating_protocol_version,
+                (SELECT protocol_version FROM blocks ORDER BY height DESC LIMIT 1)
+                    AS current_protocol_version
             FROM unshielded_utxos
             JOIN transactions ON transactions.id = unshielded_utxos.creating_transaction_id
             WHERE unshielded_utxos.owner = $1
@@ -110,14 +113,13 @@ impl UnshieldedUtxoStorage for Storage {
             .fetch_all(&*self.pool)
             .await?;
 
-        scope_to_dust_epoch(rows, ledger_version)
+        scope_to_dust_epoch(rows)
     }
 
     #[trace(properties = { "transaction_id": "{transaction_id}" })]
     async fn get_unshielded_utxos_created_by_transaction(
         &self,
         transaction_id: u64,
-        ledger_version: LedgerVersion,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
         let query = indoc! {"
             SELECT
@@ -131,7 +133,9 @@ impl UnshieldedUtxoStorage for Storage {
                 unshielded_utxos.ctime,
                 unshielded_utxos.initial_nonce,
                 unshielded_utxos.registered_for_dust_generation,
-                transactions.protocol_version AS creating_protocol_version
+                transactions.protocol_version AS creating_protocol_version,
+                (SELECT protocol_version FROM blocks ORDER BY height DESC LIMIT 1)
+                    AS current_protocol_version
             FROM unshielded_utxos
             JOIN transactions ON transactions.id = unshielded_utxos.creating_transaction_id
             WHERE unshielded_utxos.creating_transaction_id = $1
@@ -143,14 +147,13 @@ impl UnshieldedUtxoStorage for Storage {
             .fetch_all(&*self.pool)
             .await?;
 
-        scope_to_dust_epoch(rows, ledger_version)
+        scope_to_dust_epoch(rows)
     }
 
     #[trace(properties = { "transaction_id": "{transaction_id}" })]
     async fn get_unshielded_utxos_spent_by_transaction(
         &self,
         transaction_id: u64,
-        ledger_version: LedgerVersion,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
         let query = indoc! {"
             SELECT
@@ -164,7 +167,9 @@ impl UnshieldedUtxoStorage for Storage {
                 unshielded_utxos.ctime,
                 unshielded_utxos.initial_nonce,
                 unshielded_utxos.registered_for_dust_generation,
-                transactions.protocol_version AS creating_protocol_version
+                transactions.protocol_version AS creating_protocol_version,
+                (SELECT protocol_version FROM blocks ORDER BY height DESC LIMIT 1)
+                    AS current_protocol_version
             FROM unshielded_utxos
             JOIN transactions ON transactions.id = unshielded_utxos.creating_transaction_id
             WHERE unshielded_utxos.spending_transaction_id = $1
@@ -176,7 +181,7 @@ impl UnshieldedUtxoStorage for Storage {
             .fetch_all(&*self.pool)
             .await?;
 
-        scope_to_dust_epoch(rows, ledger_version)
+        scope_to_dust_epoch(rows)
     }
 
     #[trace(properties = { "address": "{address}", "transaction_id": "{transaction_id}" })]
@@ -184,7 +189,6 @@ impl UnshieldedUtxoStorage for Storage {
         &self,
         address: UnshieldedAddress,
         transaction_id: u64,
-        ledger_version: LedgerVersion,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
         let query = indoc! {"
             SELECT
@@ -198,7 +202,9 @@ impl UnshieldedUtxoStorage for Storage {
                 unshielded_utxos.ctime,
                 unshielded_utxos.initial_nonce,
                 unshielded_utxos.registered_for_dust_generation,
-                transactions.protocol_version AS creating_protocol_version
+                transactions.protocol_version AS creating_protocol_version,
+                (SELECT protocol_version FROM blocks ORDER BY height DESC LIMIT 1)
+                    AS current_protocol_version
             FROM unshielded_utxos
             JOIN transactions ON transactions.id = unshielded_utxos.creating_transaction_id
             WHERE unshielded_utxos.creating_transaction_id = $1
@@ -212,7 +218,7 @@ impl UnshieldedUtxoStorage for Storage {
             .fetch_all(&*self.pool)
             .await?;
 
-        scope_to_dust_epoch(rows, ledger_version)
+        scope_to_dust_epoch(rows)
     }
 
     #[trace(properties = { "address": "{address}", "transaction_id": "{transaction_id}" })]
@@ -220,7 +226,6 @@ impl UnshieldedUtxoStorage for Storage {
         &self,
         address: UnshieldedAddress,
         transaction_id: u64,
-        ledger_version: LedgerVersion,
     ) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
         let query = indoc! {"
             SELECT
@@ -234,7 +239,9 @@ impl UnshieldedUtxoStorage for Storage {
                 unshielded_utxos.ctime,
                 unshielded_utxos.initial_nonce,
                 unshielded_utxos.registered_for_dust_generation,
-                transactions.protocol_version AS creating_protocol_version
+                transactions.protocol_version AS creating_protocol_version,
+                (SELECT protocol_version FROM blocks ORDER BY height DESC LIMIT 1)
+                    AS current_protocol_version
             FROM unshielded_utxos
             JOIN transactions ON transactions.id = unshielded_utxos.creating_transaction_id
             WHERE unshielded_utxos.spending_transaction_id = $1
@@ -248,7 +255,7 @@ impl UnshieldedUtxoStorage for Storage {
             .fetch_all(&*self.pool)
             .await?;
 
-        scope_to_dust_epoch(rows, ledger_version)
+        scope_to_dust_epoch(rows)
     }
 }
 
@@ -261,7 +268,11 @@ mod tests {
     const LEDGER_8: i64 = 1_000_000;
     const LEDGER_9: i64 = 2_001_000;
 
-    fn row(creating_protocol_version: i64, registered: bool) -> UnshieldedUtxoRow {
+    fn row(
+        creating_protocol_version: i64,
+        current_protocol_version: i64,
+        registered: bool,
+    ) -> UnshieldedUtxoRow {
         UnshieldedUtxoRow {
             utxo: UnshieldedUtxo {
                 creating_transaction_id: 1,
@@ -276,11 +287,12 @@ mod tests {
                 registered_for_dust_generation: registered,
             },
             creating_protocol_version,
+            current_protocol_version,
         }
     }
 
-    fn flags(rows: Vec<UnshieldedUtxoRow>, ledger_version: LedgerVersion) -> Vec<bool> {
-        scope_to_dust_epoch(rows, ledger_version)
+    fn flags(rows: Vec<UnshieldedUtxoRow>) -> Vec<bool> {
+        scope_to_dust_epoch(rows)
             .expect("scoping should succeed for supported protocol versions")
             .into_iter()
             .map(|utxo| utxo.registered_for_dust_generation)
@@ -293,10 +305,10 @@ mod tests {
     #[test]
     fn same_epoch_keeps_the_stored_value() {
         assert_eq!(
-            flags(
-                vec![row(LEDGER_8, true), row(LEDGER_8, false)],
-                LedgerVersion::V8
-            ),
+            flags(vec![
+                row(LEDGER_8, LEDGER_8, true),
+                row(LEDGER_8, LEDGER_8, false),
+            ]),
             vec![true, false]
         );
     }
@@ -307,10 +319,10 @@ mod tests {
     #[test]
     fn earlier_epoch_reads_as_unregistered() {
         assert_eq!(
-            flags(
-                vec![row(LEDGER_8, true), row(LEDGER_8, false)],
-                LedgerVersion::V9
-            ),
+            flags(vec![
+                row(LEDGER_8, LEDGER_9, true),
+                row(LEDGER_8, LEDGER_9, false),
+            ]),
             vec![false, false]
         );
     }
@@ -320,10 +332,10 @@ mod tests {
     #[test]
     fn post_fork_rows_keep_their_value_after_the_fork() {
         assert_eq!(
-            flags(
-                vec![row(LEDGER_9, true), row(LEDGER_9, false)],
-                LedgerVersion::V9
-            ),
+            flags(vec![
+                row(LEDGER_9, LEDGER_9, true),
+                row(LEDGER_9, LEDGER_9, false),
+            ]),
             vec![true, false]
         );
     }
@@ -333,10 +345,10 @@ mod tests {
     #[test]
     fn mixed_epochs_are_scoped_per_row() {
         assert_eq!(
-            flags(
-                vec![row(LEDGER_8, true), row(LEDGER_9, true)],
-                LedgerVersion::V9
-            ),
+            flags(vec![
+                row(LEDGER_8, LEDGER_9, true),
+                row(LEDGER_9, LEDGER_9, true),
+            ]),
             vec![false, true]
         );
     }

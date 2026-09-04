@@ -21,7 +21,6 @@ use crate::{
             contract_action::ContractAction,
             directives::beta,
             ledger_events::{DustLedgerEvent, ZswapLedgerEvent},
-            query::current_ledger_version,
             unshielded::UnshieldedUtxo,
         },
     },
@@ -600,10 +599,9 @@ where
     S: Storage,
 {
     let storage = cx.get_storage::<S>();
-    let ledger_version = current_ledger_version(storage).await?;
 
     let utxos = storage
-        .get_unshielded_utxos_created_by_transaction(id, ledger_version)
+        .get_unshielded_utxos_created_by_transaction(id)
         .await
         .map_err_into_server_error(|| {
             format!("cannot get unshielded UTXOs created by transaction with ID {id}")
@@ -620,10 +618,9 @@ where
     S: Storage,
 {
     let storage = cx.get_storage::<S>();
-    let ledger_version = current_ledger_version(storage).await?;
 
     let utxos = storage
-        .get_unshielded_utxos_spent_by_transaction(id, ledger_version)
+        .get_unshielded_utxos_spent_by_transaction(id)
         .await
         .map_err_into_server_error(|| {
             format!("cannot get unshielded UTXOs spent by transaction with ID {id}")
