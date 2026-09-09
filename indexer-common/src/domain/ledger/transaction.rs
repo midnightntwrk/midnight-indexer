@@ -79,10 +79,8 @@ impl Transaction {
 
     /// Get the contract actions; this involves node calls.
     ///
-    /// The given `get_contract_state` may yield `None` for a contract the node does not know,
-    /// which happens for actions from a segment that failed to apply, because these were rolled
-    /// back. Such actions are returned with an empty state and must be filtered out by the caller
-    /// once the transaction result is known.
+    /// An absent post-block state is represented by empty bytes until the caller applies the
+    /// transaction locally and can discard actions whose execution phases did not succeed.
     #[trace]
     pub async fn contract_actions<E, F>(
         &self,
@@ -113,6 +111,7 @@ impl Transaction {
                                         address,
                                         state,
                                         segment,
+                                        has_guaranteed_transcript: false,
                                         attributes: ContractAttributes::Deploy,
                                     })
                                 }
@@ -131,6 +130,9 @@ impl Transaction {
                                         address,
                                         state,
                                         segment,
+                                        has_guaranteed_transcript: call
+                                            .guaranteed_transcript
+                                            .is_some(),
                                         attributes: ContractAttributes::Call { entry_point },
                                     })
                                 }
@@ -148,6 +150,7 @@ impl Transaction {
                                         address,
                                         state,
                                         segment,
+                                        has_guaranteed_transcript: false,
                                         attributes: ContractAttributes::Update,
                                     })
                                 }
@@ -235,21 +238,22 @@ fn serialize_contract_address(
         .map_err(|error| Error::Serialize("ContractAddress", error))
 }
 
-/// Decode the entry point of a contract call into the text the API exposes.
-///
-/// An entry point is an arbitrary byte string: a contract can be deployed with one which is not
-/// valid UTF-8 and then be called. Hence this must not be able to fail, because a transaction must
-/// never be able to stop indexing. Invalid bytes are replaced, which only affects how such an
-/// entry point is displayed; nothing keys off it.
+/// Decode arbitrary entry-point bytes for the text-only API representation without allowing a
+/// permissionless transaction to halt indexing. The warning is deliberately bounded: an entry
+/// point is attacker-controlled and may be large.
 fn decode_entry_point(entry_point: &[u8]) -> String {
     match str::from_utf8(entry_point) {
         Ok(entry_point) => entry_point.to_owned(),
-
         Err(_) => {
-            let hex = const_hex::encode(entry_point);
-            let lossy = String::from_utf8_lossy(entry_point).into_owned();
-            warn!(hex:%, lossy:%; "entry point is not valid UTF-8");
-            lossy
+            const LOG_PREFIX_BYTES: usize = 64;
+            let prefix_len = entry_point.len().min(LOG_PREFIX_BYTES);
+            let hex_prefix = const_hex::encode(&entry_point[..prefix_len]);
+            warn!(
+                length = entry_point.len(),
+                hex_prefix:%;
+                "entry point is not valid UTF-8"
+            );
+            String::from_utf8_lossy(entry_point).into_owned()
         }
     }
 }

@@ -176,11 +176,13 @@ impl LedgerState {
             )
             .map_err(|error| Error::ApplyRegularTransaction(Some(transaction.hash), error))?;
 
-        // Drop contract actions from segments that did not apply: these were rolled back by the
-        // ledger and hence never took effect. A deploy in a failing segment, for example, leaves
-        // the node without any state for its contract address, which must neither be looked up
-        // below nor be reported to API consumers.
-        retain_applied_contract_actions(&mut transaction.contract_actions, &transaction_result);
+        // Contract actions are owned by a physical intent segment, but Calls may also execute a
+        // guaranteed transcript in logical segment 0. Retain an action if either execution phase
+        // actually applied; Deploy and Update only execute in their physical segment.
+        retain_applied_contract_actions(&mut transaction.contract_actions, &transaction_result)
+            .map_err(|segment| {
+                Error::MissingContractActionSegmentResult(transaction.hash, segment)
+            })?;
 
         // Update transaction.
         transaction.transaction_result = transaction_result;
@@ -312,6 +314,9 @@ pub enum Error {
     #[error("no contract state for transaction {0} and contract address {1}")]
     MissingContractState(TransactionHash, SerializedContractAddress),
 
+    #[error("transaction {0} has a contract action in segment {1}, but no result for that segment")]
+    MissingContractActionSegmentResult(TransactionHash, u16),
+
     #[error("cannot get contract balances for transaction {0} and contract address {1}")]
     GetContractBalances(
         TransactionHash,
@@ -325,61 +330,114 @@ fn stringify_hash(hash: &Option<TransactionHash>) -> String {
         .unwrap_or_else(|| "<hash unavailable>".to_string())
 }
 
-/// Only keep contract actions from segments which were applied to the ledger state.
+/// Keep contract actions with at least one execution phase which applied to the ledger state.
 fn retain_applied_contract_actions(
     contract_actions: &mut Vec<ContractAction>,
     transaction_result: &TransactionResult,
-) {
-    contract_actions
-        .retain(|contract_action| transaction_result.segment_succeeded(contract_action.segment));
+) -> Result<(), u16> {
+    // Validate before mutating so an inconsistent result never leaves a partially filtered list.
+    for action in contract_actions.iter() {
+        if transaction_result
+            .segment_succeeded(action.segment)
+            .is_none()
+        {
+            return Err(action.segment);
+        }
+        if action.has_guaranteed_transcript && transaction_result.segment_succeeded(0).is_none() {
+            return Err(0);
+        }
+    }
+
+    contract_actions.retain(|action| {
+        transaction_result
+            .segment_succeeded(action.segment)
+            .expect("segment result validated above")
+            || (action.has_guaranteed_transcript
+                && transaction_result
+                    .segment_succeeded(0)
+                    .expect("guaranteed-segment result validated above"))
+    });
+
+    Ok(())
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::domain::{ContractAction, ledger_state::retain_applied_contract_actions};
+mod contract_action_tests {
+    use super::retain_applied_contract_actions;
+    use crate::domain::ContractAction;
     use indexer_common::domain::{ContractAttributes, TransactionResult};
 
-    /// A contract action from a segment which failed to apply was rolled back by the ledger, hence
-    /// it must not be indexed. Notably a deploy only takes effect in its fallible segment, so a
-    /// failing one leaves the node without any state for the deployed contract.
     #[test]
-    fn test_retain_applied_contract_actions() {
-        let contract_actions = || {
+    fn retains_only_contract_actions_with_an_applied_execution_phase() {
+        let actions = || {
             vec![
-                contract_action(1, ContractAttributes::Deploy),
-                contract_action(2, ContractAttributes::Update),
+                action(7, ContractAttributes::Deploy, false),
+                action(8, call(), false),
+                action(9, call(), true),
+                action(u16::MAX, ContractAttributes::Update, false),
             ]
         };
 
-        let mut actions = contract_actions();
-        retain_applied_contract_actions(&mut actions, &TransactionResult::Success);
-        assert_eq!(segments(&actions), vec![1, 2]);
+        let mut all_succeeded = actions();
+        retain_applied_contract_actions(&mut all_succeeded, &TransactionResult::Success).unwrap();
+        assert_eq!(segments(&all_succeeded), vec![7, 8, 9, u16::MAX]);
 
-        let mut actions = contract_actions();
-        retain_applied_contract_actions(&mut actions, &TransactionResult::Failure);
-        assert!(actions.is_empty());
+        let mut all_failed = actions();
+        retain_applied_contract_actions(&mut all_failed, &TransactionResult::Failure).unwrap();
+        assert!(all_failed.is_empty());
 
-        let mut actions = contract_actions();
-        let partial_success = TransactionResult::PartialSuccess(vec![(1, false), (2, true)]);
-        retain_applied_contract_actions(&mut actions, &partial_success);
-        assert_eq!(segments(&actions), vec![2]);
+        let mut partial = actions();
+        retain_applied_contract_actions(
+            &mut partial,
+            &TransactionResult::PartialSuccess(vec![
+                (0, true),
+                (7, false),
+                (8, false),
+                (9, false),
+                (u16::MAX, true),
+            ]),
+        )
+        .unwrap();
+
+        // Regression assertion: 4.3.301 incorrectly removed segment 9 solely because its physical
+        // segment failed, despite its guaranteed transcript having executed in segment 0.
+        assert_eq!(segments(&partial), vec![9, u16::MAX]);
+
+        let mut inconsistent = vec![action(9, call(), true)];
+        let original = inconsistent.clone();
+        assert_eq!(
+            retain_applied_contract_actions(
+                &mut inconsistent,
+                &TransactionResult::PartialSuccess(vec![(0, true)]),
+            ),
+            Err(9)
+        );
+        assert_eq!(inconsistent, original);
     }
 
-    fn contract_action(segment: u16, attributes: ContractAttributes) -> ContractAction {
+    fn call() -> ContractAttributes {
+        ContractAttributes::Call {
+            entry_point: "entry-point".to_owned(),
+        }
+    }
+
+    fn action(
+        segment: u16,
+        attributes: ContractAttributes,
+        has_guaranteed_transcript: bool,
+    ) -> ContractAction {
         ContractAction {
             address: Default::default(),
             state: Default::default(),
             segment,
+            has_guaranteed_transcript,
             zswap_state: Default::default(),
             extracted_balances: Default::default(),
             attributes,
         }
     }
 
-    fn segments(contract_actions: &[ContractAction]) -> Vec<u16> {
-        contract_actions
-            .iter()
-            .map(|contract_action| contract_action.segment)
-            .collect()
+    fn segments(actions: &[ContractAction]) -> Vec<u16> {
+        actions.iter().map(|action| action.segment).collect()
     }
 }
