@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.3.800-rc.2] - 2026-09-09
+
+Security release candidate for the ledger-v8 mainnet line, cut on top of `4.3.800-rc.1`. It carries
+a single fix — no feature delta, no schema change (still 68 GraphQL definitions / 4 migrations), so
+it deploys over the current mainnet build without migration work. It does change one
+consumer-visible behaviour: contract actions from transaction segments that never executed no
+longer reach the API. They were previously served with an empty `state`, which was never a
+documented signal for a rolled-back action; `transactionResult` is the supported way to tell what
+applied. Rows written before this release keep whatever they hold today.
+
+### 🐛 Bug Fixes
+
+- *(chain-indexer)* Prevent a single transaction from halting indexing. Building a block could fail
+  in a way that was both fatal and deterministic: the failing block was never persisted and the
+  cursor never advanced, so a restart re-fetched the same block and failed again, and one
+  permissionless transaction could stop ingestion for an entire deployment. Two causes are fixed.
+  Contract actions now carry their segment ID and are dropped once the transaction result is known,
+  so an action from a segment that never applied no longer drives a contract state lookup the node
+  cannot answer. A contract call's entry point is decoded lossily and logged rather than raising an
+  error, because an entry point is an arbitrary byte string and need not be valid UTF-8
+
 ## [4.3.800-rc.1] - 2026-08-25
 
 Security release candidate for the ledger-v8 mainnet line, cut on top of `4.3.7`. It carries a
