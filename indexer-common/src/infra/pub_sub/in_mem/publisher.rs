@@ -40,24 +40,21 @@ impl Publisher for InMemPublisher {
         let value = serde_json::to_value(message)?;
 
         match T::TOPIC {
-            Topic("BlockIndexed") => {
+            Topic::BlockIndexed => {
                 self.0.block_indexed_sender.send(value)?;
             }
 
-            Topic("WalletIndexed") => {
+            Topic::WalletIndexed => {
                 self.0.wallet_indexed_sender.send(value)?;
             }
 
-            Topic("UnshieldedUtxoIndexed") => {
+            Topic::UnshieldedUtxoIndexed => {
                 self.0.unshielded_utxo_sender.send(value)?;
             }
 
-            Topic("BridgeEventIndexed") => {
+            Topic::BridgeEventIndexed => {
                 self.0.bridge_event_sender.send(value)?;
             }
-
-            // This must not happen; if it happens, we forgot to add an arm for the topic above!
-            _ => panic!("unexpected topic {:?}", T::TOPIC),
         }
 
         Ok(())
