@@ -28,20 +28,22 @@ pub struct Config {
     pub max_reconnects: usize,
 }
 
+// Topic variant names are the subject suffix, so renaming one changes the wire format.
 impl ToSubject for Topic {
     fn to_subject(&self) -> Subject {
-        format!("pub-sub.{}", self.0).into()
+        format!("pub-sub.{self}").into()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
-        domain::{Publisher, Subscriber, WalletIndexed},
+        domain::{Publisher, Subscriber, Topic, WalletIndexed},
         error::BoxError,
         infra::pub_sub::nats::{Config, publisher::NatsPublisher, subscriber::NatsSubscriber},
     };
     use anyhow::Context;
+    use async_nats::subject::ToSubject;
     use futures::{StreamExt, TryStreamExt};
     use std::{
         sync::{
@@ -53,6 +55,23 @@ mod tests {
     use testcontainers::{GenericImage, ImageExt, core::WaitFor, runners::AsyncRunner};
     use tokio::{task, time::sleep};
     use uuid::Uuid;
+
+    /// Pins the subject wire format, which the `Display` impl of `Topic` determines. The match is
+    /// exhaustive over every variant, so a new topic does not compile until its subject is pinned.
+    #[test]
+    fn test_topic_to_subject() {
+        use Topic::*;
+        for &topic in Topic::VARIANTS {
+            let expected = match topic {
+                BlockIndexed => "pub-sub.BlockIndexed",
+                WalletIndexed => "pub-sub.WalletIndexed",
+                UnshieldedUtxoIndexed => "pub-sub.UnshieldedUtxoIndexed",
+                BridgeEventIndexed => "pub-sub.BridgeEventIndexed",
+            };
+
+            assert_eq!(topic.to_subject().as_str(), expected);
+        }
+    }
 
     #[tokio::test]
     async fn test_publish_subscribe() -> Result<(), BoxError> {

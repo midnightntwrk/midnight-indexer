@@ -39,28 +39,25 @@ impl Subscriber for InMemSubscriber {
         T: Message,
     {
         let values = match T::TOPIC {
-            Topic("BlockIndexed") => {
+            Topic::BlockIndexed => {
                 let receiver = self.0.block_indexed_sender.subscribe();
                 BroadcastStream::new(receiver)
             }
 
-            Topic("WalletIndexed") => {
+            Topic::WalletIndexed => {
                 let receiver = self.0.wallet_indexed_sender.subscribe();
                 BroadcastStream::new(receiver)
             }
 
-            Topic("UnshieldedUtxoIndexed") => {
+            Topic::UnshieldedUtxoIndexed => {
                 let receiver = self.0.unshielded_utxo_sender.subscribe();
                 BroadcastStream::new(receiver)
             }
 
-            Topic("BridgeEventIndexed") => {
+            Topic::BridgeEventIndexed => {
                 let receiver = self.0.bridge_event_sender.subscribe();
                 BroadcastStream::new(receiver)
             }
-
-            // This must not happen; if it happens, we forgot to add an arm for the topic above!
-            _ => panic!("unexpected topic {:?}", T::TOPIC),
         };
 
         values.map(|value| {
