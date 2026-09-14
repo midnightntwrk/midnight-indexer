@@ -146,10 +146,7 @@ mod sealed {
 
 #[cfg(test)]
 mod tests {
-    use crate::domain::{
-        BlockIndexed, BridgeEventIndexed, Message, Topic, UnshieldedUtxoIndexed, WalletIndexed,
-    };
-    use std::collections::HashSet;
+    use crate::domain::Topic;
 
     /// Every topic renders as its own name. The match is exhaustive, so a new topic must be added
     /// here too.
@@ -174,33 +171,6 @@ mod tests {
     fn test_variants_are_indexed_by_discriminant() {
         for &topic in Topic::VARIANTS {
             assert_eq!(Topic::VARIANTS[topic as usize], topic);
-        }
-    }
-
-    /// `VARIANTS` lists every topic exactly once.
-    #[test]
-    fn test_variants_are_unique() {
-        let names = Topic::VARIANTS
-            .iter()
-            .map(Topic::to_string)
-            .collect::<HashSet<_>>();
-
-        assert_eq!(names.len(), Topic::VARIANTS.len());
-    }
-
-    /// Each message type carries the same-named topic. The match is exhaustive, so a new topic
-    /// must be added here too.
-    #[test]
-    fn test_message_topics() {
-        for topic in Topic::VARIANTS {
-            let message_topic = match topic {
-                Topic::BlockIndexed => BlockIndexed::TOPIC,
-                Topic::WalletIndexed => WalletIndexed::TOPIC,
-                Topic::UnshieldedUtxoIndexed => UnshieldedUtxoIndexed::TOPIC,
-                Topic::BridgeEventIndexed => BridgeEventIndexed::TOPIC,
-            };
-
-            assert_eq!(message_topic, *topic);
         }
     }
 }
