@@ -77,7 +77,7 @@ The `indexer-common` crate owns all shared domain types, DB pool abstractions, m
 Components communicate via strongly-typed messages (`BlockIndexed`, `WalletIndexed`, `UnshieldedUtxoIndexed`) defined in `indexer-common/src/domain/pub_sub.rs`. Each message type carries a `const TOPIC: Topic`.
 
 - **cloud**: NATS subjects (`pub-sub.<topic>`), JSON serialization, reconnection with retry/throttle
-- **standalone**: `tokio::sync::broadcast` channels (capacity 42), background drain tasks to prevent lag errors
+- **standalone**: `tokio::sync::broadcast` channels (capacity 64 per topic, set in `in_mem.rs`), background drain tasks to prevent lag errors
 
 ### Database Migrations
 
