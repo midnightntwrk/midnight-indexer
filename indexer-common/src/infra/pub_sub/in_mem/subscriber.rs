@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::{
-    domain::{Message, Subscriber, Topic},
+    domain::{Message, Subscriber},
     infra::pub_sub::in_mem::InMemPubSub,
 };
 use futures::{Stream, StreamExt};
@@ -38,27 +38,8 @@ impl Subscriber for InMemSubscriber {
     where
         T: Message,
     {
-        let values = match T::TOPIC {
-            Topic::BlockIndexed => {
-                let receiver = self.0.block_indexed_sender.subscribe();
-                BroadcastStream::new(receiver)
-            }
-
-            Topic::WalletIndexed => {
-                let receiver = self.0.wallet_indexed_sender.subscribe();
-                BroadcastStream::new(receiver)
-            }
-
-            Topic::UnshieldedUtxoIndexed => {
-                let receiver = self.0.unshielded_utxo_sender.subscribe();
-                BroadcastStream::new(receiver)
-            }
-
-            Topic::BridgeEventIndexed => {
-                let receiver = self.0.bridge_event_sender.subscribe();
-                BroadcastStream::new(receiver)
-            }
-        };
+        let receiver = self.0.sender(T::TOPIC).subscribe();
+        let values = BroadcastStream::new(receiver);
 
         values.map(|value| {
             let value = value?;
