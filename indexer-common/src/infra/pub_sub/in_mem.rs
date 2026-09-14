@@ -14,9 +14,13 @@
 pub mod publisher;
 pub mod subscriber;
 
-use crate::infra::pub_sub::in_mem::{publisher::InMemPublisher, subscriber::InMemSubscriber};
+use crate::{
+    domain::Topic,
+    infra::pub_sub::in_mem::{publisher::InMemPublisher, subscriber::InMemSubscriber},
+};
 use log::warn;
 use serde_json::Value;
+use std::array;
 use tokio::{
     sync::broadcast::{self, Receiver, Sender, error::RecvError},
     task,
@@ -24,12 +28,7 @@ use tokio::{
 
 /// Factory for in memory based implementations for publishers and subscribers.
 #[derive(Clone)]
-pub struct InMemPubSub {
-    block_indexed_sender: Sender<Value>,
-    wallet_indexed_sender: Sender<Value>,
-    unshielded_utxo_sender: Sender<Value>,
-    bridge_event_sender: Sender<Value>,
-}
+pub struct InMemPubSub([Sender<Value>; Topic::VARIANTS.len()]);
 
 impl InMemPubSub {
     /// Factory for [InMemPublisher].
@@ -41,45 +40,39 @@ impl InMemPubSub {
     pub fn subscriber(&self) -> InMemSubscriber {
         InMemSubscriber::new(self.clone())
     }
+
+    fn sender(&self, topic: Topic) -> &Sender<Value> {
+        &self.0[topic as usize]
+    }
 }
 
 impl Default for InMemPubSub {
     fn default() -> Self {
-        let (block_indexed_sender, block_indexed_receiver) = broadcast::channel(42);
-        let (wallet_indexed_sender, wallet_indexed_receiver) = broadcast::channel(42);
-        let (unshielded_utxo_sender, unshielded_utxo_receiver) = broadcast::channel(42);
-        let (bridge_event_sender, bridge_event_receiver) = broadcast::channel(42);
-
-        let pub_sub = InMemPubSub {
-            block_indexed_sender,
-            wallet_indexed_sender,
-            unshielded_utxo_sender,
-            bridge_event_sender,
-        };
-
-        // Keep one receiver alive per topic for as long as the `InMemPubSub`
-        // lives. This guarantees that `broadcast::Sender::send` always has at
-        // least one active receiver, so publishers do not see spurious
-        // "channel closed" errors when no external subscriber happens to be
-        // attached. `RecvError::Lagged` does not invalidate the receiver —
-        // `recv` just skips ahead — so we must keep looping, not break.
-        spawn_drain("block_indexed_receiver", block_indexed_receiver);
-        spawn_drain("wallet_indexed_receiver", wallet_indexed_receiver);
-        spawn_drain("unshielded_utxo_receiver", unshielded_utxo_receiver);
-        spawn_drain("bridge_event_receiver", bridge_event_receiver);
-
-        pub_sub
+        // The array type fixes the iteration count at `Topic::VARIANTS.len()`, so `index` is
+        // always in range below.
+        Self(array::from_fn(|index| {
+            let topic = Topic::VARIANTS[index];
+            let (sender, receiver) = broadcast::channel(capacity(topic));
+            // Keep one receiver alive per topic for as long as the `InMemPubSub`
+            // lives. This guarantees that `broadcast::Sender::send` always has at
+            // least one active receiver, so publishers do not see spurious
+            // "channel closed" errors when no external subscriber happens to be
+            // attached. `RecvError::Lagged` does not invalidate the receiver —
+            // `recv` just skips ahead — so we must keep looping, not break.
+            spawn_drain(topic, receiver);
+            sender
+        }))
     }
 }
 
-fn spawn_drain(name: &'static str, mut receiver: Receiver<Value>) {
+fn spawn_drain(topic: Topic, mut receiver: Receiver<Value>) {
     task::spawn(async move {
         loop {
             match receiver.recv().await {
                 Ok(_) => continue,
 
                 Err(RecvError::Lagged(skipped)) => {
-                    warn!(receiver = name, skipped; "drain receiver lagged");
+                    warn!(topic:%, skipped; "drain receiver lagged");
                     continue;
                 }
 
@@ -87,6 +80,22 @@ fn spawn_drain(name: &'static str, mut receiver: Receiver<Value>) {
             }
         }
     });
+}
+
+/// Messages buffered per subscriber before the slowest one starts losing them.
+///
+/// The match is exhaustive, so a new topic must be sized here before it compiles.
+///
+/// # Panics
+/// `broadcast::channel` panics on a capacity of zero.
+const fn capacity(topic: Topic) -> usize {
+    use Topic::*;
+    match topic {
+        BlockIndexed => 42,
+        WalletIndexed => 42,
+        UnshieldedUtxoIndexed => 42,
+        BridgeEventIndexed => 42,
+    }
 }
 
 #[cfg(test)]
