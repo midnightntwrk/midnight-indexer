@@ -37,7 +37,9 @@ macro_rules! topics {
         }
 
         impl Topic {
-            #[cfg(test)]
+            /// Every topic in declaration order. No variant carries an explicit discriminant, so
+            /// `topic as usize` indexes this slice.
+            #[cfg(any(test, feature = "standalone"))]
             pub(crate) const VARIANTS: &'static [Topic] = &[$(Topic::$name),+];
         }
 
@@ -163,6 +165,15 @@ mod tests {
             };
 
             assert_eq!(topic.to_string(), name);
+        }
+    }
+
+    /// Each topic's discriminant is its own position in `VARIANTS`. Giving a variant an explicit
+    /// discriminant breaks this, and with it every lookup keyed on `topic as usize`.
+    #[test]
+    fn test_variants_are_indexed_by_discriminant() {
+        for &topic in Topic::VARIANTS {
+            assert_eq!(Topic::VARIANTS[topic as usize], topic);
         }
     }
 
