@@ -26,11 +26,11 @@ where
     const TOPIC: Topic;
 }
 
-/// Declares [Topic] over the given message types and implements [Message] for each, pairing every
-/// type with its same-named variant.
+// Declares `Topic` over the given message types and implements `Message` for each, pairing every
+// type with its same-named variant.
 macro_rules! topics {
     ($($name:ident),+ $(,)?) => {
-        /// One variant per [Message] implementation.
+        /// The channel a [Message] travels on, one variant per implementation.
         #[derive(Debug, Display, Clone, Copy, PartialEq, Eq)]
         pub enum Topic {
             $($name),+
@@ -139,7 +139,7 @@ impl Subscriber for NoopSubscriber {
 }
 
 // Private, so only this module can name `Sealed` and thus satisfy the supertrait bound on
-// `Message`. Making it public would let any crate implement `Message`.
+// `Message`.
 mod sealed {
     pub trait Sealed {}
 }
