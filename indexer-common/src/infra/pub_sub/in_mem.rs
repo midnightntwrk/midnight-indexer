@@ -91,10 +91,9 @@ fn spawn_drain(topic: Topic, mut receiver: Receiver<Value>) {
 const fn capacity(topic: Topic) -> usize {
     use Topic::*;
     match topic {
-        BlockIndexed => 42,
-        WalletIndexed => 42,
-        UnshieldedUtxoIndexed => 42,
-        BridgeEventIndexed => 42,
+        // `broadcast::channel` rounds its capacity up to the next power of two, so keep every
+        // value a power of two for the number here to be the ring size.
+        BlockIndexed | WalletIndexed | UnshieldedUtxoIndexed | BridgeEventIndexed => 64,
     }
 }
 
@@ -111,7 +110,7 @@ mod tests {
     use futures::StreamExt;
     use serde_json::Value;
     use std::{error::Error as StdError, time::Duration};
-    use tokio::time::sleep;
+    use tokio::{sync::broadcast, time::sleep};
     use uuid::Uuid;
 
     /// Every message type reaches a subscriber for it. The match is exhaustive, so a new topic
@@ -174,6 +173,23 @@ mod tests {
 
         let received = messages.next().await;
         assert_matches!(received, Some(Ok(received)) if received == message);
+
+        Ok(())
+    }
+
+    /// `broadcast::channel` rounds its capacity up to the next power of two: asking for 42
+    /// allocates the same 64 slots as asking for 64. `Sender::len` counts slots still unread by
+    /// some receiver, so with one idle receiver and more sends than slots it is the ring size.
+    #[test]
+    fn test_broadcast_channel_rounds_capacity_up() -> Result<(), Box<dyn StdError>> {
+        for requested in [42, 64] {
+            let (sender, _receiver) = broadcast::channel(requested);
+            for _ in 0..128 {
+                sender.send(())?;
+            }
+
+            assert_eq!(sender.len(), 64);
+        }
 
         Ok(())
     }
