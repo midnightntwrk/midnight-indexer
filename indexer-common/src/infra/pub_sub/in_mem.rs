@@ -102,13 +102,14 @@ const fn capacity(topic: Topic) -> usize {
 mod tests {
     use crate::{
         domain::{
-            BlockIndexed, BridgeEventIndexed, Publisher, Subscriber, WalletIndexed,
+            BlockIndexed, BridgeEventIndexed, Publisher, Subscriber, Topic, WalletIndexed,
             bridge::BridgeEvent,
         },
-        infra::pub_sub::in_mem::InMemPubSub,
+        infra::pub_sub::in_mem::{InMemPubSub, capacity},
     };
     use assert_matches::assert_matches;
     use futures::StreamExt;
+    use serde_json::Value;
     use std::{error::Error as StdError, time::Duration};
     use tokio::time::sleep;
     use uuid::Uuid;
@@ -141,8 +142,7 @@ mod tests {
         Ok(())
     }
 
-    /// Regression test: publishing a bridge event through the in-memory pub-sub used to panic
-    /// with "unexpected topic" because `BridgeEventIndexed` had no channel.
+    /// A bridge event published here reaches a subscriber for it.
     #[tokio::test]
     async fn test_publish_subscribe_bridge_event() -> Result<(), Box<dyn StdError>> {
         let pub_sub = InMemPubSub::default();
@@ -167,42 +167,38 @@ mod tests {
     }
 
     /// Regression test: when no external subscriber is attached, the drain
-    /// task is the sole receiver keeping the channel alive. If it broke on
-    /// `RecvError::Lagged` (the pre-fix behavior), the receiver would be
-    /// dropped and subsequent `publish` calls would fail with `SendError`
-    /// because the broadcast channel has no active receivers.
+    /// task is the sole receiver keeping a topic's channel alive. If it broke
+    /// on `RecvError::Lagged`, the receiver would be dropped and subsequent
+    /// sends would fail with `SendError` because the broadcast channel has no
+    /// active receivers.
     ///
-    /// To force the drain task to lag, we publish far more messages than the
-    /// channel capacity (42) in a tight loop. `publish` contains no await
-    /// points, so on a current-thread runtime the drain task cannot be
-    /// scheduled until we explicitly yield, guaranteeing overflow.
+    /// To force the drain task to lag, we send one message past the channel's
+    /// capacity in a tight loop; `broadcast::channel` rounds its capacity up to
+    /// the next power of two, so the ring holds more slots than `capacity`
+    /// asks for. `send` contains no await points, so on a current-thread
+    /// runtime the drain task cannot be scheduled until we explicitly yield,
+    /// guaranteeing overflow. Every topic is covered by driving the loop from
+    /// `Topic::VARIANTS`.
     #[tokio::test(flavor = "current_thread")]
     async fn test_drain_survives_lag() -> Result<(), Box<dyn StdError>> {
         let pub_sub = InMemPubSub::default();
-        let publisher = pub_sub.publisher();
 
-        for height in 0..1000 {
-            publisher
-                .publish(&BlockIndexed {
-                    height,
-                    max_transaction_id: None,
-                    caught_up: false,
-                })
-                .await?;
+        for &topic in Topic::VARIANTS {
+            // The drain discards whatever it receives, so the payload carries nothing and
+            // `InMemPublisher` would only add a serialization step this test does not exercise.
+            let sender = pub_sub.sender(topic);
+
+            for _ in 0..=capacity(topic).next_power_of_two() {
+                sender.send(Value::Null)?;
+            }
+
+            // Let the drain task observe the lag.
+            sleep(Duration::from_millis(50)).await;
+
+            // If the drain task broke on lag, this send would fail with `SendError` because no
+            // receivers remain.
+            sender.send(Value::Null)?;
         }
-
-        // Let the drain task observe the lag.
-        sleep(Duration::from_millis(50)).await;
-
-        // If the drain task broke on lag, this publish would fail with
-        // `SendError` because no receivers remain.
-        publisher
-            .publish(&BlockIndexed {
-                height: 9999,
-                max_transaction_id: None,
-                caught_up: false,
-            })
-            .await?;
 
         Ok(())
     }
