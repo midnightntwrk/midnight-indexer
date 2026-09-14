@@ -102,8 +102,8 @@ const fn capacity(topic: Topic) -> usize {
 mod tests {
     use crate::{
         domain::{
-            BlockIndexed, BridgeEventIndexed, Publisher, Subscriber, Topic, WalletIndexed,
-            bridge::BridgeEvent,
+            BlockIndexed, BridgeEventIndexed, Message, Publisher, Subscriber, Topic,
+            UnshieldedUtxoIndexed, WalletIndexed, bridge::BridgeEvent,
         },
         infra::pub_sub::in_mem::{InMemPubSub, capacity},
     };
@@ -114,54 +114,66 @@ mod tests {
     use tokio::time::sleep;
     use uuid::Uuid;
 
+    /// Every message type reaches a subscriber for it. The match is exhaustive, so a new topic
+    /// must be round-tripped here too.
     #[tokio::test]
     async fn test_publish_subscribe() -> Result<(), Box<dyn StdError>> {
         let pub_sub = InMemPubSub::default();
-        sleep(Duration::from_millis(50)).await; //testing if IN_MEM_PUB_SUB doesn't get dropped
 
-        let block_indexed = BlockIndexed {
-            height: 123,
-            max_transaction_id: None,
-            caught_up: false,
-        };
-        let publish_block_res = pub_sub.publisher().publish(&block_indexed).await;
+        for &topic in Topic::VARIANTS {
+            match topic {
+                Topic::BlockIndexed => {
+                    let event = BlockIndexed {
+                        height: 123,
+                        max_transaction_id: None,
+                        caught_up: false,
+                    };
+                    assert_publish_subscribe(&pub_sub, event).await?
+                }
 
-        assert!(publish_block_res.is_ok());
+                Topic::WalletIndexed => {
+                    let event = WalletIndexed {
+                        wallet_id: Uuid::nil(),
+                    };
+                    assert_publish_subscribe(&pub_sub, event).await?
+                }
 
-        let subscriber = pub_sub.subscriber();
-        let mut messages = subscriber.subscribe::<WalletIndexed>();
+                Topic::UnshieldedUtxoIndexed => {
+                    let event = UnshieldedUtxoIndexed {
+                        address: [3u8; 32].into(),
+                    };
+                    assert_publish_subscribe(&pub_sub, event).await?
+                }
 
-        let wallet_indexed = WalletIndexed {
-            wallet_id: Uuid::nil(),
-        };
-        pub_sub.publisher().publish(&wallet_indexed).await?;
-
-        let message = messages.next().await;
-        assert_matches!(message, Some(Ok(message)) if message == wallet_indexed);
+                Topic::BridgeEventIndexed => {
+                    let event = BridgeEventIndexed {
+                        block_height: 42,
+                        event: BridgeEvent::ReserveTransfer {
+                            mc_tx_hash: [1u8; 32].into(),
+                            amount: 1_000_000,
+                            midnight_tx_hash: [2u8; 32].into(),
+                        },
+                    };
+                    assert_publish_subscribe(&pub_sub, event).await?
+                }
+            }
+        }
 
         Ok(())
     }
 
-    /// A bridge event published here reaches a subscriber for it.
-    #[tokio::test]
-    async fn test_publish_subscribe_bridge_event() -> Result<(), Box<dyn StdError>> {
-        let pub_sub = InMemPubSub::default();
-
+    /// Subscribes, publishes the message, then asserts the subscriber receives it unchanged.
+    async fn assert_publish_subscribe<T: Message + Send + Sync>(
+        pub_sub: &InMemPubSub,
+        message: T,
+    ) -> Result<(), Box<dyn StdError>> {
         let subscriber = pub_sub.subscriber();
-        let mut messages = subscriber.subscribe::<BridgeEventIndexed>();
+        let mut messages = subscriber.subscribe::<T>();
 
-        let bridge_event_indexed = BridgeEventIndexed {
-            block_height: 42,
-            event: BridgeEvent::ReserveTransfer {
-                mc_tx_hash: [1u8; 32].into(),
-                amount: 1_000_000,
-                midnight_tx_hash: [2u8; 32].into(),
-            },
-        };
-        pub_sub.publisher().publish(&bridge_event_indexed).await?;
+        pub_sub.publisher().publish(&message).await?;
 
-        let message = messages.next().await;
-        assert_matches!(message, Some(Ok(message)) if message == bridge_event_indexed);
+        let received = messages.next().await;
+        assert_matches!(received, Some(Ok(received)) if received == message);
 
         Ok(())
     }
