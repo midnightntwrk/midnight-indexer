@@ -116,6 +116,7 @@ const hostEntries: HostEntry[] = [
   { env: EnvironmentName.DEVNET, domain: 'devnet.midnight.network' },
   { env: EnvironmentName.PREVIEW, domain: 'preview.midnight.network' },
   { env: EnvironmentName.PREPROD, domain: 'preprod.midnight.network' },
+  { env: EnvironmentName.MAINNET, domain: 'mainnet.midnight.network' },
 ];
 
 const hostConfigByEnvName: Record<EnvironmentName, HostConfig> = hostEntries.reduce(
