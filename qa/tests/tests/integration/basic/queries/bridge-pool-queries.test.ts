@@ -50,7 +50,9 @@ const EARLY_BLOCK = 1;
 
 let surfacePresent = false;
 
-describe.skipIf(env.isUndeployedEnv())('bridge pool queries', () => {
+// NIGHT not yet available on Midnight mainnet: skip there too until mainnet
+// has known NIGHT flows through the bridge pool to observe.
+describe.skipIf(env.isUndeployedEnv() || env.isMainnetEnv())('bridge pool queries', () => {
   beforeAll(async () => {
     const probe = await httpClient.getBridgePoolSummary();
     if (probe.errors || !probe.data) {

@@ -239,6 +239,10 @@ export class Environment {
     return this.isUndeployed;
   }
 
+  isMainnetEnv(): boolean {
+    return this.envName === EnvironmentName.MAINNET;
+  }
+
   getCurrentEnvironmentName(): EnvironmentName {
     return this.envName;
   }
