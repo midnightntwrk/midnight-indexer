@@ -90,10 +90,23 @@ fn spawn_drain(topic: Topic, mut receiver: Receiver<Value>) {
 /// `broadcast::channel` panics on a capacity of zero.
 const fn capacity(topic: Topic) -> usize {
     use Topic::*;
+    // `broadcast::channel` rounds its capacity up to the next power of two, so keep every value a
+    // power of two for the number here to be the ring size. One ring serves every subscriber of a
+    // topic, so the memory cost is per topic. A slot holds the message as a `serde_json::Value`
+    // plus 32 B of slot bookkeeping; the figures add that to the `Value`'s heap for a worst-case
+    // message, measured from `size_of` and string capacities. `size_of` of the message type itself
+    // is given for comparison.
     match topic {
-        // `broadcast::channel` rounds its capacity up to the next power of two, so keep every
-        // value a power of two for the number here to be the ring size.
-        BlockIndexed | WalletIndexed | UnshieldedUtxoIndexed | BridgeEventIndexed => 64,
+        // ≈ 265 B a slot, ≈ 265 KiB a ring; `BlockIndexed` is 32 B.
+        BlockIndexed => 1024,
+        // ≈ 165 B a slot, ≈ 165 KiB a ring; `WalletIndexed` is 16 B.
+        WalletIndexed => 1024,
+        // ≈ 195 B a slot, ≈ 195 KiB a ring; `UnshieldedUtxoIndexed` is 32 B.
+        UnshieldedUtxoIndexed => 1024,
+        // ≈ 736 B a slot, ≈ 736 KiB a ring; `BridgeEventIndexed` is 112 B plus a recipient of up
+        // to 32 B. `UnapprovedTransfer` is the largest variant as a `Value`, its tag being the
+        // longest of the two variants that carry every field.
+        BridgeEventIndexed => 1024,
     }
 }
 
@@ -175,6 +188,15 @@ mod tests {
         assert_matches!(received, Some(Ok(received)) if received == message);
 
         Ok(())
+    }
+
+    /// Every capacity is a power of two, so `capacity` states the ring size `broadcast::channel`
+    /// allocates.
+    #[test]
+    fn test_capacities_are_powers_of_two() {
+        for &topic in Topic::VARIANTS {
+            assert!(capacity(topic).is_power_of_two(), "{topic}");
+        }
     }
 
     /// `broadcast::channel` rounds its capacity up to the next power of two: asking for 42
