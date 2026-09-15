@@ -31,6 +31,10 @@ const CONFIG = {
   WS_PROTOCOL: "graphql-transport-ws",
   SPINNER_UPDATE_INTERVAL_MS: 100,
   PROGRESS_UPDATE_INTERVAL: 100,
+  // How often buffered blocks are flushed to disk and the resume marker
+  // (stats file) is advanced. Keeping this bounded is what makes a kill/Ctrl+C
+  // lose at most this much progress instead of the whole run.
+  CHECKPOINT_INTERVAL_MS: 10_000,
 } as const;
 
 type Config = typeof CONFIG;
@@ -75,6 +79,50 @@ function getStatsPath(): string {
   return path.join(CONFIG.STATS_DIR, `${TARGET_ENV}_stats.json`);
 }
 
+function getBlocksFilePath(): string {
+  return path.join(CONFIG.TMP_DIR, `${TARGET_ENV}_blocks.jsonl`);
+}
+
+/**
+ * Repairs a blocks.jsonl left with a truncated trailing line by a previous
+ * abrupt exit (a kill/crash mid-write, whether from before this checkpoint
+ * mechanism existed or from a write that was cut off at the OS level).
+ *
+ * Every line this tool ever writes is a complete `"<json>\n"` chunk, so a
+ * well-formed file always ends in a newline. If it doesn't, the last write
+ * never finished; this trims that partial line back to the last complete
+ * one so downstream JSON parsing (resume, test-data generation) never trips
+ * over it - instead of failing silently forever, since a stale stats.json
+ * can otherwise mean the file is never rewritten by a future run.
+ */
+function repairTruncatedBlocksFile(filePath: string): void {
+  if (!fs.existsSync(filePath)) return;
+  const size = fs.statSync(filePath).size;
+  if (size === 0) return;
+
+  const fd = fs.openSync(filePath, "r+");
+  try {
+    const tailSize = Math.min(size, 4 * 1024 * 1024);
+    const tailBuffer = Buffer.alloc(tailSize);
+    fs.readSync(fd, tailBuffer, 0, tailSize, size - tailSize);
+
+    if (tailBuffer[tailSize - 1] === 0x0a /* "\n" */) return; // last write completed
+
+    const lastNewlineInTail = tailBuffer.lastIndexOf(0x0a);
+    const truncateAt =
+      lastNewlineInTail === -1
+        ? size - tailSize // no newline in the tail at all; drop the whole tail
+        : size - tailSize + lastNewlineInTail + 1;
+
+    fs.ftruncateSync(fd, truncateAt);
+    console.warn(
+      `[WARN ] - Repaired ${filePath}: dropped a truncated trailing line from a previous abrupt exit (${size - truncateAt} bytes)`,
+    );
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 function ensureStatsDir(): void {
   if (!fs.existsSync(CONFIG.STATS_DIR)) fs.mkdirSync(CONFIG.STATS_DIR);
 }
@@ -108,9 +156,18 @@ function loadStats(): ScanStats | null {
   return null;
 }
 
+/**
+ * Writes the stats file atomically (write to a temp file, then rename over the
+ * target). Rename is an atomic replace on POSIX filesystems, so a process
+ * killed mid-write leaves either the old stats file or the new one, never a
+ * truncated/corrupted one.
+ */
 function writeStats(stats: ScanStats): void {
   ensureStatsDir();
-  fs.writeFileSync(getStatsPath(), JSON.stringify(stats, null, 2), "utf-8");
+  const finalPath = getStatsPath();
+  const tmpPath = `${finalPath}.tmp-${process.pid}`;
+  fs.writeFileSync(tmpPath, JSON.stringify(stats, null, 2), "utf-8");
+  fs.renameSync(tmpPath, finalPath);
 }
 
 /**
@@ -128,6 +185,35 @@ export interface SubscriptionHandlers<T> {
 }
 
 if (!fs.existsSync(CONFIG.TMP_DIR)) fs.mkdirSync(CONFIG.TMP_DIR);
+repairTruncatedBlocksFile(getBlocksFilePath());
+
+/**
+ * Graceful shutdown state (module scope, since signal handlers must be
+ * registered once regardless of where `main()` currently is).
+ *
+ * A signal only *requests* a shutdown: `main()` keeps running until its next
+ * checkpoint boundary, flushes whatever is buffered, and only then exits.
+ * A second signal forces an immediate exit for anyone who doesn't want to wait.
+ */
+let shutdownSignal: string | null = null;
+let notifyShutdownRequested: (() => void) | undefined;
+
+function requestShutdown(signal: string): void {
+  if (shutdownSignal) {
+    console.info(
+      `\n[INFO ] - Received ${signal} again, forcing immediate exit.`,
+    );
+    process.exit(1);
+  }
+  shutdownSignal = signal;
+  console.info(
+    `\n[INFO ] - Received ${signal}. Finishing the current checkpoint and shutting down (press again to force)...`,
+  );
+  notifyShutdownRequested?.();
+}
+
+process.on("SIGINT", () => requestShutdown("SIGINT"));
+process.on("SIGTERM", () => requestShutdown("SIGTERM"));
 
 /**
  * Cleanup function for WebSocket and handlers
@@ -460,298 +546,31 @@ function parseStartBlockHeight(): number | undefined {
   return Number.isFinite(n) && n >= 0 ? n : undefined;
 }
 
-async function main(): Promise<boolean> {
-  // Record start time for duration calculation
-  const startTime = Date.now();
+/**
+ * Regenerates the qa/tests/data/static/${TARGET_ENV} test data files
+ * (blocks.jsonc, transactions.jsonc, contract-actions.jsonc) from whatever is
+ * currently in tmp_scan/${TARGET_ENV}_blocks.jsonl.
+ *
+ * Called from a `finally` block in main() so it always runs when the process
+ * exits under its own control - success, an early return, a thrown error, a
+ * subscription failure, or a graceful SIGINT/SIGTERM shutdown - not only on
+ * the happy path. It must never throw itself: a failure here should be
+ * logged, not allowed to mask the scan's own outcome. (It still can't run
+ * after an unstoppable `kill -9`, since no JS runs at all in that case.)
+ */
+async function finalizeTestData(): Promise<void> {
+  if (!testDataFolder) return;
 
-  // Checking indexer is up and running on http ready endpoint
-  console.info(
-    `[INFO ] - Checking indexer is up and running on ${TARGET_ENV} (${INDEXER_HTTP_URL}/ready)`,
-  );
-  try {
-    const httpReadyResponse = await fetch(`${INDEXER_HTTP_URL}/ready`, {
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!httpReadyResponse.ok) {
-      console.error(
-        `[ERROR] - Indexer is not ready on ${TARGET_ENV} (${INDEXER_HTTP_URL}/ready)`,
-      );
-      console.error(
-        `[ERROR] - Replied with status ${httpReadyResponse.status}: ${httpReadyResponse.statusText}`,
-      );
-      return false;
-    }
-  } catch (error) {
-    console.error("[ERROR] - Failed to connect to indexer:", error);
-    return false;
-  }
-  console.info(`[INFO ] - Indexer is ready!`);
+  const sourceBlockDataFile = getBlocksFilePath();
 
-  console.info(
-    `[INFO ] - Connecting to indexer on ${TARGET_ENV} through websocket channel ${INDEXER_WS_URL}`,
-  );
-
-  // Initialize the websocket connection with retry
-  const indexerWs = await connectionInitWithRetry();
-  indexerWs.onmessage = handleMessage.bind(indexerWs);
-
-  // One-shot query to get the latest block height at start time
-  async function getLatestBlockHeight(
-    ws: WebSocket,
-    timeoutMs = CONFIG.QUERY_TIMEOUT_MS,
-  ): Promise<number> {
-    const id = generateCustomId();
-    const query = `query GetLatestBlock { block { height } }`;
-
-    return await new Promise<number>((resolve, reject) => {
-      let resolved = false;
-
-      const timeout = setTimeout(() => {
-        handlersMap.delete(id);
-        if (!resolved)
-          reject(new Error("Timed out fetching latest block height"));
-      }, timeoutMs);
-
-      handlersMap.set(id, {
-        next: (payload: { data?: { block?: { height?: number } } }) => {
-          try {
-            const height = payload?.data?.block?.height ?? 0;
-            const stopMessage = { id, type: "stop" };
-            ws.send(JSON.stringify(stopMessage));
-            clearTimeout(timeout);
-            handlersMap.delete(id);
-            if (!resolved) {
-              resolved = true;
-              resolve(Number(height) || 0);
-            }
-          } catch (e) {
-            clearTimeout(timeout);
-            handlersMap.delete(id);
-            if (!resolved) reject(e);
-          }
-        },
-        complete: () => {
-          // no-op; we resolve on next
-        },
-        error: (err) => {
-          clearTimeout(timeout);
-          handlersMap.delete(id);
-          if (!resolved) reject(err);
-        },
-      });
-
-      const payload = {
-        id,
-        type: "start",
-        payload: { query },
-      };
-      ws.send(JSON.stringify(payload));
-    });
-  }
-
-  const receivedBlocks: Block[] = [];
-  let blocksWithTransactions = 0;
-  let transactionsFound = 0;
-  let contractActionsFound = 0;
-
-  // Spinner for progress indication
-  const spinner = createSpinner();
-  const blockSubscriptionHandler: SubscriptionHandlers<
-    SubscriptionPayload<{ blocks: Block }>
-  > = {
-    next: async (payload) => {
-      if (payload.data !== undefined) {
-        receivedBlocks.push(payload.data.blocks);
-        if (payload.data?.blocks.transactions.length > 0) {
-          transactionsFound += payload.data?.blocks.transactions.length;
-          blocksWithTransactions++;
-
-          // Write the block to file as a json line
-          blocksFile.write(JSON.stringify(payload.data.blocks) + "\n");
-        }
-        if (
-          payload.data?.blocks.transactions.some(
-            (transaction) =>
-              transaction.__typename === "RegularTransaction" &&
-              (transaction as RegularTransaction).contractActions!.length > 0,
-          )
-        ) {
-          contractActionsFound++;
-        }
-      }
-
-      // Update spinner with current progress
-      spinner.update(receivedBlocks.length);
-    },
-    error: (err) => {
-      console.error(
-        `[ERROR] - Subscription handler received error payload:\n${JSON.stringify(err, null, 2)}`,
-      );
-    },
-    complete: () => {
-      console.debug("Completed sent from Indexer");
-    },
-  };
-
-  // Determine target height, then compute start height (START_BLOCK_HEIGHT > stats file > 0)
-  const targetHeight = await getLatestBlockHeight(indexerWs).catch(() => 0);
-  console.debug(
-    `[DEBUG] - The selected environment has ${targetHeight} blocks`,
-  );
-  const TIMEOUT_MS = CONFIG.TIMEOUT_MS;
-
-  const startBlockHeightEnv = parseStartBlockHeight();
-  const previousStats = loadStats();
-  const startHeight =
-    startBlockHeightEnv !== undefined
-      ? startBlockHeightEnv
-      : previousStats !== null
-        ? previousStats.lastScannedBlockHeight + 1
-        : 0;
-
-  if (startHeight > targetHeight) {
+  if (!fs.existsSync(sourceBlockDataFile)) {
     console.info(
-      "[INFO ] - Already caught up: start height exceeds latest block height; nothing to scan.",
+      `[INFO ] - Skipping test data update: no block data collected yet for ${TARGET_ENV} (${sourceBlockDataFile} not found)`,
     );
-    if (previousStats !== null) {
-      writeStats({
-        ...previousStats,
-        lastUpdated: new Date().toISOString(),
-      });
-    }
-    await cleanupResources(indexerWs, handlersMap);
-    return true;
-  }
-  if (startBlockHeightEnv !== undefined && startHeight >= targetHeight) {
-    console.error(
-      `[ERROR] - START_BLOCK_HEIGHT (${startBlockHeightEnv}) must be less than latest block height (${targetHeight})`,
-    );
-    await cleanupResources(indexerWs, handlersMap);
-    return false;
-  }
-  if (startHeight < 0) {
-    console.error("[ERROR] - Start height must be non-negative");
-    await cleanupResources(indexerWs, handlersMap);
-    return false;
+    return;
   }
 
-  const isResume = startBlockHeightEnv === undefined && previousStats !== null;
-  const blocksFilePath = path.join(
-    CONFIG.TMP_DIR,
-    `${TARGET_ENV}_blocks.jsonl`,
-  );
-  const blocksFile = fs.createWriteStream(blocksFilePath, {
-    flags: isResume ? "a" : "w",
-  });
-
-  // Create scan manager for handling subscription logic
-  const scanManager = new BlockScanManager(
-    handlersMap,
-    blockSubscriptionHandler,
-    spinner,
-  );
-  scanManager.setTargetHeight(targetHeight);
-
-  const reachedPromise = scanManager.createReachedPromise();
-  const errorPromise = scanManager.createErrorPromise();
-
-  const blockOffset: BlockOffset = { height: startHeight };
-  const unsubscribe = subscribeToBlockEvents(
-    indexerWs,
-    blockOffset,
-    scanManager.getWrappedHandler(),
-  );
-
-  const blocksToStream = targetHeight - startHeight + 1;
-  console.info("[INFO ] - Subscribed to block updates!");
-  console.info(
-    `[INFO ] - Streaming ${blocksToStream} blocks (from height ${startHeight} to ${targetHeight}, or ${TIMEOUT_MS / 1000}s timeout) ...`,
-  );
-  console.info(`[INFO ] - ... this might take a while`);
-
-  await Promise.race([
-    reachedPromise,
-    errorPromise,
-    new Promise((res) => setTimeout(res, TIMEOUT_MS)),
-  ]);
-
-  // Check if we exited due to an error
-  const subscriptionError = scanManager.getSubscriptionError();
-  if (subscriptionError) {
-    // Clear the spinner line
-    spinner.clear();
-
-    console.error(
-      `[ERROR] - Block scanning failed due to indexer subscription error: ${subscriptionError.message}`,
-    );
-
-    // Clean up and exit without throwing
-    await cleanupResources(indexerWs, handlersMap);
-    return false;
-  }
-
-  // Clear the spinner line before final messages
-  spinner.clear();
-
-  console.info("[INFO ] - Unsubscribing from block updates");
-  unsubscribe();
-
-  console.debug("[DEBUG] - Closing websocket connection");
-
-  // Clean up all resources
-  await cleanupResources(indexerWs, handlersMap);
-
-  // Calculate scan duration
-  const endTime = Date.now();
-  const scanDurationSeconds = Math.round((endTime - startTime) / 1000);
-  const lastScannedBlockHeight =
-    receivedBlocks.length > 0
-      ? Number(receivedBlocks[receivedBlocks.length - 1].height)
-      : startHeight - 1;
-
-  console.info("[INFO ] - Block fetching completed!");
-  console.info(`[INFO ] - Summary report:
-    - Total blocks scanned   : ${receivedBlocks.length}
-    - Blocks with txs        : ${blocksWithTransactions}
-    - Total txs found        : ${transactionsFound}
-    - Contract actions found : ${contractActionsFound}
-    - Scan duration          : ${scanDurationSeconds} seconds`);
-
-  const runStats: ScanStats = {
-    lastScannedBlockHeight,
-    totalBlocksScanned: receivedBlocks.length,
-    blocksWithTransactions,
-    totalTransactionsFound: transactionsFound,
-    contractActionsFound,
-    totalScanDurationSeconds: scanDurationSeconds,
-    lastUpdated: new Date().toISOString(),
-  };
-  const mergedStats: ScanStats =
-    previousStats !== null
-      ? {
-          lastScannedBlockHeight: runStats.lastScannedBlockHeight,
-          totalBlocksScanned:
-            previousStats.totalBlocksScanned + runStats.totalBlocksScanned,
-          blocksWithTransactions:
-            previousStats.blocksWithTransactions +
-            runStats.blocksWithTransactions,
-          totalTransactionsFound:
-            previousStats.totalTransactionsFound +
-            runStats.totalTransactionsFound,
-          contractActionsFound:
-            previousStats.contractActionsFound + runStats.contractActionsFound,
-          totalScanDurationSeconds:
-            previousStats.totalScanDurationSeconds +
-            runStats.totalScanDurationSeconds,
-          lastUpdated: runStats.lastUpdated,
-        }
-      : runStats;
-  writeStats(mergedStats);
-  console.info(`[INFO ] - Stats written to ${getStatsPath()}`);
-
-  // Update test data files if folder path was provided
-  if (testDataFolder) {
-    const sourceBlockDataFile = `${CONFIG.TMP_DIR}/${TARGET_ENV}_blocks.jsonl`;
+  try {
     console.info(
       `[INFO ] - Using block info stored in: ./${sourceBlockDataFile}`,
     );
@@ -759,10 +578,398 @@ async function main(): Promise<boolean> {
       `[INFO ] - Updating test data files in: ${testDataFolder}/${TARGET_ENV}`,
     );
 
-    updateTestDataFiles(testDataFolder, sourceBlockDataFile);
+    await updateTestDataFiles(testDataFolder, sourceBlockDataFile);
+  } catch (error) {
+    console.error(
+      `[ERROR] - Failed to update test data files for ${TARGET_ENV}: ${(error as Error).message}`,
+    );
   }
+}
 
-  return true;
+async function main(): Promise<boolean> {
+  try {
+    // Record start time for duration calculation
+    const startTime = Date.now();
+
+    // Checking indexer is up and running on http ready endpoint
+    console.info(
+      `[INFO ] - Checking indexer is up and running on ${TARGET_ENV} (${INDEXER_HTTP_URL}/ready)`,
+    );
+    try {
+      const httpReadyResponse = await fetch(`${INDEXER_HTTP_URL}/ready`, {
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!httpReadyResponse.ok) {
+        console.error(
+          `[ERROR] - Indexer is not ready on ${TARGET_ENV} (${INDEXER_HTTP_URL}/ready)`,
+        );
+        console.error(
+          `[ERROR] - Replied with status ${httpReadyResponse.status}: ${httpReadyResponse.statusText}`,
+        );
+        return false;
+      }
+    } catch (error) {
+      console.error("[ERROR] - Failed to connect to indexer:", error);
+      return false;
+    }
+    console.info(`[INFO ] - Indexer is ready!`);
+
+    console.info(
+      `[INFO ] - Connecting to indexer on ${TARGET_ENV} through websocket channel ${INDEXER_WS_URL}`,
+    );
+
+    // Initialize the websocket connection with retry
+    const indexerWs = await connectionInitWithRetry();
+    indexerWs.onmessage = handleMessage.bind(indexerWs);
+
+    // One-shot query to get the latest block height at start time
+    async function getLatestBlockHeight(
+      ws: WebSocket,
+      timeoutMs = CONFIG.QUERY_TIMEOUT_MS,
+    ): Promise<number> {
+      const id = generateCustomId();
+      const query = `query GetLatestBlock { block { height } }`;
+
+      return await new Promise<number>((resolve, reject) => {
+        let resolved = false;
+
+        const timeout = setTimeout(() => {
+          handlersMap.delete(id);
+          if (!resolved)
+            reject(new Error("Timed out fetching latest block height"));
+        }, timeoutMs);
+
+        handlersMap.set(id, {
+          next: (payload: { data?: { block?: { height?: number } } }) => {
+            try {
+              const height = payload?.data?.block?.height ?? 0;
+              const stopMessage = { id, type: "stop" };
+              ws.send(JSON.stringify(stopMessage));
+              clearTimeout(timeout);
+              handlersMap.delete(id);
+              if (!resolved) {
+                resolved = true;
+                resolve(Number(height) || 0);
+              }
+            } catch (e) {
+              clearTimeout(timeout);
+              handlersMap.delete(id);
+              if (!resolved) reject(e);
+            }
+          },
+          complete: () => {
+            // no-op; we resolve on next
+          },
+          error: (err) => {
+            clearTimeout(timeout);
+            handlersMap.delete(id);
+            if (!resolved) reject(err);
+          },
+        });
+
+        const payload = {
+          id,
+          type: "start",
+          payload: { query },
+        };
+        ws.send(JSON.stringify(payload));
+      });
+    }
+
+    const receivedBlocks: Block[] = [];
+    let blocksWithTransactions = 0;
+    let transactionsFound = 0;
+    let contractActionsFound = 0;
+
+    // Blocks with transactions, serialized but not yet written to disk. Flushed
+    // to blocksFile every CHECKPOINT_INTERVAL_MS by checkpoint() below, instead
+    // of one disk write per block.
+    let pendingLines: string[] = [];
+
+    // Spinner for progress indication
+    const spinner = createSpinner();
+    const blockSubscriptionHandler: SubscriptionHandlers<
+      SubscriptionPayload<{ blocks: Block }>
+    > = {
+      next: async (payload) => {
+        if (payload.data !== undefined) {
+          receivedBlocks.push(payload.data.blocks);
+          if (payload.data?.blocks.transactions.length > 0) {
+            transactionsFound += payload.data?.blocks.transactions.length;
+            blocksWithTransactions++;
+
+            // Buffer the block as a json line; checkpoint() flushes it to disk.
+            pendingLines.push(JSON.stringify(payload.data.blocks) + "\n");
+          }
+          if (
+            payload.data?.blocks.transactions.some(
+              (transaction) =>
+                transaction.__typename === "RegularTransaction" &&
+                (transaction as RegularTransaction).contractActions!.length > 0,
+            )
+          ) {
+            contractActionsFound++;
+          }
+        }
+
+        // Update spinner with current progress
+        spinner.update(receivedBlocks.length);
+      },
+      error: (err) => {
+        console.error(
+          `[ERROR] - Subscription handler received error payload:\n${JSON.stringify(err, null, 2)}`,
+        );
+      },
+      complete: () => {
+        console.debug("Completed sent from Indexer");
+      },
+    };
+
+    // Determine target height, then compute start height (START_BLOCK_HEIGHT > stats file > 0)
+    const targetHeight = await getLatestBlockHeight(indexerWs).catch(() => 0);
+    console.debug(
+      `[DEBUG] - The selected environment has ${targetHeight} blocks`,
+    );
+    const TIMEOUT_MS = CONFIG.TIMEOUT_MS;
+
+    const startBlockHeightEnv = parseStartBlockHeight();
+    const previousStats = loadStats();
+    const startHeight =
+      startBlockHeightEnv !== undefined
+        ? startBlockHeightEnv
+        : previousStats !== null
+          ? previousStats.lastScannedBlockHeight + 1
+          : 0;
+
+    if (startHeight > targetHeight) {
+      console.info(
+        "[INFO ] - Already caught up: start height exceeds latest block height; nothing to scan.",
+      );
+      if (previousStats !== null) {
+        writeStats({
+          ...previousStats,
+          lastUpdated: new Date().toISOString(),
+        });
+      }
+      await cleanupResources(indexerWs, handlersMap);
+      return true;
+    }
+    if (startBlockHeightEnv !== undefined && startHeight >= targetHeight) {
+      console.error(
+        `[ERROR] - START_BLOCK_HEIGHT (${startBlockHeightEnv}) must be less than latest block height (${targetHeight})`,
+      );
+      await cleanupResources(indexerWs, handlersMap);
+      return false;
+    }
+    if (startHeight < 0) {
+      console.error("[ERROR] - Start height must be non-negative");
+      await cleanupResources(indexerWs, handlersMap);
+      return false;
+    }
+
+    const isResume =
+      startBlockHeightEnv === undefined && previousStats !== null;
+    const blocksFilePath = getBlocksFilePath();
+    const blocksFile = fs.createWriteStream(blocksFilePath, {
+      flags: isResume ? "a" : "w",
+    });
+
+    /**
+     * Builds the stats snapshot for the current progress (used both by the
+     * periodic checkpoint and by the final write), merged with whatever was on
+     * disk before this run started.
+     */
+    function buildMergedStats(elapsedSeconds: number): ScanStats {
+      const lastScannedBlockHeight =
+        receivedBlocks.length > 0
+          ? Number(receivedBlocks[receivedBlocks.length - 1].height)
+          : startHeight - 1;
+
+      const runStats: ScanStats = {
+        lastScannedBlockHeight,
+        totalBlocksScanned: receivedBlocks.length,
+        blocksWithTransactions,
+        totalTransactionsFound: transactionsFound,
+        contractActionsFound,
+        totalScanDurationSeconds: elapsedSeconds,
+        lastUpdated: new Date().toISOString(),
+      };
+
+      return previousStats !== null
+        ? {
+            lastScannedBlockHeight: runStats.lastScannedBlockHeight,
+            totalBlocksScanned:
+              previousStats.totalBlocksScanned + runStats.totalBlocksScanned,
+            blocksWithTransactions:
+              previousStats.blocksWithTransactions +
+              runStats.blocksWithTransactions,
+            totalTransactionsFound:
+              previousStats.totalTransactionsFound +
+              runStats.totalTransactionsFound,
+            contractActionsFound:
+              previousStats.contractActionsFound +
+              runStats.contractActionsFound,
+            totalScanDurationSeconds:
+              previousStats.totalScanDurationSeconds +
+              runStats.totalScanDurationSeconds,
+            lastUpdated: runStats.lastUpdated,
+          }
+        : runStats;
+    }
+
+    /**
+     * Flushes buffered block lines to disk and only then advances the stats
+     * file (resume marker). This ordering is what gives the two files
+     * all-or-nothing consistency: stats.json never claims progress that isn't
+     * actually persisted in blocks.jsonl.
+     *
+     * On a write failure, the buffered lines are put back so the next
+     * checkpoint retries them, and the stats file is left untouched.
+     */
+    async function checkpoint(): Promise<void> {
+      const linesToFlush = pendingLines;
+      pendingLines = [];
+
+      if (linesToFlush.length > 0) {
+        try {
+          await new Promise<void>((resolve, reject) => {
+            blocksFile.write(linesToFlush.join(""), (err) =>
+              err ? reject(err) : resolve(),
+            );
+          });
+        } catch (error) {
+          pendingLines = [...linesToFlush, ...pendingLines];
+          console.error(
+            `[ERROR] - Failed to flush buffered blocks to ${blocksFilePath}: ${(error as Error).message}`,
+          );
+          return;
+        }
+      }
+
+      const elapsedSeconds = Math.round((Date.now() - startTime) / 1000);
+      writeStats(buildMergedStats(elapsedSeconds));
+    }
+
+    // Periodically flush buffered blocks + advance the resume marker, so a
+    // kill/Ctrl+C loses at most CHECKPOINT_INTERVAL_MS of progress instead of
+    // the whole run.
+    let checkpointTimer: ReturnType<typeof setTimeout> | undefined;
+    function scheduleCheckpoint(): void {
+      checkpointTimer = setTimeout(() => {
+        checkpoint()
+          .catch((error) =>
+            console.error(`[ERROR] - Periodic checkpoint failed: ${error}`),
+          )
+          .finally(() => {
+            if (!shutdownSignal) scheduleCheckpoint();
+          });
+      }, CONFIG.CHECKPOINT_INTERVAL_MS);
+    }
+    function stopCheckpointLoop(): void {
+      if (checkpointTimer) clearTimeout(checkpointTimer);
+    }
+    scheduleCheckpoint();
+
+    // Resolves as soon as SIGINT/SIGTERM is received, so the main race below
+    // can stop waiting for more blocks and fall through to the same
+    // finalization path used for a completed or timed-out scan.
+    const shutdownPromise = new Promise<void>((resolve) => {
+      notifyShutdownRequested = resolve;
+      if (shutdownSignal) resolve();
+    });
+
+    // Create scan manager for handling subscription logic
+    const scanManager = new BlockScanManager(
+      handlersMap,
+      blockSubscriptionHandler,
+      spinner,
+    );
+    scanManager.setTargetHeight(targetHeight);
+
+    const reachedPromise = scanManager.createReachedPromise();
+    const errorPromise = scanManager.createErrorPromise();
+
+    const blockOffset: BlockOffset = { height: startHeight };
+    const unsubscribe = subscribeToBlockEvents(
+      indexerWs,
+      blockOffset,
+      scanManager.getWrappedHandler(),
+    );
+
+    const blocksToStream = targetHeight - startHeight + 1;
+    console.info("[INFO ] - Subscribed to block updates!");
+    console.info(
+      `[INFO ] - Streaming ${blocksToStream} blocks (from height ${startHeight} to ${targetHeight}, or ${TIMEOUT_MS / 1000}s timeout) ...`,
+    );
+    console.info(`[INFO ] - ... this might take a while`);
+
+    await Promise.race([
+      reachedPromise,
+      errorPromise,
+      shutdownPromise,
+      new Promise((res) => setTimeout(res, TIMEOUT_MS)),
+    ]);
+
+    // Check if we exited due to an error
+    const subscriptionError = scanManager.getSubscriptionError();
+    if (subscriptionError) {
+      // Clear the spinner line
+      spinner.clear();
+
+      console.error(
+        `[ERROR] - Block scanning failed due to indexer subscription error: ${subscriptionError.message}`,
+      );
+
+      // Best-effort: persist whatever was safely scanned before the error
+      // instead of discarding it.
+      stopCheckpointLoop();
+      await checkpoint().catch(() => {});
+
+      // Clean up and exit without throwing
+      await cleanupResources(indexerWs, handlersMap);
+      return false;
+    }
+
+    // Clear the spinner line before final messages
+    spinner.clear();
+
+    if (shutdownSignal) {
+      console.info(
+        `[INFO ] - Shutting down after ${shutdownSignal}; finalizing with the data collected so far`,
+      );
+    }
+
+    console.info("[INFO ] - Unsubscribing from block updates");
+    unsubscribe();
+
+    console.debug("[DEBUG] - Closing websocket connection");
+
+    // Clean up all resources
+    await cleanupResources(indexerWs, handlersMap);
+
+    // Stop the periodic checkpoint and do one last flush, so the summary
+    // printed below and the persisted stats agree.
+    stopCheckpointLoop();
+    await checkpoint();
+    blocksFile.end();
+
+    const scanDurationSeconds = Math.round((Date.now() - startTime) / 1000);
+
+    console.info("[INFO ] - Block fetching completed!");
+    console.info(`[INFO ] - Summary report:
+    - Total blocks scanned   : ${receivedBlocks.length}
+    - Blocks with txs        : ${blocksWithTransactions}
+    - Total txs found        : ${transactionsFound}
+    - Contract actions found : ${contractActionsFound}
+    - Scan duration          : ${scanDurationSeconds} seconds`);
+    console.info(`[INFO ] - Stats written to ${getStatsPath()}`);
+
+    return true;
+  } finally {
+    // Runs on every exit from this function - success, error, or early
+    // return - so test data is regenerated even on an abrupt/failed run.
+    await finalizeTestData();
+  }
 }
 
 await main()
