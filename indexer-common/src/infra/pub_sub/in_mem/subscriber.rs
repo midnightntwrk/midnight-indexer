@@ -16,9 +16,10 @@ use crate::{
     infra::pub_sub::in_mem::InMemPubSub,
 };
 use futures::{Stream, StreamExt};
-use std::fmt::Debug;
+use log::warn;
+use std::{fmt::Debug, future::ready};
 use thiserror::Error;
-use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::wrappers::{BroadcastStream, errors::BroadcastStreamRecvError};
 
 /// In memory based implementations for [Subscriber].
 #[derive(Clone)]
@@ -41,8 +42,20 @@ impl Subscriber for InMemSubscriber {
         let receiver = self.0.sender(T::TOPIC).subscribe();
         let values = BroadcastStream::new(receiver);
 
+        // `Lagged` leaves the receiver usable and `recv` resumes from the oldest message still
+        // buffered, so the skipped count is logged and the stream continues.
+        let values = values.filter_map(|value| {
+            ready(match value {
+                Ok(value) => Some(value),
+
+                Err(BroadcastStreamRecvError::Lagged(skipped)) => {
+                    warn!(topic:% = T::TOPIC, skipped; "subscriber lagged");
+                    None
+                }
+            })
+        });
+
         values.map(|value| {
-            let value = value?;
             let message = serde_json::from_value::<T>(value)?;
             Ok(message)
         })
@@ -51,9 +64,6 @@ impl Subscriber for InMemSubscriber {
 
 #[derive(Debug, Error)]
 pub enum SubscriberError {
-    #[error("cannot receive")]
-    Receive(#[from] tokio_stream::wrappers::errors::BroadcastStreamRecvError),
-
     #[error("cannot JSON deserialize message")]
     Deserialize(#[from] serde_json::Error),
 }

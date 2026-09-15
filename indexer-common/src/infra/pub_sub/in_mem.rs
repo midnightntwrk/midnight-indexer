@@ -216,6 +216,34 @@ mod tests {
         Ok(())
     }
 
+    /// A subscriber that falls behind keeps receiving. `RecvError::Lagged` leaves the receiver
+    /// usable, so the stream resumes from the oldest message still buffered instead of yielding
+    /// an error.
+    #[tokio::test]
+    async fn test_subscriber_survives_lag() -> Result<(), Box<dyn StdError>> {
+        let pub_sub = InMemPubSub::default();
+        let publisher = pub_sub.publisher();
+        let subscriber = pub_sub.subscriber();
+
+        let mut messages = subscriber.subscribe::<BlockIndexed>();
+
+        // Nothing polls `messages` yet, so one message past the ring evicts height 0.
+        for height in 0..=capacity(Topic::BlockIndexed).next_power_of_two() as u64 {
+            publisher
+                .publish(&BlockIndexed {
+                    height,
+                    max_transaction_id: None,
+                    caught_up: false,
+                })
+                .await?;
+        }
+
+        let message = messages.next().await;
+        assert_matches!(message, Some(Ok(BlockIndexed { height: 1, .. })));
+
+        Ok(())
+    }
+
     /// Regression test: when no external subscriber is attached, the drain
     /// task is the sole receiver keeping a topic's channel alive. If it broke
     /// on `RecvError::Lagged`, the receiver would be dropped and subsequent
