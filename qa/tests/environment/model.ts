@@ -122,6 +122,7 @@ const hostEntries: HostEntry[] = [
     indexerHost: 'indexer.stagenet.shielded.tools',
     nodeHost: 'rpc.stagenet.shielded.tools',
   },
+  { env: EnvironmentName.MAINNET, domain: 'mainnet.midnight.network' },
 ];
 
 const hostConfigByEnvName: Record<EnvironmentName, HostConfig> = hostEntries.reduce(
