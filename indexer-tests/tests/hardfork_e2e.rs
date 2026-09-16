@@ -1066,6 +1066,12 @@ fn start_indexer(dir: &Path, node_rpc_port: u16, api_port: u16) -> anyhow::Resul
             "APP__INFRA__NODE__URL",
             format!("ws://localhost:{node_rpc_port}"),
         )
+        // spo-indexer dials its own node URL; left at the config default it
+        // exhausts its reconnect attempts and takes the whole process down.
+        .env(
+            "APP__INFRA__SPO_NODE__URL",
+            format!("ws://localhost:{node_rpc_port}"),
+        )
         .env("APP__INFRA__SPO_NODE__BLOCKFROST_ID", "hardfork-e2e-dummy")
         .env(
             "APP__INFRA__STORAGE__CNN_URL",
