@@ -19,6 +19,9 @@ import * as commentJson from "comment-json";
 import { TARGET_ENV } from "./env.js";
 import { Transaction } from "./indexer-types.js";
 
+// Switch for blocks.jsonc/transactions.jsonc generation, currently disabled.
+const GENERATE_BLOCK_AND_TRANSACTION_DATA: boolean = false;
+
 // ============================================================================
 // Type Definitions
 // ============================================================================
@@ -250,8 +253,13 @@ export function updateTestDataFiles(
       );
     }
 
-    updateBlockDataFile(folderPath, sourceBlockData);
-    updateTransactionDataFile(folderPath, sourceBlockData);
+    // Block and transaction data files are currently not consumed by the test
+    // suites; generation is kept behind this switch instead of being removed
+    // so it can be re-enabled if they become needed again.
+    if (GENERATE_BLOCK_AND_TRANSACTION_DATA) {
+      updateBlockDataFile(folderPath, sourceBlockData);
+      updateTransactionDataFile(folderPath, sourceBlockData);
+    }
     updateContractDataFile(folderPath, sourceBlockData);
 
     console.info("[INFO ] - All test data files updated successfully");
@@ -610,10 +618,11 @@ function updateTransactionDataFile(
 /**
  * Updates the contract data file
  *
- * This file has a strong requirement, it will contain only contracts that have
- * all 3 action types: ContractDeploy, ContractCall, ContractUpdate
+ * This file has a strong requirement: it contains exactly one contract (the
+ * first found in scan order) that has all 3 action types - ContractDeploy,
+ * ContractCall, ContractUpdate - with only the first instance of each type.
  *
- * If not such contracts exist, the file will contain an empty array
+ * If no such contract exists, the file will contain an empty array
  *
  * @param destinationPath - Path to the test data folder
  * @param sourceBlockData - Path to the data file containing blocks
@@ -655,33 +664,43 @@ function updateContractDataFile(
       }
     }
 
-    // Filter to only keep addresses that have all 3 action types
-    const requiredActionTypes: string[] = ["ContractDeploy", "ContractCall"];
-    const filteredContracts: ContractWithActions[] = Object.entries(
-      contractActionsMap,
-    )
-      .filter(([address, actions]: [string, ContractActionEntry[]]) => {
+    // Keep only the first contract (in scan order) that has all 3 action
+    // types, and for it only the first instance of each type.
+    const requiredActionTypes: string[] = [
+      "ContractDeploy",
+      "ContractCall",
+      "ContractUpdate",
+    ];
+    const qualifyingContract = Object.entries(contractActionsMap).find(
+      ([, actions]: [string, ContractActionEntry[]]) => {
         const actionTypes: Set<string> = new Set(
           actions.map((action: ContractActionEntry) => action["action-type"]),
         );
         return requiredActionTypes.every((type: string) =>
           actionTypes.has(type),
         );
-      })
-      .map(
-        ([address, actions]: [
-          string,
-          ContractActionEntry[],
-        ]): ContractWithActions => ({
-          "contract-address": address,
-          "contract-actions": actions,
-        }),
-      );
+      },
+    );
+
+    const filteredContracts: ContractWithActions[] = qualifyingContract
+      ? [
+          {
+            "contract-address": qualifyingContract[0],
+            "contract-actions": requiredActionTypes.map(
+              (type: string) =>
+                qualifyingContract[1].find(
+                  (action: ContractActionEntry) =>
+                    action["action-type"] === type,
+                )!,
+            ),
+          },
+        ]
+      : [];
 
     // Log if no contracts match the criteria
     if (filteredContracts.length === 0) {
       console.info(
-        "[INFO ] - No contracts found with all required action types (ContractDeploy, ContractCall)",
+        "[INFO ] - No contracts found with all required action types (ContractDeploy, ContractCall, ContractUpdate)",
       );
     }
 

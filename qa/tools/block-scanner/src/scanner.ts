@@ -575,8 +575,8 @@ function parseStartBlockHeight(): number | undefined {
 
 /**
  * Regenerates the qa/tests/data/static/${TARGET_ENV} test data files
- * (blocks.jsonc, transactions.jsonc, contract-actions.jsonc) from whatever is
- * currently in tmp_scan/${TARGET_ENV}_blocks.jsonl.
+ * (currently only contract-actions.jsonc) from whatever is currently in
+ * tmp_scan/${TARGET_ENV}_blocks.jsonl.
  *
  * Called from a `finally` block in main() so it always runs when the process
  * exits under its own control - success, an early return, a thrown error, a
