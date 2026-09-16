@@ -239,8 +239,16 @@ export function updateTestDataFiles(
       );
     }
 
-    // Read source block data file
-    const sourceBlockData = readFileContent(sourceBlockDataFile);
+    // Read the source block data file. A process killed mid-write can leave a
+    // truncated trailing line; complete lines always end with a newline, so
+    // anything after the last newline is dropped instead of failing the parse.
+    let sourceBlockData = readFileContent(sourceBlockDataFile);
+    if (!sourceBlockData.endsWith("\n")) {
+      sourceBlockData = sourceBlockData.slice(
+        0,
+        sourceBlockData.lastIndexOf("\n") + 1,
+      );
+    }
 
     updateBlockDataFile(folderPath, sourceBlockData);
     updateTransactionDataFile(folderPath, sourceBlockData);

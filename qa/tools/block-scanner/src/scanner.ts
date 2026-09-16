@@ -193,23 +193,50 @@ repairTruncatedBlocksFile(getBlocksFilePath());
  *
  * A signal only *requests* a shutdown: `main()` keeps running until its next
  * checkpoint boundary, flushes whatever is buffered, and only then exits.
- * A second signal forces an immediate exit for anyone who doesn't want to wait.
+ * A second signal skips that wait but still persists a final synchronous
+ * checkpoint and regenerates the test data files before exiting; only a third
+ * signal exits with no writes at all.
  */
 let shutdownSignal: string | null = null;
 let notifyShutdownRequested: (() => void) | undefined;
 
+// Registered by main() once the blocks file is open, so forceExit() can
+// persist buffered blocks without going through the async checkpoint.
+let forceSyncCheckpoint: (() => void) | undefined;
+let forcedExitStarted = false;
+
 function requestShutdown(signal: string): void {
   if (shutdownSignal) {
-    console.info(
-      `\n[INFO ] - Received ${signal} again, forcing immediate exit.`,
-    );
-    process.exit(1);
+    forceExit(signal);
+    return;
   }
   shutdownSignal = signal;
   console.info(
     `\n[INFO ] - Received ${signal}. Finishing the current checkpoint and shutting down (press again to force)...`,
   );
   notifyShutdownRequested?.();
+}
+
+/**
+ * Forced exit (second signal): the graceful wait is abandoned, but the test
+ * data files are still written from everything persisted so far, so a forced
+ * Ctrl+C never silently discards a long scan. All work here is synchronous
+ * because the process exits as soon as it completes.
+ */
+function forceExit(signal: string): void {
+  if (forcedExitStarted) process.exit(1);
+  forcedExitStarted = true;
+  console.info(
+    `\n[INFO ] - Received ${signal} again, forcing exit after a final test data write...`,
+  );
+  try {
+    forceSyncCheckpoint?.();
+  } catch (error) {
+    console.error(
+      `[ERROR] - Failed to persist buffered blocks during forced exit: ${(error as Error).message}`,
+    );
+  }
+  finalizeTestData().finally(() => process.exit(1));
 }
 
 process.on("SIGINT", () => requestShutdown("SIGINT"));
@@ -553,10 +580,11 @@ function parseStartBlockHeight(): number | undefined {
  *
  * Called from a `finally` block in main() so it always runs when the process
  * exits under its own control - success, an early return, a thrown error, a
- * subscription failure, or a graceful SIGINT/SIGTERM shutdown - not only on
- * the happy path. It must never throw itself: a failure here should be
- * logged, not allowed to mask the scan's own outcome. (It still can't run
- * after an unstoppable `kill -9`, since no JS runs at all in that case.)
+ * subscription failure, or a graceful SIGINT/SIGTERM shutdown - and from
+ * forceExit() so even a forced (repeated-signal) exit writes the files. It
+ * must never throw itself: a failure here should be logged, not allowed to
+ * mask the scan's own outcome. (It still can't run after an unstoppable
+ * `kill -9`, since no JS runs at all in that case.)
  */
 async function finalizeTestData(): Promise<void> {
   if (!testDataFolder) return;
@@ -826,11 +854,14 @@ async function main(): Promise<boolean> {
      * On a write failure, the buffered lines are put back so the next
      * checkpoint retries them, and the stats file is left untouched.
      */
+    let flushInFlight = false;
+
     async function checkpoint(): Promise<void> {
       const linesToFlush = pendingLines;
       pendingLines = [];
 
       if (linesToFlush.length > 0) {
+        flushInFlight = true;
         try {
           await new Promise<void>((resolve, reject) => {
             blocksFile.write(linesToFlush.join(""), (err) =>
@@ -843,12 +874,27 @@ async function main(): Promise<boolean> {
             `[ERROR] - Failed to flush buffered blocks to ${blocksFilePath}: ${(error as Error).message}`,
           );
           return;
+        } finally {
+          flushInFlight = false;
         }
       }
 
       const elapsedSeconds = Math.round((Date.now() - startTime) / 1000);
       writeStats(buildMergedStats(elapsedSeconds));
     }
+
+    // Synchronous checkpoint for the forced-exit path, where no async write
+    // can complete before the process exits. It must not touch the file while
+    // an async flush is mid-write, as appending then would interleave with the
+    // in-flight chunk; in that case those lines are sacrificed.
+    forceSyncCheckpoint = () => {
+      if (flushInFlight) return;
+      if (pendingLines.length > 0) {
+        fs.appendFileSync(blocksFilePath, pendingLines.join(""));
+        pendingLines = [];
+      }
+      writeStats(buildMergedStats(Math.round((Date.now() - startTime) / 1000)));
+    };
 
     // Periodically flush buffered blocks + advance the resume marker, so a
     // kill/Ctrl+C loses at most CHECKPOINT_INTERVAL_MS of progress instead of
