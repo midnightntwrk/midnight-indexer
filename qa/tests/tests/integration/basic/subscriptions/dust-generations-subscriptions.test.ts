@@ -53,7 +53,10 @@ function safeUnsubscribe(unsubscribe: () => void): void {
 // Dust generation registrations require a Cardano-side mapping which has no
 // counterpart in the `undeployed` environment. Skip the whole surface there;
 // re-enable once #1152 lands local Cardano test-data provisioning.
-describe.skipIf(env.isUndeployedEnv())('dust generations subscription', () => {
+// NIGHT not yet available on Midnight mainnet: skip there too until mainnet
+// has known NIGHT/cNIGHT holders to probe.
+const skipNight = env.isUndeployedEnv() || env.isMainnetEnv();
+describe.skipIf(skipNight)('dust generations subscription', () => {
   let indexerWsClient: IndexerWsClient;
 
   beforeEach(async () => {

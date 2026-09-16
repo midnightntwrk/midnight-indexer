@@ -50,7 +50,9 @@ export const BlockSchema = z.lazy(() =>
 );
 
 export const UnshieldedUtxoSchema = z.object({
-  owner: z.string().regex(/^mn_addr_/),
+  owner: z.string().regex(/^mn_addr(_[a-z0-9]+)?1/, {
+    message: 'must be a bech32m unshielded address (mn_addr... / mn_addr_<network>...)',
+  }),
   intentHash: Hash64,
   value: z.string(),
   tokenType: z
