@@ -257,6 +257,24 @@ export const generateSingleTxViaMoth = async (
 };
 
 /**
+ * Sync a wallet and flush its state to moth's on-disk cache, then release it.
+ *
+ * Meant for global setup, which has no test timeout to burn: the first sync on a
+ * fresh environment walks the chain and can take a long while. Test workers are
+ * separate processes and cannot inherit this facade — what they inherit is the
+ * cache on disk, which turns their cold sync into a much shorter restore. Keep
+ * the wallet light (a low-traffic seed): restore cost tracks the wallet's state
+ * size, not the chain length.
+ */
+export const warmMothWallet = async (seed: string): Promise<void> => {
+  const wallet = await openMothWallet(seed);
+  // moth writes the cache on stop(), so release it rather than leaving the
+  // subscription open for the life of the setup process.
+  await wallet.synced.stop();
+  openWallets.delete(cacheNameFor(seed));
+};
+
+/**
  * Stop every moth wallet opened this process and release its sync subscription.
  * Call from the transaction backend's teardown; an unstopped wallet keeps a
  * websocket open.
