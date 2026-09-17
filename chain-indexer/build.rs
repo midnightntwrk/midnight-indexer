@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use std::{
-    env,
+    env, fs,
     fs::{File, OpenOptions},
     io::{BufRead, BufReader, Write},
     path::Path,
@@ -20,6 +20,10 @@ use std::{
 
 use anyhow::{Context, bail};
 use itertools::Itertools;
+use parity_scale_codec::Decode;
+use subxt::Metadata;
+
+include!("build/runtime_version.rs");
 
 const NODE_VERSIONS_PATH: &str = "../NODE_VERSIONS";
 
@@ -48,12 +52,9 @@ fn main() -> anyhow::Result<()> {
             .canonicalize()
             .with_context(|| format!("metadata file not found at {}", metadata_path.display()))?;
 
-        // Module name: replace dots and hyphens with underscores
-        let module_suffix = node_version
-            .split_once('-')
-            .map(|(l, _)| l)
-            .unwrap_or(&node_version)
-            .replace('.', "_");
+        // The runtime names the module, so a node release that leaves the runtime
+        // alone reuses its module and needs no code change.
+        let (major, minor, patch) = runtime_version(spec_version(&metadata_path)?);
 
         // Generate the code with the subxt macro call.
         let generated_code = format!(
@@ -66,7 +67,7 @@ fn main() -> anyhow::Result<()> {
                         recursive
                     )
                 )]
-                pub mod runtime_{module_suffix} {{}}
+                pub mod runtime_{major}_{minor}_{patch} {{}}
             "#,
             metadata_path.display()
         );
@@ -86,6 +87,33 @@ fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// Reads `spec_version` from the runtime metadata at `metadata`.
+///
+/// The System pallet's `Version` constant holds a SCALE-encoded `RuntimeVersion`.
+fn spec_version(metadata: &Path) -> anyhow::Result<u32> {
+    let bytes = fs::read(metadata)
+        .with_context(|| format!("cannot read metadata at {}", metadata.display()))?;
+
+    let metadata = Metadata::decode(&mut bytes.as_slice())
+        .with_context(|| format!("cannot decode metadata at {}", metadata.display()))?;
+
+    let system = metadata
+        .pallet_by_name("System")
+        .context("metadata has no System pallet")?;
+    let version = system
+        .constant_by_name("Version")
+        .context("System pallet has no Version constant")?;
+
+    // SCALE carries no field tags or offsets, and the two names are
+    // length-prefixed, so reaching `spec_version` means decoding what precedes it.
+    // A tuple decodes as its concatenated fields, matching the struct's layout.
+    let (_spec_name, _impl_name, _authoring_version, spec_version) =
+        <(String, String, u32, u32)>::decode(&mut version.value())
+            .context("cannot decode RuntimeVersion")?;
+
+    Ok(spec_version)
 }
 
 fn read_node_versions() -> anyhow::Result<Vec<String>> {
