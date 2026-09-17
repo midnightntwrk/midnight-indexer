@@ -253,14 +253,6 @@ export class Environment {
   }
 
   /**
-   * Proof server for the moth transaction backend. Only used when
-   * `TX_BACKEND=moth`; the toolkit backend proves inside its own container.
-   */
-  getProofServerURL(): string {
-    return process.env.PROOF_SERVER_URL?.trim() || 'http://localhost:6300';
-  }
-
-  /**
    * Full indexer GraphQL endpoint (`…/api/<version>/graphql`), matching the
    * convention used by the indexer HTTP and WebSocket clients.
    */

@@ -48,6 +48,7 @@ import {
 import * as Rx from 'rxjs';
 import log from '@utils/logging/logger';
 import { env } from '../../environment/model';
+import { ensureProofServer, proofServerMismatchHint, stopProofServer } from './proof-server';
 import type { AddressType, ToolkitTransactionResult } from '../toolkit/toolkit-wrapper';
 
 /** Minutes to allow for a cold sync. A warm one takes seconds. */
@@ -84,11 +85,24 @@ const cacheNameFor = (seed: string): string =>
   process.env.TX_BACKEND_MOTH_WALLET?.trim() ||
   `qa-${createHash('sha256').update(seed).digest('hex').slice(0, 12)}`;
 
-const networkConfig = (): NetworkConfig => ({
+/**
+ * Build moth's network config.
+ *
+ * The proof server is started on demand, or taken from PROOF_SERVER_URL.
+ * Proving happens in this process, so the server is a dependency of the wallet,
+ * not of the chain stack — deployed runs need it just as much as undeployed
+ * ones do, which is why it is not in `docker-compose.yaml`.
+ *
+ * It is required even to *sync*, not only to submit: moth builds its proving
+ * service during `startWalletSync`, so an empty URL fails there with
+ * `TypeError: Invalid URL` (observed on preview, 2026-09-17). Global-setup
+ * warm-up therefore needs one too.
+ */
+const networkConfig = async (): Promise<NetworkConfig> => ({
   id: env.getNetworkId(),
   nodeUrl: env.getNodeWebsocketBaseURL(),
   indexerUrl: env.getIndexerGraphqlHttpURL(),
-  proofServerUrl: env.getProofServerURL(),
+  proofServerUrl: await ensureProofServer(),
 });
 
 /**
@@ -187,7 +201,7 @@ const openMothWallet = (seed: string): Promise<MothWallet> => {
 
   const opening = (async (): Promise<MothWallet> => {
     const keys = deriveWalletKeys(seed);
-    const network = networkConfig();
+    const network = await networkConfig();
     log.info(`moth wallet: ${name} (cache ~/.moth/sync/${network.id}/${name}/)`);
     const synced = await startWalletSync(
       keys,
@@ -241,10 +255,13 @@ export const generateSingleTxViaMoth = async (
     // transaction generator failing to build or submit, not the indexer
     // reporting the wrong thing. The suite tests the indexer; an ambiguous
     // failure here would point nowhere.
+    const message = (err as Error).message;
+    // Proving failures are almost always a ledger-train mismatch, and their own
+    // message never says so. Add the sentence that explains it.
+    const hint = /prov(e|ing)|zk|circuit/i.test(message) ? ` ${proofServerMismatchHint()}` : '';
     throw new Error(
-      `moth backend failed to build or submit the transaction (not an indexer failure): ${
-        (err as Error).message
-      }`,
+      'moth backend failed to build or submit the transaction ' +
+        `(not an indexer failure): ${message}${hint}`,
     );
   }
 
@@ -292,4 +309,7 @@ export const closeMothWallets = async (): Promise<void> => {
       }
     }),
   );
+  // Only stops a proof server this process started; one supplied through
+  // PROOF_SERVER_URL is left running.
+  await stopProofServer();
 };

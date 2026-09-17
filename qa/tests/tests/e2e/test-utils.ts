@@ -19,6 +19,7 @@ import { z } from 'zod';
 import log from '@utils/logging/logger';
 import { IndexerWsClient, UnshieldedTxSubscriptionResponse } from '@utils/indexer/websocket-client';
 import { ToolkitWrapper, type ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
+import { deriveAddresses } from '@utils/moth/moth-addresses';
 
 export function retry<T>(
   fn: () => Promise<T>,
@@ -208,7 +209,7 @@ export async function setupWalletEventSubscriptions(
   destinationSeeds: string[],
 ) {
   // Getting the addresses from their seeds
-  const sourceAddress = (await toolkit.showAddress(sourceSeed)).unshielded;
+  const sourceAddress = (await deriveAddresses(sourceSeed, toolkit)).unshielded;
   // Events from the indexer websocket for both the source addresses
   const sourceAddressEvents: UnshieldedTxSubscriptionResponse[] = [];
 
@@ -225,7 +226,7 @@ export async function setupWalletEventSubscriptions(
   // Derive and subscribe ALL destination wallets dynamically
   const destinationWallets = await Promise.all(
     destinationSeeds.map(async (seed) => {
-      const destinationAddress = (await toolkit.showAddress(seed)).unshielded;
+      const destinationAddress = (await deriveAddresses(seed, toolkit)).unshielded;
 
       const events: UnshieldedTxSubscriptionResponse[] = [];
 

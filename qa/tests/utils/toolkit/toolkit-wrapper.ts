@@ -47,6 +47,9 @@ export type ShowAddressOption =
 interface AddressInfo {
   shielded: string;
   unshielded: string;
+  // `show-address` has always returned this; it was simply not declared here.
+  // Verified against midnight-node-toolkit:1.0.0 on preview (2026-09-17).
+  dust: string;
   coinPublic: string;
   coinPublicTagged: string;
   unshieldedUserAddressUntagged: string;

@@ -87,6 +87,27 @@ async function prewarmFundingSeed(toolkit: ToolkitWrapper, seed: string): Promis
 
 export async function setup() {
   cleanupOrphanedToolkitDirs();
+
+  // On the moth backend, skip the toolkit cache warm-up entirely.
+  //
+  // That warm-up fetches every block of the target chain into the shared
+  // toolkit Postgres. On preview (~905k blocks) it is hours of work, and the
+  // whole reason for the moth backend is that this cost grows with the chain
+  // and makes long-lived environments untestable. Paying it anyway would
+  // cancel the benefit out.
+  //
+  // A few suites still reach for the toolkit for things moth cannot do yet
+  // (notably `show-viewing-key`). They keep working — they just pay their own
+  // fetch cost on first call instead of having it pre-paid here.
+  if (env.getTxBackend() === 'moth') {
+    console.log(
+      '[SETUP] TX_BACKEND=moth — skipping the toolkit cache warm-up. ' +
+        'Any test that still calls the toolkit will pay its own fetch cost on first use.',
+    );
+    await warmMoth();
+    return;
+  }
+
   console.log('[SETUP] Warming up toolkit cache (this may take several minutes)...');
 
   let reporter: CacheProgressReporter | undefined;
@@ -118,18 +139,6 @@ export async function setup() {
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log(`[SETUP] Toolkit cache warmup complete (${duration}s)`);
-
-    // The moth transaction backend keeps its own wallet cache. Warm it here,
-    // where there is no test timeout: a first sync walks the chain, while a
-    // warm one is a restore. Only when the backend is actually selected.
-    if (env.getTxBackend() === 'moth') {
-      const mothSeed = dataProvider.getFundingSeed();
-      console.log('[SETUP] Warming moth wallet cache (first sync can take a while)...');
-      const mothStart = Date.now();
-      await warmMothWallet(mothSeed);
-      const mothDuration = ((Date.now() - mothStart) / 1000).toFixed(2);
-      console.log(`[SETUP] moth wallet cache warm (${mothDuration}s)`);
-    }
   } catch (error) {
     console.error('[SETUP] Failed to warmup toolkit cache:', error);
     throw error;
@@ -139,6 +148,23 @@ export async function setup() {
       await warmupToolkit.stop();
     }
   }
+}
+
+/**
+ * Warm moth's on-disk wallet cache.
+ *
+ * Test workers are separate processes and cannot inherit a synced facade; what
+ * they inherit is this cache, which turns their cold sync into a short restore.
+ * Global setup has no test timeout to burn, so a first sync belongs here.
+ */
+async function warmMoth(): Promise<void> {
+  // A proof server is started here too: moth builds its proving service during
+  // startWalletSync, so even a sync-only warm-up needs a reachable one.
+  const mothSeed = dataProvider.getFundingSeed();
+  console.log('[SETUP] Warming moth wallet cache (first sync can take a while)...');
+  const mothStart = Date.now();
+  await warmMothWallet(mothSeed);
+  console.log(`[SETUP] moth wallet cache warm (${((Date.now() - mothStart) / 1000).toFixed(2)}s)`);
 }
 
 export async function teardown() {
