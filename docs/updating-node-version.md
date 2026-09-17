@@ -4,49 +4,67 @@ How to add or move to a Midnight Node version the indexer talks to.
 
 ## Model: many versions at once
 
-`NODE_VERSIONS` (one version per line, oldest first, **append-only**) lists
-every node version this build supports at once; the last line is the "latest"
-for local `just` recipes. The indexer picks a runtime per block from the chain's
+`NODE_VERSIONS` (one version per line, oldest first, **append-only**) lists 
+every node version this build supports at once; the last line is the default 
+for local `just` recipes. The indexer picks a runtime per block from the chain's 
 protocol version (`indexer-common/src/domain/protocol_version.rs`).
 
 Per listed version `X`:
 
 - `.node/X/metadata.scale` - subxt metadata, consumed at build time.
 - `.node/X/chain/...` - paritydb snapshot for tests.
-- `chain-indexer/src/infra/subxt_node/runtimes/vX.rs` - version-specific decode
-  logic.
+- `chain-indexer/src/infra/subxt_node/runtimes/vX_Y_Z.rs` - runtime-specific
+  decode logic.
 
 `build.rs` reads `NODE_VERSIONS` and emits a `#[subxt::subxt(...)]` module per
 entry from its `metadata.scale`; a missing file fails the build.
+
+The module is named for the runtime: `build.rs` reads `spec_version` out of the 
+metadata from the node and emits `runtime_<major>_<minor>_<patch>`.
+Node releases sharing a runtime therefore share one module. `node-1.0.2` ships
+`runtime-1.0.0`, so the listed version `1.0.2` is decoded by `v1_0_0.rs`.
 
 ## Adding / bumping a version
 
 ### 1. Record the version
 
-Append the version to `NODE_VERSIONS`. An RC roll-forward of an existing line
-(`2.0.0-rc.1` -> `rc.3`) just edits that last line.
+A new supported node version is appended to `NODE_VERSIONS`. Moving an existing supported
+version forward (`2.0.0-rc.1` -> `rc.3`, `1.0.0` -> `1.0.2`) rewrites its line.
 
 ### 2. Generate data + metadata
 
 ```bash
-just update-node    # generate-node-data + get-node-metadata for the latest line
+just update-node                 # the latest NODE_VERSIONS line
+just update-node 1.0.2           # a named version, e.g. a middle line
+just update-node 1.0.2 1.0.0     # ... whose toolkit version differs
 ```
 
 Produces `.node/X/chain/` (snapshot) and `.node/X/metadata.scale`. Needs `subxt`
 at the version pinned in `Cargo.toml`: `cargo install subxt-cli --version
 <pinned>`.
 
-### 3. Wire the runtime (new protocol version only)
+A node release names the toolkit release it ships with, and the two carry
+independent version numbers: e.g. `node-1.0.2` ships `toolkit-1.0.0`. 
+The second argument covers that; it defaults to the node version.
 
-If the version is new (not an RC of an existing line):
+### 3. Wire the runtime
 
-- add `runtimes/vX_Y_Z.rs` (copy the nearest existing one),
-- register it and add its match arms in `runtimes.rs`,
-- extend `NodeVersion`, the `ProtocolVersion` ranges, and the mappings in
-  `protocol_version.rs`.
+Build after regenerating. The outcome tells you whether the runtime moved:
 
-An RC bump needs none of this - the generated subxt module re-derives from the
-new metadata, unless pallets/events changed shape.
+- **`runtime_X_Y_Z` not found** - the module a decode module referenced is gone,
+  because the runtime behind an existing line moved. Rename `runtimes/vX_Y_Z.rs`
+  and its references to the new runtime, or add a module if both runtimes stay
+  listed.
+- **Compiles clean** - no listed line changed the runtime it had. A
+  `metadata.scale` identical to the one it replaces confirms it.
+
+A line added for a runtime the tree does not decode compiles clean too: the
+generated module is simply unreferenced. Add `runtimes/vX_Y_Z.rs` (copy the
+nearest existing one) and register it plus its match arms in `runtimes.rs`.
+
+A protocol version outside every range in `protocol_version.rs` also needs a
+`NodeVersion` variant, a `ProtocolVersion` range, and the mappings between them.
+Nothing detects either omission.
 
 ### 4. Regenerate tx fixtures (if the wire format moved)
 
@@ -77,9 +95,12 @@ moved before: `rg '0\.22\.0|<old-version>'`.
 - [ ] `just all-all` green
 - [ ] no references to a removed version (`rg <old-version>`)
 
-A **new protocol version** (not an RC roll-forward) also needs:
+A **runtime the tree does not already decode** also needs:
 
 - [ ] `runtimes/vX_Y_Z.rs` plus dispatch arms in `runtimes.rs`
+
+A **protocol version outside every `protocol_version.rs` range** also needs:
+
 - [ ] `protocol_version.rs`: new `NodeVersion` variant, `ProtocolVersion` range,
       and `→ NodeVersion` / `→ LedgerVersion` mappings
 
