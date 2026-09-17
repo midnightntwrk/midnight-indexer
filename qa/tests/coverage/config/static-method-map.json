@@ -2,6 +2,7 @@
   "methods": {
     "getLatestBlock": [{ "rootType": "Query", "field": "block" }],
     "getBlockByOffset": [{ "rootType": "Query", "field": "block" }],
+    "getBlockSystemParameters": [{ "rootType": "Query", "field": "block" }],
     "getTransactionByOffset": [{ "rootType": "Query", "field": "transactions" }],
     "getContractAction": [{ "rootType": "Query", "field": "contractAction" }],
     "getZswapMerkleTreeCollapsedUpdate": [
@@ -12,6 +13,32 @@
     "getDustCommitmentMerkleTreeUpdate": [
       { "rootType": "Query", "field": "dustCommitmentMerkleTreeUpdate" }
     ],
+    "getDParameterHistory": [{ "rootType": "Query", "field": "dParameterHistory" }],
+    "getTermsAndConditionsHistory": [
+      { "rootType": "Query", "field": "termsAndConditionsHistory" }
+    ],
+    "getCurrentEpochInfo": [{ "rootType": "Query", "field": "currentEpochInfo" }],
+    "getCommittee": [{ "rootType": "Query", "field": "committee" }],
+    "getSpoCount": [{ "rootType": "Query", "field": "spoCount" }],
+    "getSpoList": [{ "rootType": "Query", "field": "spoList" }],
+    "getSpoIdentities": [{ "rootType": "Query", "field": "spoIdentities" }],
+    "getStakePoolOperators": [{ "rootType": "Query", "field": "stakePoolOperators" }],
+    "getSpoByPoolId": [{ "rootType": "Query", "field": "spoByPoolId" }],
+    "getSpoIdentityByPoolId": [{ "rootType": "Query", "field": "spoIdentityByPoolId" }],
+    "getSpoCompositeByPoolId": [{ "rootType": "Query", "field": "spoCompositeByPoolId" }],
+    "getPoolMetadata": [{ "rootType": "Query", "field": "poolMetadata" }],
+    "getPoolMetadataList": [{ "rootType": "Query", "field": "poolMetadataList" }],
+    "getSpoPerformanceLatest": [{ "rootType": "Query", "field": "spoPerformanceLatest" }],
+    "getSpoPerformanceBySpoSk": [{ "rootType": "Query", "field": "spoPerformanceBySpoSk" }],
+    "getEpochPerformance": [{ "rootType": "Query", "field": "epochPerformance" }],
+    "getEpochUtilization": [{ "rootType": "Query", "field": "epochUtilization" }],
+    "getRegisteredTotalsSeries": [{ "rootType": "Query", "field": "registeredTotalsSeries" }],
+    "getRegisteredSpoSeries": [{ "rootType": "Query", "field": "registeredSpoSeries" }],
+    "getRegisteredPresence": [{ "rootType": "Query", "field": "registeredPresence" }],
+    "getRegisteredFirstValidEpochs": [
+      { "rootType": "Query", "field": "registeredFirstValidEpochs" }
+    ],
+    "getStakeDistribution": [{ "rootType": "Query", "field": "stakeDistribution" }],
     "subscribeToBlockEvents": [{ "rootType": "Subscription", "field": "blocks" }],
     "subscribeToUnshieldedTransactionEvents": [
       { "rootType": "Subscription", "field": "unshieldedTransactions" }
@@ -27,16 +54,6 @@
     "subscribeToDustGenerations": [{ "rootType": "Subscription", "field": "dustGenerations" }],
     "subscribeToDustNullifierTransactions": [
       { "rootType": "Subscription", "field": "dustNullifierTransactions" }
-    ],
-    "getDParameterHistory": [{ "rootType": "Query", "field": "dParameterHistory" }],
-    "getCurrentEpochInfo": [{ "rootType": "Query", "field": "currentEpochInfo" }],
-    "getCommittee": [{ "rootType": "Query", "field": "committee" }],
-    "getSpoCount": [{ "rootType": "Query", "field": "spoCount" }],
-    "getSpoList": [{ "rootType": "Query", "field": "spoList" }],
-    "getSpoIdentities": [{ "rootType": "Query", "field": "spoIdentities" }],
-    "getStakePoolOperators": [{ "rootType": "Query", "field": "stakePoolOperators" }],
-    "getSpoByPoolId": [{ "rootType": "Query", "field": "spoByPoolId" }],
-    "getSpoIdentityByPoolId": [{ "rootType": "Query", "field": "spoIdentityByPoolId" }],
-    "getRegisteredTotalsSeries": [{ "rootType": "Query", "field": "registeredTotalsSeries" }]
+    ]
   }
 }
