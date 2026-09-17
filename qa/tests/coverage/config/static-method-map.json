@@ -27,6 +27,16 @@
     "subscribeToDustGenerations": [{ "rootType": "Subscription", "field": "dustGenerations" }],
     "subscribeToDustNullifierTransactions": [
       { "rootType": "Subscription", "field": "dustNullifierTransactions" }
-    ]
+    ],
+    "getDParameterHistory": [{ "rootType": "Query", "field": "dParameterHistory" }],
+    "getCurrentEpochInfo": [{ "rootType": "Query", "field": "currentEpochInfo" }],
+    "getCommittee": [{ "rootType": "Query", "field": "committee" }],
+    "getSpoCount": [{ "rootType": "Query", "field": "spoCount" }],
+    "getSpoList": [{ "rootType": "Query", "field": "spoList" }],
+    "getSpoIdentities": [{ "rootType": "Query", "field": "spoIdentities" }],
+    "getStakePoolOperators": [{ "rootType": "Query", "field": "stakePoolOperators" }],
+    "getSpoByPoolId": [{ "rootType": "Query", "field": "spoByPoolId" }],
+    "getSpoIdentityByPoolId": [{ "rootType": "Query", "field": "spoIdentityByPoolId" }],
+    "getRegisteredTotalsSeries": [{ "rootType": "Query", "field": "registeredTotalsSeries" }]
   }
 }

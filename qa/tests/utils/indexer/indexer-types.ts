@@ -670,3 +670,71 @@ export interface ShieldedNullifierTransaction {
 }
 
 export type ViewingKey = string & { __brand: 'ViewingKey' };
+
+// SPO indexer surface (#1003). dParameterHistory is written by chain-indexer;
+// epoch/committee data by spo-indexer; the registration surface (Spo,
+// SpoIdentity, stakePoolOperators) is empty until post-mainnet registration.
+
+export interface DParameterChange {
+  blockHeight: number;
+  blockHash: string;
+  timestamp: number;
+  numPermissionedCandidates: number;
+  numRegisteredCandidates: number;
+}
+
+export interface EpochInfo {
+  epochNo: number;
+  durationSeconds: number;
+  elapsedSeconds: number;
+}
+
+export interface CommitteeMember {
+  epochNo: number;
+  position: number;
+  sidechainPubkeyHex: string;
+  expectedSlots: number;
+  auraPubkeyHex: string | null;
+  poolIdHex: string | null;
+  spoSkHex: string | null;
+}
+
+export interface Spo {
+  poolIdHex: string;
+  validatorClass: string;
+  sidechainPubkeyHex: string;
+  auraPubkeyHex: string | null;
+  name: string | null;
+  ticker: string | null;
+  homepageUrl: string | null;
+  logoUrl: string | null;
+}
+
+export interface SpoIdentity {
+  poolIdHex: string;
+  mainchainPubkeyHex: string;
+  sidechainPubkeyHex: string;
+  auraPubkeyHex: string | null;
+  validatorClass: string;
+}
+
+export interface RegisteredTotals {
+  epochNo: number;
+  totalRegistered: number;
+  newlyRegistered: number;
+}
+
+export type DParameterHistoryResponse = GraphQLResponse<{ dParameterHistory: DParameterChange[] }>;
+export type CurrentEpochInfoResponse = GraphQLResponse<{ currentEpochInfo: EpochInfo | null }>;
+export type CommitteeResponse = GraphQLResponse<{ committee: CommitteeMember[] }>;
+export type SpoCountResponse = GraphQLResponse<{ spoCount: number | null }>;
+export type SpoListResponse = GraphQLResponse<{ spoList: Spo[] }>;
+export type SpoIdentitiesResponse = GraphQLResponse<{ spoIdentities: SpoIdentity[] }>;
+export type StakePoolOperatorsResponse = GraphQLResponse<{ stakePoolOperators: string[] }>;
+export type SpoByPoolIdResponse = GraphQLResponse<{ spoByPoolId: Spo | null }>;
+export type SpoIdentityByPoolIdResponse = GraphQLResponse<{
+  spoIdentityByPoolId: SpoIdentity | null;
+}>;
+export type RegisteredTotalsSeriesResponse = GraphQLResponse<{
+  registeredTotalsSeries: RegisteredTotals[];
+}>;
