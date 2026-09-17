@@ -73,6 +73,12 @@ window, and note that during a long re-index `gc_bound: "0s"` is **not** a safe
 shortcut: retention-window unpersists keep producing garbage, so with gc off the
 ledger DB grows without bound.
 
+While far behind the tip, chain-indexer fetches blocks one at a time, and on
+mostly empty blocks the round trips to the node are what bound the sync rate.
+Raise `infra.node.catch_up_concurrency` (default 1) to fetch that many blocks at
+once; the setting only applies to blocks older than the finalization safety
+margin, so it stops costing node load by itself once caught up.
+
 ### cloud — sync a new instance and cut over (preferred)
 
 Every deployed environment runs two indexer instances behind
