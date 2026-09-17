@@ -547,10 +547,19 @@ export const ShieldedNullifierTransactionSchema = z.object({
   transaction: z.object({ hash: Hash64 }),
 });
 
-// SPO surface (#1003). Pubkey / pool-id hex on this surface is passed through
-// from spo-indexer as-is, so accept an optional 0x prefix and mixed case until
-// live data confirms the canonical form; then tighten to VarLenghtHex.
-export const SpoHex = z.string().regex(/^(0x)?[0-9a-fA-F]+$/);
+// SPO surface (#1003). Every key on this surface is unprefixed lowercase hex,
+// but spo-indexer enforces neither part: it strips only a lowercase `0x`
+// (spo-indexer/src/utils.rs `remove_hex_prefix`, no `0X` handling) and never
+// lowercases, so pubkeys are stored verbatim in whatever form the node's JSON
+// serialisation emits. The one exception is poolIdHex, which the indexer
+// derives itself with subxt's `to_hex` and is lowercase by construction.
+// The strict regex stays because the API's pool-id and SPO-key lookups
+// lowercase their input before matching stored keys (query.rs `normalize_hex`),
+// so lowercase storage is an invariant the indexer relies on without checking.
+// The committee and presence tests validate it against live devnet data; if
+// they go red on case or prefix, look at the node's hex serialisation first,
+// not at spo-indexer. Kept as its own name so the SPO schemas read as one family.
+export const SpoHex = VarLenghtHex;
 const NonNegativeInt = z.number().int().nonnegative();
 
 export const DParameterChangeSchema = z.object({
@@ -600,4 +609,99 @@ export const RegisteredTotalsSchema = z.object({
   epochNo: NonNegativeInt,
   totalRegistered: NonNegativeInt,
   newlyRegistered: NonNegativeInt,
+});
+
+export const TermsAndConditionsChangeSchema = z.object({
+  blockHeight: BlockHeight,
+  blockHash: Hash64,
+  timestamp: z.number().int().positive(),
+  hash: VarLenghtHex,
+  url: z.string().min(1),
+});
+
+export const DParameterSchema = z.object({
+  numPermissionedCandidates: NonNegativeInt,
+  numRegisteredCandidates: NonNegativeInt,
+});
+
+export const TermsAndConditionsSchema = z.object({
+  hash: VarLenghtHex,
+  url: z.string().min(1),
+});
+
+export const BlockSystemParametersSchema = z.object({
+  hash: Hash64,
+  height: BlockHeight,
+  timestamp: z.number().int().positive(),
+  systemParameters: z.object({
+    dParameter: DParameterSchema,
+    termsAndConditions: TermsAndConditionsSchema.nullable(),
+  }),
+});
+
+export const PoolMetadataSchema = z.object({
+  poolIdHex: SpoHex,
+  hexId: z.string().nullable(),
+  name: z.string().nullable(),
+  ticker: z.string().nullable(),
+  homepageUrl: z.string().nullable(),
+  logoUrl: z.string().nullable(),
+});
+
+export const EpochPerfSchema = z.object({
+  epochNo: NonNegativeInt,
+  spoSkHex: SpoHex,
+  produced: NonNegativeInt,
+  expected: NonNegativeInt,
+  identityLabel: z.string().nullable(),
+  stakeSnapshot: z.string().nullable(),
+  poolIdHex: SpoHex.nullable(),
+  validatorClass: z.string().nullable(),
+});
+
+export const SpoCompositeSchema = z.object({
+  identity: SpoIdentitySchema.nullable(),
+  metadata: PoolMetadataSchema.nullable(),
+  performance: z.array(EpochPerfSchema),
+});
+
+// `epochNo` may be negative on the range endpoints: they echo whatever bounds
+// the caller passed, and the negative-range tests rely on that.
+export const RegisteredStatSchema = z.object({
+  epochNo: z.number().int(),
+  federatedValidCount: NonNegativeInt,
+  federatedInvalidCount: NonNegativeInt,
+  registeredValidCount: NonNegativeInt,
+  registeredInvalidCount: NonNegativeInt,
+  dparam: z.number().nonnegative().nullable(),
+});
+
+export const PresenceEventSchema = z.object({
+  epochNo: z.number().int(),
+  idKey: SpoHex,
+  source: z.enum(['history', 'committee', 'performance']),
+  status: z.string().nullable(),
+});
+
+export const FirstValidEpochSchema = z.object({
+  idKey: SpoHex,
+  firstValidEpoch: z.number().int(),
+});
+
+// Lovelace amounts are serialised as decimal strings.
+const LovelaceString = z.string().regex(/^\d+$/);
+
+export const StakeShareSchema = z.object({
+  poolIdHex: SpoHex,
+  name: z.string().nullable(),
+  ticker: z.string().nullable(),
+  homepageUrl: z.string().nullable(),
+  logoUrl: z.string().nullable(),
+  liveStake: LovelaceString.nullable(),
+  activeStake: LovelaceString.nullable(),
+  liveDelegators: NonNegativeInt.nullable(),
+  liveSaturation: z.number().nonnegative().nullable(),
+  declaredPledge: LovelaceString.nullable(),
+  livePledge: LovelaceString.nullable(),
+  stakeShare: z.number().nonnegative().nullable(),
 });

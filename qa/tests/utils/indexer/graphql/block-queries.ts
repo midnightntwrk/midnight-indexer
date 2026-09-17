@@ -77,6 +77,28 @@ query ExecutionInputs($ADDRESS: HexEncoded!) {
   }
 }`;
 
+// Governance parameters (D-parameter, Terms and Conditions) in force at a block,
+// used to cross-check the dParameterHistory / termsAndConditionsHistory queries
+// (#1003). Latest block when OFFSET is omitted.
+export const GET_BLOCK_SYSTEM_PARAMETERS = `
+query BlockSystemParameters($OFFSET: BlockOffset) {
+  block(offset: $OFFSET) {
+    hash
+    height
+    timestamp
+    systemParameters {
+      dParameter {
+        numPermissionedCandidates
+        numRegisteredCandidates
+      }
+      termsAndConditions {
+        hash
+        url
+      }
+    }
+  }
+}`;
+
 export const GET_BLOCK_BY_OFFSET = `
 query GetBlock($OFFSET: BlockOffset!){
   block (offset: $OFFSET){
