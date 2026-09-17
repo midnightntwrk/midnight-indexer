@@ -546,3 +546,58 @@ export const ShieldedNullifierTransactionSchema = z.object({
   nullifier: VarLenghtHex,
   transaction: z.object({ hash: Hash64 }),
 });
+
+// SPO surface (#1003). Pubkey / pool-id hex on this surface is passed through
+// from spo-indexer as-is, so accept an optional 0x prefix and mixed case until
+// live data confirms the canonical form; then tighten to VarLenghtHex.
+export const SpoHex = z.string().regex(/^(0x)?[0-9a-fA-F]+$/);
+const NonNegativeInt = z.number().int().nonnegative();
+
+export const DParameterChangeSchema = z.object({
+  blockHeight: BlockHeight,
+  blockHash: Hash64,
+  timestamp: z.number().int().positive(),
+  numPermissionedCandidates: NonNegativeInt,
+  numRegisteredCandidates: NonNegativeInt,
+});
+
+export const EpochInfoSchema = z.object({
+  epochNo: NonNegativeInt,
+  durationSeconds: z.number().int().positive(),
+  elapsedSeconds: NonNegativeInt,
+});
+
+export const CommitteeMemberSchema = z.object({
+  epochNo: NonNegativeInt,
+  position: NonNegativeInt,
+  sidechainPubkeyHex: SpoHex,
+  expectedSlots: NonNegativeInt,
+  auraPubkeyHex: SpoHex.nullable(),
+  poolIdHex: SpoHex.nullable(),
+  spoSkHex: SpoHex.nullable(),
+});
+
+export const SpoSchema = z.object({
+  poolIdHex: SpoHex,
+  validatorClass: z.string().min(1),
+  sidechainPubkeyHex: SpoHex,
+  auraPubkeyHex: SpoHex.nullable(),
+  name: z.string().nullable(),
+  ticker: z.string().nullable(),
+  homepageUrl: z.string().nullable(),
+  logoUrl: z.string().nullable(),
+});
+
+export const SpoIdentitySchema = z.object({
+  poolIdHex: SpoHex,
+  mainchainPubkeyHex: SpoHex,
+  sidechainPubkeyHex: SpoHex,
+  auraPubkeyHex: SpoHex.nullable(),
+  validatorClass: z.string().min(1),
+});
+
+export const RegisteredTotalsSchema = z.object({
+  epochNo: NonNegativeInt,
+  totalRegistered: NonNegativeInt,
+  newlyRegistered: NonNegativeInt,
+});
