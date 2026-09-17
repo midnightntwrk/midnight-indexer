@@ -14,143 +14,152 @@
 // limitations under the License.
 
 // Integration tests for the SPO (stake pool operator) indexer GraphQL surface
-// (#1003): dParameterHistory, currentEpochInfo, committee(epoch), spoCount,
-// spoList, spoIdentities, stakePoolOperators, plus the pool-id lookups used for
-// the non-existent-pool negative case and the epoch-span guard on
-// registeredTotalsSeries.
+// (#1003) that is live on permissioned environments: governance history
+// (dParameterHistory, termsAndConditionsHistory, cross-checked against
+// Block.systemParameters), currentEpochInfo, committee(epoch) and the
+// committee-derived registration series (registeredSpoSeries,
+// registeredPresence). The registration, performance and stake surface, which
+// is empty until post-mainnet registration tooling exists, lives in
+// spo-registration-queries.test.ts.
 //
-// Data reality (2026-09):
-//   - dParameterHistory is written by chain-indexer: the first indexed block
-//     always records the D-parameter, so it is non-empty on every environment,
-//     including a fresh undeployed one.
-//   - currentEpochInfo and committee are written by spo-indexer, which runs on
-//     all deployed environments (permissioned committees). currentEpochInfo is
-//     extrapolated to the chain's real current epoch, but committee membership
-//     trails it by a few epochs (spo-indexer backfills one epoch per poll), so
-//     the committee tests scan downwards for the newest epoch that has data.
-//     Where there is no spo-indexer data (undeployed, and qanet as of 2026-09)
-//     currentEpochInfo is null and committee is [] for every epoch; those
-//     cases skip with a reason.
-//   - The registeredTotalsSeries epoch-span guard (#1455) shipped in 4.4.0-rc.4
-//     and 4.3.800-rc.1; environments on older builds (qanet as of 2026-09)
-//     return an empty list instead of an error, so its negative case gates on
-//     a runtime probe.
-//   - SPO registration data (spoCount, spoList, spoIdentities,
-//     stakePoolOperators) is empty on every environment until post-mainnet
-//     registration tooling exists. Per-endpoint tests are shape-only (success,
-//     array, schema on every item, limit bounds) so they stay valid once data
-//     appears. The single test that asserts emptiness is
-//     'should report no SPO registrations on permissioned environments' and is
-//     the one to flip when registrations exist.
-//   test.todo → needs registered-SPO data not producible on any env yet.
+// Surface presence is decided from schema introspection, never from a domain
+// query's success: a probe that fails for any other reason (outage, 5xx) fails
+// the suite in beforeAll instead of turning every test into a silent skip.
 //
 // Tracking: https://github.com/midnightntwrk/midnight-indexer/issues/1003
 
 import log from '@utils/logging/logger';
 import { env } from 'environment/model';
 import type { TestContext } from 'vitest';
-import type { z } from 'zod';
 import '@utils/logging/test-logging-hooks';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import {
+  BlockSystemParametersSchema,
   CommitteeMemberSchema,
   DParameterChangeSchema,
   EpochInfoSchema,
-  RegisteredTotalsSchema,
-  SpoHex,
-  SpoIdentitySchema,
-  SpoSchema,
+  PresenceEventSchema,
+  RegisteredStatSchema,
+  TermsAndConditionsChangeSchema,
+  VarLenghtHex,
 } from '@utils/indexer/graphql/schema';
-import type { CommitteeMember, EpochInfo } from '@utils/indexer/indexer-types';
-import dataProvider from '@utils/testdata-provider';
+import type {
+  BlockSystemParameters,
+  CommitteeMember,
+  EpochInfo,
+} from '@utils/indexer/indexer-types';
+import { fetchQueryFieldNames } from '@utils/indexer/schema-feature-probe';
+import {
+  MAX_GRAPHQL_INT,
+  assertNoGraphqlErrors,
+  epochRange,
+  expectOrdered,
+  expectValidList,
+  findLatestCommitteeEpoch,
+  skipUnlessServed,
+  skipWithReason,
+  surfaceAbsentReason,
+} from '@utils/indexer/spo-test-support';
 
 const httpClient = new IndexerHttpClient();
 
-// A well-formed (56 hex chars, 28-byte) pool id that is not registered anywhere.
-const FABRICATED_POOL_ID = 'deadbeef'.repeat(7);
-const MALFORMED_POOL_IDS = ['', 'not-a-pool-id', 'abc', 'deadbeef'.repeat(7) + 'ff'];
-const MAX_GRAPHQL_INT = 2_147_483_647;
-// Server-side cap on fromEpoch..toEpoch spans (GHSA-6746-qxvv-3hwg).
-const EPOCH_SPAN_LIMIT = 10_000;
-// How far below the current epoch to look for committee data. Epochs are 30
-// minutes on current environments, so 48 covers a day of spo-indexer lag.
-const COMMITTEE_LOOKBACK_EPOCHS = 48;
-// Resolver defaults / clamps, see indexer-api/src/infra/api/v4/query.rs.
-const SPO_LIST_DEFAULT_LIMIT = 20;
-const SPO_LIST_MAX_LIMIT = 200;
-const SPO_IDENTITIES_DEFAULT_LIMIT = 50;
-const STAKE_POOL_OPERATORS_DEFAULT_LIMIT = 20;
+// Root Query fields every test in this file depends on
+const CORE_FIELDS = ['dParameterHistory', 'currentEpochInfo', 'committee'];
+const CORE_SURFACE = `SPO surface (${CORE_FIELDS.join(', ')})`;
+// How many epochs below the known committee epoch the multi-epoch series test spans
+const SERIES_SPAN = 5;
+// How far past the current epoch the far-future committee probe reaches
+const FAR_FUTURE_EPOCH_OFFSET = 1000;
 
+let queryFields = new Set<string>();
 let surfacePresent = false;
-// Whether the deployed indexer rejects over-wide epoch spans (#1455, shipped in
-// 4.4.0-rc.4 and 4.3.800-rc.1). Older builds return an empty list instead.
-let spanGuardPresent = false;
 let epochInfo: EpochInfo | null = null;
 let knownCommitteeEpoch: number | null = null;
 let knownCommittee: CommitteeMember[] = [];
 
-function expectValidList<T>(items: unknown, schema: z.ZodType<T>, label: string): T[] {
-  expect(Array.isArray(items), `${label} should be an array`).toBe(true);
-  for (const item of items as unknown[]) {
-    const parsed = schema.safeParse(item);
-    expect(
-      parsed.success,
-      `${label} item failed schema validation ${JSON.stringify(parsed.error, null, 2)}`,
-    ).toBe(true);
-  }
-  return items as T[];
+/** Fetches the latest block's governance parameters and validates their shape. */
+async function fetchLatestBlockSystemParameters(): Promise<BlockSystemParameters> {
+  const response = await httpClient.getBlockSystemParameters();
+  expect(response).toBeSuccess();
+  const block = response.data!.block;
+  expect(block).not.toBeNull();
+
+  const parsed = BlockSystemParametersSchema.safeParse(block);
+  expect(
+    parsed.success,
+    `Block.systemParameters schema validation failed ${JSON.stringify(parsed.error, null, 2)}`,
+  ).toBe(true);
+  return block!;
 }
 
-describe('spo queries', () => {
+/**
+ * Asserts a governance history is ordered newest first: strictly decreasing
+ * block heights and non-increasing timestamps.
+ */
+function expectNewestFirst(history: { blockHeight: number; timestamp: number }[], label: string) {
+  expectOrdered(
+    history,
+    (previous, current) =>
+      current.blockHeight < previous.blockHeight && current.timestamp <= previous.timestamp,
+    label,
+  );
+}
+
+function noCommitteeReason(): string {
+  return `no committee data on ${env.getCurrentEnvironmentName()}`;
+}
+
+// currentEpochInfo is nullable by contract, but on an environment that ships
+// spo-indexer a null means the component is not deployed or has never
+// committed an epoch
+function noEpochReason(): string {
+  return `spo-indexer not deployed or has no epochs on ${env.getCurrentEnvironmentName()} (currentEpochInfo is null)`;
+}
+
+/**
+ * The slot schedule of a committee: the fields spo-indexer writes once per
+ * epoch and never touches again. The identity fields (poolIdHex, auraPubkeyHex,
+ * spoSkHex) are left out because they are joined from spo_identity, which is
+ * backfilled independently and can change between two reads.
+ */
+function committeeSchedule(members: CommitteeMember[]) {
+  return members.map(({ epochNo, position, sidechainPubkeyHex, expectedSlots }) => ({
+    epochNo,
+    position,
+    sidechainPubkeyHex,
+    expectedSlots,
+  }));
+}
+
+describe.skipIf(env.isUndeployedEnv())('spo queries', () => {
   beforeAll(async () => {
-    // dParameterHistory is served on every environment that has the SPO
-    // surface at all, so a healthy response means the surface is present.
-    const probe = await httpClient.getDParameterHistory();
-    if (probe.errors || !probe.data) {
-      log.warn(`SPO surface not present on ${env.getCurrentEnvironmentName()}; skipping`);
+    // Throws on an unreachable indexer or a broken introspection, failing the
+    // suite instead of skipping it.
+    queryFields = await fetchQueryFieldNames();
+
+    const missing = CORE_FIELDS.filter((field) => !queryFields.has(field));
+    if (missing.length > 0) {
+      log.warn(
+        `${CORE_SURFACE} not served on ${env.getCurrentEnvironmentName()} (missing ${missing.join(', ')}); skipping`,
+      );
       return;
     }
     surfacePresent = true;
 
-    const spanProbe = await httpClient.getRegisteredTotalsSeries(0, EPOCH_SPAN_LIMIT + 1);
-    spanGuardPresent = (spanProbe.errors ?? []).length > 0;
-    if (!spanGuardPresent) {
-      log.warn(
-        `Epoch-span guard (#1455) not deployed on ${env.getCurrentEnvironmentName()}; skipping its negative case`,
-      );
-    }
-
     const epochResponse = await httpClient.getCurrentEpochInfo();
-    epochInfo = epochResponse.data?.currentEpochInfo ?? null;
+    assertNoGraphqlErrors('currentEpochInfo', epochResponse);
+    epochInfo = epochResponse.data!.currentEpochInfo;
     if (!epochInfo) {
-      log.warn(`No spo-indexer epoch data on ${env.getCurrentEnvironmentName()}`);
+      log.warn(noEpochReason());
       return;
     }
 
-    // Resolve the most recent epoch that has a committee. currentEpochInfo is
-    // extrapolated to the chain's real current epoch, while spo-indexer
-    // backfills committee membership one epoch per poll cycle and has been
-    // observed trailing by ~4 epochs on devnet, so scan downwards from the
-    // current epoch within a bounded window.
-    const oldestCandidate = Math.max(0, epochInfo.epochNo - COMMITTEE_LOOKBACK_EPOCHS);
-    for (let epoch = epochInfo.epochNo; epoch >= oldestCandidate; epoch--) {
-      const response = await httpClient.getCommittee(epoch);
-      const members = response.data?.committee ?? [];
-      if (!response.errors && members.length > 0) {
-        knownCommitteeEpoch = epoch;
-        knownCommittee = members;
-        log.info(
-          `Using epoch ${epoch} (${epochInfo.epochNo - epoch} behind current) with ${members.length} committee members`,
-        );
-        break;
-      }
+    const known = await findLatestCommitteeEpoch(httpClient, epochInfo.epochNo);
+    if (known) {
+      knownCommitteeEpoch = known.epoch;
+      knownCommittee = known.members;
     }
-    if (knownCommitteeEpoch === null) {
-      log.warn(
-        `No committee data within epochs ${oldestCandidate}..${epochInfo.epochNo} on ${env.getCurrentEnvironmentName()}`,
-      );
-    }
-  }, 30_000);
+  }, 60_000);
 
   describe('dParameterHistory', () => {
     /**
@@ -161,7 +170,7 @@ describe('spo queries', () => {
      */
     test('should return at least one D-parameter change set at genesis', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Query', 'SPO', 'Governance'] };
-      if (!surfacePresent) return ctx.skip();
+      if (!surfacePresent) return skipWithReason(ctx, surfaceAbsentReason(CORE_SURFACE));
 
       const response = await httpClient.getDParameterHistory();
 
@@ -177,12 +186,13 @@ describe('spo queries', () => {
     /**
      * @given the D-parameter history
      * @when its ordering is inspected
-     * @then entries are newest first with strictly decreasing block heights, and
-     *       the oldest entry describes a non-empty committee
+     * @then entries are newest first with strictly decreasing block heights and
+     *       non-increasing timestamps, and the oldest entry describes a
+     *       non-empty committee
      */
     test('should order D-parameter changes newest first with unique block heights', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Query', 'SPO', 'Governance'] };
-      if (!surfacePresent) return ctx.skip();
+      if (!surfacePresent) return skipWithReason(ctx, surfaceAbsentReason(CORE_SURFACE));
 
       const response = await httpClient.getDParameterHistory();
 
@@ -190,17 +200,129 @@ describe('spo queries', () => {
       const history = response.data!.dParameterHistory;
       expect(history.length).toBeGreaterThanOrEqual(1);
 
-      const heights = history.map((entry) => entry.blockHeight);
-      for (let i = 1; i < heights.length; i++) {
-        expect(heights[i], `entry ${i} should be older than entry ${i - 1}`).toBeLessThan(
-          heights[i - 1],
-        );
-      }
+      expectNewestFirst(history, 'dParameterHistory');
 
       const genesis = history[history.length - 1];
       expect(genesis.numPermissionedCandidates + genesis.numRegisteredCandidates).toBeGreaterThan(
         0,
       );
+    });
+
+    /**
+     * @given the latest block and the D-parameter history
+     * @when the newest history entry at or below the block height is compared
+     *       with Block.systemParameters.dParameter
+     * @then both report the same candidate counts
+     *
+     * The block is fetched first: a D-parameter change landing between the two
+     * reads then shows up in the history but not in the (older) block, and the
+     * "at or below the block height" lookup still picks the matching entry.
+     */
+    test('should agree with the D-parameter in force at the latest block', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Query', 'SPO', 'Governance'] };
+      if (!surfacePresent) return skipWithReason(ctx, surfaceAbsentReason(CORE_SURFACE));
+
+      const block = await fetchLatestBlockSystemParameters();
+      const response = await httpClient.getDParameterHistory();
+      expect(response).toBeSuccess();
+
+      const inForce = response.data!.dParameterHistory.find(
+        (entry) => entry.blockHeight <= block.height,
+      );
+      expect(inForce, `no D-parameter entry at or below block ${block.height}`).toBeDefined();
+      expect({
+        numPermissionedCandidates: inForce!.numPermissionedCandidates,
+        numRegisteredCandidates: inForce!.numRegisteredCandidates,
+      }).toEqual(block.systemParameters.dParameter);
+    });
+
+    /**
+     * @given the newest and the oldest D-parameter history entries
+     * @when each entry's blockHash is resolved through block(offset: {hash})
+     * @then the block has the entry's height and timestamp, and its
+     *       systemParameters.dParameter equals the entry's counts
+     */
+    test('should reference blocks that resolve by hash to the same parameters', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Query', 'SPO', 'Governance'] };
+      if (!surfacePresent) return skipWithReason(ctx, surfaceAbsentReason(CORE_SURFACE));
+
+      const response = await httpClient.getDParameterHistory();
+      expect(response).toBeSuccess();
+      const history = response.data!.dParameterHistory;
+      expect(history.length).toBeGreaterThanOrEqual(1);
+
+      // Newest three plus the genesis entry, de-duplicated for short histories;
+      // bounded so the test stays well inside its timeout on long histories.
+      const sample = [...history.slice(0, 3), history[history.length - 1]].filter(
+        (entry, index, all) => all.findIndex((e) => e.blockHash === entry.blockHash) === index,
+      );
+
+      for (const entry of sample) {
+        const blockResponse = await httpClient.getBlockSystemParameters({ hash: entry.blockHash });
+        expect(blockResponse, `block(hash: ${entry.blockHash})`).toBeSuccess();
+        const block = blockResponse.data!.block;
+        expect(block, `block ${entry.blockHash} should exist`).not.toBeNull();
+
+        expect(block!.height).toBe(entry.blockHeight);
+        expect(block!.timestamp).toBe(entry.timestamp);
+        expect(block!.systemParameters.dParameter).toEqual({
+          numPermissionedCandidates: entry.numPermissionedCandidates,
+          numRegisteredCandidates: entry.numRegisteredCandidates,
+        });
+      }
+    });
+  });
+
+  describe('termsAndConditionsHistory', () => {
+    /**
+     * @given any environment serving termsAndConditionsHistory
+     * @when the history is queried
+     * @then the response is a possibly empty list whose entries match the
+     *       TermsAndConditionsChange schema and are ordered newest first
+     */
+    test('should return a well-formed history ordered newest first', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Query', 'SPO', 'Governance'] };
+      if (!surfacePresent) return skipWithReason(ctx, surfaceAbsentReason(CORE_SURFACE));
+      if (!skipUnlessServed(ctx, queryFields, 'termsAndConditionsHistory')) return;
+
+      const response = await httpClient.getTermsAndConditionsHistory();
+
+      expect(response).toBeSuccess();
+      const history = expectValidList(
+        response.data!.termsAndConditionsHistory,
+        TermsAndConditionsChangeSchema,
+        'termsAndConditionsHistory',
+      );
+      expectNewestFirst(history, 'termsAndConditionsHistory');
+    });
+
+    /**
+     * @given the latest block and the Terms and Conditions history
+     * @when the newest entry at or below the block height is compared with
+     *       Block.systemParameters.termsAndConditions
+     * @then an empty history means the block reports null, otherwise both carry
+     *       the same document hash and URL
+     */
+    test('should agree with the Terms and Conditions in force at the latest block', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Query', 'SPO', 'Governance'] };
+      if (!surfacePresent) return skipWithReason(ctx, surfaceAbsentReason(CORE_SURFACE));
+      if (!skipUnlessServed(ctx, queryFields, 'termsAndConditionsHistory')) return;
+
+      const block = await fetchLatestBlockSystemParameters();
+      const response = await httpClient.getTermsAndConditionsHistory();
+      expect(response).toBeSuccess();
+
+      const inForce = response.data!.termsAndConditionsHistory.find(
+        (entry) => entry.blockHeight <= block.height,
+      );
+      if (!inForce) {
+        expect(block.systemParameters.termsAndConditions).toBeNull();
+        return;
+      }
+      expect(block.systemParameters.termsAndConditions).toEqual({
+        hash: inForce.hash,
+        url: inForce.url,
+      });
     });
   });
 
@@ -208,18 +330,14 @@ describe('spo queries', () => {
     /**
      * @given an environment where spo-indexer has recorded epochs
      * @when currentEpochInfo is queried
-     * @then epoch info matches the EpochInfo schema, epochNo is positive and the
-     *       elapsed time is within the epoch duration
+     * @then epoch info matches the EpochInfo schema (which already pins epochNo
+     *       to a non-negative integer, epoch 0 included) and the elapsed time is
+     *       within the epoch duration
      */
     test('should return well-formed current epoch info where spo-indexer data exists', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Query', 'SPO', 'Epoch'] };
-      if (!surfacePresent) return ctx.skip();
-      if (!epochInfo) {
-        return ctx.skip(
-          true,
-          `no spo-indexer epoch data on ${env.getCurrentEnvironmentName()} — currentEpochInfo is null`,
-        );
-      }
+      if (!surfacePresent) return skipWithReason(ctx, surfaceAbsentReason(CORE_SURFACE));
+      if (!epochInfo) return skipWithReason(ctx, noEpochReason());
 
       const response = await httpClient.getCurrentEpochInfo();
 
@@ -232,29 +350,24 @@ describe('spo queries', () => {
         parsed.success,
         `EpochInfo schema validation failed ${JSON.stringify(parsed.error, null, 2)}`,
       ).toBe(true);
-      expect(info!.epochNo).toBeGreaterThan(0);
       // Extrapolated from the latest stored epoch, so it may briefly overshoot
       // right at an epoch boundary; soft so a boundary race does not fail the run.
       expect.soft(info!.elapsedSeconds).toBeLessThan(info!.durationSeconds);
     });
 
     /**
-     * @given an environment where spo-indexer has recorded no epochs
-     * @when currentEpochInfo is queried
-     * @then the response is successful and currentEpochInfo is null (nullable
-     *       contract, not an error)
+     * @given the current epoch and the newest epoch with committee data
+     * @when the two are compared
+     * @then the current epoch is never behind the newest committee epoch
+     *       (spo-indexer only backfills, it never runs ahead of the chain)
      */
-    test('should return a successful null where spo-indexer epoch data is absent', async (ctx: TestContext) => {
-      ctx.task!.meta.custom = { labels: ['Query', 'SPO', 'Epoch', 'Negative'] };
-      if (!surfacePresent) return ctx.skip();
-      if (epochInfo) {
-        return ctx.skip(true, `epoch data present on ${env.getCurrentEnvironmentName()}`);
-      }
+    test('should not lag behind the newest committee epoch', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Query', 'SPO', 'Epoch'] };
+      if (!surfacePresent) return skipWithReason(ctx, surfaceAbsentReason(CORE_SURFACE));
+      if (!epochInfo) return skipWithReason(ctx, noEpochReason());
+      if (knownCommitteeEpoch === null) return skipWithReason(ctx, noCommitteeReason());
 
-      const response = await httpClient.getCurrentEpochInfo();
-
-      expect(response).toBeSuccess();
-      expect(response.data!.currentEpochInfo).toBeNull();
+      expect(epochInfo.epochNo).toBeGreaterThanOrEqual(knownCommitteeEpoch);
     });
   });
 
@@ -263,15 +376,15 @@ describe('spo queries', () => {
      * @given a past epoch known to have a committee
      * @when committee(epoch) is queried
      * @then every member matches the CommitteeMember schema and echoes the
-     *       requested epoch, positions are ascending and contiguous, and the
-     *       committee is scheduled to produce at least one slot
+     *       requested epoch, positions are ascending and contiguous, sidechain
+     *       keys are in canonical lowercase form without a prefix, expected
+     *       slots are spread evenly across positions, and the committee is
+     *       scheduled to produce at least one slot
      */
     test('should return committee members for a known past epoch', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Query', 'SPO', 'Committee'] };
-      if (!surfacePresent) return ctx.skip();
-      if (knownCommitteeEpoch === null) {
-        return ctx.skip(true, `no committee data on ${env.getCurrentEnvironmentName()}`);
-      }
+      if (!surfacePresent) return skipWithReason(ctx, surfaceAbsentReason(CORE_SURFACE));
+      if (knownCommitteeEpoch === null) return skipWithReason(ctx, noCommitteeReason());
 
       const response = await httpClient.getCommittee(knownCommitteeEpoch);
 
@@ -281,14 +394,26 @@ describe('spo queries', () => {
 
       for (const member of members) {
         expect(member.epochNo).toBe(knownCommitteeEpoch);
+        // spo-indexer stores keys stripped of their 0x prefix and lowercased; a
+        // failure here is the signal to keep SpoHex permissive (schema.ts).
+        expect(
+          VarLenghtHex.safeParse(member.sidechainPubkeyHex).success,
+          `sidechain key ${member.sidechainPubkeyHex} should be lowercase hex without a prefix`,
+        ).toBe(true);
       }
 
+      // Strictly ascending already implies unique; the span check adds contiguity.
       const positions = members.map((member) => member.position);
-      for (let i = 1; i < positions.length; i++) {
-        expect(positions[i]).toBeGreaterThan(positions[i - 1]);
-      }
-      expect(new Set(positions).size).toBe(positions.length);
+      expectOrdered(positions, (previous, current) => current > previous, 'committee positions');
       expect(Math.max(...positions) - Math.min(...positions) + 1).toBe(positions.length);
+
+      // spo-indexer hands out slots_per_epoch / positions to every position and
+      // the remainder one slot at a time, so the spread is at most one.
+      const expectedSlots = members.map((member) => member.expectedSlots);
+      expect(Math.max(...expectedSlots) - Math.min(...expectedSlots)).toBeLessThanOrEqual(1);
+
+      // Sidechain keys are deliberately not asserted unique: the committee is a
+      // slot schedule and one validator may hold several positions (preprod).
 
       const totalExpectedSlots = members.reduce((sum, member) => sum + member.expectedSlots, 0);
       expect(totalExpectedSlots).toBeGreaterThan(0);
@@ -296,20 +421,29 @@ describe('spo queries', () => {
 
     /**
      * @given a past epoch known to have a committee
-     * @when committee(epoch) is queried twice
-     * @then both reads return the same members in the same order
+     * @when committee(epoch) is queried twice in a row
+     * @then both reads return the same members in the same order, and the
+     *       schedule (epoch, position, sidechain key, expected slots) matches
+     *       the snapshot taken in beforeAll
+     *
+     * Full equality is only asserted between the two back-to-back reads. The
+     * beforeAll snapshot is compared on the schedule alone because poolIdHex,
+     * auraPubkeyHex and spoSkHex come from a LEFT JOIN on spo_identity, which
+     * spo-indexer backfills independently: a row landing between beforeAll and
+     * this test turns those from null to a value on a perfectly healthy indexer.
      */
     test('should return the same member set on repeated reads', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Query', 'SPO', 'Committee'] };
-      if (!surfacePresent) return ctx.skip();
-      if (knownCommitteeEpoch === null) {
-        return ctx.skip(true, `no committee data on ${env.getCurrentEnvironmentName()}`);
-      }
+      if (!surfacePresent) return skipWithReason(ctx, surfaceAbsentReason(CORE_SURFACE));
+      if (knownCommitteeEpoch === null) return skipWithReason(ctx, noCommitteeReason());
 
-      const response = await httpClient.getCommittee(knownCommitteeEpoch);
+      const first = await httpClient.getCommittee(knownCommitteeEpoch);
+      const second = await httpClient.getCommittee(knownCommitteeEpoch);
 
-      expect(response).toBeSuccess();
-      expect(response.data!.committee).toEqual(knownCommittee);
+      expect(first).toBeSuccess();
+      expect(second).toBeSuccess();
+      expect(second.data!.committee).toEqual(first.data!.committee);
+      expect(committeeSchedule(first.data!.committee)).toEqual(committeeSchedule(knownCommittee));
     });
 
     /**
@@ -320,7 +454,7 @@ describe('spo queries', () => {
      */
     test('should return an empty list for a negative epoch', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Query', 'SPO', 'Committee', 'Negative'] };
-      if (!surfacePresent) return ctx.skip();
+      if (!surfacePresent) return skipWithReason(ctx, surfaceAbsentReason(CORE_SURFACE));
 
       const response = await httpClient.getCommittee(-1);
 
@@ -335,17 +469,40 @@ describe('spo queries', () => {
      */
     test('should return an empty list for a far-future epoch', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Query', 'SPO', 'Committee', 'Negative'] };
-      if (!surfacePresent) return ctx.skip();
+      if (!surfacePresent) return skipWithReason(ctx, surfaceAbsentReason(CORE_SURFACE));
 
       const maxIntResponse = await httpClient.getCommittee(MAX_GRAPHQL_INT);
       expect(maxIntResponse).toBeSuccess();
       expect(maxIntResponse.data!.committee).toEqual([]);
 
       if (epochInfo) {
-        const futureResponse = await httpClient.getCommittee(epochInfo.epochNo + 1000);
+        const futureResponse = await httpClient.getCommittee(
+          epochInfo.epochNo + FAR_FUTURE_EPOCH_OFFSET,
+        );
         expect(futureResponse).toBeSuccess();
         expect(futureResponse.data!.committee).toEqual([]);
       }
+    });
+
+    /**
+     * @given an epoch just above the 32-bit GraphQL Int range
+     * @when committee(epoch) is queried
+     * @then the response is successful with an empty list
+     *
+     * The schema advertises `epoch: Int!` but the resolver binds an i64
+     * (query.rs `committee`), and async-graphql parses any JSON integer into it.
+     * epochUtilization binds an i32 and rejects the same value; see the
+     * registration suite. If the server tightens committee to i32, flip this to
+     * an error assertion.
+     */
+    test('should accept an epoch above the 32-bit Int range as an empty list', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Query', 'SPO', 'Committee', 'Negative'] };
+      if (!surfacePresent) return skipWithReason(ctx, surfaceAbsentReason(CORE_SURFACE));
+
+      const response = await httpClient.getCommittee(MAX_GRAPHQL_INT + 1);
+
+      expect(response).toBeSuccess();
+      expect(response.data!.committee).toEqual([]);
     });
 
     /**
@@ -355,267 +512,143 @@ describe('spo queries', () => {
      */
     test('should reject a non-integer epoch with a GraphQL error', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Query', 'SPO', 'Committee', 'Negative'] };
-      if (!surfacePresent) return ctx.skip();
+      if (!surfacePresent) return skipWithReason(ctx, surfaceAbsentReason(CORE_SURFACE));
 
       const invalidEpochs = ['not-an-int', 1.5] as unknown as number[];
       for (const epoch of invalidEpochs) {
         const response = await httpClient.getCommittee(epoch);
-        // Variable-coercion errors carry no data at all, so assert on the
-        // presence of an error rather than the strict toBeError() shape.
+        // Variable coercion fails before any field resolves, so there is no
+        // `committee` key for toBeError() to look at: async-graphql answers
+        // `"data": null` today, and a server that omits `data` altogether is
+        // equally correct. Assert on the error and on the absence of data.
         expect
           .soft(response.errors ?? [], `expected a GraphQL error for epoch ${String(epoch)}`)
           .not.toHaveLength(0);
-        expect.soft(response.data).toBeNull();
+        expect
+          .soft(response.data ?? null, `expected no data for epoch ${String(epoch)}`)
+          .toBeNull();
       }
     });
   });
 
-  describe('SPO registration surface', () => {
+  describe('registeredSpoSeries', () => {
     /**
-     * @given any environment
-     * @when spoCount is queried
-     * @then a non-negative integer is returned (the resolver never returns null
-     *       even though the field is nullable in the schema)
+     * @given a past epoch known to have a committee
+     * @when registeredSpoSeries is queried for exactly that epoch
+     * @then one row is returned whose federatedValidCount equals the number of
+     *       distinct committee keys scheduled for at least one slot, with no
+     *       federated invalid members
      */
-    test('spoCount should return a non-negative integer', async (ctx: TestContext) => {
-      ctx.task!.meta.custom = { labels: ['Query', 'SPO', 'Registration'] };
-      if (!surfacePresent) return ctx.skip();
+    test('should report the committee size for a known epoch', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Query', 'SPO', 'Committee', 'Registration'] };
+      if (!surfacePresent) return skipWithReason(ctx, surfaceAbsentReason(CORE_SURFACE));
+      if (!skipUnlessServed(ctx, queryFields, 'registeredSpoSeries')) return;
+      if (knownCommitteeEpoch === null) return skipWithReason(ctx, noCommitteeReason());
 
-      const response = await httpClient.getSpoCount();
+      const response = await httpClient.getRegisteredSpoSeries(
+        knownCommitteeEpoch,
+        knownCommitteeEpoch,
+      );
 
       expect(response).toBeSuccess();
-      const count = response.data!.spoCount;
-      expect(count).not.toBeNull();
-      expect(Number.isInteger(count)).toBe(true);
-      expect(count!).toBeGreaterThanOrEqual(0);
+      const stats = expectValidList(
+        response.data!.registeredSpoSeries,
+        RegisteredStatSchema,
+        'registeredSpoSeries',
+      );
+      expect(stats).toHaveLength(1);
+
+      const [stat] = stats;
+      const scheduledKeys = new Set(
+        knownCommittee
+          .filter((member) => member.expectedSlots > 0)
+          .map((member) => member.sidechainPubkeyHex),
+      );
+      expect(stat.epochNo).toBe(knownCommitteeEpoch);
+      expect(stat.federatedValidCount).toBe(scheduledKeys.size);
+      expect(stat.federatedInvalidCount).toBe(0);
     });
 
     /**
-     * @given any environment
-     * @when spoList is queried without arguments
-     * @then a list bounded by the default limit is returned and every item
-     *       matches the Spo schema
+     * @given a past epoch known to have a committee
+     * @when registeredSpoSeries is queried for a short range ending at it
+     * @then exactly one row per epoch is returned, ascending and contiguous
      */
-    test('spoList should return a well-formed list with default pagination', async (ctx: TestContext) => {
-      ctx.task!.meta.custom = { labels: ['Query', 'SPO', 'Registration'] };
-      if (!surfacePresent) return ctx.skip();
+    test('should return one contiguous ascending row per epoch', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Query', 'SPO', 'Committee', 'Registration'] };
+      if (!surfacePresent) return skipWithReason(ctx, surfaceAbsentReason(CORE_SURFACE));
+      if (!skipUnlessServed(ctx, queryFields, 'registeredSpoSeries')) return;
+      if (knownCommitteeEpoch === null) return skipWithReason(ctx, noCommitteeReason());
 
-      const response = await httpClient.getSpoList();
+      const fromEpoch = Math.max(0, knownCommitteeEpoch - SERIES_SPAN);
+      const response = await httpClient.getRegisteredSpoSeries(fromEpoch, knownCommitteeEpoch);
 
       expect(response).toBeSuccess();
-      const spos = expectValidList(response.data!.spoList, SpoSchema, 'spoList');
-      expect(spos.length).toBeLessThanOrEqual(SPO_LIST_DEFAULT_LIMIT);
-    });
-
-    /**
-     * @given limit, offset and search arguments, including out-of-range limits
-     * @when spoList is queried with each combination
-     * @then every request succeeds and honours the (silently clamped) limit
-     */
-    test('spoList should honour limit, offset and search arguments without error', async (ctx: TestContext) => {
-      ctx.task!.meta.custom = { labels: ['Query', 'SPO', 'Registration'] };
-      if (!surfacePresent) return ctx.skip();
-
-      const filtered = await httpClient.getSpoList({ limit: 5, offset: 0, search: 'dead' });
-      expect(filtered).toBeSuccess();
-      expectValidList(filtered.data!.spoList, SpoSchema, 'spoList(search)');
-      expect(filtered.data!.spoList.length).toBeLessThanOrEqual(5);
-
-      // limit is clamped to [1, 200] server-side, never rejected.
-      for (const limit of [0, 10_000]) {
-        const response = await httpClient.getSpoList({ limit });
-        expect(response, `spoList(limit: ${limit}) should succeed`).toBeSuccess();
-        expect(response.data!.spoList.length).toBeLessThanOrEqual(SPO_LIST_MAX_LIMIT);
-      }
-    });
-
-    /**
-     * @given any environment
-     * @when spoIdentities is queried with and without pagination
-     * @then every request succeeds, respects its limit and every item matches
-     *       the SpoIdentity schema
-     */
-    test('spoIdentities should return a well-formed list', async (ctx: TestContext) => {
-      ctx.task!.meta.custom = { labels: ['Query', 'SPO', 'Registration'] };
-      if (!surfacePresent) return ctx.skip();
-
-      const defaults = await httpClient.getSpoIdentities();
-      expect(defaults).toBeSuccess();
-      const identities = expectValidList(
-        defaults.data!.spoIdentities,
-        SpoIdentitySchema,
-        'spoIdentities',
+      const stats = expectValidList(
+        response.data!.registeredSpoSeries,
+        RegisteredStatSchema,
+        'registeredSpoSeries',
       );
-      expect(identities.length).toBeLessThanOrEqual(SPO_IDENTITIES_DEFAULT_LIMIT);
-
-      const paged = await httpClient.getSpoIdentities({ limit: 3, offset: 1 });
-      expect(paged).toBeSuccess();
-      expectValidList(paged.data!.spoIdentities, SpoIdentitySchema, 'spoIdentities(paged)');
-      expect(paged.data!.spoIdentities.length).toBeLessThanOrEqual(3);
+      expect(stats.map((stat) => stat.epochNo)).toEqual(epochRange(fromEpoch, knownCommitteeEpoch));
     });
+  });
 
+  describe('registeredPresence', () => {
     /**
-     * @given any environment
-     * @when stakePoolOperators is queried with and without a limit
-     * @then every request succeeds, respects its limit and every item is a hex
-     *       SPO key
-     */
-    test('stakePoolOperators should return a well-formed list of SPO keys', async (ctx: TestContext) => {
-      ctx.task!.meta.custom = { labels: ['Query', 'SPO', 'Registration'] };
-      if (!surfacePresent) return ctx.skip();
-
-      const defaults = await httpClient.getStakePoolOperators();
-      expect(defaults).toBeSuccess();
-      const operators = expectValidList(
-        defaults.data!.stakePoolOperators,
-        SpoHex,
-        'stakePoolOperators',
-      );
-      expect(operators.length).toBeLessThanOrEqual(STAKE_POOL_OPERATORS_DEFAULT_LIMIT);
-
-      const limited = await httpClient.getStakePoolOperators(5);
-      expect(limited).toBeSuccess();
-      expectValidList(limited.data!.stakePoolOperators, SpoHex, 'stakePoolOperators(5)');
-      expect(limited.data!.stakePoolOperators.length).toBeLessThanOrEqual(5);
-    });
-
-    /**
-     * @given a permissioned environment with no SPO registrations
-     * @when spoCount, spoList, spoIdentities and stakePoolOperators are queried
-     * @then each returns a successful empty result
+     * @given a past epoch known to have a committee
+     * @when registeredPresence is queried for exactly that epoch
+     * @then there is one committee-source event per committee member with a
+     *       null status, keyed by pool id where known and by sidechain key
+     *       otherwise, and events are ordered by epoch, source and key
      *
-     * This is the single data-reality assertion for the registration surface.
-     * Once post-mainnet registration tooling produces real SPOs, replace it with
-     * non-empty assertions (the per-endpoint shape tests above already validate
-     * populated data).
+     * The committee is re-read here instead of using the beforeAll snapshot:
+     * the event key falls back from poolIdHex to the sidechain key, and
+     * poolIdHex is joined from spo_identity, which spo-indexer backfills
+     * independently of the committee rows.
      */
-    test('should report no SPO registrations on permissioned environments', async (ctx: TestContext) => {
-      ctx.task!.meta.custom = { labels: ['Query', 'SPO', 'Registration', 'Negative'] };
-      if (!surfacePresent) return ctx.skip();
+    test('should contain one committee event per member for a known epoch', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Query', 'SPO', 'Committee', 'Registration'] };
+      if (!surfacePresent) return skipWithReason(ctx, surfaceAbsentReason(CORE_SURFACE));
+      if (!skipUnlessServed(ctx, queryFields, 'registeredPresence')) return;
+      if (knownCommitteeEpoch === null) return skipWithReason(ctx, noCommitteeReason());
 
-      const [count, list, identities, operators] = await Promise.all([
-        httpClient.getSpoCount(),
-        httpClient.getSpoList(),
-        httpClient.getSpoIdentities(),
-        httpClient.getStakePoolOperators(),
+      const [committeeResponse, response] = await Promise.all([
+        httpClient.getCommittee(knownCommitteeEpoch),
+        httpClient.getRegisteredPresence(knownCommitteeEpoch, knownCommitteeEpoch),
       ]);
 
-      expect(count).toBeSuccess();
-      expect(count.data!.spoCount).toBe(0);
-      expect(list).toBeSuccess();
-      expect(list.data!.spoList).toEqual([]);
-      expect(identities).toBeSuccess();
-      expect(identities.data!.spoIdentities).toEqual([]);
-      expect(operators).toBeSuccess();
-      expect(operators.data!.stakePoolOperators).toEqual([]);
-    });
-
-    /**
-     * @given a registered SPO
-     * @when spoList(search) is queried with a prefix of its pool id
-     * @then only matching SPOs are returned
-     */
-    test.todo('spoList search should filter by pool id prefix');
-  });
-
-  describe('pool-id lookups', () => {
-    /**
-     * @given a well-formed pool id that is not registered
-     * @when spoByPoolId and spoIdentityByPoolId are queried
-     * @then both resolve successfully to null
-     */
-    test('should return null for a fabricated well-formed pool id', async (ctx: TestContext) => {
-      ctx.task!.meta.custom = { labels: ['Query', 'SPO', 'Negative'] };
-      if (!surfacePresent) return ctx.skip();
-
-      const spo = await httpClient.getSpoByPoolId(FABRICATED_POOL_ID);
-      expect(spo).toBeSuccess();
-      expect(spo.data!.spoByPoolId).toBeNull();
-
-      const identity = await httpClient.getSpoIdentityByPoolId(FABRICATED_POOL_ID);
-      expect(identity).toBeSuccess();
-      expect(identity.data!.spoIdentityByPoolId).toBeNull();
-    });
-
-    /**
-     * @given malformed pool ids (empty, non-hex, odd length, wrong length)
-     * @when spoByPoolId and spoIdentityByPoolId are queried with each
-     * @then the indexer resolves to null rather than raising an error
-     *
-     * Potential server-side finding: the pool-id normaliser only lowercases the
-     * input and performs no hex validation, so garbage silently yields null.
-     * If validation is added later, switch these assertions to toBeError().
-     */
-    test('should return null rather than an error for malformed pool ids', async (ctx: TestContext) => {
-      ctx.task!.meta.custom = { labels: ['Query', 'SPO', 'Negative'] };
-      if (!surfacePresent) return ctx.skip();
-
-      const malformedIds = [...MALFORMED_POOL_IDS, ...dataProvider.getFabricatedMalformedHashes()];
-      for (const poolId of malformedIds) {
-        const spo = await httpClient.getSpoByPoolId(poolId);
-        expect.soft(spo, `spoByPoolId(${JSON.stringify(poolId)})`).toBeSuccess();
-        expect.soft(spo.data?.spoByPoolId).toBeNull();
-
-        const identity = await httpClient.getSpoIdentityByPoolId(poolId);
-        expect.soft(identity, `spoIdentityByPoolId(${JSON.stringify(poolId)})`).toBeSuccess();
-        expect.soft(identity.data?.spoIdentityByPoolId).toBeNull();
-      }
-    });
-
-    /**
-     * @given a registered SPO
-     * @when spoByPoolId is queried with its pool id
-     * @then the Spo is returned with identity and metadata fields populated
-     */
-    test.todo('spoByPoolId should return the SPO for a registered pool id');
-
-    /**
-     * @given a registered SPO
-     * @when spoIdentityByPoolId is queried with its pool id
-     * @then the identity is returned with mainchain, sidechain and aura keys
-     */
-    test.todo('spoIdentityByPoolId should return identity fields for a registered pool');
-  });
-
-  describe('registeredTotalsSeries range validation', () => {
-    /**
-     * @given an epoch range wider than the server-side span cap
-     * @when registeredTotalsSeries is queried
-     * @then the indexer rejects it with an "epoch range too large" client error
-     */
-    test('should reject an epoch span larger than the maximum', async (ctx: TestContext) => {
-      ctx.task!.meta.custom = { labels: ['Query', 'SPO', 'Negative'] };
-      if (!surfacePresent) return ctx.skip();
-      if (!spanGuardPresent) {
-        return ctx.skip(
-          true,
-          `epoch-span guard (#1455, indexer >= 4.4.0-rc.4) not deployed on ${env.getCurrentEnvironmentName()}`,
-        );
-      }
-
-      const response = await httpClient.getRegisteredTotalsSeries(0, EPOCH_SPAN_LIMIT + 1);
-
-      expect(response).toBeError();
-      expect(response.errors![0].message).toMatch(/epoch range too large/);
-    });
-
-    /**
-     * @given an epoch range exactly at the server-side span cap
-     * @when registeredTotalsSeries is queried
-     * @then the request succeeds (the bound is inclusive) and every item matches
-     *       the RegisteredTotals schema
-     */
-    test('should accept the maximum allowed epoch span', async (ctx: TestContext) => {
-      ctx.task!.meta.custom = { labels: ['Query', 'SPO', 'Registration'] };
-      if (!surfacePresent) return ctx.skip();
-
-      const response = await httpClient.getRegisteredTotalsSeries(0, EPOCH_SPAN_LIMIT);
+      expect(committeeResponse).toBeSuccess();
+      const committee = committeeResponse.data!.committee;
+      expect(committee.length).toBe(knownCommittee.length);
 
       expect(response).toBeSuccess();
-      expectValidList(
-        response.data!.registeredTotalsSeries,
-        RegisteredTotalsSchema,
-        'registeredTotalsSeries',
+      const events = expectValidList(
+        response.data!.registeredPresence,
+        PresenceEventSchema,
+        'registeredPresence',
+      );
+
+      for (const event of events) {
+        expect(event.epochNo).toBe(knownCommitteeEpoch);
+      }
+
+      const committeeEvents = events.filter((event) => event.source === 'committee');
+      expect(committeeEvents).toHaveLength(committee.length);
+      for (const event of committeeEvents) {
+        expect(event.status).toBeNull();
+      }
+
+      const expectedKeys = committee.map((member) => member.poolIdHex ?? member.sidechainPubkeyHex);
+      expect(new Set(committeeEvents.map((event) => event.idKey))).toEqual(new Set(expectedKeys));
+
+      expectOrdered(
+        events,
+        (previous, current) =>
+          previous.epochNo < current.epochNo ||
+          (previous.epochNo === current.epochNo &&
+            (previous.source < current.source ||
+              (previous.source === current.source && previous.idKey <= current.idKey))),
+        'registeredPresence events',
       );
     });
   });
