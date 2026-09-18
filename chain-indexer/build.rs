@@ -12,7 +12,8 @@
 // limitations under the License.
 
 use std::{
-    env,
+    collections::HashMap,
+    env, fs,
     fs::{File, OpenOptions},
     io::{BufRead, BufReader, Write},
     path::Path,
@@ -20,6 +21,10 @@ use std::{
 
 use anyhow::{Context, bail};
 use itertools::Itertools;
+use parity_scale_codec::Decode;
+use subxt::Metadata;
+
+include!("build/runtime_version.rs");
 
 const NODE_VERSIONS_PATH: &str = "../NODE_VERSIONS";
 
@@ -38,6 +43,15 @@ fn main() -> anyhow::Result<()> {
             )
         })?;
 
+    // Tell cargo to rerun build script if:
+    // 1. The node versions file changes.
+    println!("cargo:rerun-if-changed={}", NODE_VERSIONS_PATH);
+    // 2. The .node directory structure changes. Cargo scans a directory
+    //    recursively, so this covers every metadata.scale beneath it.
+    println!("cargo:rerun-if-changed=../.node");
+
+    // Node versions that ship the same runtime share its module.
+    let mut runtime_metadata = HashMap::new();
     let node_versions = read_node_versions()?;
     for node_version in node_versions {
         let metadata_path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -47,13 +61,30 @@ fn main() -> anyhow::Result<()> {
         let metadata_path = metadata_path
             .canonicalize()
             .with_context(|| format!("metadata file not found at {}", metadata_path.display()))?;
+        let metadata = fs::read(&metadata_path)
+            .with_context(|| format!("cannot read metadata at {}", metadata_path.display()))?;
+        let metadata = Metadata::decode(&mut &*metadata)
+            .with_context(|| format!("cannot decode metadata at {}", metadata_path.display()))?;
 
-        // Module name: replace dots and hyphens with underscores
-        let module_suffix = node_version
-            .split_once('-')
-            .map(|(l, _)| l)
-            .unwrap_or(&node_version)
-            .replace('.', "_");
+        let runtime = runtime_version(spec_version(&metadata)?);
+        // A runtime seen before must decode to the same metadata; otherwise one blob
+        // is stale or the runtime changed without bumping `spec_version`.
+        let hash = metadata.hasher().hash();
+        if let Some((first_hash, first_node_version)) = runtime_metadata.get(&runtime) {
+            if *first_hash != hash {
+                let (major, minor, patch) = runtime;
+                bail!(
+                    "node versions {first_node_version} and {node_version} both report runtime \
+                     {major}.{minor}.{patch}, but their metadata differs"
+                );
+            }
+            continue;
+        }
+        runtime_metadata.insert(runtime, (hash, node_version.clone()));
+
+        // The runtime names the module, so a node release that leaves the runtime
+        // alone reuses its module and needs no code change.
+        let (major, minor, patch) = runtime;
 
         // Generate the code with the subxt macro call.
         let generated_code = format!(
@@ -66,7 +97,7 @@ fn main() -> anyhow::Result<()> {
                         recursive
                     )
                 )]
-                pub mod runtime_{module_suffix} {{}}
+                pub mod runtime_{major}_{minor}_{patch} {{}}
             "#,
             metadata_path.display()
         );
@@ -75,17 +106,30 @@ fn main() -> anyhow::Result<()> {
         writeln!(generated_runtime_file, "{}", generated_code).with_context(|| {
             format!("cannot write generated runtime code for node version {node_version}")
         })?;
-
-        // Tell cargo to rerun build script if:
-        // 1. The node versions file changes.
-        println!("cargo:rerun-if-changed={}", NODE_VERSIONS_PATH);
-        // 2. The metadata file itself changes.
-        println!("cargo:rerun-if-changed={}", metadata_path.display());
-        // 3. The .node directory structure changes.
-        println!("cargo:rerun-if-changed=../.node");
     }
 
     Ok(())
+}
+
+/// Reads `spec_version` from runtime metadata.
+///
+/// The System pallet's `Version` constant holds a SCALE-encoded `RuntimeVersion`.
+fn spec_version(metadata: &Metadata) -> anyhow::Result<u32> {
+    let system = metadata
+        .pallet_by_name("System")
+        .context("metadata has no System pallet")?;
+    let version = system
+        .constant_by_name("Version")
+        .context("System pallet has no Version constant")?;
+
+    // SCALE carries no field tags or offsets, and the two names are
+    // length-prefixed, so reaching `spec_version` means decoding what precedes it.
+    // A tuple decodes as its concatenated fields, matching the struct's layout.
+    let (_spec_name, _impl_name, _authoring_version, spec_version) =
+        <(String, String, u32, u32)>::decode(&mut version.value())
+            .context("cannot decode RuntimeVersion")?;
+
+    Ok(spec_version)
 }
 
 fn read_node_versions() -> anyhow::Result<Vec<String>> {
