@@ -21,7 +21,24 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verify-release-tag:
+    name: Verify release tag
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout the build commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify annotated GPG tag before publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/verify-release-tag.py
+
   build-and-push:
+    needs: verify-release-tag
     name: Build and push (${{ matrix.image.name }}, ${{ matrix.platform.arch }})
     runs-on: ubuntu-latest-16-core-x64
     permissions:
@@ -134,7 +151,7 @@ jobs:
   merge-manifests:
     name: Merge multi-arch manifest (${{ matrix.image.name }})
     needs: build-and-push
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       packages: write
     strategy:
@@ -203,7 +220,7 @@ jobs:
   docker-compose-validation:
     name: Docker Compose Validation
     needs: merge-manifests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     continue-on-error: true
     strategy:
       matrix:

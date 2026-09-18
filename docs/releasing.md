@@ -44,7 +44,17 @@ Review the prepended section before committing.
 
    Confirm the tag sits on the merge commit that is the remote branch tip before pushing.
 
-3. **Images publish automatically.** A `v*` tag triggers
+3. **Images publish after tag verification.** Before either architecture starts building or
+   authenticating to a registry, the workflow requires GitHub to verify the annotated
+   tag's GPG signature. Lightweight tags, unverified signatures, nested tags, and tags
+   pointing at a different commit from the workflow are rejected. The signing public
+   key must be registered with GitHub. Manual dispatch against a tag uses the same check.
+
+   This gates publication, not GitHub's acceptance of the tag push: GitHub rulesets
+   do not enforce signed tag objects. Release tags must not be moved or deleted;
+   use a new version if a tag was created incorrectly.
+
+   **Images publish automatically after that check.** A `v*` tag triggers
    `.github/workflows/build-indexer-images.yaml`, which builds every component
    (`chain-indexer`, `wallet-indexer`, `indexer-api`, `spo-indexer`,
    `indexer-standalone`) with the `release` profile and pushes semver-tagged images to three
@@ -65,7 +75,15 @@ lands on the integration branch.
 ## Maintenance branches
 
 Fixes for a shipped line live on `release/*` branches (e.g. `release/4.3.1`); CI
-runs on them as on `main`.
+runs on them as on `main`. Backports are merged through reviewed PRs using merge
+commits, so an individual fix or a batch retains its commit messages and trailers.
+Use `git cherry-pick -x -S <commit>`: cherry-picking creates a new commit, so the
+backporter must sign it again; the original signature cannot be preserved.
+
+Before enabling the new required checks on an existing release branch, backport
+this publishing workflow, its verification script, the pre-commit configuration and
+workflow, and the release scan triggers. Old tag commits retain their old workflows;
+this change does not retrofit historical tags.
 
 ## Pre-release / dev tags
 

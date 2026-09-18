@@ -41,3 +41,10 @@ updates:
       all:
         patterns:
           - "*"
+
+  - package-ecosystem: "pip"
+    labels:
+      - "bot:dependencies"
+    directory: "/.github"
+    schedule:
+      interval: "weekly"

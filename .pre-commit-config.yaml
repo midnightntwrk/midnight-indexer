@@ -1,0 +1,18 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-yaml
+        files: ^(\.github/workflows/|\.pre-commit-config\.yaml$)
+      - id: end-of-file-fixer
+        files: ^\.github/scripts/.*\.py$
+      - id: trailing-whitespace
+        files: ^\.github/scripts/.*\.py$
+  - repo: local
+    hooks:
+      - id: release-tag-tests
+        name: Release tag verification tests
+        entry: python3 -m unittest discover -s .github/scripts -p test_verify_release_tag.py
+        language: system
+        pass_filenames: false
+        always_run: true
