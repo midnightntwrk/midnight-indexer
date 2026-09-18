@@ -22,7 +22,11 @@ import { GenericContainer, StartedTestContainer } from 'testcontainers';
 import { getContractDeploymentHashes, resolveBlockHash } from '../../tests/e2e/test-utils';
 import { ensureToolkitCachePostgres } from './toolkit-cache';
 import { closeMothWallets, generateSingleTxViaMoth } from '../moth/moth-backend';
-import { callCircuitViaMoth, deployContractViaMoth } from '../moth/moth-contracts';
+import {
+  callCircuitViaMoth,
+  deployContractViaMoth,
+  updateContractViaMoth,
+} from '../moth/moth-contracts';
 import { z } from 'zod';
 import {
   Coin,
@@ -946,15 +950,35 @@ class ToolkitWrapper {
     fundingSeed?: string,
     newAuthoritySeed: string = DEFAULT_NEW_AUTHORITY_SEED,
   ): Promise<ToolkitTransactionResult> {
-    if (!this.startedContainer) {
-      throw new Error('Container is not started. Call start() first.');
-    }
-
     if (!deploymentResult?.['contract-address-untagged']) {
       log.error('Deployment result is missing or has no contract address.');
       throw new Error(
         'Deployment result with contract-address-untagged is required. Ensure deployContract() succeeded before calling updateContract().',
       );
+    }
+
+    // When TX_BACKEND=moth, replace the authority through midnight-js.
+    // `newAuthoritySeed` is not used on this path: midnight-js takes a signing
+    // key rather than a seed, and no assertion reads who holds the authority
+    // afterwards — only that the update is indexed.
+    if (env.getTxBackend() === 'moth') {
+      const seed = fundingSeed ?? DEFAULT_FUNDING_SEED;
+      const txHash = await updateContractViaMoth(
+        seed,
+        deploymentResult['contract-address-untagged'],
+      );
+      const result: ToolkitTransactionResult = {
+        txHash,
+        blockHash: '',
+        status: 'sent',
+        rawOutput: `moth/midnight-js submitted ${txHash}`,
+      };
+      await resolveBlockHash(result);
+      return result;
+    }
+
+    if (!this.startedContainer) {
+      throw new Error('Container is not started. Call start() first.');
     }
 
     const contractAddressUntagged = deploymentResult['contract-address-untagged'];
