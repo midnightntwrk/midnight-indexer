@@ -31,7 +31,7 @@ use crate::{
             contract_event::{ContractEvent, ContractEventFilter},
             directives::beta,
             dust::DustGenerationStatus,
-            dust_generations::DustGenerations,
+            dust_generations::{DustGenerations, DustGenerationsSnapshotPolicy},
             merkle_tree_collapsed_update::MerkleTreeCollapsedUpdate,
             spo::{
                 CommitteeMember, EpochInfo, EpochPerf, FirstValidEpoch, PoolMetadata,
@@ -383,6 +383,21 @@ where
             .into_iter()
             .map(|d| DustGenerations::from_domain(d, network_id))
             .collect())
+    }
+
+    /// The effective freshness policy for `dustGenerations` snapshots, reflecting this deployment's
+    /// runtime configuration. Query this before opening a `dustGenerations` subscription to choose
+    /// a `blockHash` that will be accepted; account for indexing lag since the tip keeps advancing.
+    #[trace]
+    async fn dust_generations_snapshot_policy(
+        &self,
+        cx: &Context<'_>,
+    ) -> DustGenerationsSnapshotPolicy {
+        let max_age_blocks = cx
+            .get_subscription_config()
+            .dust_generations
+            .max_snapshot_age;
+        DustGenerationsSnapshotPolicy { max_age_blocks }
     }
 
     /// Get a collapsed Merkle tree update for the dust commitment tree.

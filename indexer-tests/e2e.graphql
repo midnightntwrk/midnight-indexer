@@ -863,6 +863,12 @@ query DustGenerationsQuery($cardanoRewardAddresses: [CardanoRewardAddress!]!) {
     }
 }
 
+query DustGenerationsSnapshotPolicyQuery {
+    dustGenerationsSnapshotPolicy {
+        maxAgeBlocks
+    }
+}
+
 query DustCommitmentMerkleTreeUpdateQuery($startIndex: Int!, $endIndex: Int!) {
     dustCommitmentMerkleTreeUpdate(startIndex: $startIndex, endIndex: $endIndex) {
         startIndex
