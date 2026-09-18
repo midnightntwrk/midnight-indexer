@@ -50,6 +50,7 @@ serde_json = { workspace = true }
 tempfile  = { workspace = true }
 testcontainers = { workspace = true }
 testcontainers-modules = { workspace = true, features = [ "postgres" ] }
+tokio     = { workspace = true, features = [ "test-util" ] }
 walkdir   = { workspace = true }
 # SPIKE — REMOVE BEFORE MERGE, together with tests/contract_state_arena.rs: the spike reaches
 # into the ledger arena directly, which production chain-indexer code does not.
