@@ -14,9 +14,13 @@
 pub mod publisher;
 pub mod subscriber;
 
-use crate::infra::pub_sub::in_mem::{publisher::InMemPublisher, subscriber::InMemSubscriber};
+use crate::{
+    domain::Topic,
+    infra::pub_sub::in_mem::{publisher::InMemPublisher, subscriber::InMemSubscriber},
+};
 use log::warn;
 use serde_json::Value;
+use std::array;
 use tokio::{
     sync::broadcast::{self, Receiver, Sender, error::RecvError},
     task,
@@ -24,11 +28,7 @@ use tokio::{
 
 /// Factory for in memory based implementations for publishers and subscribers.
 #[derive(Clone)]
-pub struct InMemPubSub {
-    block_indexed_sender: Sender<Value>,
-    wallet_indexed_sender: Sender<Value>,
-    unshielded_utxo_sender: Sender<Value>,
-}
+pub struct InMemPubSub([Sender<Value>; Topic::VARIANTS.len()]);
 
 impl InMemPubSub {
     /// Factory for [InMemPublisher].
@@ -40,42 +40,39 @@ impl InMemPubSub {
     pub fn subscriber(&self) -> InMemSubscriber {
         InMemSubscriber::new(self.clone())
     }
+
+    fn sender(&self, topic: Topic) -> &Sender<Value> {
+        &self.0[topic as usize]
+    }
 }
 
 impl Default for InMemPubSub {
     fn default() -> Self {
-        let (block_indexed_sender, block_indexed_receiver) = broadcast::channel(42);
-        let (wallet_indexed_sender, wallet_indexed_receiver) = broadcast::channel(42);
-        let (unshielded_utxo_sender, unshielded_utxo_receiver) = broadcast::channel(42);
-
-        let pub_sub = InMemPubSub {
-            block_indexed_sender,
-            wallet_indexed_sender,
-            unshielded_utxo_sender,
-        };
-
-        // Keep one receiver alive per topic for as long as the `InMemPubSub`
-        // lives. This guarantees that `broadcast::Sender::send` always has at
-        // least one active receiver, so publishers do not see spurious
-        // "channel closed" errors when no external subscriber happens to be
-        // attached. `RecvError::Lagged` does not invalidate the receiver —
-        // `recv` just skips ahead — so we must keep looping, not break.
-        spawn_drain("block_indexed_receiver", block_indexed_receiver);
-        spawn_drain("wallet_indexed_receiver", wallet_indexed_receiver);
-        spawn_drain("unshielded_utxo_receiver", unshielded_utxo_receiver);
-
-        pub_sub
+        // The array type fixes the iteration count at `Topic::VARIANTS.len()`, so `index` is
+        // always in range below.
+        Self(array::from_fn(|index| {
+            let topic = Topic::VARIANTS[index];
+            let (sender, receiver) = broadcast::channel(capacity(topic));
+            // Keep one receiver alive per topic for as long as the `InMemPubSub`
+            // lives. This guarantees that `broadcast::Sender::send` always has at
+            // least one active receiver, so publishers do not see spurious
+            // "channel closed" errors when no external subscriber happens to be
+            // attached. `RecvError::Lagged` does not invalidate the receiver —
+            // `recv` just skips ahead — so we must keep looping, not break.
+            spawn_drain(topic, receiver);
+            sender
+        }))
     }
 }
 
-fn spawn_drain(name: &'static str, mut receiver: Receiver<Value>) {
+fn spawn_drain(topic: Topic, mut receiver: Receiver<Value>) {
     task::spawn(async move {
         loop {
             match receiver.recv().await {
                 Ok(_) => continue,
 
                 Err(RecvError::Lagged(skipped)) => {
-                    warn!(receiver = name, skipped; "drain receiver lagged");
+                    warn!(topic:%, skipped; "drain receiver lagged");
                     continue;
                 }
 
@@ -85,83 +82,173 @@ fn spawn_drain(name: &'static str, mut receiver: Receiver<Value>) {
     });
 }
 
+/// Messages buffered per subscriber before the slowest one starts losing them.
+///
+/// The match is exhaustive, so a new topic must be sized here before it compiles.
+///
+/// # Panics
+/// `broadcast::channel` panics on a capacity of zero.
+const fn capacity(topic: Topic) -> usize {
+    use Topic::*;
+    // `broadcast::channel` rounds its capacity up to the next power of two, so keep every value a
+    // power of two for the number here to be the ring size. One ring serves every subscriber of a
+    // topic, so the memory cost is per topic. A slot holds the message as a `serde_json::Value`
+    // plus 32 B of slot bookkeeping; the figures add that to the `Value`'s heap for a worst-case
+    // message, measured from `size_of` and string capacities. `size_of` of the message type itself
+    // is given for comparison.
+    match topic {
+        // ≈ 265 B a slot, ≈ 265 KiB a ring; `BlockIndexed` is 32 B.
+        BlockIndexed => 1024,
+        // ≈ 165 B a slot, ≈ 165 KiB a ring; `WalletIndexed` is 16 B.
+        WalletIndexed => 1024,
+        // ≈ 195 B a slot, ≈ 195 KiB a ring; `UnshieldedUtxoIndexed` is 32 B.
+        UnshieldedUtxoIndexed => 1024,
+        // ≈ 736 B a slot, ≈ 736 KiB a ring; `BridgeEventIndexed` is 112 B plus a recipient of up
+        // to 32 B. `UnapprovedTransfer` is the largest variant as a `Value`, its tag being the
+        // longest of the two variants that carry every field.
+        BridgeEventIndexed => 1024,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
-        domain::{BlockIndexed, Publisher, Subscriber, WalletIndexed},
-        infra::pub_sub::in_mem::InMemPubSub,
+        domain::{
+            BlockIndexed, BridgeEventIndexed, Message, Publisher, Subscriber, Topic,
+            UnshieldedUtxoIndexed, WalletIndexed, bridge::BridgeEvent,
+        },
+        infra::pub_sub::in_mem::{InMemPubSub, capacity},
     };
     use assert_matches::assert_matches;
     use futures::StreamExt;
+    use serde_json::Value;
     use std::{error::Error as StdError, time::Duration};
-    use tokio::time::sleep;
+    use tokio::{sync::broadcast, time::sleep};
     use uuid::Uuid;
 
+    /// Every message type reaches a subscriber for it. The match is exhaustive, so a new topic
+    /// must be round-tripped here too.
     #[tokio::test]
     async fn test_publish_subscribe() -> Result<(), Box<dyn StdError>> {
         let pub_sub = InMemPubSub::default();
-        sleep(Duration::from_millis(50)).await; //testing if IN_MEM_PUB_SUB doesn't get dropped
 
-        let block_indexed = BlockIndexed {
-            height: 123,
-            max_transaction_id: None,
-            caught_up: false,
-        };
-        let publish_block_res = pub_sub.publisher().publish(&block_indexed).await;
+        for &topic in Topic::VARIANTS {
+            match topic {
+                Topic::BlockIndexed => {
+                    let event = BlockIndexed {
+                        height: 123,
+                        max_transaction_id: None,
+                        caught_up: false,
+                    };
+                    assert_publish_subscribe(&pub_sub, event).await?
+                }
 
-        assert!(publish_block_res.is_ok());
+                Topic::WalletIndexed => {
+                    let event = WalletIndexed {
+                        wallet_id: Uuid::nil(),
+                    };
+                    assert_publish_subscribe(&pub_sub, event).await?
+                }
 
+                Topic::UnshieldedUtxoIndexed => {
+                    let event = UnshieldedUtxoIndexed {
+                        address: [3u8; 32].into(),
+                    };
+                    assert_publish_subscribe(&pub_sub, event).await?
+                }
+
+                Topic::BridgeEventIndexed => {
+                    let event = BridgeEventIndexed {
+                        block_height: 42,
+                        event: BridgeEvent::ReserveTransfer {
+                            mc_tx_hash: [1u8; 32].into(),
+                            amount: 1_000_000,
+                            midnight_tx_hash: [2u8; 32].into(),
+                        },
+                    };
+                    assert_publish_subscribe(&pub_sub, event).await?
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Subscribes, publishes the message, then asserts the subscriber receives it unchanged.
+    async fn assert_publish_subscribe<T: Message + Send + Sync>(
+        pub_sub: &InMemPubSub,
+        message: T,
+    ) -> Result<(), Box<dyn StdError>> {
         let subscriber = pub_sub.subscriber();
-        let mut messages = subscriber.subscribe::<WalletIndexed>();
+        let mut messages = subscriber.subscribe::<T>();
 
-        let wallet_indexed = WalletIndexed {
-            wallet_id: Uuid::nil(),
-        };
-        pub_sub.publisher().publish(&wallet_indexed).await?;
+        pub_sub.publisher().publish(&message).await?;
 
-        let message = messages.next().await;
-        assert_matches!(message, Some(Ok(message)) if message == wallet_indexed);
+        let received = messages.next().await;
+        assert_matches!(received, Some(Ok(received)) if received == message);
+
+        Ok(())
+    }
+
+    /// Every capacity is a power of two, so `capacity` states the ring size `broadcast::channel`
+    /// allocates.
+    #[test]
+    fn test_capacities_are_powers_of_two() {
+        for &topic in Topic::VARIANTS {
+            assert!(capacity(topic).is_power_of_two(), "{topic}");
+        }
+    }
+
+    /// `broadcast::channel` rounds its capacity up to the next power of two: asking for 42
+    /// allocates the same 64 slots as asking for 64. `Sender::len` counts slots still unread by
+    /// some receiver, so with one idle receiver and more sends than slots it is the ring size.
+    #[test]
+    fn test_broadcast_channel_rounds_capacity_up() -> Result<(), Box<dyn StdError>> {
+        for requested in [42, 64] {
+            let (sender, _receiver) = broadcast::channel(requested);
+            for _ in 0..128 {
+                sender.send(())?;
+            }
+
+            assert_eq!(sender.len(), 64);
+        }
 
         Ok(())
     }
 
     /// Regression test: when no external subscriber is attached, the drain
-    /// task is the sole receiver keeping the channel alive. If it broke on
-    /// `RecvError::Lagged` (the pre-fix behavior), the receiver would be
-    /// dropped and subsequent `publish` calls would fail with `SendError`
-    /// because the broadcast channel has no active receivers.
+    /// task is the sole receiver keeping a topic's channel alive. If it broke
+    /// on `RecvError::Lagged`, the receiver would be dropped and subsequent
+    /// sends would fail with `SendError` because the broadcast channel has no
+    /// active receivers.
     ///
-    /// To force the drain task to lag, we publish far more messages than the
-    /// channel capacity (42) in a tight loop. `publish` contains no await
-    /// points, so on a current-thread runtime the drain task cannot be
-    /// scheduled until we explicitly yield, guaranteeing overflow.
+    /// To force the drain task to lag, we send one message past the channel's
+    /// capacity in a tight loop; `broadcast::channel` rounds its capacity up to
+    /// the next power of two, so the ring holds more slots than `capacity`
+    /// asks for. `send` contains no await points, so on a current-thread
+    /// runtime the drain task cannot be scheduled until we explicitly yield,
+    /// guaranteeing overflow. Every topic is covered by driving the loop from
+    /// `Topic::VARIANTS`.
     #[tokio::test(flavor = "current_thread")]
     async fn test_drain_survives_lag() -> Result<(), Box<dyn StdError>> {
         let pub_sub = InMemPubSub::default();
-        let publisher = pub_sub.publisher();
 
-        for height in 0..1000 {
-            publisher
-                .publish(&BlockIndexed {
-                    height,
-                    max_transaction_id: None,
-                    caught_up: false,
-                })
-                .await?;
+        for &topic in Topic::VARIANTS {
+            // The drain discards whatever it receives, so the payload carries nothing and
+            // `InMemPublisher` would only add a serialization step this test does not exercise.
+            let sender = pub_sub.sender(topic);
+
+            for _ in 0..=capacity(topic).next_power_of_two() {
+                sender.send(Value::Null)?;
+            }
+
+            // Let the drain task observe the lag.
+            sleep(Duration::from_millis(50)).await;
+
+            // If the drain task broke on lag, this send would fail with `SendError` because no
+            // receivers remain.
+            sender.send(Value::Null)?;
         }
-
-        // Let the drain task observe the lag.
-        sleep(Duration::from_millis(50)).await;
-
-        // If the drain task broke on lag, this publish would fail with
-        // `SendError` because no receivers remain.
-        publisher
-            .publish(&BlockIndexed {
-                height: 9999,
-                max_transaction_id: None,
-                caught_up: false,
-            })
-            .await?;
 
         Ok(())
     }
