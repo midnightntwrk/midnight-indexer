@@ -245,6 +245,27 @@ describe
       );
 
       /**
+       * Fixture self-check: the transaction is still partially successful even
+       * though this call has no guaranteed transcript at all — its fallible
+       * segment fails on its own.
+       *
+       * @given a stale contract call whose circuit has no pre-checkpoint section
+       * @when we query the indexer for its transaction result
+       * @then the result is a partial success
+       */
+      test(
+        'the fixture still produces a partially successful transaction',
+        async (context: TestContext) => {
+          context.task!.meta.custom = { labels: ['Query', 'Transaction', 'PartialSuccess'] };
+
+          const transaction = await indexedTransaction(pair.stale.txHash);
+
+          expect(transaction.transactionResult?.status).toBe('PARTIAL_SUCCESS');
+        },
+        TEST_TIMEOUT,
+      );
+
+      /**
        * Counterpart to the assertion above, and the reason both are needed: an
        * indexer that simply never filters anything would pass the "still reported"
        * test for the wrong reason. Nothing about this call reached the ledger
@@ -268,7 +289,6 @@ describe
           };
 
           const transaction = await indexedTransaction(pair.stale.txHash);
-          expect(transaction.transactionResult?.status).toBe('PARTIAL_SUCCESS');
 
           const actions = transaction.contractActions ?? [];
           expect(
