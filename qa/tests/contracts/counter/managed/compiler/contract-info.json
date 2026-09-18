@@ -12,6 +12,16 @@
         "type-name": "Tuple",
         "types": []
       }
+    },
+    {
+      "name": "store",
+      "pure": false,
+      "proof": true,
+      "arguments": [],
+      "result-type": {
+        "type-name": "Tuple",
+        "types": []
+      }
     }
   ],
   "witnesses": [],
