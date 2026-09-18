@@ -5,7 +5,7 @@
     "": {
       "name": "midnight-indexer-viteset",
       "dependencies": {
-        "@shieldedtech/moth-wallet": "0.13.0",
+        "@shieldedtech/moth-wallet": "0.13.1-canary.20260917165053-023b847",
         "rxjs": "7.8.2",
       },
       "devDependencies": {
@@ -348,7 +348,7 @@
 
     "@scure/sr25519": ["@scure/sr25519@0.2.0", "", { "dependencies": { "@noble/curves": "~1.9.2", "@noble/hashes": "~1.8.0" } }, "sha512-uUuLP7Z126XdSizKtrCGqYyR3b3hYtJ6Fg/XFUXmc2//k2aXHDLqZwFeXxL97gg4XydPROPVnuaHGF2+xriSKg=="],
 
-    "@shieldedtech/moth-wallet": ["@shieldedtech/moth-wallet@0.13.0", "", { "dependencies": { "@midnight-ntwrk/compact-js": "2.5.1", "@midnight-ntwrk/compact-runtime": "0.16.0", "@midnight-ntwrk/ledger-v8": "8.1.0", "@midnight-ntwrk/midnight-js": "4.1.1", "@midnight-ntwrk/midnight-js-http-client-proof-provider": "4.1.1", "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "4.1.1", "@midnight-ntwrk/midnight-js-level-private-state-provider": "4.1.1", "@midnight-ntwrk/midnight-js-node-zk-config-provider": "4.1.1", "@midnight-ntwrk/zkir-v2": "2.1.0", "@midnightntwrk/wallet-sdk": "^1.2.0", "@noble/ciphers": "^2.2.0", "@noble/hashes": "^2.2.0", "@scure/bip39": "^2.2.0", "graphql": "^16.10.0", "graphql-request": "^7.4.0", "graphql-ws": "^6.0.0", "rxjs": "7.8.2", "ws": "8.21.0" } }, "sha512-aHHAtoYW66sSXer2ehJEONmOr+OmWiuSCZfDvPVUJEnXeBbu/Pn0dr5HmbavFTHbh101Jf5GfWU52WiJoto4Tg=="],
+    "@shieldedtech/moth-wallet": ["@shieldedtech/moth-wallet@0.13.1-canary.20260917165053-023b847", "", { "dependencies": { "@midnight-ntwrk/compact-js": "2.5.1", "@midnight-ntwrk/compact-runtime": "0.16.0", "@midnight-ntwrk/ledger-v8": "8.1.0", "@midnight-ntwrk/midnight-js": "4.1.1", "@midnight-ntwrk/midnight-js-http-client-proof-provider": "4.1.1", "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "4.1.1", "@midnight-ntwrk/midnight-js-level-private-state-provider": "4.1.1", "@midnight-ntwrk/midnight-js-node-zk-config-provider": "4.1.1", "@midnight-ntwrk/zkir-v2": "2.1.0", "@midnightntwrk/wallet-sdk": "^1.2.0", "@noble/ciphers": "^2.2.0", "@noble/hashes": "^2.2.0", "@scure/bip39": "^2.2.0", "effect": "^3.19.19", "graphql": "^16.10.0", "graphql-request": "^7.4.0", "graphql-ws": "^6.0.0", "rxjs": "7.8.2", "ws": "8.21.0" } }, "sha512-afRfkI+2Q7ETtkq9WVz5g8s8Ix8NjUJF4UQ9s6zX3+d5vxJ7hcTX39Xrw+57EoAaFg822uTOwzilrqYBUXJ0BA=="],
 
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
 
@@ -1245,6 +1245,8 @@
     "@scure/sr25519/@noble/curves": ["@noble/curves@1.9.7", "", { "dependencies": { "@noble/hashes": "1.8.0" } }, "sha512-gbKGcRUYIjA3/zCCNaWDciTMFI0dCkvou3TL8Zmy5Nc7sJ47a0jtOeZoTaMxkuqRo9cRhjOdZJXegxYE5FN/xw=="],
 
     "@scure/sr25519/@noble/hashes": ["@noble/hashes@1.8.0", "", {}, "sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A=="],
+
+    "@shieldedtech/moth-wallet/graphql": ["graphql@16.14.2", "", {}, "sha512-Chq1s4CY7jmh8gO2qvLIJyfCDIN+EHLFW/9iShnp1z8FjBQMoodWP1kDC36VAMXXIvAjj4ARa7ntfAV2BrjsbA=="],
 
     "@shieldedtech/moth-wallet/ws": ["ws@8.21.0", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g=="],
 

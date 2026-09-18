@@ -32,7 +32,7 @@
     ]
   },
   "dependencies": {
-    "@shieldedtech/moth-wallet": "0.13.0",
+    "@shieldedtech/moth-wallet": "0.13.1-canary.20260917165053-023b847",
     "rxjs": "7.8.2"
   },
   "devDependencies": {
