@@ -22,6 +22,7 @@ import { GenericContainer, StartedTestContainer } from 'testcontainers';
 import { getContractDeploymentHashes, resolveBlockHash } from '../../tests/e2e/test-utils';
 import { ensureToolkitCachePostgres } from './toolkit-cache';
 import { closeMothWallets, generateSingleTxViaMoth } from '../moth/moth-backend';
+import { callCircuitViaMoth, deployContractViaMoth } from '../moth/moth-contracts';
 import { z } from 'zod';
 import {
   Coin,
@@ -873,15 +874,35 @@ class ToolkitWrapper {
     rngSeed: string = DEFAULT_RNG_SEED,
     fundingSeed?: string,
   ): Promise<ToolkitTransactionResult> {
-    if (!this.startedContainer) {
-      throw new Error('Container is not started. Call start() first.');
-    }
-
     if (!deploymentResult?.['contract-address-untagged']) {
       log.error('Deployment result is missing or has no contract address.');
       throw new Error(
         'Deployment result with contract-address-untagged is required. Ensure deployContract() succeeded before calling callContract().',
       );
+    }
+
+    // When TX_BACKEND=moth, call the circuit through midnight-js. `callKey` is
+    // the circuit name either way — the committed counter contract exposes
+    // `increment`, which is this method's default.
+    if (env.getTxBackend() === 'moth') {
+      const seed = fundingSeed ?? DEFAULT_FUNDING_SEED;
+      const txHash = await callCircuitViaMoth(
+        seed,
+        deploymentResult['contract-address-untagged'],
+        callKey,
+      );
+      const result: ToolkitTransactionResult = {
+        txHash,
+        blockHash: '',
+        status: 'sent',
+        rawOutput: `moth/midnight-js submitted ${txHash}`,
+      };
+      await resolveBlockHash(result);
+      return result;
+    }
+
+    if (!this.startedContainer) {
+      throw new Error('Container is not started. Call start() first.');
     }
 
     const contractAddressUntagged = deploymentResult['contract-address-untagged'];
@@ -978,6 +999,27 @@ class ToolkitWrapper {
    * @throws Error if the container is not started or if any step in the deployment process fails.
    */
   async deployContract(fundingSeed?: string): Promise<DeployContractResult> {
+    // When TX_BACKEND=moth, deploy through midnight-js in-process with moth
+    // supplying the wallet, instead of the toolkit container. The contract is
+    // the counter committed under qa/tests/contracts, not the toolkit's
+    // built-in contract-simple, so the address is the only thing the
+    // assertions carry over — which is all they use.
+    if (env.getTxBackend() === 'moth') {
+      const seed = fundingSeed ?? DEFAULT_FUNDING_SEED;
+      const { contractAddress } = await deployContractViaMoth(seed);
+      const { txHash, blockHash } = await getContractDeploymentHashes(contractAddress);
+      return {
+        'contract-address-untagged': contractAddress,
+        // The toolkit reports a bech32m-tagged address and the deploying
+        // wallet's coin public key alongside the deploy. midnight-js returns
+        // neither, and no assertion reads them; left empty rather than faked.
+        'contract-address-tagged': '',
+        'coin-public': '',
+        'deploy-tx-hash': txHash,
+        'deploy-block-hash': blockHash,
+      };
+    }
+
     if (!this.startedContainer) {
       throw new Error('Container is not started. Call start() first.');
     }

@@ -64,7 +64,7 @@ const SYNC_TIMEOUT_MS = Number(process.env.MN_SYNC_TIMEOUT_MS ?? 6 * 60 * 60 * 1
 const ZERO_TOTAL_GRACE_MS = 120_000;
 
 /** A moth-synced wallet, opened once and reused for the life of the process. */
-interface MothWallet {
+export interface MothWallet {
   readonly synced: SyncedWallet;
   readonly keys: WalletKeys;
   readonly networkId: string;
@@ -194,7 +194,7 @@ const awaitSettled = async (facade: SyncedWallet['facade'], timeoutMs: number): 
  * The seed is used only to derive keys and a hashed cache name; it is never
  * logged. On a first sync this is minutes; warm, it is seconds.
  */
-const openMothWallet = (seed: string): Promise<MothWallet> => {
+export const openMothWallet = (seed: string): Promise<MothWallet> => {
   const name = cacheNameFor(seed);
   const existing = openWallets.get(name);
   if (existing) return existing;
