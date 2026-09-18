@@ -42,6 +42,7 @@
 import { dirname, resolve } from 'path';
 import { createKeystore } from '@midnightntwrk/wallet-sdk/unshielded';
 import {
+  createContractMaintenanceTxInterface,
   createUnprovenCallTxFromInitialStates,
   deployContract as deployViaMidnightJs,
   getPublicStates,
@@ -190,18 +191,24 @@ const openContractContext = (seed: string, artifactDir: string): Promise<Contrac
  */
 const inMemoryPrivateStateProvider = () => {
   const states = new Map<string, unknown>();
-  const addresses = new Map<string, string>();
+  // Signing keys are keyed by contract address, contract addresses by private
+  // state key. Separate maps, because the two key spaces are unrelated and a
+  // shared one would let a private state key shadow a contract address.
+  const signingKeys = new Map<string, string>();
+  const contractAddresses = new Map<string, string>();
   return {
     set: async (key: string, state: unknown) => void states.set(key, state),
     get: async (key: string) => states.get(key) ?? null,
     remove: async (key: string) => void states.delete(key),
     clear: async () => void states.clear(),
     setSigningKey: async (address: string, signingKey: string) =>
-      void addresses.set(address, signingKey),
-    getSigningKey: async (address: string) => addresses.get(address) ?? null,
-    removeSigningKey: async (address: string) => void addresses.delete(address),
-    clearSigningKeys: async () => void addresses.clear(),
-    setContractAddress: async (key: string, address: string) => void addresses.set(key, address),
+      void signingKeys.set(address, signingKey),
+    getSigningKey: async (address: string) => signingKeys.get(address) ?? null,
+    removeSigningKey: async (address: string) => void signingKeys.delete(address),
+    clearSigningKeys: async () => void signingKeys.clear(),
+    setContractAddress: async (key: string, address: string) =>
+      void contractAddresses.set(key, address),
+    getContractAddress: async (key: string) => contractAddresses.get(key) ?? null,
   };
 };
 
@@ -287,6 +294,44 @@ export const callCircuitViaMoth = async (
     return submitted.txHash as string;
   } catch (err) {
     throw asBackendFailure(`call circuit ${circuitId}`, err);
+  }
+};
+
+/**
+ * Replace a contract's maintenance authority — the toolkit's `maintenance`
+ * command, and the only contract action of the three that changes who may
+ * maintain the contract rather than its state.
+ *
+ * The deploy stored its signing key in the private-state provider, which is
+ * in-memory, so this only works in the same process that deployed the contract.
+ * That matches how the suite uses it: deploy, call and update run in one
+ * sequential describe block.
+ *
+ * @param seed - Funding seed for the wallet paying for the update. Never logged.
+ * @param contractAddress - Address returned by {@link deployContractViaMoth}.
+ * @param newAuthority - The signing key to hand authority to. Defaults to a
+ *                       fresh sample key; the suite only checks that the update
+ *                       is indexed, not who ends up holding it.
+ * @param artifactDir - The same `managed/` directory the contract was deployed from.
+ */
+export const updateContractViaMoth = async (
+  seed: string,
+  contractAddress: string,
+  newAuthority: ReturnType<typeof sampleSigningKey> = sampleSigningKey(),
+  artifactDir: string = DEFAULT_ARTIFACT_DIR,
+): Promise<string> => {
+  const ctx = await openContractContext(seed, artifactDir);
+  try {
+    const maintenance = createContractMaintenanceTxInterface(
+      ctx.providers,
+      ctx.compiledContract,
+      contractAddress as any,
+    );
+    const finalized = await maintenance.replaceAuthority(newAuthority);
+    log.info(`moth/midnight-js replaced the authority on ${contractAddress}`);
+    return finalized.txHash as string;
+  } catch (err) {
+    throw asBackendFailure('replace the contract maintenance authority', err);
   }
 };
 
