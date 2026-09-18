@@ -13,6 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import log from '@utils/logging/logger';
 import { env } from 'environment/model';
 import type { TestContext } from 'vitest';
@@ -305,6 +308,65 @@ describe('indexer sync compatibility', () => {
 
       expect(isBailOutLine(line)).toBe(false);
       expect(parseStateRootMismatch(line)).toBeUndefined();
+    });
+  });
+
+  describe('Rust source staying in sync with the bail-out patterns', () => {
+    // tests/sync/indexer-sync.test.ts -> qa/tests/tests/sync, so four levels up is the repo root.
+    const repoRoot = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      '..',
+      '..',
+      '..',
+      '..',
+    );
+    const readSource = (relativePath: string) =>
+      readFileSync(path.join(repoRoot, relativePath), 'utf8');
+
+    /**
+     * DIVERGENCE_PATTERN has no shared constant with the Rust source it matches, so a
+     * reworded `bail!` in application.rs would silently stop being recognised. This
+     * cannot catch a rewording, but it does catch the phrases being removed or typo'd.
+     *
+     * @given the divergence phrases application.rs bails out with
+     * @when chain-indexer/src/application.rs is read from disk
+     * @then every phrase is still present verbatim
+     */
+    test('should still contain the divergence phrases application.rs bails out with', (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Sync', 'Regression'] };
+
+      const source = readSource('chain-indexer/src/application.rs');
+
+      expect(source).toContain('ledger state root mismatch');
+      expect(source).toContain('zswap state root mismatch');
+      expect(source).toContain('translate ledger state');
+    });
+
+    /**
+     * Same drift risk as above for FATAL_PATTERN, whose two phrases are duplicated
+     * verbatim across every binary's main.rs rather than shared.
+     *
+     * @given the fatal-exit phrases every indexer binary logs on its way out
+     * @when each binary's main.rs is read from disk
+     * @then both phrases are still present verbatim in every one of them
+     */
+    test('should still contain the fatal-exit phrases in every binary main.rs', (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Sync', 'Regression'] };
+
+      const mainFiles = [
+        'chain-indexer/src/main.rs',
+        'indexer-api/src/main.rs',
+        'indexer-standalone/src/main.rs',
+        'wallet-indexer/src/main.rs',
+        'spo-indexer/src/main.rs',
+      ];
+
+      for (const relativePath of mainFiles) {
+        const source = readSource(relativePath);
+
+        expect(source).toContain('process exited with ERROR');
+        expect(source).toContain('process panicked');
+      }
     });
   });
 
