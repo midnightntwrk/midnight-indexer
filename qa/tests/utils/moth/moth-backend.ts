@@ -64,7 +64,7 @@ const SYNC_TIMEOUT_MS = Number(process.env.MN_SYNC_TIMEOUT_MS ?? 6 * 60 * 60 * 1
 const ZERO_TOTAL_GRACE_MS = 120_000;
 
 /** A moth-synced wallet, opened once and reused for the life of the process. */
-interface MothWallet {
+export interface MothWallet {
   readonly synced: SyncedWallet;
   readonly keys: WalletKeys;
   readonly networkId: string;
