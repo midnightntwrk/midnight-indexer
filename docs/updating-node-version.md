@@ -55,8 +55,12 @@ Build after regenerating. The outcome tells you whether the runtime moved:
   because the runtime behind an existing line moved. Rename `runtimes/vX_Y_Z.rs`
   and its references to the new runtime, or add a module if both runtimes stay
   listed.
-- **Compiles clean** - no listed line changed the runtime it had. A
-  `metadata.scale` identical to the one it replaces confirms it.
+- **`node versions A and B both report runtime X.Y.Z, but their metadata
+  differs`** - two lines claim one runtime from different metadata. One `.node/`
+  directory is stale; regenerate it.
+- **Compiles clean** - no listed line changed the runtime it had. Lines sharing
+  a runtime share its module. A `metadata.scale` identical to the one it
+  replaces confirms it.
 
 A line added for a runtime the tree does not decode compiles clean too: the
 generated module is simply unreferenced. Add `runtimes/vX_Y_Z.rs` (copy the
