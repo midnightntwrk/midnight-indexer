@@ -36,7 +36,9 @@ strictly stronger with no change to the suite itself.
 ## When to Run
 
 - Before promoting an indexer version into an environment.
-- When a node runtime upgrade lands, against each supported indexer version.
+- When a node runtime upgrade lands, against each supported indexer version —
+  set `MAX_BLOCKS` (or `0`) high enough to pass the upgrade height; the
+  default only checks the first 2000 blocks from genesis.
 - To bisect the first block at which a version diverges from a chain.
 
 Not part of the aggregate `bun run test` script: a run takes minutes at best and
