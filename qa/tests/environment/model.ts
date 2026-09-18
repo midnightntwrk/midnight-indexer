@@ -239,6 +239,9 @@ export class Environment {
     return this.isUndeployed;
   }
 
+  // Revisit the isMainnetEnv() skips across the suite if mainnet ever gets
+  // NIGHT support — right now this is a straightforward environment-name
+  // check, not a capability probe.
   isMainnetEnv(): boolean {
     return this.envName === EnvironmentName.MAINNET;
   }
