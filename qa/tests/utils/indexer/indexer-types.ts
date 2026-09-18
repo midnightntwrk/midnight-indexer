@@ -670,3 +670,196 @@ export interface ShieldedNullifierTransaction {
 }
 
 export type ViewingKey = string & { __brand: 'ViewingKey' };
+
+// SPO indexer surface (#1003). dParameterHistory and termsAndConditionsHistory
+// are written by chain-indexer; epoch/committee data by spo-indexer; the
+// registration surface (Spo, SpoIdentity, PoolMetadata, EpochPerf, StakeShare,
+// stakePoolOperators) is empty until post-mainnet registration.
+
+export interface DParameterChange {
+  blockHeight: number;
+  blockHash: string;
+  timestamp: number;
+  numPermissionedCandidates: number;
+  numRegisteredCandidates: number;
+}
+
+export interface EpochInfo {
+  epochNo: number;
+  durationSeconds: number;
+  elapsedSeconds: number;
+}
+
+export interface CommitteeMember {
+  epochNo: number;
+  position: number;
+  sidechainPubkeyHex: string;
+  expectedSlots: number;
+  auraPubkeyHex: string | null;
+  poolIdHex: string | null;
+  spoSkHex: string | null;
+}
+
+export interface Spo {
+  poolIdHex: string;
+  validatorClass: string;
+  sidechainPubkeyHex: string;
+  auraPubkeyHex: string | null;
+  name: string | null;
+  ticker: string | null;
+  homepageUrl: string | null;
+  logoUrl: string | null;
+}
+
+export interface SpoIdentity {
+  poolIdHex: string;
+  mainchainPubkeyHex: string;
+  sidechainPubkeyHex: string;
+  auraPubkeyHex: string | null;
+  validatorClass: string;
+}
+
+export interface RegisteredTotals {
+  epochNo: number;
+  totalRegistered: number;
+  newlyRegistered: number;
+}
+
+export type DParameterHistoryResponse = GraphQLResponse<{ dParameterHistory: DParameterChange[] }>;
+export type CurrentEpochInfoResponse = GraphQLResponse<{ currentEpochInfo: EpochInfo | null }>;
+export type CommitteeResponse = GraphQLResponse<{ committee: CommitteeMember[] }>;
+export type SpoCountResponse = GraphQLResponse<{ spoCount: number | null }>;
+export type SpoListResponse = GraphQLResponse<{ spoList: Spo[] }>;
+export type SpoIdentitiesResponse = GraphQLResponse<{ spoIdentities: SpoIdentity[] }>;
+export type StakePoolOperatorsResponse = GraphQLResponse<{ stakePoolOperators: string[] }>;
+export type SpoByPoolIdResponse = GraphQLResponse<{ spoByPoolId: Spo | null }>;
+export type SpoIdentityByPoolIdResponse = GraphQLResponse<{
+  spoIdentityByPoolId: SpoIdentity | null;
+}>;
+export type RegisteredTotalsSeriesResponse = GraphQLResponse<{
+  registeredTotalsSeries: RegisteredTotals[];
+}>;
+
+export interface TermsAndConditionsChange {
+  blockHeight: number;
+  blockHash: string;
+  timestamp: number;
+  hash: string;
+  url: string;
+}
+
+export interface DParameter {
+  numPermissionedCandidates: number;
+  numRegisteredCandidates: number;
+}
+
+export interface TermsAndConditions {
+  hash: string;
+  url: string;
+}
+
+export interface SystemParameters {
+  dParameter: DParameter;
+  termsAndConditions: TermsAndConditions | null;
+}
+
+// The Block projection used by GET_BLOCK_SYSTEM_PARAMETERS. `timestamp` is a
+// GraphQL Int; the wider `Block` interface above types it as string.
+export interface BlockSystemParameters {
+  hash: string;
+  height: number;
+  timestamp: number;
+  systemParameters: SystemParameters;
+}
+
+export interface PoolMetadata {
+  poolIdHex: string;
+  hexId: string | null;
+  name: string | null;
+  ticker: string | null;
+  homepageUrl: string | null;
+  logoUrl: string | null;
+}
+
+export interface EpochPerf {
+  epochNo: number;
+  spoSkHex: string;
+  produced: number;
+  expected: number;
+  identityLabel: string | null;
+  stakeSnapshot: string | null;
+  poolIdHex: string | null;
+  validatorClass: string | null;
+}
+
+export interface SpoComposite {
+  identity: SpoIdentity | null;
+  metadata: PoolMetadata | null;
+  performance: EpochPerf[];
+}
+
+export interface RegisteredStat {
+  epochNo: number;
+  federatedValidCount: number;
+  federatedInvalidCount: number;
+  registeredValidCount: number;
+  registeredInvalidCount: number;
+  dparam: number | null;
+}
+
+export interface PresenceEvent {
+  epochNo: number;
+  idKey: string;
+  source: string;
+  status: string | null;
+}
+
+export interface FirstValidEpoch {
+  idKey: string;
+  firstValidEpoch: number;
+}
+
+export interface StakeShare {
+  poolIdHex: string;
+  name: string | null;
+  ticker: string | null;
+  homepageUrl: string | null;
+  logoUrl: string | null;
+  liveStake: string | null;
+  activeStake: string | null;
+  liveDelegators: number | null;
+  liveSaturation: number | null;
+  declaredPledge: string | null;
+  livePledge: string | null;
+  stakeShare: number | null;
+}
+
+export type TermsAndConditionsHistoryResponse = GraphQLResponse<{
+  termsAndConditionsHistory: TermsAndConditionsChange[];
+}>;
+export type BlockSystemParametersResponse = GraphQLResponse<{
+  block: BlockSystemParameters | null;
+}>;
+export type PoolMetadataResponse = GraphQLResponse<{ poolMetadata: PoolMetadata | null }>;
+export type PoolMetadataListResponse = GraphQLResponse<{ poolMetadataList: PoolMetadata[] }>;
+export type SpoCompositeByPoolIdResponse = GraphQLResponse<{
+  spoCompositeByPoolId: SpoComposite | null;
+}>;
+export type SpoPerformanceLatestResponse = GraphQLResponse<{
+  spoPerformanceLatest: EpochPerf[];
+}>;
+export type SpoPerformanceBySpoSkResponse = GraphQLResponse<{
+  spoPerformanceBySpoSk: EpochPerf[];
+}>;
+export type EpochPerformanceResponse = GraphQLResponse<{ epochPerformance: EpochPerf[] }>;
+export type EpochUtilizationResponse = GraphQLResponse<{ epochUtilization: number | null }>;
+export type RegisteredSpoSeriesResponse = GraphQLResponse<{
+  registeredSpoSeries: RegisteredStat[];
+}>;
+export type RegisteredPresenceResponse = GraphQLResponse<{
+  registeredPresence: PresenceEvent[];
+}>;
+export type RegisteredFirstValidEpochsResponse = GraphQLResponse<{
+  registeredFirstValidEpochs: FirstValidEpoch[];
+}>;
+export type StakeDistributionResponse = GraphQLResponse<{ stakeDistribution: StakeShare[] }>;
