@@ -4,16 +4,19 @@ export type Witnesses<PS> = {};
 
 export type ImpureCircuits<PS> = {
   increment(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, []>;
+  store(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, []>;
 };
 
 export type ProvableCircuits<PS> = {
   increment(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, []>;
+  store(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, []>;
 };
 
 export type PureCircuits = {};
 
 export type Circuits<PS> = {
   increment(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, []>;
+  store(context: __compactRuntime.CircuitContext<PS>): __compactRuntime.CircuitResults<PS, []>;
 };
 
 export type Ledger = {

@@ -219,7 +219,13 @@ const inMemoryPrivateStateProvider = () => {
  */
 const asBackendFailure = (what: string, err: unknown): Error => {
   const message = (err as Error).message;
-  const hint = /prov(e|ing)|zk|circuit/i.test(message) ? ` ${proofServerMismatchHint()}` : '';
+  // Only for genuine proving failures. An earlier version matched /circuit/
+  // too, which appended a ledger-train explanation to "Circuit 'store' is
+  // undefined" — a plain contract/call-key mismatch that has nothing to do with
+  // the proof server, and the wrong hint sends the reader down the wrong path.
+  const hint = /prov(e|ing|er)|zk(ir|config)?\b/i.test(message)
+    ? ` ${proofServerMismatchHint()}`
+    : '';
   return new Error(
     `moth/midnight-js backend failed to ${what} (not an indexer failure): ${message}${hint}`,
   );
