@@ -1,22 +1,31 @@
-// This file is part of Compact.
-// Copyright (C) 2025 Midnight Foundation
-// SPDX-License-Identifier: Apache-2.0
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
+// Minimal contract for the indexer's contract-action e2e tests.
 //
-//  	http://www.apache.org/licenses/LICENSE-2.0
+// The indexer assertions only care that a deploy, a call and a maintenance
+// update are reported correctly — never what the contract computes. So this
+// contract exists to be cheap to prove and to expose the circuit names the
+// suite already calls.
 //
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// `store` is the call key `contract-actions-sequential.test.ts` uses, matching
+// the toolkit's built-in contract-simple. `increment` is `callContract()`'s
+// default. Both are kept so either call key works.
+//
+// Compile with compactc 0.31.1, which emits checkRuntimeVersion('0.16.0') to
+// match the @midnight-ntwrk/compact-runtime 0.16.0 that midnight-js 4.1.1 pins.
+// A 0.30.0 build emits 0.15.0 and will not load.
+
+pragma language_version >= 0.23;
 
 import CompactStandardLibrary;
 
 export ledger round: Counter;
 
 export circuit increment(): [] {
+  round.increment(1);
+}
+
+// Deliberately the same effect as `increment`: the suite calls this only to
+// produce an indexable contract action, and a no-argument circuit keeps the
+// call site free of contract-specific arguments.
+export circuit store(): [] {
   round.increment(1);
 }

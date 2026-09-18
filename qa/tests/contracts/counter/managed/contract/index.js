@@ -83,7 +83,7 @@ export class Contract {
           __compactRuntime.typeError(
             'increment',
             'argument 1 (as invoked from Typescript)',
-            'counter.compact line 20 char 1',
+            'counter.compact line 22 char 1',
             'CircuitContext',
             contextOrig_0,
           );
@@ -104,9 +104,49 @@ export class Contract {
           gasCost: context.gasCost,
         };
       },
+      store: (...args_1) => {
+        if (args_1.length !== 1) {
+          throw new __compactRuntime.CompactError(
+            `store: expected 1 argument (as invoked from Typescript), received ${args_1.length}`,
+          );
+        }
+        const contextOrig_0 = args_1[0];
+        if (!(
+          typeof contextOrig_0 === 'object' && contextOrig_0.currentQueryContext != undefined
+        )) {
+          __compactRuntime.typeError(
+            'store',
+            'argument 1 (as invoked from Typescript)',
+            'counter.compact line 29 char 1',
+            'CircuitContext',
+            contextOrig_0,
+          );
+        }
+        const context = { ...contextOrig_0, gasCost: __compactRuntime.emptyRunningCost() };
+        const partialProofData = {
+          input: { value: [], alignment: [] },
+          output: undefined,
+          publicTranscript: [],
+          privateTranscriptOutputs: [],
+        };
+        const result_0 = this._store_0(context, partialProofData);
+        partialProofData.output = { value: [], alignment: [] };
+        return {
+          result: result_0,
+          context: context,
+          proofData: partialProofData,
+          gasCost: context.gasCost,
+        };
+      },
     };
-    this.impureCircuits = { increment: this.circuits.increment };
-    this.provableCircuits = { increment: this.circuits.increment };
+    this.impureCircuits = {
+      increment: this.circuits.increment,
+      store: this.circuits.store,
+    };
+    this.provableCircuits = {
+      increment: this.circuits.increment,
+      store: this.circuits.store,
+    };
   }
   initialState(...args_0) {
     if (args_0.length !== 1) {
@@ -135,6 +175,7 @@ export class Contract {
     stateValue_0 = stateValue_0.arrayPush(__compactRuntime.StateValue.newNull());
     state_0.data = new __compactRuntime.ChargedState(stateValue_0);
     state_0.setOperation('increment', new __compactRuntime.ContractOperation());
+    state_0.setOperation('store', new __compactRuntime.ContractOperation());
     const context = __compactRuntime.createCircuitContext(
       __compactRuntime.dummyContractAddress(),
       constructorContext_0.initialZswapLocalState.coinPublicKey,
@@ -176,6 +217,34 @@ export class Contract {
     };
   }
   _increment_0(context, partialProofData) {
+    const tmp_0 = 1n;
+    __compactRuntime.queryLedgerState(context, partialProofData, [
+      {
+        idx: {
+          cached: false,
+          pushPath: true,
+          path: [
+            {
+              tag: 'value',
+              value: { value: _descriptor_7.toValue(0n), alignment: _descriptor_7.alignment() },
+            },
+          ],
+        },
+      },
+      {
+        addi: {
+          immediate: parseInt(
+            __compactRuntime.valueToBigInt(
+              { value: _descriptor_0.toValue(tmp_0), alignment: _descriptor_0.alignment() }.value,
+            ),
+          ),
+        },
+      },
+      { ins: { cached: true, n: 1 } },
+    ]);
+    return [];
+  }
+  _store_0(context, partialProofData) {
     const tmp_0 = 1n;
     __compactRuntime.queryLedgerState(context, partialProofData, [
       {
