@@ -554,6 +554,39 @@ impl LedgerState {
                         *STRICTNESS_V8,
                         timestamp(well_formed_timestamp),
                     )
+                    .or_else(|error| {
+                        // The node validates mempool transactions against a `tblock` ahead of
+                        // block time and caches the result keyed on (tx_hash, ledger_state_key);
+                        // at inclusion a transaction still matching a cached key skips
+                        // re-validation against real block time. So a chain-accepted transaction
+                        // can fail this strict replay, and its valid window (latest dust `ctime`
+                        // ..= earliest intent `ttl`) can be seconds wide at an arbitrary offset
+                        // from block time, so no fixed tolerance covers it. Retry at the
+                        // transaction's own bounds: earliest intent TTL (covers "TTL has
+                        // expired"), then latest dust ctime (covers "not valid yet"). If no
+                        // retry passes, return the original error.
+                        let min_ttl = transaction.intents().map(|(_, intent)| intent.ttl).min();
+                        let max_ctime = transaction
+                            .intents()
+                            .filter_map(|(_, intent)| {
+                                intent.dust_actions.as_ref().map(|dust| dust.ctime)
+                            })
+                            .max();
+                        warn!(
+                            error:%, well_formed_timestamp, min_ttl:?, max_ctime:?;
+                            "well-formed check failed against block time, \
+                             retrying at transaction time bounds"
+                        );
+                        [min_ttl, max_ctime]
+                            .into_iter()
+                            .flatten()
+                            .find_map(|tblock| {
+                                transaction
+                                    .well_formed(&cx.ref_state, *STRICTNESS_V8, tblock)
+                                    .ok()
+                            })
+                            .ok_or(error)
+                    })
                     .map_err(|error| Error::MalformedTransaction(error.into()))?;
                 let (ledger_state, transaction_result) =
                     ledger_state.apply(&verified_ledger_transaction, &cx);
@@ -655,6 +688,31 @@ impl LedgerState {
                         *STRICTNESS_V9,
                         timestamp(well_formed_timestamp),
                     )
+                    .or_else(|error| {
+                        // See the V8 arm above for why a failed well-formed check is retried at
+                        // the transaction's own time bounds.
+                        let min_ttl = transaction.intents().map(|(_, intent)| intent.ttl).min();
+                        let max_ctime = transaction
+                            .intents()
+                            .filter_map(|(_, intent)| {
+                                intent.dust_actions.as_ref().map(|dust| dust.ctime)
+                            })
+                            .max();
+                        warn!(
+                            error:%, well_formed_timestamp, min_ttl:?, max_ctime:?;
+                            "well-formed check failed against block time, \
+                             retrying at transaction time bounds"
+                        );
+                        [min_ttl, max_ctime]
+                            .into_iter()
+                            .flatten()
+                            .find_map(|tblock| {
+                                transaction
+                                    .well_formed(&cx.ref_state, *STRICTNESS_V9, tblock)
+                                    .ok()
+                            })
+                            .ok_or(error)
+                    })
                     .map_err(|error| Error::MalformedTransaction(error.into()))?;
                 let (ledger_state, transaction_result) =
                     ledger_state.apply(&verified_ledger_transaction, &cx);
