@@ -24,7 +24,7 @@ use crate::{
 use async_stream::try_stream;
 use const_hex::FromHexError;
 use fastrace::trace;
-use futures::{Stream, StreamExt, TryStreamExt, stream};
+use futures::{Stream, StreamExt, TryStreamExt, future::Either, stream};
 use http::{
     HeaderMap,
     header::{InvalidHeaderValue, USER_AGENT},
@@ -39,7 +39,7 @@ use indexer_common::{
 use log::{debug, info, warn};
 use parity_scale_codec::Decode;
 use serde::Deserialize;
-use std::{future::ready, time::Duration};
+use std::{future::ready, num::NonZeroUsize, pin::pin, time::Duration};
 use subxt::{
     OnlineClient, SubstrateConfig,
     config::{
@@ -91,6 +91,7 @@ pub struct SubxtNode {
     rpc_client: ReconnectingRpcClient,
     online_client: OnlineClient<SubstrateConfig>,
     subscription_recovery_timeout: Duration,
+    catch_up_concurrency: NonZeroUsize,
 }
 
 impl SubxtNode {
@@ -101,6 +102,7 @@ impl SubxtNode {
             reconnect_max_delay: retry_max_delay,
             reconnect_max_attempts: retry_max_attempts,
             subscription_recovery_timeout,
+            catch_up_concurrency,
         } = config;
 
         let retry_policy = ExponentialBackoff::from_millis(10)
@@ -122,6 +124,7 @@ impl SubxtNode {
             rpc_client,
             online_client,
             subscription_recovery_timeout,
+            catch_up_concurrency,
         })
     }
 
@@ -182,7 +185,7 @@ impl SubxtNode {
     }
 
     async fn make_block(
-        &mut self,
+        &self,
         authorities: &mut Option<Vec<[u8; 32]>>,
         block: OnlineClientAtBlock,
     ) -> Result<Block, SubxtNodeError> {
@@ -232,8 +235,18 @@ impl SubxtNode {
         );
 
         // Fetch authorities if `None`, either initially or because of a `NewSession` event (below).
+        // Aura verifies a block's author against its parent's state, so read the set from there:
+        // at a session-change block the block's own state already holds the next session's set.
         if authorities.is_none() {
-            *authorities = Some(runtimes::fetch_authorities(state_node_version, &block).await?);
+            let fetched = if height == 0 {
+                runtimes::fetch_authorities(state_node_version, &block).await?
+            } else {
+                let parent = self.block_at(header.parent_hash).await?;
+                let parent_node_version =
+                    ProtocolVersion::try_from(parent.spec_version())?.node_version();
+                runtimes::fetch_authorities(parent_node_version, &parent).await?
+            };
+            *authorities = Some(fetched);
         }
         let author = authorities
             .as_ref()
@@ -432,29 +445,64 @@ impl Node for SubxtNode {
                 // Initialize from the stored block hash so the first forward-fetched block
                 // is verified against it too.
                 let mut last_forward_hash = after_height.map(|_| H256(after_hash.0));
-                for height in start_height..safe_height {
-                    if height % CATCH_UP_LOG_INTERVAL == 0 {
-                        info!(
-                            highest_stored_height:? = after_height,
-                            current_height = height,
-                            first_finalized_height = end_height;
-                            "catching up by height"
-                        );
+                {
+                    let node = &*self;
+                    let heights = start_height..safe_height;
+                    // Fetch and make blocks `catch_up_concurrency` at a time. `buffered` yields
+                    // them in height order, so the parent hash check below is unchanged. With
+                    // concurrency 1 the per-session authorities cache is kept; workers cannot
+                    // share it, so each of them reads the set from its block's parent instead.
+                    let blocks = if node.catch_up_concurrency.get() == 1 {
+                        let state = (heights, &mut authorities);
+                        Either::Left(stream::unfold(state, |(mut heights, authorities)| async {
+                            let height = heights.next()?;
+                            let block = async {
+                                let block = node.block_at_height(height).await?;
+                                let hash = block.block_hash();
+                                let block = node.make_block(authorities, block).await?;
+                                Ok((hash, block))
+                            }
+                            .await;
+                            Some((block, (heights, authorities)))
+                        }))
+                    } else {
+                        let make = |height| async move {
+                            let block = node.block_at_height(height).await?;
+                            let hash = block.block_hash();
+                            let block = node.make_block(&mut None, block).await?;
+                            Ok::<_, SubxtNodeError>((hash, block))
+                        };
+                        Either::Right(
+                            stream::iter(heights)
+                                .map(make)
+                                .buffered(node.catch_up_concurrency.get()),
+                        )
+                    };
+                    let mut blocks = pin!(blocks);
+
+                    while let Some(block) = blocks.next().await {
+                        let (block_hash, made_block) = block?;
+                        let height = made_block.height;
+                        if height % CATCH_UP_LOG_INTERVAL == 0 {
+                            info!(
+                                highest_stored_height:? = after_height,
+                                current_height = height,
+                                first_finalized_height = end_height;
+                                "catching up by height"
+                            );
+                        }
+                        if let Some(expected_parent) = last_forward_hash
+                            && made_block.parent_hash.0 != expected_parent.0
+                        {
+                            Err(SubxtNodeError::ParentHashMismatch(
+                                height,
+                                expected_parent,
+                                H256(made_block.parent_hash.0),
+                            ))?;
+                        }
+                        last_forward_hash = Some(block_hash);
+                        yield made_block;
                     }
-                    let block = self.block_at_height(height).await?;
-                    let block_hash = block.block_hash();
-                    let made_block = self.make_block(&mut authorities, block).await?;
-                    if let Some(expected_parent) = last_forward_hash
-                        && made_block.parent_hash.0 != expected_parent.0
-                    {
-                        Err(SubxtNodeError::ParentHashMismatch(
-                            height,
-                            expected_parent,
-                            H256(made_block.parent_hash.0),
-                        ))?;
-                    }
-                    last_forward_hash = Some(block_hash);
-                    yield made_block;
                 }
 
                 let stop_hash = last_forward_hash.unwrap_or(H256(after_hash.0));
@@ -602,10 +650,21 @@ pub struct Config {
         default = "default_subscription_recovery_timeout"
     )]
     pub subscription_recovery_timeout: Duration,
+
+    /// How many blocks to fetch from the node at once while catching up on blocks older than
+    /// the finalization safety margin. Blocks near the tip and the live subscription are always
+    /// fetched one at a time, so this only adds node load until the indexer has caught up.
+    /// Defaults to 1.
+    #[serde(default = "default_catch_up_concurrency")]
+    pub catch_up_concurrency: NonZeroUsize,
 }
 
 fn default_subscription_recovery_timeout() -> Duration {
     Duration::from_secs(30)
+}
+
+fn default_catch_up_concurrency() -> NonZeroUsize {
+    NonZeroUsize::MIN
 }
 
 /// Error possibly returned by [SubxtNode::new].
