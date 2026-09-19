@@ -61,7 +61,7 @@ describe.sequential('contract actions', () => {
     await toolkit.stop();
   });
 
-  describe('a transaction to deploy a smart contract', () => {
+  describe('a transaction to deploy a counter smart contract', () => {
     beforeAll(async () => {
       contractDeployResult = await toolkit.deployContract(fundingSeed);
     }, CONTRACT_ACTION_TIMEOUT);
@@ -175,7 +175,7 @@ describe.sequential('contract actions', () => {
     );
   });
 
-  describe('a transaction to call a smart contract', () => {
+  describe('a transaction to call the store circuit on the deployed counter smart contract', () => {
     beforeAll(async () => {
       contractCallResult = await toolkit.callContract(
         'store',
@@ -289,7 +289,7 @@ describe.sequential('contract actions', () => {
     );
   });
 
-  describe('a transaction to update a smart contract', () => {
+  describe('a transaction to update the counter smart contract', () => {
     beforeAll(async () => {
       // Allow call to finalize before running maintenance (update)
       await getTransactionByHashWithRetry(contractCallTransactionHash);
