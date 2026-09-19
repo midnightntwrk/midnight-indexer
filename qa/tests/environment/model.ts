@@ -238,6 +238,40 @@ export class Environment {
     return this.isUndeployed;
   }
 
+  /**
+   * Which backend builds and submits transactions: the default `toolkit`
+   * (a `midnight-node-toolkit` container) or `moth` (moth-wallet's sync engine
+   * in-process). Unset means `toolkit`, so nothing changes for existing runs.
+   * See `utils/moth/moth-backend.ts` and
+   * `local_mds/wire-moth-wallet-in-indexer-qa-test.md`.
+   */
+  getTxBackend(): 'toolkit' | 'moth' {
+    const raw = process.env.TX_BACKEND?.trim().toLowerCase();
+    if (!raw || raw === 'toolkit') return 'toolkit';
+    if (raw === 'moth') return 'moth';
+    throw new Error(`Invalid TX_BACKEND="${process.env.TX_BACKEND}". Use "toolkit" or "moth".`);
+  }
+
+  /**
+   * Full indexer GraphQL endpoint (`…/api/<version>/graphql`), matching the
+   * convention used by the indexer HTTP and WebSocket clients.
+   */
+  getIndexerGraphqlHttpURL(): string {
+    const apiVersion = process.env.INDEXER_API_VERSION?.trim() || 'v4';
+    return `${this.getIndexerHttpBaseURL()}/api/${apiVersion}/graphql`;
+  }
+
+  /**
+   * The same GraphQL endpoint as {@link getIndexerGraphqlHttpURL} over
+   * WebSocket. midnight-js's public-data provider takes both, and they must
+   * name the same deployment or a contract's state and its subscription come
+   * from different chains.
+   */
+  getIndexerGraphqlWsURL(): string {
+    const apiVersion = process.env.INDEXER_API_VERSION?.trim() || 'v4';
+    return `${this.getIndexerWebsocketBaseURL()}/api/${apiVersion}/graphql`;
+  }
+
   getCurrentEnvironmentName(): EnvironmentName {
     return this.envName;
   }

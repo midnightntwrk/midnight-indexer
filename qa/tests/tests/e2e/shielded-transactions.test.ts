@@ -35,6 +35,7 @@ import {
 import { IndexerWsClient } from '@utils/indexer/websocket-client';
 import { EventCoordinator } from '@utils/event-coordinator';
 import { collectValidDustLedgerEvents } from 'tests/shared/dust-ledger-utils';
+import { deriveAddresses } from '@utils/moth/moth-addresses';
 
 /**
  * Subscribe to shielded transaction events for an open wallet session and resolve `true` as soon
@@ -89,7 +90,19 @@ describe('shielded transactions', () => {
 
   // Deterministic seeds (hex) that work with the toolkit
   const sourceSeed = dataProvider.getFundingSeed();
-  const destinationSeed = '0000000000000000000000000000000000000000000000000000000987654321';
+  // Self-transfer: the funding wallet sends to itself, so its balance stays flat
+  // and a funded wallet can run this suite indefinitely.
+  //
+  // This used to be a hard-coded seed. On preview under TX_BACKEND=moth that seed
+  // happened to BE the funding wallet's, so the suite was already self-transferring
+  // by accident — and the source and destination viewing-key tests were quietly
+  // asserting on the same key. Deriving it from the funding seed makes that
+  // intentional and true on every environment instead of one.
+  //
+  // The cost is the same as for the unshielded suites: the paired source/destination
+  // tests now assert the same thing twice. The "unrelated viewing key" test below is
+  // what still proves the indexer does not leak a transaction to a third party.
+  const destinationSeed = sourceSeed;
 
   let destinationAddress: string;
 
@@ -104,7 +117,7 @@ describe('shielded transactions', () => {
     await toolkit.start();
 
     // Derive shielded addresses from seeds
-    destinationAddress = (await toolkit.showAddress(destinationSeed)).shielded;
+    destinationAddress = (await deriveAddresses(destinationSeed, toolkit)).shielded;
 
     const beforeDustEvents = await collectValidDustLedgerEvents(
       indexerWsClient,
@@ -174,10 +187,7 @@ describe('shielded transactions', () => {
         testKey: 'PM-17709',
       };
 
-      ctx.skip?.(
-        transactionResult.status !== 'confirmed',
-        "Toolkit transaction hasn't been confirmed",
-      );
+      ctx.skip?.(transactionResult.status !== 'confirmed', "Transaction hasn't been confirmed");
 
       // The expected block might take a bit more to show up by indexer, so we retry a few times
       const blockResponse = await getBlockByHashWithRetry(transactionResult.blockHash!);
@@ -202,10 +212,7 @@ describe('shielded transactions', () => {
         testKey: 'PM-17710',
       };
 
-      ctx.skip?.(
-        transactionResult.status !== 'confirmed',
-        "Toolkit transaction hasn't been confirmed",
-      );
+      ctx.skip?.(transactionResult.status !== 'confirmed', "Transaction hasn't been confirmed");
 
       log.info(
         `Verifying indexer reports a shielded transaction by hash: ${transactionResult.txHash}`,
@@ -310,10 +317,7 @@ describe('shielded transactions', () => {
         labels: ['Query', 'Transaction', 'Zswap', 'ShieldedTokens'],
       };
 
-      ctx.skip?.(
-        transactionResult.status !== 'confirmed',
-        "Toolkit transaction hasn't been confirmed",
-      );
+      ctx.skip?.(transactionResult.status !== 'confirmed', "Transaction hasn't been confirmed");
 
       const transactionResponse = await getTransactionByHashWithRetry(transactionResult.txHash);
       expect(transactionResponse).toBeSuccess();
@@ -344,10 +348,7 @@ describe('shielded transactions', () => {
         labels: ['Query', 'Transaction', 'Dust', 'CommitmentMerkleTree', 'ShieldedTokens'],
       };
 
-      ctx.skip?.(
-        transactionResult.status !== 'confirmed',
-        "Toolkit transaction hasn't been confirmed",
-      );
+      ctx.skip?.(transactionResult.status !== 'confirmed', "Transaction hasn't been confirmed");
 
       const transactionResponse = await getTransactionByHashWithRetry(transactionResult.txHash);
       expect(transactionResponse).toBeSuccess();
@@ -388,10 +389,7 @@ describe('shielded transactions', () => {
           labels: ['Subscription', 'ShieldedTransaction', 'ViewingKey', 'Source'],
         };
 
-        ctx.skip?.(
-          transactionResult.status !== 'confirmed',
-          "Toolkit transaction hasn't been confirmed",
-        );
+        ctx.skip?.(transactionResult.status !== 'confirmed', "Transaction hasn't been confirmed");
 
         // Reconnect WS client - the connection may have gone stale during the long toolkit transaction
         await indexerWsClient.connectionClose();
@@ -426,10 +424,7 @@ describe('shielded transactions', () => {
           labels: ['Subscription', 'ShieldedTransaction', 'ViewingKey', 'Destination'],
         };
 
-        ctx.skip?.(
-          transactionResult.status !== 'confirmed',
-          "Toolkit transaction hasn't been confirmed",
-        );
+        ctx.skip?.(transactionResult.status !== 'confirmed', "Transaction hasn't been confirmed");
 
         // Reconnect WS client - the connection may have gone stale during the long toolkit transaction
         await indexerWsClient.connectionClose();
@@ -468,10 +463,7 @@ describe('shielded transactions', () => {
           labels: ['Subscription', 'ShieldedTransaction', 'ViewingKey', 'Privacy'],
         };
 
-        ctx.skip?.(
-          transactionResult.status !== 'confirmed',
-          "Toolkit transaction hasn't been confirmed",
-        );
+        ctx.skip?.(transactionResult.status !== 'confirmed', "Transaction hasn't been confirmed");
 
         // Reconnect WS client - the connection may have gone stale during the long toolkit transaction
         await indexerWsClient.connectionClose();

@@ -19,6 +19,7 @@ import { z } from 'zod';
 import log from '@utils/logging/logger';
 import { IndexerWsClient, UnshieldedTxSubscriptionResponse } from '@utils/indexer/websocket-client';
 import { ToolkitWrapper, type ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
+import { deriveAddresses } from '@utils/moth/moth-addresses';
 
 export function retry<T>(
   fn: () => Promise<T>,
@@ -79,7 +80,7 @@ query GetTransactionByOffset($OFFSET: TransactionOffset!) {
 export async function resolveBlockHash(result: ToolkitTransactionResult): Promise<void> {
   if (result.blockHash || !result.txHash) return;
   log.debug(
-    `Block hash missing from toolkit output, resolving from indexer for tx ${result.txHash}`,
+    `Block hash not known at submit time, resolving from the indexer for tx ${result.txHash}`,
   );
   const client = new IndexerHttpClient();
   const offset = { hash: result.txHash };
@@ -97,6 +98,14 @@ export async function resolveBlockHash(result: ToolkitTransactionResult): Promis
   const tx = transactions[0];
   if (tx?.block?.hash) {
     result.blockHash = tx.block.hash;
+    // Being in a block IS confirmation, so promote the status too. The toolkit
+    // blocks until the node finalises the transaction and reports `confirmed`
+    // itself; the moth backend returns as soon as the transaction is submitted,
+    // because the block is not known at submit time. Without this promotion
+    // every test guarded by `skipUnlessConfirmed` skipped on the moth backend
+    // with "Transaction hasn't been confirmed" — the transaction was in
+    // fact confirmed, only the status had not caught up.
+    result.status = 'confirmed';
     log.debug(`Resolved block hash: ${result.blockHash}`);
   } else {
     log.warn(`Could not resolve block hash from indexer for tx ${result.txHash}`);
@@ -208,7 +217,7 @@ export async function setupWalletEventSubscriptions(
   destinationSeeds: string[],
 ) {
   // Getting the addresses from their seeds
-  const sourceAddress = (await toolkit.showAddress(sourceSeed)).unshielded;
+  const sourceAddress = (await deriveAddresses(sourceSeed, toolkit)).unshielded;
   // Events from the indexer websocket for both the source addresses
   const sourceAddressEvents: UnshieldedTxSubscriptionResponse[] = [];
 
@@ -222,10 +231,29 @@ export async function setupWalletEventSubscriptions(
   // wait until source events count stabilizes, then snapshot to historical array
   const historicalSourceEvents = await waitForEventsStabilization(sourceAddressEvents, 1000);
 
-  // Derive and subscribe ALL destination wallets dynamically
+  // Derive and subscribe ALL destination wallets dynamically.
+  //
+  // A destination that IS the source (a self-transfer) reuses the source's
+  // subscription rather than opening a second one for the same address. Two
+  // subscriptions to one address deliver identical events, so the copy buys
+  // nothing and costs a connection slot on the shared socket.
   const destinationWallets = await Promise.all(
     destinationSeeds.map(async (seed) => {
-      const destinationAddress = (await toolkit.showAddress(seed)).unshielded;
+      const destinationAddress = (await deriveAddresses(seed, toolkit)).unshielded;
+
+      if (destinationAddress === sourceAddress) {
+        return {
+          seed,
+          destinationAddress,
+          // The same arrays the source reads, so both sides of the transfer
+          // observe one stream — not a snapshot that can drift from it.
+          events: sourceAddressEvents,
+          // Unsubscribing is the source's job; doing it here too would close
+          // the subscription out from under the source's own tests.
+          unsubscribe: () => {},
+          historicalDestinationEvents: historicalSourceEvents,
+        };
+      }
 
       const events: UnshieldedTxSubscriptionResponse[] = [];
 
