@@ -82,6 +82,6 @@
     "nanoid": "^3.3.17",
     "@midnight-ntwrk/ledger-v8": "8.1.0",
     "@midnight-ntwrk/onchain-runtime-v3": "3.0.0",
-    "@scure/base": "2.2.0"
+    "@scure/base": "2.3.0"
   }
 }
