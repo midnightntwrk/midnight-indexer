@@ -76,6 +76,7 @@
   },
   "overrides": {
     "@midnight-ntwrk/ledger-v8": "8.1.0",
-    "@midnight-ntwrk/onchain-runtime-v3": "3.0.0"
+    "@midnight-ntwrk/onchain-runtime-v3": "3.0.0",
+    "@scure/base": "2.3.0"
   }
 }
