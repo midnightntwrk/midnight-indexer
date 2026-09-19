@@ -17,6 +17,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import os from 'node:os';
 
 export type Flavour = 'cloud' | 'standalone';
 
@@ -83,6 +84,35 @@ export class UndeployedEnvironmentManager {
    * Ensure the undeployed stack is up. If a stack is already running, do not
    * re-provision and remember not to tear down on exit.
    */
+  /**
+   * Delete moth's cached wallet state for the undeployed network.
+   *
+   * moth keys its cache by wallet name only — nothing about the chain — so a
+   * cache written against the previous undeployed chain is restored against the
+   * new one. That does not fail: the wallet reports no progress and no error,
+   * and global setup sits in "Warming moth wallet cache" indefinitely. It has
+   * already cost one run, and the symptom points nowhere near the cause.
+   *
+   * Only the `undeployed` subtree is touched. Caches for real networks describe
+   * chains that persist and must be left alone — they cost over an hour to
+   * rebuild.
+   */
+  private purgeMothSyncCache(): void {
+    const dir = path.join(os.homedir(), '.moth', 'sync', 'undeployed');
+    if (!fs.existsSync(dir)) return;
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+      console.log(`[undeployed] Purged moth wallet cache at ${dir} (the chain is being replaced).`);
+    } catch (error) {
+      // Not fatal: a stale cache only costs a slow or hung sync, and failing the
+      // run here would be worse than warning about it.
+      console.warn(
+        `[undeployed] Could not purge the moth wallet cache at ${dir}: ${String(error)}. ` +
+          'If setup hangs in "Warming moth wallet cache", remove it by hand.',
+      );
+    }
+  }
+
   async ensureRunning(): Promise<void> {
     if (await this.isIndexerReady()) {
       console.log(
@@ -103,6 +133,11 @@ export class UndeployedEnvironmentManager {
     const scriptName = this.withData
       ? 'qa/scripts/startup-localenv-with-data.sh'
       : 'qa/scripts/startup-localenv-from-genesis.sh';
+
+    // The provisioning scripts below replace the chain — from genesis outright,
+    // and with-data from a fixture snapshot. Either way the chain that any
+    // cached moth wallet state describes is about to stop existing.
+    this.purgeMothSyncCache();
 
     console.log(`[undeployed] Provisioning stack via ${scriptName} (cwd=${repoRoot})`);
     const result = spawnSync('bash', [scriptName], {
