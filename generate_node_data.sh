@@ -25,16 +25,87 @@ readonly toolkit_image="midnightntwrk/midnight-node-toolkit:$toolkit_version"
 readonly rng_seed="0000000000000000000000000000000000000000000000000000000000000037"
 readonly node_dir="$(pwd)/.node/$node_version"
 
-# token-issuer is toolkit-js's compiler pin, not midnight-js's: the toolkit's
-# bundled generate-intent/contract-custom pipeline is built against
-# compact-runtime 0.15.0, which only a 0.30.0 compactc build satisfies (a
-# 0.31.1 build asserts 0.16.0 and this toolkit rejects it). Ledger tokens
+# The compactc version to build contracts/token-issuer with is toolkit-js's
+# compiler pin, not midnight-js's, and that pin ties to the WHOLE ledger stack
+# a toolkit build targets, not just a compact-runtime number: each compactc
+# release binds one onchain-runtime/ledger major via a fixed compact-runtime
+# dependency, and compact-runtime's own version check demands an EXACT minor
+# match under its 0.x versioning, so there is no forward- or
+# backward-compatible choice here — one compactc version per ledger line,
+# full stop.
+#
+#   ledger | node/toolkit line          | compactc    | compact-runtime
+#   -------|-----------------------------|-------------|----------------
+#   v8     | 1.x (this repo's default)  | 0.30.0      | 0.15.0
+#   v9     | 2.1.0-beta.1+               | 0.33.0-rc.2 | 0.18.0-rc.1
+#
+# Override COMPACTC_VERSION to match whatever NODE_VERSION targets; the
+# default keeps today's ledger-8 behaviour unchanged. Ledger tokens
 # token-issuer mints go to whichever wallet its mintUnshielded call names as
 # recipient.
-readonly compactc_version="0.30.0"
+readonly compactc_version="${COMPACTC_VERSION:-0.30.0}"
 readonly token_issuer_dir="$(pwd)/contracts/token-issuer"
 readonly token_issuer_mint_seed="0000000000000000000000000000000000000000000000000000000000000001"
 readonly token_issuer_mint_amount="100000000000"
+
+# A GITHUB_TOKEN exported but empty (not merely unset) makes the `compact`
+# CLI authenticate with a blank credential and fail every GitHub call outright
+# ("Bad credentials") instead of falling back to an unauthenticated request.
+if [ -z "${GITHUB_TOKEN:-}" ]; then
+    unset GITHUB_TOKEN
+fi
+
+# Resolve the release-asset target triple compactc ships for this host, for
+# the direct-download fallback below.
+compactc_target_triple() {
+    case "$(uname -s)-$(uname -m)" in
+        Linux-x86_64) echo "x86_64-unknown-linux-musl" ;;
+        Linux-aarch64|Linux-arm64) echo "aarch64-unknown-linux-musl" ;;
+        Darwin-x86_64) echo "x86_64-darwin" ;;
+        Darwin-arm64|Darwin-aarch64) echo "aarch64-darwin" ;;
+        *)
+            echo "Error: no known compactc release asset for $(uname -s)-$(uname -m)" >&2
+            exit 1
+            ;;
+    esac
+}
+
+# Make sure compactc $compactc_version is installed, fetching it if not.
+ensure_compactc() {
+    local version="$1"
+    if compact list --installed 2>/dev/null | grep -qx "  $version" || \
+       compact list --installed 2>/dev/null | grep -qx "→ $version"; then
+        return
+    fi
+    if compact update "$version" --no-set-default >/dev/null 2>&1; then
+        return
+    fi
+    # `compact update`/`list` only surface FINAL releases. Some versions (0.33.0
+    # among them, needed for ledger v9) were never cut as a final release --
+    # only as release-candidate tags (compactc-v0.33.0-rc.0/1/2) -- so pass the
+    # exact upstream tag suffix as COMPACTC_VERSION (e.g. "0.33.0-rc.2") and
+    # this fetches it straight from the compiler's real home, LFDT-Minokawa/compact
+    # (NOT midnightntwrk -- that org has no compact repo).
+    echo "compact CLI has no final release '$version'; fetching compactc-v$version from LFDT-Minokawa/compact directly" >&2
+    if ! command -v gh >/dev/null 2>&1; then
+        echo "Error: the 'gh' CLI is required to fetch compactc $version, which has no final release" >&2
+        exit 1
+    fi
+    local triple dest tmp_zip_dir
+    triple="$(compactc_target_triple)"
+    dest="$HOME/.compact/versions/$version/$triple"
+    tmp_zip_dir="$(mktemp -d)"
+    if ! gh release download "compactc-v$version" --repo LFDT-Minokawa/compact \
+        -p "*${triple}.zip" -O "$tmp_zip_dir/compactc.zip"; then
+        rm -rf "$tmp_zip_dir"
+        echo "Error: no compactc-v$version release found for $triple at LFDT-Minokawa/compact" >&2
+        exit 1
+    fi
+    mkdir -p "$dest"
+    unzip -oq "$tmp_zip_dir/compactc.zip" -d "$dest"
+    chmod +x "$dest"/*
+    rm -rf "$tmp_zip_dir"
+}
 
 # Set up fresh node data directory.
 if [ -d $node_dir ]; then
@@ -50,6 +121,7 @@ if ! command -v compact >/dev/null 2>&1; then
     echo "Error: the 'compact' CLI is required to build contracts/token-issuer (see https://docs.midnight.network for install instructions)" >&2
     exit 1
 fi
+ensure_compactc "$compactc_version"
 token_issuer_build_dir="$(mktemp -d)"
 compact compile "+$compactc_version" "$token_issuer_dir/token-issuer.compact" "$token_issuer_build_dir/out"
 
@@ -251,6 +323,22 @@ token_issuer_recipient_address=$(docker run \
     show-address --network undeployed --seed $token_issuer_mint_seed \
     | jq -r .userAddress)
 
+# WORKAROUND (see midnight-node#1969 and its follow-ups): generate-intent
+# circuit's default path fetches ledger parameters through subxt's statically
+# generated runtime API, which can throw RuntimeApiError(IncompatibleCodegen)
+# against a live node even with no version skew involved -- reproduced here
+# against a node freshly genesised on ledger v9, no hard fork in the picture.
+# The same call succeeds standalone via show-ledger-parameters (a raw query),
+# so fetching it ourselves and passing it through --custom-ledger-parameters
+# avoids the broken path entirely. Applied unconditionally: verified harmless
+# on ledger v8 too, so this stays one code path for both lines.
+token_issuer_ledger_parameters=$(docker run \
+    --rm \
+    --network host \
+    -e MN_SRC_URL=ws://127.0.0.1:9944 \
+    $toolkit_image \
+    show-ledger-parameters --read-from-rpc-url ws://127.0.0.1:9944 --serialize)
+
 docker run \
     --rm \
     --network host \
@@ -268,6 +356,7 @@ docker run \
     --output-intent /toolkit-js/token-issuer/mint.intent \
     --output-private-state /toolkit-js/token-issuer/mint.private \
     --output-zswap-state /toolkit-js/token-issuer/mint.zswap \
+    --custom-ledger-parameters "$token_issuer_ledger_parameters" \
     mintUnshielded "{bytes:'0x$token_issuer_recipient_address'}" $token_issuer_mint_amount
 
 docker run \
