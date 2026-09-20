@@ -2,9 +2,11 @@
 
 set -euxo pipefail
 
-# Cleanup function to ensure node container is removed.
+# Cleanup function to ensure node container and scratch build dir are removed.
+token_issuer_build_dir=""
 cleanup() {
     docker rm -f node >/dev/null 2>&1 || true
+    [ -n "$token_issuer_build_dir" ] && rm -rf "$token_issuer_build_dir"
 }
 
 # Set up trap to cleanup on exit.
@@ -23,11 +25,43 @@ readonly toolkit_image="midnightntwrk/midnight-node-toolkit:$toolkit_version"
 readonly rng_seed="0000000000000000000000000000000000000000000000000000000000000037"
 readonly node_dir="$(pwd)/.node/$node_version"
 
+# token-issuer is toolkit-js's compiler pin, not midnight-js's: the toolkit's
+# bundled generate-intent/contract-custom pipeline is built against
+# compact-runtime 0.15.0, which only a 0.30.0 compactc build satisfies (a
+# 0.31.1 build asserts 0.16.0 and this toolkit rejects it). Ledger tokens
+# token-issuer mints go to whichever wallet its mintUnshielded call names as
+# recipient.
+readonly compactc_version="0.30.0"
+readonly token_issuer_dir="$(pwd)/contracts/token-issuer"
+readonly token_issuer_mint_seed="0000000000000000000000000000000000000000000000000000000000000001"
+readonly token_issuer_mint_amount="100000000000"
+
 # Set up fresh node data directory.
 if [ -d $node_dir ]; then
     rm -r $node_dir;
 fi
 mkdir -p $node_dir
+
+# Compile token-issuer on the host: toolkit-js's own config.ts imports
+# @midnight-ntwrk/compact-js/effect, which only resolves under /toolkit-js
+# inside the toolkit image, so the compiled contract and its config.ts are
+# seeded into the toolkit_out volume and dual-mounted there for that step.
+if ! command -v compact >/dev/null 2>&1; then
+    echo "Error: the 'compact' CLI is required to build contracts/token-issuer (see https://docs.midnight.network for install instructions)" >&2
+    exit 1
+fi
+token_issuer_build_dir="$(mktemp -d)"
+compact compile "+$compactc_version" "$token_issuer_dir/token-issuer.compact" "$token_issuer_build_dir/out"
+
+docker run \
+    --rm \
+    -v toolkit_out:/out \
+    -v "$token_issuer_build_dir/out":/src/out:ro \
+    -v "$token_issuer_dir/token-issuer.config.ts":/src/token-issuer.config.ts:ro \
+    --entrypoint sh \
+    $toolkit_image \
+    -c 'rm -rf /out/out /out/token-issuer.config.ts && cp -r /src/out /out/out && cp /src/token-issuer.config.ts /out/token-issuer.config.ts'
+rm -rf "$token_issuer_build_dir"
 
 # Start the node container.
 docker run \
@@ -157,6 +191,103 @@ docker run \
     --rng-seed $rng_seed \
     --contract-address $(cat /tmp/contract_address.mn) \
     --new-authority-seed 1000000000000000000000000000000000000000000000000000000000000001
+
+# Deploy token-issuer and mint unshielded tokens to wallet 01 (the same funding
+# wallet used elsewhere in this script), so the pre-populated
+# chain also has a non-NIGHT unshielded token colour to query against.
+docker run \
+    --rm \
+    --network host \
+    -v toolkit_out:/out \
+    -v toolkit_out:/toolkit-js/token-issuer \
+    -e TOOLKIT_JS_PATH=/toolkit-js \
+    $toolkit_image \
+    generate-intent deploy \
+    --toolkit-js-path /toolkit-js \
+    --config /toolkit-js/token-issuer/token-issuer.config.ts \
+    --coin-public aa0d72bb77ea46f986a800c66d75c4e428a95bd7e1244f1ed059374e6266eb98 \
+    --network undeployed \
+    --output-intent /toolkit-js/token-issuer/deploy.intent \
+    --output-private-state /toolkit-js/token-issuer/deploy.private \
+    --output-zswap-state /toolkit-js/token-issuer/deploy.zswap
+
+docker run \
+    --rm \
+    --network host \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    generate-txs contract-custom \
+    --funding-seed "0000000000000000000000000000000000000000000000000000000000000001" \
+    --compiled-contract-dir /out/out \
+    --intent-file /out/deploy.intent \
+    --dest-file /out/token_issuer_deploy.mn
+
+docker run \
+    --rm \
+    --network host \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    generate-txs --src-file /out/token_issuer_deploy.mn --dest-url ws://127.0.0.1:9944 \
+    send
+
+docker run \
+    --rm \
+    --network host \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    contract-address --src-file /out/token_issuer_deploy.mn > /tmp/token_issuer_address.mn
+
+docker run \
+    --rm \
+    --network host \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    contract-state --contract-address $(cat /tmp/token_issuer_address.mn) \
+    --dest-file /out/token_issuer_state.bin
+
+token_issuer_recipient_address=$(docker run \
+    --rm \
+    $toolkit_image \
+    show-address --network undeployed --seed $token_issuer_mint_seed \
+    | jq -r .userAddress)
+
+docker run \
+    --rm \
+    --network host \
+    -v toolkit_out:/out \
+    -v toolkit_out:/toolkit-js/token-issuer \
+    -e TOOLKIT_JS_PATH=/toolkit-js \
+    $toolkit_image \
+    generate-intent circuit \
+    --toolkit-js-path /toolkit-js \
+    --config /toolkit-js/token-issuer/token-issuer.config.ts \
+    --contract-address $(cat /tmp/token_issuer_address.mn) \
+    --coin-public aa0d72bb77ea46f986a800c66d75c4e428a95bd7e1244f1ed059374e6266eb98 \
+    --input-onchain-state /toolkit-js/token-issuer/token_issuer_state.bin \
+    --input-private-state /toolkit-js/token-issuer/deploy.private \
+    --output-intent /toolkit-js/token-issuer/mint.intent \
+    --output-private-state /toolkit-js/token-issuer/mint.private \
+    --output-zswap-state /toolkit-js/token-issuer/mint.zswap \
+    mintUnshielded "{bytes:'0x$token_issuer_recipient_address'}" $token_issuer_mint_amount
+
+docker run \
+    --rm \
+    --network host \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    generate-txs contract-custom \
+    --funding-seed "0000000000000000000000000000000000000000000000000000000000000001" \
+    --compiled-contract-dir /out/out \
+    --intent-file /out/mint.intent \
+    --dest-file /out/token_issuer_mint.mn
+
+docker run \
+    --rm \
+    --network host \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    generate-txs --src-file /out/token_issuer_mint.mn --dest-url ws://127.0.0.1:9944 \
+    send
 
 # Wait for enough blocks to be finalized so that the pre-populated chain data
 # contains sufficient blocks for e2e tests (MAX_HEIGHT = 32 in e2e.rs).
