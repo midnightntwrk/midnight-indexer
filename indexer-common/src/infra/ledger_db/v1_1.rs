@@ -280,19 +280,21 @@ impl DB for LedgerDb {
     fn get_root_count(&self, key: &ArenaHash<Self::Hasher>) -> u32 {
         block_in_place(|| {
             Handle::current().block_on(async {
+                // Read the stored `count` column, not `count(1)`: the row-count aggregate
+                // is 0/1 (key is the primary key) and under-reports true counts >= 2, which
+                // storage-core's flush then drives negative. A missing row means count 0.
                 let query = indoc! {"
-                    SELECT count(1)
+                    SELECT count
                     FROM ledger_db_roots
                     WHERE key = $1
                 "};
 
-                let (count,) = sqlx::query_as::<_, (i64,)>(query)
+                sqlx::query_as::<_, (i64,)>(query)
                     .bind(key.0.as_slice())
-                    .fetch_one(&*self.pool)
+                    .fetch_optional(&*self.pool)
                     .await
-                    .unwrap_or_panic("cannot get root count");
-
-                count as u32
+                    .unwrap_or_panic("cannot get root count")
+                    .map_or(0, |(count,)| count as u32)
             })
         })
     }
@@ -450,5 +452,207 @@ where
             .execute(&mut **tx)
             .await
             .unwrap_or_panic("cannot set root count");
+    }
+}
+
+#[cfg(test)]
+fn arena_hash(bytes: [u8; 32]) -> ArenaHash<DefaultHasher> {
+    ArenaHash::deserialize(&mut bytes.as_slice(), 0).expect("32 bytes are an ArenaHash")
+}
+
+/// `get_root_count` must return the stored count, not the number of matching rows: `key` is the
+/// primary key, so a row-count aggregate can only ever be 0 or 1.
+///
+/// Shared by the sqlite and postgres suites rather than written twice: `LedgerDb` is one type under
+/// both features - only its pool field is feature-gated - so the assertions need neither generics
+/// nor a macro. Only acquiring the pool differs, and that stays in each suite.
+#[cfg(test)]
+fn assert_get_root_count_reads_stored_count(db: &mut LedgerDb) {
+    let key = arena_hash([0xaa; 32]);
+    let other_key = arena_hash([0xbb; 32]);
+
+    assert_eq!(db.get_root_count(&key), 0, "missing key is not a root");
+
+    db.set_root_count(key.clone(), 7);
+    db.set_root_count(other_key.clone(), 1);
+    assert_eq!(db.get_root_count(&key), 7);
+    assert_eq!(db.get_root_count(&other_key), 1);
+
+    db.set_root_count(key.clone(), 0);
+    assert_eq!(db.get_root_count(&key), 0, "count 0 deletes the row");
+    assert_eq!(db.get_root_count(&other_key), 1);
+}
+
+#[cfg(all(test, feature = "standalone"))]
+mod sqlite_tests {
+    use super::assert_get_root_count_reads_stored_count;
+    use crate::infra::{
+        ledger_db::v1_1::LedgerDb,
+        migrations::sqlite::run_for_ledger_db,
+        pool::sqlite::{Config, SqlitePool},
+    };
+    use anyhow::Context;
+    use indoc::indoc;
+    use midnight_storage_core_v1::{DefaultHasher, Storage, arena::ArenaHash};
+    use std::error::Error as StdError;
+
+    /// Number of times a root is persisted before it is unpersisted again; stands in for
+    /// concurrent references to one arena node (the ledger's delta-tracking `ChildRef` persists
+    /// its child on creation and unpersists it on drop). Any value >= 3 exposes the read bug.
+    const PERSISTS: u32 = 5;
+
+    async fn setup_pool() -> Result<SqlitePool, Box<dyn StdError>> {
+        let pool = SqlitePool::new(Config::default())
+            .await
+            .context("create sqlite pool")?;
+        run_for_ledger_db(&pool)
+            .await
+            .context("run ledger_db migrations")?;
+
+        Ok(pool)
+    }
+
+    /// The stored root count for `key`, read with plain SQL so assertions do not go through the
+    /// code under test. `None` means there is no row, i.e. the key is not a root.
+    async fn stored_root_count(
+        pool: &SqlitePool,
+        key: &ArenaHash<DefaultHasher>,
+    ) -> Result<Option<i64>, Box<dyn StdError>> {
+        let query = indoc! {"
+            SELECT count
+            FROM ledger_db_roots
+            WHERE key = $1
+        "};
+
+        let count = sqlx::query_as::<_, (i64,)>(query)
+            .bind(key.0.as_slice())
+            .fetch_optional(&**pool)
+            .await
+            .context("select stored root count")?
+            .map(|(count,)| count);
+
+        Ok(count)
+    }
+
+    /// `get_root_count` must return the stored count, not the number of matching rows: `key` is
+    /// the primary key, so a row-count aggregate can only ever be 0 or 1.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn get_root_count_returns_stored_count_not_row_count() -> Result<(), Box<dyn StdError>> {
+        let pool = setup_pool().await?;
+        let mut db = LedgerDb::new(pool);
+
+        assert_get_root_count_reads_stored_count(&mut db);
+
+        Ok(())
+    }
+
+    /// Root counts must accumulate across persists: storage-core's flush computes
+    /// `stored count + delta`, so an under-reading `get_root_count` writes back a count that is
+    /// too low. With a read saturating at 1 every persist stores `1 + 1`, and the count caps at
+    /// 2 however many blocks reference the root.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn repeated_persist_accumulates_stored_root_count() -> Result<(), Box<dyn StdError>> {
+        let pool = setup_pool().await?;
+        let storage = Storage::new(16, LedgerDb::new(pool.clone()));
+
+        let mut root = storage.alloc(42u32);
+        for _ in 0..PERSISTS {
+            root.persist();
+            storage.with_backend(|backend| backend.flush_all_changes_to_db());
+        }
+
+        assert_eq!(
+            stored_root_count(&pool, &root.hash()).await?,
+            Some(PERSISTS.into())
+        );
+
+        Ok(())
+    }
+
+    /// Balanced persist/unpersist must bring the root count back to zero. Under-read counts make
+    /// storage-core's flush compute a negative count and panic ("roots counts can't be negative"),
+    /// which is what takes the chain-indexer down once the ledger drops a shared reference.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn balanced_unpersist_returns_root_count_to_zero() -> Result<(), Box<dyn StdError>> {
+        let pool = setup_pool().await?;
+        let storage = Storage::new(16, LedgerDb::new(pool.clone()));
+
+        let mut root = storage.alloc(42u32);
+        for _ in 0..PERSISTS {
+            root.persist();
+            storage.with_backend(|backend| backend.flush_all_changes_to_db());
+        }
+
+        for _ in 0..PERSISTS {
+            root.unpersist();
+            storage.with_backend(|backend| backend.flush_all_changes_to_db());
+        }
+
+        assert_eq!(
+            stored_root_count(&pool, &root.hash()).await?,
+            None,
+            "no longer a root"
+        );
+
+        Ok(())
+    }
+}
+
+#[cfg(all(test, feature = "cloud"))]
+mod postgres_tests {
+    use super::assert_get_root_count_reads_stored_count;
+    use crate::infra::{
+        ledger_db::v1_1::LedgerDb,
+        migrations::postgres::run as run_migrations,
+        pool::{self, postgres::PostgresPool},
+    };
+    use anyhow::Context;
+    use sqlx::postgres::PgSslMode;
+    use std::{error::Error as StdError, time::Duration};
+    use testcontainers::{ImageExt, runners::AsyncRunner};
+    use testcontainers_modules::postgres::Postgres;
+
+    async fn setup_pool()
+    -> Result<(testcontainers::ContainerAsync<Postgres>, PostgresPool), Box<dyn StdError>> {
+        let container = Postgres::default()
+            .with_db_name("indexer")
+            .with_user("indexer")
+            .with_password(env!("APP__INFRA__STORAGE__PASSWORD"))
+            .with_tag("17.1-alpine")
+            .start()
+            .await
+            .context("start Postgres container")?;
+        let port = container
+            .get_host_port_ipv4(5432)
+            .await
+            .context("get Postgres port")?;
+
+        let config = pool::postgres::Config {
+            host: "localhost".to_string(),
+            port,
+            dbname: "indexer".to_string(),
+            user: "indexer".to_string(),
+            password: env!("APP__INFRA__STORAGE__PASSWORD").into(),
+            sslmode: PgSslMode::Prefer,
+            max_connections: 10,
+            idle_timeout: Duration::from_secs(60),
+            max_lifetime: Duration::from_secs(5 * 60),
+        };
+        let pool = PostgresPool::new(config).await?;
+        run_migrations(&pool).await.context("run migrations")?;
+
+        Ok((container, pool))
+    }
+
+    /// See the standalone counterpart: `key` is the primary key, so a row-count aggregate can
+    /// only ever be 0 or 1, never the stored count.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn get_root_count_reads_the_stored_count() -> Result<(), Box<dyn StdError>> {
+        let (_container, pool) = setup_pool().await?;
+        let mut db = LedgerDb::new(pool);
+
+        assert_get_root_count_reads_stored_count(&mut db);
+
+        Ok(())
     }
 }
