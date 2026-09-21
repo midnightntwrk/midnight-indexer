@@ -6,7 +6,11 @@ set -euxo pipefail
 token_issuer_build_dir=""
 cleanup() {
     docker rm -f node >/dev/null 2>&1 || true
-    [ -n "$token_issuer_build_dir" ] && rm -rf "$token_issuer_build_dir"
+    # `[ -n ... ] && rm` as the trap's last command would make a successful run
+    # exit 1 whenever the build dir was never set.
+    if [ -n "$token_issuer_build_dir" ]; then
+        rm -rf "$token_issuer_build_dir"
+    fi
 }
 
 # Set up trap to cleanup on exit.
@@ -55,9 +59,9 @@ if [ -z "${GITHUB_TOKEN:-}" ]; then
     unset GITHUB_TOKEN
 fi
 
-# Resolve the release-asset target triple compactc ships for this host, for
-# the direct-download fallback below.
-compactc_target_triple() {
+# The target triple compactc's release ASSETS are named with, for the
+# direct-download fallback below.
+compactc_asset_triple() {
     case "$(uname -s)-$(uname -m)" in
         Linux-x86_64) echo "x86_64-unknown-linux-musl" ;;
         Linux-aarch64|Linux-arm64) echo "aarch64-unknown-linux-musl" ;;
@@ -70,11 +74,30 @@ compactc_target_triple() {
     esac
 }
 
+# The directory name the `compact` CLI resolves a compiler under, i.e.
+# versions/<version>/<triple>/compactc. It matches the asset triple everywhere
+# except Intel macOS, where the asset ships as x86_64-darwin but the CLI's
+# Target type renders x86_64-apple-darwin -- unpacking under the asset name
+# there installs a compiler the CLI can never find.
+compactc_install_triple() {
+    case "$(uname -s)-$(uname -m)" in
+        Darwin-x86_64) echo "x86_64-apple-darwin" ;;
+        *) compactc_asset_triple ;;
+    esac
+}
+
 # Make sure compactc $compactc_version is installed, fetching it if not.
 ensure_compactc() {
     local version="$1"
-    if compact list --installed 2>/dev/null | grep -qx "  $version" || \
-       compact list --installed 2>/dev/null | grep -qx "→ $version"; then
+    local install_triple dest
+    install_triple="$(compactc_install_triple)"
+    dest="$HOME/.compact/versions/$version/$install_triple"
+    # Mirror the CLI's own definition of "installed" -- the compiler binary is
+    # present -- rather than parsing `compact list --installed`, whose output
+    # only indents entries when a default compiler is set and marks the current
+    # one with a configurable icon, so a grep on it misses exactly the machines
+    # this fallback has just provisioned.
+    if [ -x "$dest/compactc" ]; then
         return
     fi
     if compact update "$version" --no-set-default >/dev/null 2>&1; then
@@ -84,21 +107,40 @@ ensure_compactc() {
     # among them, needed for ledger v9) were never cut as a final release --
     # only as release-candidate tags (compactc-v0.33.0-rc.0/1/2) -- so pass the
     # exact upstream tag suffix as COMPACTC_VERSION (e.g. "0.33.0-rc.2") and
-    # this fetches it straight from the compiler's real home, LFDT-Minokawa/compact
-    # (NOT midnightntwrk -- that org has no compact repo).
-    echo "compact CLI has no final release '$version'; fetching compactc-v$version from LFDT-Minokawa/compact directly" >&2
+    # this fetches it straight from the compiler's upstream home,
+    # LFDT-Minokawa/compact, which is where these tags are actually published
+    # (midnightntwrk/compact exists, but only mirrors final releases).
+    echo "compact CLI has no final release '$version'; fetching it from LFDT-Minokawa/compact directly" >&2
     if ! command -v gh >/dev/null 2>&1; then
         echo "Error: the 'gh' CLI is required to fetch compactc $version, which has no final release" >&2
         exit 1
     fi
-    local triple dest tmp_zip_dir
-    triple="$(compactc_target_triple)"
-    dest="$HOME/.compact/versions/$version/$triple"
+    # `gh release download` hits the API as a user, so it fails on an
+    # unauthenticated host even for a public repo.
+    if ! gh auth status >/dev/null 2>&1; then
+        echo "Error: 'gh' is not authenticated; run 'gh auth login' or export GH_TOKEN to fetch compactc $version" >&2
+        exit 1
+    fi
+    if ! command -v unzip >/dev/null 2>&1; then
+        echo "Error: 'unzip' is required to unpack the compactc $version release asset" >&2
+        exit 1
+    fi
+    local asset_triple tmp_zip_dir tag found_tag
+    asset_triple="$(compactc_asset_triple)"
     tmp_zip_dir="$(mktemp -d)"
-    if ! gh release download "compactc-v$version" --repo LFDT-Minokawa/compact \
-        -p "*${triple}.zip" -O "$tmp_zip_dir/compactc.zip"; then
+    found_tag=""
+    # Releases from 0.31.0 on are tagged compactc-v<version>; older ones
+    # (0.30.0-rc.*) are tagged plain v<version>.
+    for tag in "compactc-v$version" "v$version"; do
+        if gh release download "$tag" --repo LFDT-Minokawa/compact \
+            -p "*${asset_triple}.zip" -O "$tmp_zip_dir/compactc.zip" --clobber 2>/dev/null; then
+            found_tag="$tag"
+            break
+        fi
+    done
+    if [ -z "$found_tag" ]; then
         rm -rf "$tmp_zip_dir"
-        echo "Error: no compactc-v$version release found for $triple at LFDT-Minokawa/compact" >&2
+        echo "Error: no compactc release for $asset_triple at LFDT-Minokawa/compact under tag compactc-v$version or v$version" >&2
         exit 1
     fi
     mkdir -p "$dest"
