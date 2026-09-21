@@ -304,7 +304,8 @@ impl LedgerState {
         // guaranteed transcript in logical segment 0. Retain an action if either execution phase
         // actually applied; Deploy and Update only execute in their physical segment. This runs
         // before any state is captured below, so a rolled-back action neither gets a key nor
-        // reaches the API, which previously reported it with no indication it never took effect.
+        // reaches the API. A segment with no result is an error rather than "not applied": the
+        // ledger reports every intent segment, so a missing one means the result shape changed.
         retain_applied_contract_actions(&mut transaction.contract_actions, &transaction_result)
             .map_err(|segment| {
                 Error::MissingContractActionSegmentResult(transaction.hash, segment)
