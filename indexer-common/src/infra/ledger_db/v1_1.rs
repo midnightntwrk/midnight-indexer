@@ -493,7 +493,7 @@ mod sqlite_tests {
     };
     use anyhow::Context;
     use indoc::indoc;
-    use midnight_storage_core_v1::{DefaultHasher, Storage, arena::ArenaHash};
+    use midnight_storage_core_v1::{DefaultHasher, Storage, arena::ArenaHash, db::DB};
     use std::error::Error as StdError;
 
     /// Number of times a root is persisted before it is unpersisted again; stands in for
@@ -592,6 +592,53 @@ mod sqlite_tests {
             stored_root_count(&pool, &root.hash()).await?,
             None,
             "no longer a root"
+        );
+
+        Ok(())
+    }
+
+    /// A DB written by the old read holds under-counted roots: a root referenced three times was
+    /// stored as 2. Restarting on the fixed read must not panic on such a row. Every reference the
+    /// new process drops was persisted by the same process first (the ledger's `ChildRef` persists
+    /// on load and unpersists on drop), so the count only ever returns to the seeded value.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn under_counted_root_from_old_read_survives_restart() -> Result<(), Box<dyn StdError>> {
+        const CAPPED_COUNT: u32 = 2;
+        const LIVE_REFERENCES: u32 = 3;
+
+        let pool = setup_pool().await?;
+
+        // Old process: the node reaches the DB with its count capped at 2.
+        let hash = {
+            let storage = Storage::new(16, LedgerDb::new(pool.clone()));
+            let mut root = storage.alloc(42u32);
+            root.persist();
+            storage.with_backend(|backend| backend.flush_all_changes_to_db());
+            root.hash()
+        };
+        LedgerDb::new(pool.clone()).set_root_count(hash.clone(), CAPPED_COUNT);
+
+        // New process on the fixed read: each live reference is loaded (persisted) before it is
+        // dropped (unpersisted).
+        let storage = Storage::new(16, LedgerDb::new(pool.clone()));
+        let mut root = storage.alloc(42u32);
+        for _ in 0..LIVE_REFERENCES {
+            root.persist();
+            storage.with_backend(|backend| backend.flush_all_changes_to_db());
+        }
+        assert_eq!(
+            stored_root_count(&pool, &hash).await?,
+            Some((CAPPED_COUNT + LIVE_REFERENCES).into())
+        );
+
+        for _ in 0..LIVE_REFERENCES {
+            root.unpersist();
+            storage.with_backend(|backend| backend.flush_all_changes_to_db());
+        }
+        assert_eq!(
+            stored_root_count(&pool, &hash).await?,
+            Some(CAPPED_COUNT.into()),
+            "the stale under-count survives as a harmless over-count"
         );
 
         Ok(())
