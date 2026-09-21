@@ -19,6 +19,11 @@ import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
 import log from '@utils/logging/logger';
 import dataProvider from '@utils/testdata-provider';
+import {
+  COMPACT_COMPILER_VERSION,
+  compileCompactContract,
+  compiledRuntimeVersion,
+} from '@utils/compact/compact-compiler';
 import { env } from 'environment/model';
 import { getTransactionByHashWithRetry } from './test-utils';
 import {
@@ -29,15 +34,21 @@ import {
 } from '@utils/toolkit/toolkit-wrapper';
 import type { RegularTransaction } from '@utils/indexer/indexer-types';
 
-const TOOLKIT_WRAPPER_TIMEOUT = 120_000; // 2 minutes
+// First use also builds the Compact toolchain image and pulls the toolkit image.
+const SETUP_TIMEOUT = 900_000; // 15 minutes
 const CONTRACT_ACTION_TIMEOUT = 600_000; // 10 minutes — deploy plus four proven calls
 const TEST_TIMEOUT = 60_000; // 1 minute
 
-/** Compiled Compact fixture; see its README for why it is shaped the way it is. */
+/**
+ * Compact fixture source; see its README for why the contract is shaped the way
+ * it is. Only the `.compact` source and its toolkit-js config are committed —
+ * the compiled output is produced on the fly by {@link compileCompactContract}.
+ */
 const SEGMENT_SPLIT_DIR = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '../../data/contracts/segment-split',
 );
+const SEGMENT_SPLIT_SOURCE = 'segment-split.compact';
 const SEGMENT_SPLIT: CustomContractSpec = { configFile: 'segment-split.config.ts' };
 
 /** Normalize hash for comparison (indexer may return with or without 0x prefix). */
@@ -76,9 +87,24 @@ describe
 
     beforeAll(async () => {
       fundingSeed = dataProvider.getFundingSeed();
-      toolkit = new ToolkitWrapper({ customContractDir: SEGMENT_SPLIT_DIR });
+
+      const compiledDir = await compileCompactContract({
+        sourceDir: SEGMENT_SPLIT_DIR,
+        sourceFile: SEGMENT_SPLIT_SOURCE,
+        stage: [SEGMENT_SPLIT.configFile],
+      });
+      const requiredRuntime = compiledRuntimeVersion(compiledDir);
+      log.info(
+        `segment-split compiled by compactc ${COMPACT_COMPILER_VERSION} ` +
+          `for compact-runtime ${requiredRuntime ?? 'unknown'}`,
+      );
+
+      toolkit = new ToolkitWrapper({ customContractDir: compiledDir });
       await toolkit.start();
-    }, TOOLKIT_WRAPPER_TIMEOUT);
+      if (requiredRuntime) {
+        await toolkit.assertCompactRuntimeSupported(requiredRuntime);
+      }
+    }, SETUP_TIMEOUT);
 
     afterAll(async () => {
       await toolkit.stop();
