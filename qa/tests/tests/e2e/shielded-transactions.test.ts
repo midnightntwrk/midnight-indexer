@@ -35,6 +35,7 @@ import {
 import { IndexerWsClient } from '@utils/indexer/websocket-client';
 import { EventCoordinator } from '@utils/event-coordinator';
 import { collectValidDustLedgerEvents } from 'tests/shared/dust-ledger-utils';
+import { deriveAddresses } from '@utils/moth/moth-addresses';
 
 /**
  * Subscribe to shielded transaction events for an open wallet session and resolve `true` as soon
@@ -104,7 +105,7 @@ describe('shielded transactions', () => {
     await toolkit.start();
 
     // Derive shielded addresses from seeds
-    destinationAddress = (await toolkit.showAddress(destinationSeed)).shielded;
+    destinationAddress = (await deriveAddresses(destinationSeed, toolkit)).shielded;
 
     const beforeDustEvents = await collectValidDustLedgerEvents(
       indexerWsClient,
