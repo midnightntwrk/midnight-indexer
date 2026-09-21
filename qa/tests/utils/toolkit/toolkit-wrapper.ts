@@ -126,7 +126,6 @@ const TOOLKIT_JS_PATH = '/toolkit-js';
  */
 const CUSTOM_CONTRACT_MOUNT = `${TOOLKIT_JS_PATH}/test/custom-contract`;
 const DEFAULT_MANAGED_DIR = 'managed';
-const CUSTOM_PRIVATE_STATE_FILE = 'custom_private.state';
 const DEFAULT_COIN_PUBLIC_SEED = '0000000000000000000000000000000000000000000000000000000000000001';
 const DEFAULT_RNG_SEED = '0000000000000000000000000000000000000000000000000000000000000037';
 // Default coin/funding seed used by the toolkit minter e2e (matches the node-repo
@@ -134,6 +133,10 @@ const DEFAULT_RNG_SEED = '000000000000000000000000000000000000000000000000000000
 const DEFAULT_FUNDING_SEED = '0000000000000000000000000000000000000000000000000000000000000001';
 const DEFAULT_NEW_AUTHORITY_SEED =
   '1000000000000000000000000000000000000000000000000000000000000001';
+
+/** Strip terminal colour codes, so parsing never depends on whether the toolkit colorizes. */
+// eslint-disable-next-line no-control-regex
+const stripAnsi = (value: string): string => value.replace(/\x1b\[[0-9;]*m/g, '');
 
 // Human-readable description of the schema `getDustBalance` accepts, reused in its error
 // messages so a mismatch reports expected-vs-actual rather than a cryptic "structure not found".
@@ -207,8 +210,6 @@ class ToolkitWrapper {
   }
 
   private parseTransactionOutput(output: string): ToolkitTransactionResult {
-    // eslint-disable-next-line no-control-regex
-    const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
     const lines = stripAnsi(output).trim().split('\n');
     const jsonLines = lines.filter((line) => line.trim().startsWith('{'));
 
@@ -1284,11 +1285,19 @@ class ToolkitWrapper {
   ): Promise<DeployContractResult> {
     this.assertCustomContractMounted();
 
-    const coinPublicSeed = fundingSeed ?? DEFAULT_COIN_PUBLIC_SEED;
-    const { coinPublic } = await this.showAddress(coinPublicSeed);
+    // Pinned, not derived from `fundingSeed` — same rule as `deployContract`. A
+    // compiled contract's toolkit-js config hard-codes the coin public key it
+    // was built for, so deriving this from whatever seed happens to be funding
+    // the deployment would silently disagree with the fixture the moment
+    // FUNDING_SEED_<ENV> is set.
+    const { coinPublic } = await this.showAddress(DEFAULT_COIN_PUBLIC_SEED);
 
-    const intentFile = '/out/custom_deploy_intent.mn';
-    const deployTxFileName = 'custom_deploy_tx.mn';
+    // Namespaced per contract so two custom contracts driven by one wrapper
+    // never overwrite each other's intent, transaction or private state.
+    const prefix = this.customFilePrefix(contract);
+    const intentFile = `/out/${prefix}_deploy_intent.mn`;
+    const deployTxFileName = `${prefix}_deploy_tx.mn`;
+    const privateStateFile = this.customPrivateStateFile(contract);
 
     await this.execToolkit(
       [
@@ -1306,15 +1315,15 @@ class ToolkitWrapper {
         '--output-intent',
         intentFile,
         '--output-private-state',
-        `/out/${CUSTOM_PRIVATE_STATE_FILE}`,
+        `/out/${privateStateFile}`,
         '--output-zswap-state',
-        '/out/custom_deploy_zswap.state',
+        `/out/${prefix}_deploy_zswap.state`,
         ...constructorArgs,
       ],
       'custom contract deploy intent generation failed',
     );
 
-    this.assertOutputFile(CUSTOM_PRIVATE_STATE_FILE, 'custom contract deploy intent');
+    this.assertOutputFile(privateStateFile, 'custom contract deploy intent');
 
     await this.execToolkit(
       [
@@ -1322,7 +1331,7 @@ class ToolkitWrapper {
         '--intent-file',
         intentFile,
         '--zswap-state-file',
-        '/out/custom_deploy_zswap.state',
+        `/out/${prefix}_deploy_zswap.state`,
         ...(fundingSeed != null && fundingSeed !== '' ? ['--funding-seed', fundingSeed] : []),
       ],
       'custom contract deploy tx generation failed',
@@ -1413,9 +1422,10 @@ class ToolkitWrapper {
       throw new Error('Deployment result is missing contract-address-untagged');
     }
 
-    const intentFile = `/out/custom_${label}_intent.mn`;
-    const zswapStateFile = `/out/custom_${label}_zswap.state`;
-    const txFileName = `custom_${label}_tx.mn`;
+    const prefix = this.customFilePrefix(contract);
+    const intentFile = `/out/${prefix}_${label}_intent.mn`;
+    const zswapStateFile = `/out/${prefix}_${label}_zswap.state`;
+    const txFileName = `${prefix}_${label}_tx.mn`;
 
     await this.execToolkit(
       [
@@ -1437,11 +1447,17 @@ class ToolkitWrapper {
         '--input-onchain-state',
         onchainStateFile,
         '--input-private-state',
-        `/out/${CUSTOM_PRIVATE_STATE_FILE}`,
+        this.customPrivateStateFilePath(contract),
         '--output-intent',
         intentFile,
+        // Every call reads the deploy-time private state and writes its own
+        // successor, which nothing then consumes — the private-state chain is
+        // deliberately not carried forward. That is only sound for a contract
+        // with vacant witnesses, like the fixtures this path currently drives;
+        // a contract with real witness state would need the output of one call
+        // fed in as the input of the next.
         '--output-private-state',
-        `/out/custom_${label}_priv.state`,
+        `/out/${prefix}_${label}_priv.state`,
         '--output-zswap-state',
         zswapStateFile,
         circuitId,
@@ -1503,10 +1519,28 @@ class ToolkitWrapper {
    * True when the decoded transaction carries a non-empty guaranteed transcript,
    * i.e. the ledger's partition algorithm kept a guaranteed prefix for the call.
    *
+   * Throws when the field is absent altogether. A caller asserting "no
+   * guaranteed transcript" cannot tell a genuine `None` from output this
+   * function failed to understand, so an unrecognised shape has to be loud:
+   * silently returning `false` would let that assertion pass for the wrong
+   * reason.
+   *
    * @param decodedTransaction - Output of {@link showTransaction}.
+   * @throws Error if the output carries no `guaranteed_transcript` field.
    */
   static hasGuaranteedTranscript(decodedTransaction: string): boolean {
-    return /guaranteed_transcript:\s*Some\(/.test(decodedTransaction);
+    // `Some()` is matched ahead of `Some(` so an empty transcript is not read as a present one.
+    const match = /guaranteed_transcript:\s*(None|Some\(\s*\)|Some\()/.exec(
+      stripAnsi(decodedTransaction),
+    );
+    if (!match) {
+      throw new Error(
+        'show-transaction output carries no guaranteed_transcript field. The toolkit output ' +
+          'format has changed; this check would otherwise report "no guaranteed transcript" ' +
+          'for every call.',
+      );
+    }
+    return match[1] === 'Some(';
   }
 
   private assertCustomContractMounted(): void {
@@ -1516,6 +1550,22 @@ class ToolkitWrapper {
           'custom-contract commands need the compiled contract mounted into the toolkit-js tree.',
       );
     }
+  }
+
+  /**
+   * A filename prefix unique to one contract, derived from its config file, so
+   * files two contracts write under `/out` never collide.
+   */
+  private customFilePrefix(contract: CustomContractSpec): string {
+    return contract.configFile.replace(/\.config\.ts$/, '').replace(/[^A-Za-z0-9_-]/g, '_');
+  }
+
+  private customPrivateStateFile(contract: CustomContractSpec): string {
+    return `${this.customFilePrefix(contract)}_private.state`;
+  }
+
+  private customPrivateStateFilePath(contract: CustomContractSpec): string {
+    return `/out/${this.customPrivateStateFile(contract)}`;
   }
 
   /**

@@ -13,7 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { resolve } from 'node:path';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
 import log from '@utils/logging/logger';
@@ -25,7 +26,6 @@ import {
   type CustomContractCall,
   type CustomContractSpec,
   type DeployContractResult,
-  type ToolkitTransactionResult,
 } from '@utils/toolkit/toolkit-wrapper';
 import type { RegularTransaction } from '@utils/indexer/indexer-types';
 
@@ -34,7 +34,10 @@ const CONTRACT_ACTION_TIMEOUT = 600_000; // 10 minutes — deploy plus four prov
 const TEST_TIMEOUT = 60_000; // 1 minute
 
 /** Compiled Compact fixture; see its README for why it is shaped the way it is. */
-const SEGMENT_SPLIT_DIR = resolve('data/contracts/segment-split');
+const SEGMENT_SPLIT_DIR = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../../data/contracts/segment-split',
+);
 const SEGMENT_SPLIT: CustomContractSpec = { configFile: 'segment-split.config.ts' };
 
 /** Normalize hash for comparison (indexer may return with or without 0x prefix). */
@@ -49,10 +52,16 @@ function sameHash(a: string | undefined, b: string | undefined): boolean {
  * runs it.
  */
 interface StalePair {
-  applied: ToolkitTransactionResult;
-  stale: ToolkitTransactionResult;
   /** The stale call decoded by the toolkit itself, independently of the indexer. */
   staleDecoded: string;
+  /**
+   * The stale transaction as the indexer reports it, fetched once up front.
+   * Keeping the fetch out of the tests means an indexing failure surfaces as a
+   * broken fixture rather than as an assertion outcome — which matters most
+   * for the `test.fails` case, where any thrown error would otherwise read as
+   * the expected failure.
+   */
+  indexed: RegularTransaction;
 }
 
 // Undeployed only: the toolkit rebuilds ledger state from genesis on every call, which on a
@@ -110,12 +119,22 @@ describe
         });
 
       const applied = await toolkit.sendCustomContractCall(await build('applied'));
+      // Without this first call landing, the second one is not stale: it
+      // succeeds outright and the scenario under test never happens. Checked
+      // here so that shows up as a broken fixture, not as a puzzling
+      // assertion failure pointing at the indexer.
+      if (!applied.blockHash) {
+        throw new Error(
+          `${label}: the first call (tx ${applied.txHash}) never reached a block, so the ` +
+            'second call would not be stale',
+        );
+      }
 
       const staleCall = await build('stale');
       const staleDecoded = await toolkit.showTransaction(staleCall);
       const stale = await toolkit.sendCustomContractCall(staleCall);
 
-      return { applied, stale, staleDecoded };
+      return { staleDecoded, indexed: await indexedTransaction(stale.txHash) };
     }
 
     /** Fetch the indexed transaction for a hash, failing loudly if it never appears. */
@@ -174,8 +193,7 @@ describe
         async (context: TestContext) => {
           context.task!.meta.custom = { labels: ['Query', 'Transaction', 'PartialSuccess'] };
 
-          const transaction = await indexedTransaction(pair.stale.txHash);
-          const result = transaction.transactionResult;
+          const result = pair.indexed.transactionResult;
 
           expect(result?.status).toBe('PARTIAL_SUCCESS');
           expect(result?.segments?.find((segment) => segment.id === 0)?.success).toBe(true);
@@ -206,8 +224,7 @@ describe
             labels: ['Query', 'Transaction', 'ContractCall', 'PartialSuccess', 'Regression'],
           };
 
-          const transaction = await indexedTransaction(pair.stale.txHash);
-          const actions = transaction.contractActions ?? [];
+          const actions = pair.indexed.contractActions ?? [];
 
           expect(
             actions.some((action) => sameHash(action.address, contractAddress)),
@@ -258,9 +275,7 @@ describe
         async (context: TestContext) => {
           context.task!.meta.custom = { labels: ['Query', 'Transaction', 'PartialSuccess'] };
 
-          const transaction = await indexedTransaction(pair.stale.txHash);
-
-          expect(transaction.transactionResult?.status).toBe('PARTIAL_SUCCESS');
+          expect(pair.indexed.transactionResult?.status).toBe('PARTIAL_SUCCESS');
         },
         TEST_TIMEOUT,
       );
@@ -288,9 +303,7 @@ describe
             labels: ['Query', 'Transaction', 'ContractCall', 'PartialSuccess'],
           };
 
-          const transaction = await indexedTransaction(pair.stale.txHash);
-
-          const actions = transaction.contractActions ?? [];
+          const actions = pair.indexed.contractActions ?? [];
           expect(
             actions.some((action) => sameHash(action.address, contractAddress)),
             'no execution phase of this Call applied, so the indexer must not report it',
