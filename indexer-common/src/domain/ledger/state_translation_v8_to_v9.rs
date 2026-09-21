@@ -17,7 +17,7 @@
 //!
 //! The translation table is the ledger team's
 //! [`v8_to_v9_state_translation::StateTranslationTable`], pinned by rev to the
-//! exact crate `node-2.1.0-beta.1` migrates with (`midnight-node` PR #2054,
+//! exact crate `node-2.1.0-rc.1` migrates with (`midnight-node` PR #2054,
 //! backported as #2060, replaced the node's own copy with this crate). This
 //! module used to carry a re-ported copy of that table; it now depends on the
 //! upstream crate directly, so there is one implementation rather than two to
@@ -35,8 +35,9 @@
 //! compares it against the node's value, so the indexer and the node MUST
 //! translate with the same table compiled against the same ledger crates. That
 //! holds today: both pin this crate at the same rev and patch every v9-side
-//! crate to `ledger-9.1.0.0-rc.4`, with `midnight-storage-core`'s `layout-v2` /
-//! `gc-v1` features matching. Any drift there breaks the boundary permanently.
+//! crate to the same per-crate ledger 9.1.0.0-rc.5 tags, with
+//! `midnight-storage-core`'s `layout-v2` / `gc-v1` features matching. Any drift
+//! there breaks the boundary permanently.
 //!
 //! When the ledger rc moves, re-check in this order: bump the workspace
 //! `[patch.crates-io]` tags, bump this crate's rev to whatever the matching node
