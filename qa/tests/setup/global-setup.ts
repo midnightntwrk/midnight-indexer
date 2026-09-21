@@ -20,6 +20,7 @@ import { ToolkitWrapper } from '../utils/toolkit/toolkit-wrapper';
 import { startCacheProgressReporter, CacheProgressReporter } from '../utils/toolkit/toolkit-cache';
 import { env } from '../environment/model';
 import dataProvider from '../utils/testdata-provider';
+import { warmMothWallet } from '../utils/moth/moth-backend';
 
 let warmupToolkit: ToolkitWrapper | undefined;
 
@@ -114,6 +115,18 @@ export async function setup() {
 
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
     console.log(`[SETUP] Toolkit cache warmup complete (${duration}s)`);
+
+    // The moth transaction backend keeps its own wallet cache. Warm it here,
+    // where there is no test timeout: a first sync walks the chain, while a
+    // warm one is a restore. Only when the backend is actually selected.
+    if (env.getTxBackend() === 'moth') {
+      const mothSeed = dataProvider.getFundingSeed();
+      console.log('[SETUP] Warming moth wallet cache (first sync can take a while)...');
+      const mothStart = Date.now();
+      await warmMothWallet(mothSeed);
+      const mothDuration = ((Date.now() - mothStart) / 1000).toFixed(2);
+      console.log(`[SETUP] moth wallet cache warm (${mothDuration}s)`);
+    }
   } catch (error) {
     console.error('[SETUP] Failed to warmup toolkit cache:', error);
     throw error;
