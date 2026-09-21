@@ -1579,6 +1579,8 @@ mod contract_event_correlation_tests {
     fn call_action(address: &[u8], entry_point: &str) -> ContractAction {
         ContractAction {
             address: bv(address),
+            segment: 0,
+            has_guaranteed_transcript: false,
             state_key: None,
             zswap_state_key: None,
             extracted_balances: vec![],
@@ -1591,6 +1593,8 @@ mod contract_event_correlation_tests {
     fn deploy_action(address: &[u8]) -> ContractAction {
         ContractAction {
             address: bv(address),
+            segment: 0,
+            has_guaranteed_transcript: false,
             state_key: None,
             zswap_state_key: None,
             extracted_balances: vec![],

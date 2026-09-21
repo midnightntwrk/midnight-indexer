@@ -28,6 +28,13 @@ use indexer_common::domain::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContractAction {
     pub address: SerializedContractAddress,
+
+    /// Physical segment containing this action.
+    pub segment: u16,
+
+    /// Whether this Call also has work in guaranteed logical segment 0.
+    pub has_guaranteed_transcript: bool,
+
     pub state_key: Option<SerializedContractStateKey>,
     pub zswap_state_key: Option<SerializedZswapStateKey>,
     pub extracted_balances: Vec<ContractBalance>,
@@ -38,6 +45,8 @@ impl From<indexer_common::domain::ContractAction> for ContractAction {
     fn from(contract_action: indexer_common::domain::ContractAction) -> Self {
         Self {
             address: contract_action.address,
+            segment: contract_action.segment,
+            has_guaranteed_transcript: contract_action.has_guaranteed_transcript,
             state_key: Default::default(),
             zswap_state_key: Default::default(),
             extracted_balances: Default::default(),

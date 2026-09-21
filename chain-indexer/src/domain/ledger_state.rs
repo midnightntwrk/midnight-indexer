@@ -11,12 +11,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{RegularTransaction, SystemTransaction, Transaction, node};
+use crate::domain::{ContractAction, RegularTransaction, SystemTransaction, Transaction, node};
 use derive_more::derive::{Deref, From};
 use fastrace::trace;
 use indexer_common::domain::{
     ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, BlockHash, LedgerVersion,
     NetworkId, SerializedContractAddress, SerializedLedgerStateKey, TransactionHash,
+    TransactionResult,
     ledger::{LedgerParameters, RootCountRepair},
 };
 use std::{
@@ -299,6 +300,16 @@ impl LedgerState {
             )
             .map_err(|error| Error::ApplyRegularTransaction(Some(transaction.hash), error))?;
 
+        // Contract actions are owned by a physical intent segment, but Calls may also execute a
+        // guaranteed transcript in logical segment 0. Retain an action if either execution phase
+        // actually applied; Deploy and Update only execute in their physical segment. This runs
+        // before any state is captured below, so a rolled-back action neither gets a key nor
+        // reaches the API, which previously reported it with no indication it never took effect.
+        retain_applied_contract_actions(&mut transaction.contract_actions, &transaction_result)
+            .map_err(|segment| {
+                Error::MissingContractActionSegmentResult(transaction.hash, segment)
+            })?;
+
         // Update transaction.
         transaction.transaction_result = transaction_result;
         transaction.zswap_merkle_tree_root = self
@@ -408,6 +419,9 @@ pub enum Error {
         #[source] indexer_common::domain::ledger::Error,
     ),
 
+    #[error("transaction {0} has a contract action in segment {1}, but no result for that segment")]
+    MissingContractActionSegmentResult(TransactionHash, u16),
+
     #[error("cannot get contract balances for transaction {0} and contract address {1}")]
     GetContractBalances(
         TransactionHash,
@@ -419,4 +433,116 @@ pub enum Error {
 fn stringify_hash(hash: &Option<TransactionHash>) -> String {
     hash.map(|hash| hash.to_string())
         .unwrap_or_else(|| "<hash unavailable>".to_string())
+}
+
+/// Keep contract actions with at least one execution phase which applied to the ledger state.
+fn retain_applied_contract_actions(
+    contract_actions: &mut Vec<ContractAction>,
+    transaction_result: &TransactionResult,
+) -> Result<(), u16> {
+    // Validate before mutating so an inconsistent result never leaves a partially filtered list.
+    for action in contract_actions.iter() {
+        if transaction_result
+            .segment_succeeded(action.segment)
+            .is_none()
+        {
+            return Err(action.segment);
+        }
+        if action.has_guaranteed_transcript && transaction_result.segment_succeeded(0).is_none() {
+            return Err(0);
+        }
+    }
+
+    contract_actions.retain(|action| {
+        transaction_result
+            .segment_succeeded(action.segment)
+            .expect("segment result validated above")
+            || (action.has_guaranteed_transcript
+                && transaction_result
+                    .segment_succeeded(0)
+                    .expect("guaranteed-segment result validated above"))
+    });
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod contract_action_tests {
+    use super::retain_applied_contract_actions;
+    use crate::domain::ContractAction;
+    use indexer_common::domain::{ContractAttributes, TransactionResult};
+
+    #[test]
+    fn retains_only_contract_actions_with_an_applied_execution_phase() {
+        let actions = || {
+            vec![
+                action(7, ContractAttributes::Deploy, false),
+                action(8, call(), false),
+                action(9, call(), true),
+                action(u16::MAX, ContractAttributes::Update, false),
+            ]
+        };
+
+        let mut all_succeeded = actions();
+        retain_applied_contract_actions(&mut all_succeeded, &TransactionResult::Success).unwrap();
+        assert_eq!(segments(&all_succeeded), vec![7, 8, 9, u16::MAX]);
+
+        let mut all_failed = actions();
+        retain_applied_contract_actions(&mut all_failed, &TransactionResult::Failure).unwrap();
+        assert!(all_failed.is_empty());
+
+        let mut partial = actions();
+        retain_applied_contract_actions(
+            &mut partial,
+            &TransactionResult::PartialSuccess(vec![
+                (0, true),
+                (7, false),
+                (8, false),
+                (9, false),
+                (u16::MAX, true),
+            ]),
+        )
+        .unwrap();
+
+        // Regression assertion: 4.3.301 incorrectly removed segment 9 solely because its physical
+        // segment failed, despite its guaranteed transcript having executed in segment 0.
+        assert_eq!(segments(&partial), vec![9, u16::MAX]);
+
+        let mut inconsistent = vec![action(9, call(), true)];
+        let original = inconsistent.clone();
+        assert_eq!(
+            retain_applied_contract_actions(
+                &mut inconsistent,
+                &TransactionResult::PartialSuccess(vec![(0, true)]),
+            ),
+            Err(9)
+        );
+        assert_eq!(inconsistent, original);
+    }
+
+    fn call() -> ContractAttributes {
+        ContractAttributes::Call {
+            entry_point: "entry-point".to_owned(),
+        }
+    }
+
+    fn action(
+        segment: u16,
+        attributes: ContractAttributes,
+        has_guaranteed_transcript: bool,
+    ) -> ContractAction {
+        ContractAction {
+            address: Default::default(),
+            segment,
+            has_guaranteed_transcript,
+            state_key: Default::default(),
+            zswap_state_key: Default::default(),
+            extracted_balances: Default::default(),
+            attributes,
+        }
+    }
+
+    fn segments(actions: &[ContractAction]) -> Vec<u16> {
+        actions.iter().map(|action| action.segment).collect()
+    }
 }
