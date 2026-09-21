@@ -341,7 +341,7 @@ docker run \
     --network host \
     -v toolkit_out:/out \
     $toolkit_image \
-    generate-txs --src-file /out/token_issuer_deploy.mn --dest-url ws://127.0.0.1:9944 \
+    generate-txs --src-file /out/token_issuer_deploy.mn \
     send
 
 docker run \
@@ -365,22 +365,6 @@ token_issuer_recipient_address=$(docker run \
     show-address --network undeployed --seed $token_issuer_mint_seed \
     | jq -r .userAddress)
 
-# WORKAROUND (see midnight-node#1969 and its follow-ups): generate-intent
-# circuit's default path fetches ledger parameters through subxt's statically
-# generated runtime API, which can throw RuntimeApiError(IncompatibleCodegen)
-# against a live node even with no version skew involved -- reproduced here
-# against a node freshly genesised on ledger v9, no hard fork in the picture.
-# The same call succeeds standalone via show-ledger-parameters (a raw query),
-# so fetching it ourselves and passing it through --custom-ledger-parameters
-# avoids the broken path entirely. Applied unconditionally: verified harmless
-# on ledger v8 too, so this stays one code path for both lines.
-token_issuer_ledger_parameters=$(docker run \
-    --rm \
-    --network host \
-    -e MN_SRC_URL=ws://127.0.0.1:9944 \
-    $toolkit_image \
-    show-ledger-parameters --read-from-rpc-url ws://127.0.0.1:9944 --serialize)
-
 docker run \
     --rm \
     --network host \
@@ -398,7 +382,6 @@ docker run \
     --output-intent /toolkit-js/token-issuer/mint.intent \
     --output-private-state /toolkit-js/token-issuer/mint.private \
     --output-zswap-state /toolkit-js/token-issuer/mint.zswap \
-    --custom-ledger-parameters "$token_issuer_ledger_parameters" \
     mintUnshielded "{bytes:'0x$token_issuer_recipient_address'}" $token_issuer_mint_amount
 
 docker run \
@@ -417,7 +400,7 @@ docker run \
     --network host \
     -v toolkit_out:/out \
     $toolkit_image \
-    generate-txs --src-file /out/token_issuer_mint.mn --dest-url ws://127.0.0.1:9944 \
+    generate-txs --src-file /out/token_issuer_mint.mn \
     send
 
 # Wait for enough blocks to be finalized so that the pre-populated chain data
