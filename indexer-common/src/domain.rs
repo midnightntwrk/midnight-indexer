@@ -277,6 +277,10 @@ pub struct ContractAction {
     /// whether its physical/fallible segment succeeds. Always false for Deploy and Update.
     pub has_guaranteed_transcript: bool,
 
+    /// Original Call entry-point bytes for event correlation, before display decoding.
+    /// None for Deploy and Update; not persisted in the action's JSON attributes.
+    pub raw_entry_point: Option<ByteVec>,
+
     pub attributes: ContractAttributes,
 }
 

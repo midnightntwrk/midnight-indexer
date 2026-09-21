@@ -903,7 +903,7 @@ async fn save_contract_event_indexed_fields<I: IntoIterator<Item = i64>>(
 }
 
 /// Pair each ledger event with the id of the emitting `ContractCall` by
-/// matching `(contract_address, entry_point)` against the contract actions of
+/// matching `(contract_address, raw_entry_point)` against the contract actions of
 /// the same transaction (ticket #1162). Only an unambiguous match is
 /// attributed: if several calls in the same transaction share address and
 /// entry point, the events stay unattributed (`NULL`) rather than risking
@@ -925,11 +925,9 @@ fn correlate_contract_action_ids(
                     .iter()
                     .zip(contract_action_ids)
                     .filter(|(action, _)| {
-                        matches!(
-                            &action.attributes,
-                            ContractAttributes::Call { entry_point: action_entry_point }
-                                if action_entry_point.as_bytes() == entry_point.as_ref()
-                        ) && action.address == *contract_address
+                        matches!(&action.attributes, ContractAttributes::Call { .. })
+                            && action.raw_entry_point.as_ref() == Some(entry_point)
+                            && action.address == *contract_address
                     });
 
             let (_, &contract_action_id) = matches.next()?;
@@ -1581,6 +1579,7 @@ mod contract_event_correlation_tests {
             address: bv(address),
             segment: 0,
             has_guaranteed_transcript: false,
+            raw_entry_point: Some(bv(entry_point.as_bytes())),
             state_key: None,
             zswap_state_key: None,
             extracted_balances: vec![],
@@ -1595,6 +1594,7 @@ mod contract_event_correlation_tests {
             address: bv(address),
             segment: 0,
             has_guaranteed_transcript: false,
+            raw_entry_point: None,
             state_key: None,
             zswap_state_key: None,
             extracted_balances: vec![],
@@ -1628,6 +1628,56 @@ mod contract_event_correlation_tests {
 
         let correlated = correlate_contract_action_ids(&events, &actions, &[10, 20]);
         assert_eq!(correlated, vec![Some(10), Some(20)]);
+    }
+
+    fn raw_call_action(entry_point: &[u8], display_entry_point: &str) -> ContractAction {
+        indexer_common::domain::ContractAction {
+            address: bv(&[0x01; 32]),
+            segment: 1,
+            has_guaranteed_transcript: false,
+            raw_entry_point: Some(bv(entry_point)),
+            attributes: ContractAttributes::Call {
+                entry_point: display_entry_point.to_owned(),
+            },
+        }
+        .into()
+    }
+
+    #[test]
+    fn correlates_invalid_utf8_and_nul_entry_points() {
+        for raw in [b"tick\xff".as_slice(), b"tick\0"] {
+            let actions = vec![raw_call_action(raw, "tick\u{fffd}")];
+            let events = vec![contract_event(&[0x01; 32], raw)];
+
+            assert_eq!(
+                correlate_contract_action_ids(&events, &actions, &[10]),
+                vec![Some(10)]
+            );
+        }
+    }
+
+    #[test]
+    fn distinguishes_entry_points_with_identical_display_strings() {
+        let entry_points = [
+            b"tick\xff".as_slice(),
+            b"tick\xfe",
+            b"tick\0",
+            "tick\u{fffd}".as_bytes(),
+        ];
+        let actions = entry_points
+            .iter()
+            .map(|raw| raw_call_action(raw, "tick\u{fffd}"))
+            .collect::<Vec<_>>();
+        let events = entry_points
+            .iter()
+            .rev()
+            .map(|raw| contract_event(&[0x01; 32], raw))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            correlate_contract_action_ids(&events, &actions, &[10, 20, 30, 40]),
+            vec![Some(40), Some(30), Some(20), Some(10)]
+        );
     }
 
     #[test]

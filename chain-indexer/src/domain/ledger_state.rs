@@ -419,7 +419,9 @@ pub enum Error {
         #[source] indexer_common::domain::ledger::Error,
     ),
 
-    #[error("transaction {0} has a contract action in segment {1}, but no result for that segment")]
+    #[error(
+        "transaction {0} is missing a result for logical segment {1} required by a contract action"
+    )]
     MissingContractActionSegmentResult(TransactionHash, u16),
 
     #[error("cannot get contract balances for transaction {0} and contract address {1}")]
@@ -535,6 +537,12 @@ mod contract_action_tests {
             address: Default::default(),
             segment,
             has_guaranteed_transcript,
+            raw_entry_point: match &attributes {
+                ContractAttributes::Call { entry_point } => {
+                    Some(entry_point.as_bytes().to_vec().into())
+                }
+                _ => None,
+            },
             state_key: Default::default(),
             zswap_state_key: Default::default(),
             extracted_balances: Default::default(),
