@@ -45,7 +45,7 @@ use midnight_ledger_v9::{
 use midnight_serialize_v1::{Serializable, Tagged, tagged_serialize};
 use midnight_transient_crypto_v2::commitment::PureGeneratorPedersen;
 use midnight_transient_crypto_v3::commitment::PureGeneratorPedersen as PureGeneratorPedersenV9;
-use std::{io, string::FromUtf8Error};
+use std::io;
 use thiserror::Error;
 
 type TransactionV8<D> =
@@ -84,9 +84,6 @@ pub enum Error {
 
     #[error("cannot deserialize {0}")]
     Deserialize(&'static str, #[source] io::Error),
-
-    #[error("cannot convert {0} to UTF-8 string")]
-    FromUtf8(&'static str, #[source] FromUtf8Error),
 
     #[error("cannot get contract state from node for address {0}")]
     GetContractState(SerializedContractAddress, #[source] BoxError),
