@@ -70,6 +70,14 @@ fn main() -> anyhow::Result<()> {
         // A runtime seen before must decode to the same metadata; otherwise one blob
         // is stale or the runtime changed without bumping `spec_version`.
         let hash = metadata.hasher().hash();
+        let (major, minor, patch) = runtime;
+        // Read with `cargo check -p chain-indexer -vv 2>&1 | grep '^\[chain-indexer '`.
+        println!(
+            "node {node_version}: runtime {major}.{minor}.{patch} metadata {}",
+            hash.iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        );
         if let Some((first_hash, first_node_version)) = runtime_metadata.get(&runtime) {
             if *first_hash != hash {
                 let (major, minor, patch) = runtime;
