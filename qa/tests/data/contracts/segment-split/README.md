@@ -94,28 +94,32 @@ that works, whereas a missed one still shows up on the first call as
 on toolkit 1.x, `compact-0.30` on 2.0.x, `compact-0.30.0` on 2.1.x. The check
 globs for the package rather than assuming a layout.)
 
-### Toolkit 2.1.x is not usable yet
+### Pinning a pre-release
 
-Setting `COMPACTC_VERSION` gets a 2.1.x image as far as loading the contract,
-but `generate-txs` then rejects the intent: `expected header tag
-'midnight:intent[v9]...', got 'midnight:intent[v6]...'`. Its Rust side wants a
-ledger-v9 intent, which needs compactc 0.33.x — the only release in that
-image's supported set that is **not** published (the public ladder is 0.29.0,
-0.30.0, 0.31.0, 0.31.1, then 0.34.0, and 0.34.0 targets runtime 0.19.0, which
-no workspace in the image provides). Until 0.33.x is reachable, run this suite
-on node and toolkit `1.0.0`.
+`COMPACT_COMPILER_VERSION` accepts a pre-release such as `0.33.0-rc.2`. The
+toolchain manager only offers stable releases — `compact list` jumps from
+0.31.1 to 0.34.0 — so the toolchain image falls back to fetching the
+pre-release archive from the compiler repo's GitHub releases, which has the
+same layout the manager unpacks. This matters because a newer toolkit can
+require a runtime no stable compiler emits: toolkit 2.1.x wants compact-runtime
+`0.18.0-rc.1`, which only compactc 0.33.x produces (0.30.0 → 0.15.0, 0.31.0 →
+0.16.0, and the next stable, 0.34.0 → 0.19.0, overshoots).
 
-So when a toolkit bump drops 0.30.0, the run fails with an actionable message
-and the fix is one environment variable:
+### Status on toolkit 2.1.x
+
+Not yet usable for the `burnWithGuaranteed` scenario, though it gets close:
 
 ```bash
-COMPACT_COMPILER_VERSION=0.31.0 TARGET_ENV=undeployed bun run test:e2e
+NODE_TAG=2.1.0-beta.1 NODE_TOOLKIT_TAG=2.1.0-beta.1 \
+  COMPACT_COMPILER_VERSION=0.33.0-rc.2 TARGET_ENV=undeployed bun run test:e2e
 ```
 
-Once a new pin is confirmed to still produce the guaranteed/fallible split the
-test relies on (the two fixture self-checks are exactly what proves that),
-change the default.
-
-Other overrides: `COMPACT_MANAGER_VERSION` pins the `compact` installer release,
-and `COMPACT_TOOLCHAIN_IMAGE` points at a pre-built image instead of building
-one.
+deploys the contract and runs the `burnWithoutGuaranteed` scenario green, but
+the node rejects the stale `burnWithGuaranteed` call from the mempool with
+`INVALID_TRANSACTION ... custom error: 104`. That is the ballast doing its job
+against the wrong ledger: the sizes above are tuned so the **ledger v8**
+partition leaves part of the circuit in the fallible phase, and ledger v9
+prices the circuit differently, so the whole thing lands in the guaranteed
+phase again and mempool validation refuses it — the exact failure mode the
+ballast exists to avoid. Retuning it for ledger v9 is separate work; until
+then run this suite on node and toolkit `1.0.0`.

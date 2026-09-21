@@ -36,6 +36,10 @@ const DOCKERFILE = path.join(HERE, 'compact-toolchain.Dockerfile');
  * against the toolkit image actually in use — otherwise a mismatch surfaces
  * much later as an opaque `Version mismatch: compiled code expects X,
  * runtime is Y`.
+ *
+ * A pre-release is a valid pin (`0.33.0-rc.2`): the toolchain image falls back
+ * to fetching one when the toolchain manager does not offer the version, and a
+ * newer toolkit can need a runtime no stable compiler emits yet.
  */
 export const COMPACT_COMPILER_VERSION = process.env.COMPACT_COMPILER_VERSION ?? '0.30.0';
 
@@ -127,14 +131,7 @@ export async function compileCompactContract(options: CompileCompactOptions): Pr
 
   log.info(`Compiling Compact fixture ${name} with compactc ${COMPACT_COMPILER_VERSION}`);
   await dockerRun(
-    [
-      '-v',
-      `${outputDir}:/work`,
-      TOOLCHAIN_IMAGE,
-      'compile',
-      `/work/${sourceFile}`,
-      `/work/${MANAGED_DIR}`,
-    ],
+    ['-v', `${outputDir}:/work`, TOOLCHAIN_IMAGE, `/work/${sourceFile}`, `/work/${MANAGED_DIR}`],
     `compiling ${sourceFile}`,
     COMPILE_TIMEOUT_MS,
   );
