@@ -111,82 +111,144 @@ const networkConfig = async (): Promise<NetworkConfig> => ({
  * stale DUST Merkle root is rejected by the node as error 170, so the settle
  * step holds until the dust balance is stable across two emissions.
  */
-const awaitSettled = async (facade: SyncedWallet['facade'], timeoutMs: number): Promise<void> => {
+/**
+ * Elapsed time as `12m 04s`. Decimal minutes read as a clock time to anyone
+ * skimming — `12.4m` looks like 12:04 but means 12m 24s — and these lines are
+ * read while waiting on a sync that can run for hours.
+ */
+const elapsed = (ms: number): string => {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+};
+
+const awaitSettled = async (
+  facade: SyncedWallet['facade'],
+  timeoutMs: number,
+  echoToConsole = false,
+): Promise<void> => {
   const started = Date.now();
   let lastReport = 0;
+  let lastEmission = Date.now();
   let zeroTotalSince: number | undefined;
 
-  await Rx.firstValueFrom(
-    (facade.state() as Rx.Observable<any>).pipe(
-      Rx.tap((s: any) => {
-        const now = Date.now();
-        if (now - lastReport < 15_000) return;
-        lastReport = now;
-        const one = (name: string, p: any) => {
-          if (!p) return `${name}=?`;
-          const applied = p.appliedIndex ?? 0n;
-          const target = p.highestRelevantWalletIndex ?? p.highestIndex ?? 0n;
-          const pct =
-            target > 0n ? ` ${((Number(applied) / Number(target)) * 100).toFixed(1)}%` : '';
-          return `${name}=${applied}/${target}${pct}`;
-        };
-        log.info(
-          `moth syncing (${((now - started) / 60_000).toFixed(1)}m)  ` +
+  // A heartbeat, not a progress line. The progress lines below only print when
+  // the facade emits, so a wallet that emits nothing at all — the shape a
+  // stale cache restored against a re-genesised chain produces — stays
+  // completely silent and looks identical to one that is simply slow. This
+  // says out loud how long it has been quiet.
+  const heartbeat = echoToConsole
+    ? setInterval(() => {
+        const quietMs = Date.now() - lastEmission;
+        if (quietMs < 60_000) return;
+        console.log(
+          `[SETUP] moth wallet has emitted no state for ${elapsed(quietMs)} ` +
+            `(${elapsed(Date.now() - started)} elapsed). A first sync is slow but ` +
+            'should still emit; a permanently quiet wallet usually means a cache restored ' +
+            'against a different chain — purge ~/.moth/sync/<network>/<wallet>/ and retry.',
+        );
+      }, 60_000)
+    : undefined;
+  heartbeat?.unref?.();
+
+  try {
+    await Rx.firstValueFrom(
+      (facade.state() as Rx.Observable<any>).pipe(
+        Rx.tap((s: any) => {
+          const now = Date.now();
+          lastEmission = now;
+          if (now - lastReport < 15_000) return;
+          lastReport = now;
+          // Grouped with thousands separators: these run to seven figures on a
+          // deployed chain, and an ungrouped 1534959 is not readable at a glance.
+          const n = (v: bigint | number) => Number(v).toLocaleString('en-US');
+          const one = (name: string, p: any) => {
+            if (!p) return `${name}=?`;
+            // Once a sub-wallet is done, say so instead of printing indices that
+            // no longer change. It also gives the only sensible reading for a
+            // wallet whose counters are 0/0 — complete with nothing to apply,
+            // which "0/0" alone makes look stuck.
+            if (p.isStrictlyComplete?.() === true) return `${name}=synced 100.0%`;
+            const applied = p.appliedIndex ?? 0n;
+            // `highestRelevantWalletIndex` counts only the events that concern
+            // THIS wallet, which is what "synced" is judged against. For the
+            // unshielded sub-wallet that is legitimately 0 on a wallet with no
+            // unshielded history — it is complete, not stuck.
+            const target = p.highestRelevantWalletIndex ?? p.highestIndex ?? 0n;
+            const pct =
+              target > 0n ? ` ${((Number(applied) / Number(target)) * 100).toFixed(1)}%` : '';
+            // The chain-wide stream position, shown only when it differs from
+            // the per-wallet target. moth's TUI reports this larger number, so
+            // without it the two disagree and look like a bug.
+            const chain = p.highestIndex ?? 0n;
+            const ofChain = chain > target ? ` of ${n(chain)}` : '';
+            return `${name}=${n(applied)}/${n(target)}${pct}${ofChain}`;
+          };
+          const line =
+            `moth syncing (${elapsed(now - started)})  ` +
             `${one('shielded', s.shielded?.state?.progress)}  ` +
             `${one('unshielded', s.unshielded?.progress)}  ` +
-            `${one('dust', s.dust?.state?.progress)}`,
-        );
-      }),
-      Rx.filter((s: any) => {
-        try {
-          const complete =
-            s.shielded?.state?.progress?.isStrictlyComplete?.() === true &&
-            s.unshielded?.progress?.isStrictlyComplete?.() === true &&
-            s.dust?.state?.progress?.isStrictlyComplete?.() === true;
-          if (!complete) return false;
-          const idle = (p: any) =>
-            Number(p?.appliedIndex ?? 0n) === 0 &&
-            Number(p?.highestRelevantWalletIndex ?? p?.highestIndex ?? 0n) === 0;
-          if (idle(s.shielded?.state?.progress) && idle(s.dust?.state?.progress)) {
-            zeroTotalSince ??= Date.now();
-            if (Date.now() - zeroTotalSince > ZERO_TOTAL_GRACE_MS) {
-              throw new Error(
-                'moth reports synced but the indexer delivered no ledger events ' +
-                  `(applied and target both 0 on shielded and dust for ${ZERO_TOTAL_GRACE_MS / 1000}s). ` +
-                  'The subscription most likely failed to open (a withdrawn or rate-limited ' +
-                  'indexer websocket). Check the target indexer is routed and caught up.',
-              );
+            `${one('dust', s.dust?.state?.progress)}`;
+          log.info(line);
+          // Global setup has no test log of its own and can sit here for well
+          // over an hour on a first sync. Without a line on stdout a healthy slow
+          // sync and a hung one look identical — which has already cost a run.
+          if (echoToConsole) console.log(`[SETUP] ${line}`);
+        }),
+        Rx.filter((s: any) => {
+          try {
+            const complete =
+              s.shielded?.state?.progress?.isStrictlyComplete?.() === true &&
+              s.unshielded?.progress?.isStrictlyComplete?.() === true &&
+              s.dust?.state?.progress?.isStrictlyComplete?.() === true;
+            if (!complete) return false;
+            const idle = (p: any) =>
+              Number(p?.appliedIndex ?? 0n) === 0 &&
+              Number(p?.highestRelevantWalletIndex ?? p?.highestIndex ?? 0n) === 0;
+            if (idle(s.shielded?.state?.progress) && idle(s.dust?.state?.progress)) {
+              zeroTotalSince ??= Date.now();
+              if (Date.now() - zeroTotalSince > ZERO_TOTAL_GRACE_MS) {
+                throw new Error(
+                  'moth reports synced but the indexer delivered no ledger events ' +
+                    `(applied and target both 0 on shielded and dust for ${ZERO_TOTAL_GRACE_MS / 1000}s). ` +
+                    'The subscription most likely failed to open (a withdrawn or rate-limited ' +
+                    'indexer websocket). Check the target indexer is routed and caught up.',
+                );
+              }
+              return false;
             }
+            return true;
+          } catch (err) {
+            if (err instanceof Error && err.message.startsWith('moth reports synced')) throw err;
             return false;
           }
-          return true;
-        } catch (err) {
-          if (err instanceof Error && err.message.startsWith('moth reports synced')) throw err;
-          return false;
-        }
-      }),
-      Rx.bufferCount(2, 1),
-      Rx.filter(([a, b]: any[]) => {
-        try {
-          return (a.dust?.balance?.(new Date()) ?? 0n) === (b.dust?.balance?.(new Date()) ?? 0n);
-        } catch {
-          return true;
-        }
-      }),
-      Rx.map(() => undefined),
-      Rx.timeout({
-        each: timeoutMs,
-        with: () =>
-          Rx.throwError(
-            () =>
-              new Error(
-                `moth sync produced no progress for ${(timeoutMs / 60_000).toFixed(0)} minutes. ` +
-                  'Raise MN_SYNC_TIMEOUT_MS if the progress lines were still advancing.',
-              ),
-          ),
-      }),
-    ),
-  );
+        }),
+        Rx.bufferCount(2, 1),
+        Rx.filter(([a, b]: any[]) => {
+          try {
+            return (a.dust?.balance?.(new Date()) ?? 0n) === (b.dust?.balance?.(new Date()) ?? 0n);
+          } catch {
+            return true;
+          }
+        }),
+        Rx.map(() => undefined),
+        Rx.timeout({
+          each: timeoutMs,
+          with: () =>
+            Rx.throwError(
+              () =>
+                new Error(
+                  `moth sync produced no progress for ${(timeoutMs / 60_000).toFixed(0)} minutes. ` +
+                    'Raise MN_SYNC_TIMEOUT_MS if the progress lines were still advancing.',
+                ),
+            ),
+        }),
+      ),
+    );
+  } finally {
+    if (heartbeat) clearInterval(heartbeat);
+  }
 };
 
 /**
@@ -194,7 +256,7 @@ const awaitSettled = async (facade: SyncedWallet['facade'], timeoutMs: number): 
  * The seed is used only to derive keys and a hashed cache name; it is never
  * logged. On a first sync this is minutes; warm, it is seconds.
  */
-const openMothWallet = (seed: string): Promise<MothWallet> => {
+export const openMothWallet = (seed: string, echoProgress = false): Promise<MothWallet> => {
   const name = cacheNameFor(seed);
   const existing = openWallets.get(name);
   if (existing) return existing;
@@ -210,7 +272,7 @@ const openMothWallet = (seed: string): Promise<MothWallet> => {
       name,
       false,
     );
-    await awaitSettled(synced.facade, SYNC_TIMEOUT_MS);
+    await awaitSettled(synced.facade, SYNC_TIMEOUT_MS, echoProgress);
     log.info(`moth wallet ${name} synced`);
     return { synced, keys, networkId: network.id };
   })();
@@ -284,7 +346,9 @@ export const generateSingleTxViaMoth = async (
  * size, not the chain length.
  */
 export const warmMothWallet = async (seed: string): Promise<void> => {
-  const wallet = await openMothWallet(seed);
+  // Echo progress: this is the one call that can run for hours, and it runs in
+  // global setup where nothing else prints.
+  const wallet = await openMothWallet(seed, true);
   // moth writes the cache on stop(), so release it rather than leaving the
   // subscription open for the life of the setup process.
   await wallet.synced.stop();
