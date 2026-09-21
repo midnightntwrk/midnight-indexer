@@ -27,6 +27,6 @@ data/static/*/contract-events.jsonc
 data/static/*/transactions.jsonc
 data/static/*/unshielded-token-types.jsonc
 
-# Compiled by toolkit-js inside the toolkit container when a custom contract fixture is used
-# (root-owned); the committed source is the .ts next to it.
-data/contracts/*/*.config.js
+# Compact fixtures are compiled on the fly into .tmp/compact; this only catches
+# output from compiling one in place by hand.
+data/contracts/*/managed/

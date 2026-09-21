@@ -126,6 +126,21 @@ const TOOLKIT_JS_PATH = '/toolkit-js';
  */
 const CUSTOM_CONTRACT_MOUNT = `${TOOLKIT_JS_PATH}/test/custom-contract`;
 const DEFAULT_MANAGED_DIR = 'managed';
+/**
+ * Lists every `@midnight-ntwrk/compact-runtime` the toolkit-js tree carries.
+ *
+ * The tree has held its runtime variants under different names across
+ * releases — `v7`/`v8` on toolkit 1.x, `compact-0.30` on 2.0.x,
+ * `compact-0.30.0` on 2.1.x — so this globs one level down rather than
+ * assuming any of them, and includes the hoisted root copy. The image has no
+ * `find`, hence the shell loop.
+ */
+const TOOLKIT_JS_RUNTIME_PROBE = [
+  'for f in',
+  `${TOOLKIT_JS_PATH}/node_modules/@midnight-ntwrk/compact-runtime/package.json`,
+  `${TOOLKIT_JS_PATH}/*/node_modules/@midnight-ntwrk/compact-runtime/package.json;`,
+  'do [ -f "$f" ] && grep -m1 \'"version"\' "$f"; done; true',
+].join(' ');
 const DEFAULT_COIN_PUBLIC_SEED = '0000000000000000000000000000000000000000000000000000000000000001';
 const DEFAULT_RNG_SEED = '0000000000000000000000000000000000000000000000000000000000000037';
 // Default coin/funding seed used by the toolkit minter e2e (matches the node-repo
@@ -1541,6 +1556,52 @@ class ToolkitWrapper {
       );
     }
     return match[1] === 'Some(';
+  }
+
+  /**
+   * Fail early when the running toolkit image cannot execute a contract
+   * compiled against `requiredRuntime`.
+   *
+   * Compiled Compact code declares the `@midnight-ntwrk/compact-runtime`
+   * version it needs, and the toolkit image bundles a fixed set of them.
+   * Compiling against a version the image does not carry still produces a
+   * working-looking contract — the mismatch only surfaces much later, deep in
+   * a call, as `Version mismatch: compiled code expects X, runtime is Y`.
+   * Checking up front turns that into an actionable message naming what the
+   * image does provide.
+   *
+   * @param requiredRuntime - Runtime version the compiled contract declares.
+   * @throws Error if the image provides runtimes and this one is not among them.
+   */
+  async assertCompactRuntimeSupported(requiredRuntime: string): Promise<void> {
+    const { output } = await this.execToolkit(
+      ['sh', '-c', TOOLKIT_JS_RUNTIME_PROBE],
+      'probing the toolkit-js compact runtimes failed',
+    );
+
+    const provided = [...stripAnsi(output).matchAll(/"version":\s*"([^"]+)"/g)].map(
+      (match) => match[1],
+    );
+
+    if (provided.length === 0) {
+      log.warn(
+        `Toolkit image ${this.config.nodeToolkitTag} exposes no compact-runtime package; ` +
+          `cannot verify that it can run a contract built for runtime ${requiredRuntime}`,
+      );
+      return;
+    }
+
+    if (provided.includes(requiredRuntime)) {
+      log.debug(`Toolkit image provides compact-runtime ${requiredRuntime}`);
+      return;
+    }
+
+    throw new Error(
+      `Toolkit image ${this.config.nodeToolkitTag} cannot run a contract built for ` +
+        `compact-runtime ${requiredRuntime}. It provides: ${[...new Set(provided)].sort().join(', ')}. ` +
+        'Set COMPACT_COMPILER_VERSION to a compactc release targeting one of those, or use a ' +
+        'toolkit image that carries this runtime.',
+    );
   }
 
   private assertCustomContractMounted(): void {

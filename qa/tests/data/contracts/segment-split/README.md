@@ -41,19 +41,55 @@ The test verifies both shapes with the toolkit's own `show-transaction`
 *before* asserting anything about the indexer, so "the indexer reported it" can
 never be confused with "the fixture never produced a guaranteed transcript".
 
-## Regenerating the compiled output
+## How it gets compiled
 
-The compiled artefacts are committed because the test environment has no Compact
-toolchain. To rebuild them:
+Only two files are committed: `segment-split.compact` and its toolkit-js
+`segment-split.config.ts`. The compiled output — generated JS, ZKIR and prover
+keys, close to a megabyte of binary nobody can review in a diff — is **not** in
+the repository. The test builds it on the fly:
+
+1. `utils/compact/compact-compiler.ts` builds `compact-toolchain:<version>`
+   from `utils/compact/compact-toolchain.Dockerfile` (first use only; a Docker
+   image cache hit afterwards), which installs the pinned compactc release.
+2. It copies both committed files into
+   `.tmp/compact/segment-split-<digest>/` and runs `compact compile` there.
+   The digest covers the compiler pin and the bytes of both inputs, so editing
+   the contract compiles into a fresh directory instead of reusing stale
+   output, and an unchanged fixture never recompiles.
+3. `ToolkitWrapper` mounts that directory as the custom contract.
+
+Nothing but Docker is needed on the host, and the compile takes about a second
+once the image exists.
+
+## The compiler pin
+
+`COMPACT_COMPILER_VERSION` in `utils/compact/compact-compiler.ts` defaults to
+**0.30.0**, and it is a pin rather than "latest" for a reason: compiled output
+declares the `@midnight-ntwrk/compact-runtime` version it needs — 0.30.0 emits
+`checkRuntimeVersion('0.15.0')` — and the `midnight-node-toolkit` image bundles
+only a fixed set of those runtimes.
+
+`ToolkitWrapper.assertCompactRuntimeSupported` reads the declared version out of
+the freshly compiled contract, lists the runtimes the running image actually
+carries, and fails up front when the two do not meet — naming what the image
+does provide. Without that check the mismatch only appears much later, as
+`Version mismatch: compiled code expects 0.16.0, runtime is 0.15.0`.
+
+(Where those runtimes live has moved around: `/toolkit-js/v8` on toolkit 1.x,
+`/toolkit-js/compact-0.30` on 2.0.x, `/toolkit-js/compact-0.30.0` on 2.1.x. The
+check globs for the package rather than assuming any one layout.)
+
+So when a toolkit bump drops 0.30.0, the run fails with an actionable message
+and the fix is one environment variable:
 
 ```bash
-compact update 0.30.0
-~/.compact/versions/0.30.0/*/compactc.bin segment-split.compact managed
+COMPACT_COMPILER_VERSION=0.31.0 TARGET_ENV=undeployed bun run test:e2e
 ```
 
-**Use compactc 0.30.0, not a later release.** The compiler must emit code for
-the Compact runtime that the node toolkit bundles: 0.30.0 targets runtime
-`0.15.0` and `ledger-8.0.2`, which is what `/toolkit-js/v8` inside the
-`midnight-node-toolkit` image provides. Compiling with 0.31.0 produces
-`checkRuntimeVersion('0.16.0')` and the toolkit fails to load the contract with
-`Version mismatch: compiled code expects 0.16.0, runtime is 0.15.0`.
+Once a new pin is confirmed to still produce the guaranteed/fallible split the
+test relies on (the two fixture self-checks are exactly what proves that),
+change the default.
+
+Other overrides: `COMPACT_MANAGER_VERSION` pins the `compact` installer release,
+and `COMPACT_TOOLCHAIN_IMAGE` points at a pre-built image instead of building
+one.
