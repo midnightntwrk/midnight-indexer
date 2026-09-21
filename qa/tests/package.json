@@ -32,6 +32,10 @@
       "prettier --write"
     ]
   },
+  "dependencies": {
+    "@shieldedtech/moth-wallet": "0.13.0",
+    "rxjs": "7.8.2"
+  },
   "devDependencies": {
     "@graphql-inspector/core": "^6.4.1",
     "@types/node": "^22.20.1",
@@ -66,6 +70,7 @@
     "minimatch": "^10.2.5",
     "brace-expansion": "^5.0.9",
     "js-yaml": "^4.3.2",
-    "nanoid": "^3.3.17"
+    "nanoid": "^3.3.17",
+    "@midnight-ntwrk/ledger-v8": "8.1.0"
   }
 }
