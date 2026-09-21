@@ -69,15 +69,41 @@ declares the `@midnight-ntwrk/compact-runtime` version it needs — 0.30.0 emits
 `checkRuntimeVersion('0.15.0')` — and the `midnight-node-toolkit` image bundles
 only a fixed set of those runtimes.
 
-`ToolkitWrapper.assertCompactRuntimeSupported` reads the declared version out of
-the freshly compiled contract, lists the runtimes the running image actually
-carries, and fails up front when the two do not meet — naming what the image
-does provide. Without that check the mismatch only appears much later, as
-`Version mismatch: compiled code expects 0.16.0, runtime is 0.15.0`.
+Which runtime the toolkit loads is not simply "the one in the image". Toolkit
+2.x bundles several — one per compactc variant workspace, plus a hoisted root
+copy — and resolves `compact-js` / `compact-runtime` imports through a hook
+that picks a workspace from the **`COMPACTC_VERSION`** environment variable,
+with no default. `ToolkitWrapper` therefore sets `COMPACTC_VERSION` from the
+compiler pin; left unset, resolution falls through to the root copy and loading
+the contract config dies with `Version mismatch: compiled code expects 0.15.0,
+runtime is 0.18.0-rc.1`. Toolkit 1.x has no such hook and ignores the variable.
 
-(Where those runtimes live has moved around: `/toolkit-js/v8` on toolkit 1.x,
-`/toolkit-js/compact-0.30` on 2.0.x, `/toolkit-js/compact-0.30.0` on 2.1.x. The
-check globs for the package rather than assuming any one layout.)
+`ToolkitWrapper.assertCompactRuntimeSupported` then checks the image can supply
+the version the freshly compiled contract declares, and how sharply depends on
+whether the dispatch rule is known. On a 2.x image the `compact-<version>/`
+workspace that `COMPACTC_VERSION` selects is authoritative, so its runtime is
+compared directly. On 1.x, variants are keyed on the ledger version
+(`/toolkit-js/v8`) and resolved internally by the toolkit; that rule is not
+modelled, so the check only asks whether any tree carries the runtime.
+
+The permissive fallback is deliberate — a false failure blocks a configuration
+that works, whereas a missed one still shows up on the first call as
+`Version mismatch: ...`.
+
+(Variant directories are named inconsistently across releases: `/toolkit-js/v8`
+on toolkit 1.x, `compact-0.30` on 2.0.x, `compact-0.30.0` on 2.1.x. The check
+globs for the package rather than assuming a layout.)
+
+### Toolkit 2.1.x is not usable yet
+
+Setting `COMPACTC_VERSION` gets a 2.1.x image as far as loading the contract,
+but `generate-txs` then rejects the intent: `expected header tag
+'midnight:intent[v9]...', got 'midnight:intent[v6]...'`. Its Rust side wants a
+ledger-v9 intent, which needs compactc 0.33.x — the only release in that
+image's supported set that is **not** published (the public ladder is 0.29.0,
+0.30.0, 0.31.0, 0.31.1, then 0.34.0, and 0.34.0 targets runtime 0.19.0, which
+no workspace in the image provides). Until 0.33.x is reachable, run this suite
+on node and toolkit `1.0.0`.
 
 So when a toolkit bump drops 0.30.0, the run fails with an actionable message
 and the fix is one environment variable:

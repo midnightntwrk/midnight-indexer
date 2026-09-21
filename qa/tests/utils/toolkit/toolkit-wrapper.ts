@@ -69,6 +69,17 @@ interface ToolkitConfig {
    * toolkit-js tree so the custom-contract commands can reach it.
    */
   customContractDir?: string;
+  /**
+   * The compactc release `customContractDir` was compiled with, e.g. `0.30.0`.
+   *
+   * Toolkit 2.x resolves `compact-js` / `compact-runtime` imports through a
+   * hook that picks a sibling `compact-<version>/` workspace by
+   * `COMPACTC_VERSION`, and has no default. Left unset, resolution falls
+   * through to the hoisted root copy and loading the contract config dies with
+   * `Version mismatch: compiled code expects X, runtime is Y`. Toolkit 1.x has
+   * no such hook and ignores the variable.
+   */
+  compactcVersion?: string;
 }
 
 /**
@@ -127,20 +138,27 @@ const TOOLKIT_JS_PATH = '/toolkit-js';
 const CUSTOM_CONTRACT_MOUNT = `${TOOLKIT_JS_PATH}/test/custom-contract`;
 const DEFAULT_MANAGED_DIR = 'managed';
 /**
- * Lists every `@midnight-ntwrk/compact-runtime` the toolkit-js tree carries.
+ * Reports every `@midnight-ntwrk/compact-runtime` in the toolkit-js tree, as
+ * `<package.json path> "version": "<v>"` lines.
  *
- * The tree has held its runtime variants under different names across
- * releases — `v7`/`v8` on toolkit 1.x, `compact-0.30` on 2.0.x,
- * `compact-0.30.0` on 2.1.x — so this globs one level down rather than
- * assuming any of them, and includes the hoisted root copy. The image has no
- * `find`, hence the shell loop.
+ * The path matters as much as the version: 2.x keeps one runtime per compactc
+ * variant workspace alongside a hoisted root copy, and which one a contract
+ * gets depends on `COMPACTC_VERSION`, not on mere presence. Variant
+ * directories have been named `v7`/`v8` (toolkit 1.x), `compact-0.30` (2.0.x)
+ * and `compact-0.30.0` (2.1.x), so this globs one level down rather than
+ * assuming a layout. The image has no `find`, hence the shell loop.
  */
 const TOOLKIT_JS_RUNTIME_PROBE = [
   'for f in',
   `${TOOLKIT_JS_PATH}/node_modules/@midnight-ntwrk/compact-runtime/package.json`,
   `${TOOLKIT_JS_PATH}/*/node_modules/@midnight-ntwrk/compact-runtime/package.json;`,
-  'do [ -f "$f" ] && grep -m1 \'"version"\' "$f"; done; true',
+  'do [ -f "$f" ] && { printf \'%s \' "$f"; grep -m1 \'"version"\' "$f"; }; done; true',
 ].join(' ');
+
+/** Marks a compactc variant workspace, e.g. `/toolkit-js/compact-0.30.0/…` — 2.x only. */
+const TOOLKIT_JS_VARIANT = /\/compact-([0-9][^/]*)\//;
+/** The tree a runtime was found in, for reporting: `compact-0.30.0`, `v8`, or `node_modules`. */
+const TOOLKIT_JS_TREE = new RegExp(`^${TOOLKIT_JS_PATH}/([^/]+)/`);
 const DEFAULT_COIN_PUBLIC_SEED = '0000000000000000000000000000000000000000000000000000000000000001';
 const DEFAULT_RNG_SEED = '0000000000000000000000000000000000000000000000000000000000000037';
 // Default coin/funding seed used by the toolkit minter e2e (matches the node-repo
@@ -438,7 +456,10 @@ class ToolkitWrapper {
           ? [{ source: this.config.customContractDir, target: CUSTOM_CONTRACT_MOUNT }]
           : []),
       ])
-      .withEnvironment({ MN_LEDGER_CACHE_DB: '/ledger-cache' })
+      .withEnvironment({
+        MN_LEDGER_CACHE_DB: '/ledger-cache',
+        ...(this.config.compactcVersion ? { COMPACTC_VERSION: this.config.compactcVersion } : {}),
+      })
       .withCommand(['sleep', 'infinity']);
   }
 
@@ -1559,19 +1580,25 @@ class ToolkitWrapper {
   }
 
   /**
-   * Fail early when the running toolkit image cannot execute a contract
-   * compiled against `requiredRuntime`.
+   * Fail early when the toolkit image cannot execute a contract compiled
+   * against `requiredRuntime`.
    *
-   * Compiled Compact code declares the `@midnight-ntwrk/compact-runtime`
-   * version it needs, and the toolkit image bundles a fixed set of them.
-   * Compiling against a version the image does not carry still produces a
-   * working-looking contract — the mismatch only surfaces much later, deep in
-   * a call, as `Version mismatch: compiled code expects X, runtime is Y`.
-   * Checking up front turns that into an actionable message naming what the
-   * image does provide.
+   * How sharp this can be depends on whether the image's dispatch rule is
+   * known. Toolkit 2.x selects a `compact-<version>/` workspace from
+   * `COMPACTC_VERSION`, which {@link ToolkitConfig.compactcVersion} sets, so
+   * when a matching workspace exists it is authoritative and its runtime is
+   * compared directly. Toolkit 1.x instead keys its variants on the ledger
+   * version (`/toolkit-js/v8`) and resolves them internally; that rule is not
+   * modelled here, so the check falls back to presence — fail only when no
+   * tree in the image carries the runtime at all.
+   *
+   * Being wrong in the permissive direction is deliberate: a false failure
+   * blocks a working configuration, while a missed one still surfaces as
+   * `Version mismatch: compiled code expects X, runtime is Y` on the first
+   * call.
    *
    * @param requiredRuntime - Runtime version the compiled contract declares.
-   * @throws Error if the image provides runtimes and this one is not among them.
+   * @throws Error if the image cannot supply `requiredRuntime`.
    */
   async assertCompactRuntimeSupported(requiredRuntime: string): Promise<void> {
     const { output } = await this.execToolkit(
@@ -1579,11 +1606,15 @@ class ToolkitWrapper {
       'probing the toolkit-js compact runtimes failed',
     );
 
-    const provided = [...stripAnsi(output).matchAll(/"version":\s*"([^"]+)"/g)].map(
-      (match) => match[1],
+    const found = [...stripAnsi(output).matchAll(/^(\S+)\s+"version":\s*"([^"]+)"/gm)].map(
+      ([, path, version]) => ({
+        version,
+        tree: TOOLKIT_JS_TREE.exec(path)?.[1] ?? 'root',
+        variant: TOOLKIT_JS_VARIANT.exec(path)?.[1],
+      }),
     );
 
-    if (provided.length === 0) {
+    if (found.length === 0) {
       log.warn(
         `Toolkit image ${this.config.nodeToolkitTag} exposes no compact-runtime package; ` +
           `cannot verify that it can run a contract built for runtime ${requiredRuntime}`,
@@ -1591,14 +1622,40 @@ class ToolkitWrapper {
       return;
     }
 
-    if (provided.includes(requiredRuntime)) {
-      log.debug(`Toolkit image provides compact-runtime ${requiredRuntime}`);
+    const inventory = found.map((entry) => `${entry.tree}=${entry.version}`).join(', ');
+
+    // Variant directories are named inconsistently across releases —
+    // `compact-0.30` on 2.0.x, `compact-0.30.0` on 2.1.x — so match on the
+    // minor version, which is what the runtime line is keyed by.
+    const minor = (version: string) => version.split('.').slice(0, 2).join('.');
+    const selected = this.config.compactcVersion
+      ? found.find(
+          (entry) => entry.variant && minor(entry.variant) === minor(this.config.compactcVersion!),
+        )
+      : undefined;
+
+    if (selected) {
+      if (selected.version === requiredRuntime) {
+        log.debug(`Toolkit image resolves compact-runtime ${selected.version} (${selected.tree})`);
+        return;
+      }
+      throw new Error(
+        `Toolkit image ${this.config.nodeToolkitTag} selects ${selected.tree} for ` +
+          `COMPACTC_VERSION=${this.config.compactcVersion}, which provides compact-runtime ` +
+          `${selected.version}, but the contract was compiled for ${requiredRuntime}. ` +
+          `Runtimes in the image: ${inventory}. Set COMPACT_COMPILER_VERSION to a compactc ` +
+          'release whose variant provides the required runtime.',
+      );
+    }
+
+    if (found.some((entry) => entry.version === requiredRuntime)) {
+      log.debug(`Toolkit image carries compact-runtime ${requiredRuntime} (${inventory})`);
       return;
     }
 
     throw new Error(
-      `Toolkit image ${this.config.nodeToolkitTag} cannot run a contract built for ` +
-        `compact-runtime ${requiredRuntime}. It provides: ${[...new Set(provided)].sort().join(', ')}. ` +
+      `Toolkit image ${this.config.nodeToolkitTag} carries no compact-runtime ${requiredRuntime}, ` +
+        `which the contract was compiled for. Runtimes in the image: ${inventory}. ` +
         'Set COMPACT_COMPILER_VERSION to a compactc release targeting one of those, or use a ' +
         'toolkit image that carries this runtime.',
     );
