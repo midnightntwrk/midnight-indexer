@@ -19,7 +19,8 @@ export default {
   createInitialPrivateState,
   config: {
     keys: {
-      // Seed 0000...0001
+      // Seed 0000...0001 — must match DEFAULT_COIN_PUBLIC_SEED in
+      // utils/toolkit/toolkit-wrapper.ts, which deployCustomContract pins.
       coinPublic: '1bd4f827be97ff013c4a702e4b08f30ec378728a54670cf7cc92cb9b1a14eff6',
     },
     network: 'undeployed',
