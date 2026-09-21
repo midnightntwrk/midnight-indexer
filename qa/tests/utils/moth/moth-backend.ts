@@ -48,7 +48,7 @@ import {
 import * as Rx from 'rxjs';
 import log from '@utils/logging/logger';
 import { env } from '../../environment/model';
-import { ensureProofServer, proofServerMismatchHint, stopProofServer } from './proof-server';
+import { ensureProofServer, proofServerMismatchHint } from './proof-server';
 import type { AddressType, ToolkitTransactionResult } from '../toolkit/toolkit-wrapper';
 
 /** Minutes to allow for a cold sync. A warm one takes seconds. */
@@ -309,7 +309,54 @@ export const closeMothWallets = async (): Promise<void> => {
       }
     }),
   );
-  // Only stops a proof server this process started; one supplied through
-  // PROOF_SERVER_URL is left running.
-  await stopProofServer();
+  // The proof server is NOT stopped here. It is a service owned by global
+  // setup, which starts it once and stops it in teardown; a worker stopping it
+  // would pull it out from under its siblings.
+};
+
+/**
+ * List every unshielded token type the seed's wallet can currently spend, with
+ * the total value held of each.
+ *
+ * This reads the wallet's own live balance, which is the only thing that tells
+ * us what the wallet can actually *spend*. A chain-wide scan (the
+ * `unshielded-token-types.jsonc` fixture) records what exists on the chain and
+ * who held it at scan time — useful for query and streaming tests, but it
+ * cannot establish spendable ownership for the wallet under test.
+ *
+ * Waits for the unshielded sub-wallet to be strictly complete, the same bar
+ * moth's own `listNightUtxos` uses, so a partially synced wallet cannot report
+ * a short balance.
+ *
+ * @param seed - The seed whose wallet to read. Never logged.
+ * @returns Total spendable value per token type, keyed by the hex token type
+ *          the indexer also reports as `tokenType`.
+ */
+export const listUnshieldedHoldingsViaMoth = async (seed: string): Promise<Map<string, bigint>> => {
+  const wallet = await openMothWallet(seed);
+
+  const state = await Rx.firstValueFrom(
+    (wallet.synced.facade.state() as Rx.Observable<any>).pipe(
+      Rx.filter((s: any) => s.unshielded?.progress?.isStrictlyComplete?.() === true),
+      Rx.timeout({
+        each: SYNC_TIMEOUT_MS,
+        with: () =>
+          Rx.throwError(
+            () =>
+              new Error(
+                'moth did not reach a strictly-complete unshielded state in ' +
+                  `${(SYNC_TIMEOUT_MS / 60_000).toFixed(0)} minutes, so the wallet's ` +
+                  'spendable token types cannot be listed.',
+              ),
+          ),
+      }),
+    ),
+  );
+
+  const totals = new Map<string, bigint>();
+  for (const coin of state.unshielded.availableCoins as any[]) {
+    const tokenType = coin.utxo.type as string;
+    totals.set(tokenType, (totals.get(tokenType) ?? 0n) + BigInt(coin.utxo.value));
+  }
+  return totals;
 };

@@ -145,8 +145,14 @@ describe.skipIf(skipNight)('unshielded NIGHT transactions', NIGHT_SUITE_OPTS, ()
     tokenType: NIGHT_TOKEN_TYPE,
     amount: 1,
     unit: 'STAR',
-    destinationSeed: DESTINATION_SEED,
-    extraDestinationSeeds: [SECOND_DESTINATION_SEED],
+    // Self-transfer, so a funded wallet can run the suite indefinitely. The
+    // multi-destination tests below keep their own distinct wallets: proving the
+    // indexer routes a transfer to one recipient and not another cannot be done
+    // with a single wallet.
+    selfTransfer: true,
+    // B1 and B2 of the multi-destination tests below. They are subscribed here,
+    // alongside the funding wallet, so `destinations` is [self, B1, B2].
+    extraDestinationSeeds: [DESTINATION_SEED, SECOND_DESTINATION_SEED],
     testKeys: {
       blockQueryByHash: 'PM-17711',
       transactionQueryByHash: 'PM-17712',
@@ -239,7 +245,7 @@ describe.skipIf(skipNight)('unshielded NIGHT transactions', NIGHT_SUITE_OPTS, ()
 
       ctx.skip?.(
         scenario.transactionResult.status !== 'confirmed',
-        "Toolkit transaction hasn't been confirmed",
+        "Transaction hasn't been confirmed",
       );
 
       const transactionResponse = await scenario.httpClient.getTransactionByOffset({
@@ -284,7 +290,7 @@ describe.skipIf(skipNight)('unshielded NIGHT transactions', NIGHT_SUITE_OPTS, ()
     test('should emit UnshieldedTransaction only for the target wallet (A > B1)', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Wallet', 'Subscription', 'MultiDestination'] };
 
-      const destinationAddress = scenario.wallet.destinations[0].destinationAddress;
+      const destinationAddress = scenario.wallet.destinations[1].destinationAddress;
 
       const b1TxResult = await scenario.toolkit.generateSingleTx(
         scenario.wallet.source.seed,
@@ -296,7 +302,7 @@ describe.skipIf(skipNight)('unshielded NIGHT transactions', NIGHT_SUITE_OPTS, ()
       // Wait for B1's UnshieldedTransaction matching the submitted tx hash
       const latestB1Tx = await retrySimple(async () => {
         const events = getEventsOfType(
-          scenario.wallet.destinations[0].events,
+          scenario.wallet.destinations[1].events,
           'UnshieldedTransaction',
         );
         return events.find((e) => e.transaction.hash === b1TxResult.txHash) ?? null;
@@ -311,7 +317,7 @@ describe.skipIf(skipNight)('unshielded NIGHT transactions', NIGHT_SUITE_OPTS, ()
       // Wait for B2 progress
       const latestB2Tx = await retrySimple(async () => {
         const progressEvents = getEventsOfType(
-          scenario.wallet.destinations[1].events,
+          scenario.wallet.destinations[2].events,
           'UnshieldedTransactionsProgress',
         );
         return progressEvents.at(-1) ?? null;
@@ -326,7 +332,7 @@ describe.skipIf(skipNight)('unshielded NIGHT transactions', NIGHT_SUITE_OPTS, ()
       );
 
       // Ensure B2 did not receive a UnshieldedTransaction event
-      const b2Tx = getEventsOfType(scenario.wallet.destinations[1].events, 'UnshieldedTransaction');
+      const b2Tx = getEventsOfType(scenario.wallet.destinations[2].events, 'UnshieldedTransaction');
       expect(b2Tx.length).toBe(0);
 
       // B2 must at least show progress
@@ -343,7 +349,7 @@ describe.skipIf(skipNight)('unshielded NIGHT transactions', NIGHT_SUITE_OPTS, ()
     test('should emit UnshieldedTransaction only for the target wallet (A > B2)', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Wallet', 'Subscription', 'MultiDestination'] };
 
-      const secondDestinationAddress = scenario.wallet.destinations[1].destinationAddress;
+      const secondDestinationAddress = scenario.wallet.destinations[2].destinationAddress;
 
       const b2TxResult = await scenario.toolkit.generateSingleTx(
         scenario.wallet.source.seed,
@@ -355,7 +361,7 @@ describe.skipIf(skipNight)('unshielded NIGHT transactions', NIGHT_SUITE_OPTS, ()
       // Wait for B2's UnshieldedTransaction matching the submitted tx hash
       const latestB2Tx = await retrySimple(async () => {
         const b2Events = getEventsOfType(
-          scenario.wallet.destinations[1].events,
+          scenario.wallet.destinations[2].events,
           'UnshieldedTransaction',
         );
         return b2Events.find((e) => e.transaction.hash === b2TxResult.txHash) ?? null;
@@ -364,7 +370,7 @@ describe.skipIf(skipNight)('unshielded NIGHT transactions', NIGHT_SUITE_OPTS, ()
       // B1 UnshieldedTransaction (should NOT match B2)
       const latestB1Tx = await retrySimple(async () => {
         const b1Events = getEventsOfType(
-          scenario.wallet.destinations[0].events,
+          scenario.wallet.destinations[1].events,
           'UnshieldedTransaction',
         );
         return b1Events.at(-1) ?? null;

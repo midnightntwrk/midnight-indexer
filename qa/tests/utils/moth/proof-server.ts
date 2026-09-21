@@ -27,14 +27,34 @@
 
 import { execFile } from 'child_process';
 import { createServer } from 'net';
+import fs from 'fs';
+import path from 'path';
 import { promisify } from 'util';
+import log from '@utils/logging/logger';
 
 const execFileAsync = promisify(execFile);
 
 const CONTAINER_NAME = 'midnight-proof-server';
 const IMAGE_REPO = 'midnightntwrk/proof-server';
 const INTERNAL_PORT = 6300;
-const READY_TIMEOUT_MS = 120_000;
+/**
+ * A container with a warm parameter cache serves /health in a couple of
+ * seconds. A cold one downloads the whole zk parameter set first (see
+ * ZK_PARAMS_DIR), which is why this budget is minutes rather than seconds.
+ */
+const READY_TIMEOUT_MS = 15 * 60_000;
+
+/**
+ * Host directory backing the container's `/.cache/midnight`.
+ *
+ * On first boot the proof server downloads every public parameter and proving
+ * key from srs.midnight.network into `/.cache/midnight/zk-params`. Without a
+ * mount that download lives in the container's writable layer and is repeated
+ * by every new container — measured at over two minutes on preview and enough
+ * to exhaust a 120s readiness budget. Mounting it makes the download a
+ * one-off, and mirrors `.tmp/toolkit-zk-cache` on the toolkit side.
+ */
+const ZK_PARAMS_DIR = path.resolve('.tmp/proof-server-zk-params');
 const READY_POLL_INTERVAL_MS = 1_000;
 
 /**
@@ -53,6 +73,12 @@ const DEFAULT_PROOF_SERVER_TAG = '8.1.0';
 const proofServerTag = (): string =>
   process.env.PROOF_SERVER_TAG?.trim() || DEFAULT_PROOF_SERVER_TAG;
 
+// LOGGING. Global setup and every test worker are separate processes, and each
+// one calls ensureProofServer(), so anything printed here is printed once per
+// process. Only a state change — actually starting a container — earns a console
+// line; reuse and an externally-supplied URL go to the debug log. Global setup
+// prints the single human-facing `[SETUP] Proof server: …` line.
+
 /** Set when this process started the container, so teardown only stops its own. */
 let startedByUs = false;
 let ensured: Promise<string> | undefined;
@@ -68,7 +94,7 @@ export async function ensureProofServer(): Promise<string> {
   const explicit = process.env.PROOF_SERVER_URL?.trim();
   if (explicit) {
     await assertReachable(explicit);
-    console.log(`[PROOF] Using PROOF_SERVER_URL=${explicit} (no container started)`);
+    log.debug(`Using PROOF_SERVER_URL=${explicit} (no container started)`);
     return explicit;
   }
 
@@ -92,7 +118,7 @@ export async function stopProofServer(): Promise<void> {
   ensured = undefined;
   try {
     await execFileAsync('docker', ['rm', '-f', CONTAINER_NAME]);
-    console.log(`[PROOF] Stopped ${CONTAINER_NAME}`);
+    log.debug(`Stopped ${CONTAINER_NAME}`);
   } catch {
     // Already gone, or removed by another worker — nothing to do.
   }
@@ -108,12 +134,20 @@ async function bootstrap(): Promise<string> {
     }
     const url = `http://127.0.0.1:${port}`;
     await waitForReady(url);
-    console.log(`[PROOF] Reusing existing ${CONTAINER_NAME} at ${url}`);
+    log.debug(`Reusing existing ${CONTAINER_NAME} at ${url}`);
     return url;
   }
 
   const tag = proofServerTag();
   const port = await getFreePort();
+  fs.mkdirSync(ZK_PARAMS_DIR, { recursive: true });
+  const cold = fs.readdirSync(ZK_PARAMS_DIR).length === 0;
+  if (cold) {
+    console.log(
+      '[SETUP] Proof server parameter cache is empty — the first start downloads ' +
+        `the zk parameter set into ${ZK_PARAMS_DIR}. This is a one-off.`,
+    );
+  }
   try {
     await execFileAsync('docker', [
       'run',
@@ -122,6 +156,8 @@ async function bootstrap(): Promise<string> {
       CONTAINER_NAME,
       '-p',
       `127.0.0.1:${port}:${INTERNAL_PORT}`,
+      '-v',
+      `${ZK_PARAMS_DIR}:/.cache/midnight`,
       // No command: the image is entrypointed to start the server on its own
       // port 6300. It is `bash -c`, so an argument appended here would be
       // taken as $0 rather than a flag.
@@ -137,7 +173,7 @@ async function bootstrap(): Promise<string> {
         if (!raced.running) await execFileAsync('docker', ['start', CONTAINER_NAME]);
         const url = `http://127.0.0.1:${raced.port}`;
         await waitForReady(url);
-        console.log(`[PROOF] Adopted ${CONTAINER_NAME} at ${url} after a start race`);
+        log.debug(`Adopted ${CONTAINER_NAME} at ${url} after a start race`);
         return url;
       }
     }
@@ -149,9 +185,53 @@ async function bootstrap(): Promise<string> {
 
   const url = `http://127.0.0.1:${port}`;
   await waitForReady(url);
-  console.log(`[PROOF] Started ${CONTAINER_NAME} (${IMAGE_REPO}:${tag}) at ${url}`);
+  console.log(`[SETUP] Started ${CONTAINER_NAME} (${IMAGE_REPO}:${tag}) at ${url}`);
   return url;
 }
+
+/**
+ * A one-line description of the proof server behind a URL: its reported
+ * version, and the container serving it when there is one.
+ *
+ * The server exposes `/version` (verified against
+ * midnightntwrk/proof-server:8.1.0, which answers `8.1.0`), so a version is
+ * reported even for an external URL we did not start and cannot inspect.
+ * `container <name>` is shown only when the URL is served by a local container
+ * we know about; anything else is reported as `external`.
+ */
+export async function describeProofServer(url: string): Promise<string> {
+  const version = await proofServerVersion(url);
+  const info = await inspectContainer();
+  const local = info?.port !== undefined && url.includes(`:${info.port}`);
+  const where = local ? `container ${CONTAINER_NAME}` : 'external';
+  const expected = proofServerTag();
+
+  let note = '';
+  if (version && majorOf(version) !== majorOf(expected)) {
+    // Not fatal, and only the MAJOR is compared: proof-server and ledger
+    // version strings do not track each other exactly (a ledger 9.1.0.0-rc.N
+    // pairs with a proof-server 9.0.0-rc.N). A genuine train mismatch fails
+    // later inside proving, and this line is what makes that failure readable.
+    note = ` - WARNING: expected the ${expected} train, proving may fail`;
+  }
+  return `${url} (version ${version ?? 'unknown'}, ${where})${note}`;
+}
+
+/** Reads `/version`. Returns undefined rather than throwing: this is reporting. */
+async function proofServerVersion(url: string): Promise<string | undefined> {
+  try {
+    const res = await fetch(`${url.replace(/\/+$/, '')}/version`, {
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!res.ok) return undefined;
+    const body = (await res.text()).trim();
+    return body.length > 0 && body.length < 64 ? body : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const majorOf = (version: string): string => version.split('.')[0] ?? version;
 
 /**
  * A proof server whose ledger train does not match the node's cannot prove a
@@ -186,8 +266,9 @@ async function waitForReady(url: string): Promise<void> {
     } catch (err) {
       if (Date.now() >= deadline) {
         throw new Error(
-          `Proof server at ${url} did not become ready within ${READY_TIMEOUT_MS / 1000}s. ` +
-            `${proofServerMismatchHint()} (${errorMessage(err)})`,
+          `Proof server at ${url} did not become ready within ${READY_TIMEOUT_MS / 60_000} minutes. ` +
+            `If this was a first start it was downloading zk parameters into ${ZK_PARAMS_DIR}; ` +
+            `check the container logs. Otherwise: ${proofServerMismatchHint()} (${errorMessage(err)})`,
         );
       }
       await sleep(READY_POLL_INTERVAL_MS);
