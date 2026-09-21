@@ -841,7 +841,11 @@ mod tests {
         },
         error::BoxError,
     };
-    use std::{convert::Infallible, sync::LazyLock};
+    use std::{
+        convert::Infallible,
+        sync::{Arc, LazyLock, Mutex},
+    };
+    use thiserror::Error;
 
     #[tokio::test]
     async fn test_blocks() -> Result<(), BoxError> {
@@ -852,6 +856,34 @@ mod tests {
             .try_collect::<Vec<_>>()
             .await?;
         assert_eq!(heights, vec![0, 1, 2, 3]);
+
+        Ok(())
+    }
+
+    /// A block that cannot be built - e.g. because building it looks up a contract state the node
+    /// does not have - must not be able to halt ingestion for good. This is what makes such a
+    /// block fatal: it is neither skipped nor tolerated, and the next subscription resumes at the
+    /// last good block, so the very same block is fetched again after a restart.
+    #[tokio::test]
+    async fn test_failing_block_is_not_skipped_and_refetched() -> Result<(), BoxError> {
+        let subscriptions = Arc::new(Mutex::new(Vec::new()));
+        let node = FailingNode {
+            subscriptions: subscriptions.clone(),
+        };
+
+        let blocks = node_blocks(None, node).take(4).collect::<Vec<_>>().await;
+
+        assert!(matches!(&blocks[0], Ok(block) if block.height == 0));
+        assert!(matches!(&blocks[1], Ok(block) if block.height == 1));
+        assert!(blocks[2].is_err());
+        assert!(blocks[3].is_err());
+
+        let subscriptions = subscriptions.lock().expect("subscriptions not poisoned");
+        assert_eq!(subscriptions.len(), 2);
+        assert!(subscriptions[0].is_none());
+        let resumed_at = subscriptions[1].expect("resubscribed after the last successful block");
+        assert_eq!(resumed_at.height, 1);
+        assert_eq!(resumed_at.hash, BLOCK_1_HASH);
 
         Ok(())
     }
@@ -963,4 +995,67 @@ mod tests {
     #[allow(clippy::zero_prefixed_literal)]
     static PROTOCOL_VERSION: LazyLock<ProtocolVersion> =
         LazyLock::new(|| 0_022_000_u32.try_into().unwrap());
+
+    /// A node which fails to build the block at height 2, recording what each subscription starts
+    /// after.
+    #[derive(Clone)]
+    struct FailingNode {
+        subscriptions: Arc<Mutex<Vec<Option<BlockRef>>>>,
+    }
+
+    impl Node for FailingNode {
+        type Error = FailingNodeError;
+
+        async fn highest_blocks(
+            &self,
+        ) -> Result<impl Stream<Item = Result<BlockRef, Self::Error>>, Self::Error> {
+            Ok(stream::empty())
+        }
+
+        fn finalized_blocks(
+            &mut self,
+            after: Option<BlockRef>,
+        ) -> impl Stream<Item = Result<node::Block, Self::Error>> {
+            self.subscriptions
+                .lock()
+                .expect("subscriptions not poisoned")
+                .push(after);
+
+            let blocks = match after {
+                None => vec![
+                    Ok(BLOCK_0.to_owned()),
+                    Ok(BLOCK_1.to_owned()),
+                    Err(FailingNodeError),
+                ],
+
+                Some(_) => vec![Err(FailingNodeError)],
+            };
+
+            stream::iter(blocks)
+        }
+
+        async fn fetch_system_parameters(
+            &self,
+            block_hash: BlockHash,
+            block_height: u64,
+            timestamp: u64,
+            _node_version: NodeVersion,
+        ) -> Result<SystemParametersChange, Self::Error> {
+            Ok(SystemParametersChange {
+                block_height,
+                block_hash,
+                timestamp,
+                d_parameter: None,
+                terms_and_conditions: None,
+            })
+        }
+
+        async fn fetch_genesis_ledger_state(&self) -> Result<ByteVec, Self::Error> {
+            Ok(Default::default())
+        }
+    }
+
+    #[derive(Debug, Error)]
+    #[error("cannot build block")]
+    struct FailingNodeError;
 }
