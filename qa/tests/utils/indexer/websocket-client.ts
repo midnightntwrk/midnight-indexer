@@ -16,7 +16,7 @@
 import { env } from 'environment/model';
 import { GraphQLError } from 'graphql';
 import log from '@utils/logging/logger';
-import { retry } from '@utils/retry-helper';
+import { NonRetryableError, retry } from '@utils/retry-helper';
 import type {
   Block,
   BlockOffset,
@@ -193,6 +193,16 @@ export interface GraphQLCompleteMessage {
 }
 
 /**
+ * Raised when the websocket can no longer deliver subscription events, either
+ * because it is closed or because it has gone silent despite the keepalive.
+ *
+ * Extends {@link NonRetryableError} so `retry` gives up immediately: a poll
+ * against a dead socket has nothing left to wait for, and reporting that is
+ * more useful than exhausting the budget and reporting "not found yet".
+ */
+export class DeadSocketError extends NonRetryableError {}
+
+/**
  * A low-level WebSocket client that directly implements the GraphQL over WebSocket protocol.
  * Supports mutations and streaming subscriptions to blocks, transactions, contracts and wallet
  * related events
@@ -216,12 +226,15 @@ export class IndexerWsClient {
   /**
    * Keepalive timer, and the flag that disables it.
    *
-   * WHY THIS EXISTS. The indexer closes a websocket 60 s after the last message
-   * it sent, with no close frame — the client sees a bare `1006`. But the
-   * progress subscription deliberately backs off while the chain is idle (since
-   * indexer 4.4.0: 30 s doubling to 240 s, ±20 % jitter), so the server goes
-   * quiet for longer than its own idle limit and drops the subscription it chose
-   * to throttle. Measured against preview: three sockets carrying 1, 2 and 4
+   * WHY THIS EXISTS. An idle websocket to a hosted indexer is closed 60 s after
+   * the last message the server sent, with no close frame — the client sees a
+   * bare `1006`. The indexer's own configuration has no websocket idle timeout,
+   * so this is the ingress in front of the hosted environments rather than the
+   * indexer itself, and the undeployed stack has no such limit. But the progress
+   * subscription deliberately backs off while the chain is idle (since indexer
+   * 4.4.0: 30 s doubling to 240 s, ±20 % jitter), so the server goes quiet for
+   * longer than the idle limit and the subscription it chose to throttle is
+   * dropped. Measured against preview: three sockets carrying 1, 2 and 4
    * subscriptions all closed exactly 60.0 s after their last inbound message.
    *
    * graphql-transport-ws allows a client `ping` at any time, which the server
@@ -231,7 +244,7 @@ export class IndexerWsClient {
    */
   private keepAliveTimer: ReturnType<typeof setInterval> | null = null;
 
-  /** Interval between client pings. Comfortably inside the server's 60 s limit. */
+  /** Interval between client pings. Comfortably inside the 60 s idle limit. */
   private static readonly KEEPALIVE_INTERVAL_MS = 25_000;
 
   /**
@@ -271,12 +284,21 @@ export class IndexerWsClient {
       log.warn(
         `WebSocket onclose: code=${event.code}, reason=${event.reason || '(no reason)'}, wasClean=${event.wasClean}`,
       );
+      // A server-side close (the bare 1006 this keepalive exists to prevent)
+      // never goes through connectionClose(), so the timer has to be released
+      // here too — otherwise it outlives the socket for the worker's lifetime.
+      this.stopKeepAlive();
     };
     return ws;
   }
 
   /** Creates a new WebSocket, attaches handlers, and assigns to this.ws */
   private createWebSocket(): void {
+    // A timer left over from an earlier socket must not survive into the new
+    // one: it would ping before `connection_ack`, which graphql-transport-ws
+    // requires the server to reject with 4401.
+    this.stopKeepAlive();
+
     // A previous failed connection attempt may have left a socket in CONNECTING
     // or OPEN. Detach handlers and close it so a retry does not leak orphan
     // sockets that keep handshaking against the gateway and add to load.
@@ -377,10 +399,10 @@ export class IndexerWsClient {
    * Start pinging the server so an idle subscription is not dropped.
    *
    * Opt out with `INDEXER_WS_KEEPALIVE=off`, which the integration suite uses to
-   * prove the server really does close an unpinged idle socket — the behaviour
-   * this keepalive exists to work around. Without that test, a future server
-   * change could quietly remove the need for the keepalive, or quietly make it
-   * insufficient, and nothing would notice.
+   * prove an unpinged idle socket really is closed — the behaviour this
+   * keepalive exists to work around. Without that test, a future change could
+   * quietly remove the need for the keepalive, or quietly make it insufficient,
+   * and nothing would notice.
    */
   private startKeepAlive(): void {
     this.stopKeepAlive();
@@ -413,26 +435,33 @@ export class IndexerWsClient {
     }
   }
 
+  /** Whether the socket is currently open, without judging how long it has been quiet. */
+  isSocketOpen(): boolean {
+    return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
+  }
+
   /**
    * Throw when the socket is closed, or has heard nothing for longer than
    * {@link DEAD_SOCKET_AFTER_MS}.
    *
    * Callers that poll for an event use this so a dead connection surfaces as a
    * clear error instead of an expired timeout that says only "not found yet".
+   * The error is a {@link NonRetryableError}, so a poll wrapped in `retry`
+   * stops on the spot rather than spending its remaining attempts on a
+   * connection that can no longer deliver anything.
    */
   assertSocketAlive(): void {
-    const ws = this.ws;
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      throw new Error(
+    if (!this.isSocketOpen()) {
+      throw new DeadSocketError(
         'The indexer websocket is closed, so no further subscription events can arrive. ' +
-          'The indexer drops a socket 60s after the last message it sent; the client pings ' +
-          'every 25s to prevent that, so a close here means the connection genuinely failed.',
+          'An idle socket is dropped 60s after the last message the server sent; the client ' +
+          'pings every 25s to prevent that, so a close here means the connection genuinely failed.',
       );
     }
 
     const silentFor = Date.now() - this.lastInboundAt;
     if (this.lastInboundAt > 0 && silentFor > IndexerWsClient.DEAD_SOCKET_AFTER_MS) {
-      throw new Error(
+      throw new DeadSocketError(
         `The indexer websocket has delivered nothing for ${Math.round(silentFor / 1000)}s, ` +
           'including no reply to the keepalive ping, so it is no longer usable. ' +
           'Waiting longer cannot help.',
@@ -498,7 +527,14 @@ export class IndexerWsClient {
 
     // The server may also ping us; the protocol requires a pong back.
     if (type === 'ping') {
-      this.ws?.send(JSON.stringify({ type: 'pong' }));
+      // Guarded like the keepalive ping: a server ping racing a local close
+      // would otherwise throw out of this event handler as an uncaught
+      // exception during parallel teardown.
+      try {
+        this.ws?.send(JSON.stringify({ type: 'pong' }));
+      } catch (error) {
+        log.debug(`Could not answer the server ping with a pong: ${String(error)}`);
+      }
       return;
     }
 

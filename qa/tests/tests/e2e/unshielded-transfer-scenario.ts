@@ -250,6 +250,11 @@ async function findTransferEvent(
 ): Promise<UnshieldedTransaction> {
   return retry(
     async () => {
+      // Every event this poll waits for arrives over the subscription socket,
+      // so a dead socket means nothing can ever arrive. Say so at once instead
+      // of reporting "not found yet" until the attempts run out.
+      scenario.wsClient.assertSocketAlive();
+
       const event = getEventsOfType(events, 'UnshieldedTransaction').find(
         (txEvent) => txEvent.transaction.hash === scenario.transactionResult.txHash,
       );
@@ -301,6 +306,7 @@ function findProgressUpdateEvent(
 
 /** Asserts a progress update past the baseline arrives for one of the two addresses. */
 async function expectProgressUpdate(
+  wsClient: IndexerWsClient,
   events: UnshieldedTxSubscriptionResponse[],
   historicalEvents: UnshieldedTxSubscriptionResponse[],
   addressLabel: string,
@@ -330,7 +336,13 @@ async function expectProgressUpdate(
   );
 
   const event = await retry(
-    async () => findProgressUpdateEvent(events, highestTransactionIdBefore, addressLabel),
+    async () => {
+      // This is the longest poll in the suite (60 attempts, 5s apart). Without
+      // the liveness check a socket dropped early costs the full five minutes
+      // and still only reports that the event was not found.
+      wsClient.assertSocketAlive();
+      return findProgressUpdateEvent(events, highestTransactionIdBefore, addressLabel);
+    },
     {
       maxRetries: 60,
       delayMs: 5000,
@@ -577,6 +589,7 @@ export function defineUnshieldedTransferTests(scenario: UnshieldedTransferScenar
         ]);
 
         await expectProgressUpdate(
+          scenario.wsClient,
           scenario.wallet.source.events,
           scenario.wallet.source.historicalEvents,
           'source',
@@ -604,6 +617,7 @@ export function defineUnshieldedTransferTests(scenario: UnshieldedTransferScenar
         ]);
 
         await expectProgressUpdate(
+          scenario.wsClient,
           scenario.wallet.destinations[0].events,
           scenario.wallet.destinations[0].historicalDestinationEvents,
           'destination',
