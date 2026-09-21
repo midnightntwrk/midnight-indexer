@@ -99,7 +99,10 @@ describe
           `for compact-runtime ${requiredRuntime ?? 'unknown'}`,
       );
 
-      toolkit = new ToolkitWrapper({ customContractDir: compiledDir });
+      toolkit = new ToolkitWrapper({
+        customContractDir: compiledDir,
+        compactcVersion: COMPACT_COMPILER_VERSION,
+      });
       await toolkit.start();
       if (requiredRuntime) {
         await toolkit.assertCompactRuntimeSupported(requiredRuntime);
