@@ -51,7 +51,7 @@
 //! Docker, plus these images (see `NODE_VERSIONS` and the `*_TAG` overrides):
 //!
 //! - `midnight-node:1.0.0` -- ledger-8 chain-spec source.
-//! - `midnight-node:2.1.0-beta.1` + matching toolkit -- the migration node.
+//! - `midnight-node:2.1.0-rc.1` + matching toolkit -- the migration node.
 //!
 //! Ignored by default: it pulls/boots containers and takes a few minutes. Run it
 //! with
@@ -1064,6 +1064,12 @@ fn start_indexer(dir: &Path, node_rpc_port: u16, api_port: u16) -> anyhow::Resul
         .env("APP__INFRA__API__PORT", api_port.to_string())
         .env(
             "APP__INFRA__NODE__URL",
+            format!("ws://localhost:{node_rpc_port}"),
+        )
+        // spo-indexer dials its own node URL; left at the config default it
+        // exhausts its reconnect attempts and takes the whole process down.
+        .env(
+            "APP__INFRA__SPO_NODE__URL",
             format!("ws://localhost:{node_rpc_port}"),
         )
         .env("APP__INFRA__SPO_NODE__BLOCKFROST_ID", "hardfork-e2e-dummy")
