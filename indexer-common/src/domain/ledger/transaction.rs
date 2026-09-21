@@ -239,10 +239,11 @@ fn serialize_contract_address(
 }
 
 /// Decode arbitrary entry-point bytes for the text-only API representation without allowing a
-/// permissionless transaction to halt indexing. The warning is deliberately bounded: an entry
-/// point is attacker-controlled and may be large.
+/// permissionless transaction to halt indexing. Replace NUL as well as invalid UTF-8 because
+/// PostgreSQL JSONB cannot store NUL, even JSON-escaped. The warning is bounded because entry
+/// points are attacker-controlled.
 fn decode_entry_point(entry_point: &[u8]) -> String {
-    match str::from_utf8(entry_point) {
+    let decoded = match str::from_utf8(entry_point) {
         Ok(entry_point) => entry_point.to_owned(),
         Err(_) => {
             const LOG_PREFIX_BYTES: usize = 64;
@@ -255,6 +256,12 @@ fn decode_entry_point(entry_point: &[u8]) -> String {
             );
             String::from_utf8_lossy(entry_point).into_owned()
         }
+    };
+
+    if decoded.contains('\0') {
+        decoded.replace('\0', "\u{fffd}")
+    } else {
+        decoded
     }
 }
 
@@ -410,5 +417,20 @@ mod tests {
         assert_eq!(decode_entry_point("\u{1f680}".as_bytes()), "\u{1f680}");
         assert_eq!(decode_entry_point(b"transfer\xff"), "transfer\u{fffd}");
         assert_eq!(decode_entry_point(b"\xff\xfe"), "\u{fffd}\u{fffd}");
+    }
+
+    #[test]
+    fn test_decode_entry_point_removes_nul_from_json_attributes() {
+        for raw in [b"\0".as_slice(), b"tick\0", b"tick\xff\0"] {
+            let entry_point = decode_entry_point(raw);
+            assert!(!entry_point.contains('\0'));
+            let attributes = crate::domain::ContractAttributes::Call { entry_point };
+            let json = serde_json::to_string(&attributes).unwrap();
+            assert!(!json.contains("\\u0000"));
+        }
+        assert_eq!(decode_entry_point(b"tick\0"), "tick\u{fffd}");
+        assert_eq!(decode_entry_point(b"tick\xff\0"), "tick\u{fffd}\u{fffd}");
+        // Other control characters are supported by JSONB and need no replacement.
+        assert_eq!(decode_entry_point(b"\t\n\r\x01"), "\t\n\r\x01");
     }
 }
