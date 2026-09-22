@@ -172,12 +172,28 @@ pub enum TransactionResult {
     /// All guaranteed and fallible coins succeeded.
     Success,
 
-    /// Not all fallible coins succeeded; the value maps segemt ID to success.
+    /// Not all fallible coins succeeded; the value maps segment ID to success.
     PartialSuccess(Vec<(u16, bool)>),
 
     /// Guaranteed coins failed.
     #[default]
     Failure,
+}
+
+impl TransactionResult {
+    /// Whether a logical segment was applied to the ledger state.
+    ///
+    /// A missing entry in a partial-success result is kept distinct from an explicit failure so
+    /// callers cannot silently discard data if the ledger's result shape changes.
+    pub fn segment_succeeded(&self, segment: u16) -> Option<bool> {
+        match self {
+            Self::Success => Some(true),
+            Self::PartialSuccess(segments) => segments
+                .iter()
+                .find_map(|&(id, succeeded)| (id == segment).then_some(succeeded)),
+            Self::Failure => Some(false),
+        }
+    }
 }
 
 /// The variant of a transaction: regular or system.
@@ -192,7 +208,20 @@ pub enum TransactionVariant {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContractAction {
     pub address: SerializedContractAddress,
+
+    /// The serialized contract state, empty if the node did not have one for `address`. This can
+    /// legitimately happen for an action from a segment that failed to apply, because such an
+    /// action was rolled back; these get filtered out once the transaction result is known.
     pub state: SerializedContractState,
+
+    /// The ID of the segment this action belongs to; used to filter out actions from segments that
+    /// failed to apply.
+    pub segment: u16,
+
+    /// A Call with a guaranteed transcript also executes in logical segment 0, independently of
+    /// whether its physical/fallible segment succeeds. Always false for Deploy and Update.
+    pub has_guaranteed_transcript: bool,
+
     pub attributes: ContractAttributes,
 }
 
@@ -351,4 +380,25 @@ pub struct DustOutput {
 pub enum LedgerEventGrouping {
     Zswap,
     Dust,
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::domain::TransactionResult;
+
+    #[test]
+    fn test_segment_succeeded() {
+        assert_eq!(TransactionResult::Success.segment_succeeded(0), Some(true));
+        assert_eq!(
+            TransactionResult::Success.segment_succeeded(u16::MAX),
+            Some(true)
+        );
+        assert_eq!(TransactionResult::Failure.segment_succeeded(0), Some(false));
+
+        let result = TransactionResult::PartialSuccess(vec![(0, true), (7, false), (42, true)]);
+        assert_eq!(result.segment_succeeded(0), Some(true));
+        assert_eq!(result.segment_succeeded(7), Some(false));
+        assert_eq!(result.segment_succeeded(42), Some(true));
+        assert_eq!(result.segment_succeeded(99), None);
+    }
 }
