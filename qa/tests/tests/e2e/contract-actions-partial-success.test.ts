@@ -68,9 +68,8 @@ interface StalePair {
   /**
    * The stale transaction as the indexer reports it, fetched once up front.
    * Keeping the fetch out of the tests means an indexing failure surfaces as a
-   * broken fixture rather than as an assertion outcome — which matters most
-   * for the `test.fails` case, where any thrown error would otherwise read as
-   * the expected failure.
+   * broken fixture rather than as an assertion outcome, so a red assertion
+   * always means the indexer reported the wrong thing.
    */
   indexed: RegularTransaction;
 }
@@ -320,12 +319,13 @@ describe
        * @when we query the indexer for that transaction
        * @then the contract call is not reported
        *
-       * Marked `test.fails` until the contract-action segment filter lands on
-       * main: the current indexer still reports this call. Vitest fails a
-       * `test.fails` test that passes, so the marker must be removed the moment
-       * the filter ships — it cannot be forgotten.
+       * This asserts the correct behaviour, so it is red against an indexer
+       * that does not filter contract actions on segment success — which
+       * includes 4.4.0-rc.5. That red is the signal the fix is missing on the
+       * build under test, not a broken test: the same assertion passes against
+       * 4.3.302, where the filter is present.
        */
-      test.fails(
+      test(
         'is not reported by the indexer',
         async (context: TestContext) => {
           context.task!.meta.custom = {
