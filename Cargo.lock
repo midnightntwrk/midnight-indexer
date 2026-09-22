@@ -1267,7 +1267,7 @@ version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3977,8 +3977,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-base-crypto"
-version = "1.0.0"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.1.0#d89e0b6334f83bc9477152fb5edf7eca71660237"
+version = "1.0.1"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.1.2#36d7442172136758e33009f75ff4aa56616cff40"
 dependencies = [
  "anyhow",
  "atomic-write-file",
@@ -4009,7 +4009,7 @@ dependencies = [
 [[package]]
 name = "midnight-base-crypto-derive"
 version = "1.0.0"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.1.0#d89e0b6334f83bc9477152fb5edf7eca71660237"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.1.2#36d7442172136758e33009f75ff4aa56616cff40"
 dependencies = [
  "proc-macro2",
  "quote 1.0.45",
@@ -4041,8 +4041,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-coin-structure"
-version = "2.0.1"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.1.0#d89e0b6334f83bc9477152fb5edf7eca71660237"
+version = "2.0.2"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.1.2#36d7442172136758e33009f75ff4aa56616cff40"
 dependencies = [
  "fake",
  "lazy_static",
@@ -4084,8 +4084,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger"
-version = "8.1.0"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.1.0#d89e0b6334f83bc9477152fb5edf7eca71660237"
+version = "8.1.2"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.1.2#36d7442172136758e33009f75ff4aa56616cff40"
 dependencies = [
  "anyhow",
  "derive-where",
@@ -4117,7 +4117,7 @@ dependencies = [
 [[package]]
 name = "midnight-ledger-static"
 version = "9.0.0"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.1.0#d89e0b6334f83bc9477152fb5edf7eca71660237"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.1.2#36d7442172136758e33009f75ff4aa56616cff40"
 dependencies = [
  "proc-macro2",
  "quote 1.0.45",
@@ -4125,8 +4125,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime"
-version = "3.1.0"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.1.0#d89e0b6334f83bc9477152fb5edf7eca71660237"
+version = "3.1.1"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.1.2#36d7442172136758e33009f75ff4aa56616cff40"
 dependencies = [
  "derive-where",
  "enum_index",
@@ -4150,8 +4150,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-state"
-version = "3.0.0"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.1.0#d89e0b6334f83bc9477152fb5edf7eca71660237"
+version = "3.0.1"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.1.2#36d7442172136758e33009f75ff4aa56616cff40"
 dependencies = [
  "derive-where",
  "fake",
@@ -4168,8 +4168,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-vm"
-version = "3.1.0"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.1.0#d89e0b6334f83bc9477152fb5edf7eca71660237"
+version = "3.1.1"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.1.2#36d7442172136758e33009f75ff4aa56616cff40"
 dependencies = [
  "derive-where",
  "fake",
@@ -4209,8 +4209,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-serialize"
-version = "1.1.0"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.1.0#d89e0b6334f83bc9477152fb5edf7eca71660237"
+version = "1.1.1"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.1.2#36d7442172136758e33009f75ff4aa56616cff40"
 dependencies = [
  "crypto",
  "konst",
@@ -4223,7 +4223,7 @@ dependencies = [
 [[package]]
 name = "midnight-serialize-macros"
 version = "1.0.0"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.1.0#d89e0b6334f83bc9477152fb5edf7eca71660237"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.1.2#36d7442172136758e33009f75ff4aa56616cff40"
 dependencies = [
  "proc-macro2",
  "quote 1.0.45",
@@ -4232,8 +4232,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage"
-version = "2.0.1"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.1.0#d89e0b6334f83bc9477152fb5edf7eca71660237"
+version = "2.0.3"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.1.2#36d7442172136758e33009f75ff4aa56616cff40"
 dependencies = [
  "crypto",
  "derive-where",
@@ -4250,8 +4250,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage-core"
-version = "1.2.0"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.1.0#d89e0b6334f83bc9477152fb5edf7eca71660237"
+version = "1.2.1"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.1.2#36d7442172136758e33009f75ff4aa56616cff40"
 dependencies = [
  "archery",
  "crypto",
@@ -4275,7 +4275,7 @@ dependencies = [
 [[package]]
 name = "midnight-storage-macros"
 version = "1.0.0"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.1.0#d89e0b6334f83bc9477152fb5edf7eca71660237"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.1.2#36d7442172136758e33009f75ff4aa56616cff40"
 dependencies = [
  "midnight-serialize-macros",
  "proc-macro2",
@@ -4285,8 +4285,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-transient-crypto"
-version = "2.1.0"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.1.0#d89e0b6334f83bc9477152fb5edf7eca71660237"
+version = "2.1.1"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.1.2#36d7442172136758e33009f75ff4aa56616cff40"
 dependencies = [
  "anyhow",
  "blake2b_simd",
@@ -4343,8 +4343,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-zswap"
-version = "8.1.0"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.1.0#d89e0b6334f83bc9477152fb5edf7eca71660237"
+version = "8.1.2"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?tag=ledger-8.1.2#36d7442172136758e33009f75ff4aa56616cff40"
 dependencies = [
  "derive-where",
  "fake",
@@ -5237,7 +5237,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27c6023962132f4b30eb4c172c91ce92d933da334c59c23cddee82358ddafb0b"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote 1.0.45",
  "syn 2.0.117",
@@ -8542,7 +8542,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

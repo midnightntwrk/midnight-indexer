@@ -97,14 +97,14 @@ uuid                        = { version = "1.23", features = [ "serde" ] }
 walkdir                     = { version = "2.5" }
 
 [patch.crates-io]
-midnight-ledger              = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-8.1.0" }
-midnight-zswap               = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-8.1.0" }
-midnight-transient-crypto    = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-8.1.0" }
-midnight-onchain-vm          = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-8.1.0" }
-midnight-onchain-state       = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-8.1.0" }
-midnight-onchain-runtime     = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-8.1.0" }
-midnight-serialize           = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-8.1.0" }
-midnight-storage-core        = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-8.1.0" }
-midnight-base-crypto         = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-8.1.0" }
-midnight-base-crypto-derive  = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-8.1.0" }
-midnight-coin-structure      = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-8.1.0" }
+midnight-ledger              = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-8.1.2" }
+midnight-zswap               = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-8.1.2" }
+midnight-transient-crypto    = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-8.1.2" }
+midnight-onchain-vm          = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-8.1.2" }
+midnight-onchain-state       = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-8.1.2" }
+midnight-onchain-runtime     = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-8.1.2" }
+midnight-serialize           = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-8.1.2" }
+midnight-storage-core        = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-8.1.2" }
+midnight-base-crypto         = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-8.1.2" }
+midnight-base-crypto-derive  = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-8.1.2" }
+midnight-coin-structure      = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-8.1.2" }
