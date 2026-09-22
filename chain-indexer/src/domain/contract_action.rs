@@ -20,7 +20,16 @@ use indexer_common::domain::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContractAction {
     pub address: SerializedContractAddress,
+
+    /// Empty only while an absent post-block state is awaiting execution-phase filtering.
     pub state: SerializedContractState,
+
+    /// Physical segment containing this action.
+    pub segment: u16,
+
+    /// Whether this Call also has work in guaranteed logical segment 0.
+    pub has_guaranteed_transcript: bool,
+
     pub zswap_state: SerializedZswapState,
     pub extracted_balances: Vec<ContractBalance>,
     pub attributes: ContractAttributes,
@@ -31,6 +40,8 @@ impl From<indexer_common::domain::ContractAction> for ContractAction {
         Self {
             address: contract_action.address,
             state: contract_action.state,
+            segment: contract_action.segment,
+            has_guaranteed_transcript: contract_action.has_guaranteed_transcript,
             zswap_state: Default::default(),
             extracted_balances: Default::default(),
             attributes: contract_action.attributes,

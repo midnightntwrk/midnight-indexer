@@ -24,10 +24,10 @@ use http::{
     header::{InvalidHeaderValue, USER_AGENT},
 };
 use indexer_common::error::BoxError;
-use reqwest::Client as HttpClient;
+use reqwest::{Client as HttpClient, ClientBuilder};
 use secrecy::{ExposeSecret, SecretString};
 use serde_json::value::RawValue;
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
 use subxt::{
     OnlineClient, PolkadotConfig,
     config::RpcConfigFor,
@@ -51,9 +51,49 @@ pub struct Config {
     pub blockfrost_id: SecretString,
 
     #[serde(with = "humantime_serde")]
-    pub reconnect_max_delay: std::time::Duration,
+    pub reconnect_max_delay: Duration,
 
     pub reconnect_max_attempts: usize,
+
+    #[serde(default)]
+    pub http_pool: HttpPoolConfig,
+}
+
+/// Pool tuning applied to every `reqwest::Client` SPOClient owns (its own direct
+/// Blockfrost client and the one wrapped by `BlockfrostAPI`). Both clients use the
+/// same values so the total idle socket count is bounded.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct HttpPoolConfig {
+    #[serde(default = "default_max_idle_per_host")]
+    pub max_idle_per_host: usize,
+
+    #[serde(default = "default_idle_timeout", with = "humantime_serde")]
+    pub idle_timeout: Duration,
+
+    #[serde(default = "default_tcp_keepalive", with = "humantime_serde")]
+    pub tcp_keepalive: Duration,
+}
+
+fn default_max_idle_per_host() -> usize {
+    4
+}
+
+fn default_idle_timeout() -> Duration {
+    Duration::from_secs(30)
+}
+
+fn default_tcp_keepalive() -> Duration {
+    Duration::from_secs(60)
+}
+
+impl Default for HttpPoolConfig {
+    fn default() -> Self {
+        Self {
+            max_idle_per_host: default_max_idle_per_host(),
+            idle_timeout: default_idle_timeout(),
+            tcp_keepalive: default_tcp_keepalive(),
+        }
+    }
 }
 
 /// A [Node] implementation based on subxt.
@@ -77,6 +117,7 @@ impl SPOClient {
             blockfrost_id,
             reconnect_max_delay,
             reconnect_max_attempts,
+            http_pool,
         } = config;
 
         if blockfrost_id.expose_secret().is_empty() {
@@ -94,14 +135,20 @@ impl SPOClient {
             .build(&url)
             .await
             .map_err(|error| SPOClientError::Subtx(error.into()))?;
+
         let online_client = OnlineClient::<PolkadotConfig>::from_rpc_client(rpc_client.clone())
             .await
             .map_err(|error| SPOClientError::UnexpectedResponse(error.to_string()))?;
 
-        let blockfrost = BlockfrostAPI::new(blockfrost_id.expose_secret(), Default::default());
+        // Keep the user agent Blockfrost has seen from this client since day one.
+        let blockfrost = BlockfrostAPI::new_with_client(
+            blockfrost_id.expose_secret(),
+            Default::default(),
+            tuned_client_builder(&http_pool).user_agent("midnight-spo-indexer/1.0"),
+        )
+        .map_err(|error| SPOClientError::UnexpectedResponse(error.to_string()))?;
 
-        let http = HttpClient::builder()
-            .user_agent("midnight-spo-indexer/1.0")
+        let http = tuned_client_builder(&http_pool)
             .build()
             .map_err(|error| SPOClientError::UnexpectedResponse(error.to_string()))?;
 
@@ -400,6 +447,15 @@ fn parse_lovelace(v: &serde_json::Value, field: &str) -> Option<i64> {
             None
         }
     }
+}
+
+fn tuned_client_builder(http_pool: &HttpPoolConfig) -> ClientBuilder {
+    let user_agent = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"));
+    ClientBuilder::new()
+        .user_agent(user_agent)
+        .pool_max_idle_per_host(http_pool.max_idle_per_host)
+        .pool_idle_timeout(http_pool.idle_timeout)
+        .tcp_keepalive(http_pool.tcp_keepalive)
 }
 
 async fn get_epoch_duration(
