@@ -51,7 +51,7 @@
 //! Docker, plus these images (see `NODE_VERSIONS` and the `*_TAG` overrides):
 //!
 //! - `midnight-node:1.0.0` -- ledger-8 chain-spec source.
-//! - `midnight-node:2.1.0-rc.1` + matching toolkit -- the migration node.
+//! - `midnight-node:2.1.0-rc.2` + matching toolkit -- the migration node.
 //!
 //! Ignored by default: it pulls/boots containers and takes a few minutes. Run it
 //! with

@@ -2837,7 +2837,7 @@ mod tests {
         //
         // The pinned v9 root below was reproduced byte-for-byte by the ledger
         // team's `v8-to-v9-state-translation` crate (`midnightntwrk/midnight-ledger`
-        // rev `da96e33d`) over this same blob — the crate `node-2.1.0-rc.1`
+        // rev `da96e33d`) over this same blob — the crate `node-2.1.0-rc.2`
         // itself translates with, so this fixture is authoritative for the
         // translation. It moved when the ledger 8 -> 9 dust wipe landed
         // (midnight-node #2012, backported as #2057): the v8 dust state is
