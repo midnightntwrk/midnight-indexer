@@ -117,6 +117,11 @@ where
             .map_err_into_server_error(|| "get highest ledger state")?
             .some_or_server_error(|| "no ledger state available")?;
 
+        // Bound concurrent ledger-DB work (issue #595): hold a permit across the Merkle-tree walk
+        // so unauthenticated queries cannot exhaust the blocking pool that block_in_place hands the
+        // worker's core to, and wedge the runtime.
+        let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
+
         cx.get_ledger_state_cache()
             .make_zswap_collapsed_update(start_index, end_index, storage, protocol_version)
             .await
@@ -337,6 +342,11 @@ where
             .map_err_into_server_error(|| "get highest ledger state")?
             .some_or_server_error(|| "no ledger state available")?;
 
+        // Bound concurrent ledger-DB work (issue #595): hold a permit across the Merkle-tree walk
+        // so unauthenticated queries cannot exhaust the blocking pool that block_in_place hands the
+        // worker's core to, and wedge the runtime.
+        let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
+
         cx.get_ledger_state_cache()
             .dust_commitments_collapsed_update(start_index, end_index, storage, protocol_version)
             .await
@@ -366,6 +376,11 @@ where
             .await
             .map_err_into_server_error(|| "get highest ledger state")?
             .some_or_server_error(|| "no ledger state available")?;
+
+        // Bound concurrent ledger-DB work (issue #595): hold a permit across the Merkle-tree walk
+        // so unauthenticated queries cannot exhaust the blocking pool that block_in_place hands the
+        // worker's core to, and wedge the runtime.
+        let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
 
         cx.get_ledger_state_cache()
             .dust_generations_collapsed_update(start_index, end_index, storage, protocol_version)
