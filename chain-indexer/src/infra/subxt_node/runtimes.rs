@@ -89,7 +89,7 @@ pub async fn get_contract_state(
     address: SerializedContractAddress,
     node_version: NodeVersion,
     block: &OnlineClientAtBlock,
-) -> Result<SerializedContractState, SubxtNodeError> {
+) -> Result<Option<SerializedContractState>, SubxtNodeError> {
     // Fast path: the module selected from the block's protocol-version digest.
     let result = get_contract_state_for(node_version, address.clone(), block).await;
     if result.is_ok() {
@@ -115,7 +115,7 @@ async fn get_contract_state_for(
     node_version: NodeVersion,
     address: SerializedContractAddress,
     block: &OnlineClientAtBlock,
-) -> Result<SerializedContractState, SubxtNodeError> {
+) -> Result<Option<SerializedContractState>, SubxtNodeError> {
     match node_version {
         NodeVersion::V0_22 => v0_22_0::get_contract_state(address, block).await,
         NodeVersion::V1_0 => v1_0_0::get_contract_state(address, block).await,
