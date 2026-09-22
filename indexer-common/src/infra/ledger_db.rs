@@ -36,7 +36,24 @@ pub async fn init(config: Config) -> Result<(), Error> {
         cnn_url,
     } = config;
 
-    let pool = sqlite::SqlitePool::new(sqlite::Config { cnn_url }).await?;
+    // storage-core assumes a single writer: `flush_*` reads root counts and
+    // then writes new ones, and that read-then-write must observe its own
+    // in-progress state. With max_connections > 1, sqlx can route the read to
+    // a different connection whose WAL snapshot predates the writer, breaking
+    // the invariant and producing "roots counts can't be negative" panics.
+    //
+    // `synchronous_full`: chain-indexer commits the ledger state BEFORE the block row in the
+    // main DB and the resume path relies on the on-disk ledger DB being at least as new as
+    // the main DB. With NORMAL both files fsync independently at checkpoints, so a power
+    // loss could keep block N in the main DB while dropping N's ledger state here - the
+    // startup filter would then silently seed from an older state and diverge. FULL keeps
+    // the cross-file ordering: a ledger state is durable before its block row can be.
+    let pool = sqlite::SqlitePool::new(sqlite::Config {
+        cnn_url,
+        max_connections: 1,
+        synchronous_full: true,
+    })
+    .await?;
     migrations::sqlite::run_for_ledger_db(&pool).await?;
 
     let db = v1_1::LedgerDb::new(pool);
