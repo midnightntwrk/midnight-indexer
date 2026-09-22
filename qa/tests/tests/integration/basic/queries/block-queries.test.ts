@@ -26,6 +26,7 @@ import type {
 } from '@utils/indexer/indexer-types';
 import dataProvider from '@utils/testdata-provider';
 import { TestContext } from 'vitest';
+import { env } from 'environment/model';
 
 const indexerHttpClient = new IndexerHttpClient();
 
@@ -639,7 +640,8 @@ async function extractGenesisTransactions(block: Block): Promise<Transaction[]> 
   return block.transactions as Transaction[];
 }
 
-describe(`genesis block`, () => {
+// Genesis block has no pre-fund wallet / regular transactions on mainnet: skip there.
+describe.skipIf(env.isMainnetEnv())(`genesis block`, () => {
   let genesisBlock: Block;
 
   beforeEach(async () => {

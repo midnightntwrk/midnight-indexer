@@ -35,6 +35,7 @@ import {
   DustLedgerEventSchema,
   UnshieldedUtxoSchema,
 } from '@utils/indexer/graphql/schema';
+import { env } from 'environment/model';
 
 const indexerHttpClient = new IndexerHttpClient();
 
@@ -93,16 +94,20 @@ describe('transaction queries', () => {
      * @when we send a transaction query with that hash
      * @then Indexer should return the transaction with that hash
      */
-    test(`should return the transaction with that hash, given that transaction exists`, async () => {
-      const genesisTransactions = await getGenesisTransactionsByHash();
-      expect(Array.isArray(genesisTransactions)).toBe(true);
-      expect(genesisTransactions.length).toBeGreaterThanOrEqual(1);
+    // Genesis block has no regular transactions on mainnet: skip there.
+    test.skipIf(env.isMainnetEnv())(
+      `should return the transaction with that hash, given that transaction exists`,
+      async () => {
+        const genesisTransactions = await getGenesisTransactionsByHash();
+        expect(Array.isArray(genesisTransactions)).toBe(true);
+        expect(genesisTransactions.length).toBeGreaterThanOrEqual(1);
 
-      for (const tx of genesisTransactions) {
-        expect.soft(tx.hash).toBeDefined();
-        expect.soft(tx.__typename).toBeDefined();
-      }
-    });
+        for (const tx of genesisTransactions) {
+          expect.soft(tx.hash).toBeDefined();
+          expect.soft(tx.__typename).toBeDefined();
+        }
+      },
+    );
 
     /**
      * A transaction query by hash with a valid & non-existing hash returns an empty list
@@ -178,34 +183,38 @@ describe('transaction queries', () => {
      * @when we send a transaction query with that identifier
      * @then Indexer should return the transaction with that identifier
      */
-    test('should return the transaction with that identifier, given that transaction exists', async () => {
-      const blockResponse = await getGenesisBlock();
-      const transactions = blockResponse.data!.block.transactions;
+    // Genesis block has no regular transactions on mainnet: skip there.
+    test.skipIf(env.isMainnetEnv())(
+      'should return the transaction with that identifier, given that transaction exists',
+      async () => {
+        const blockResponse = await getGenesisBlock();
+        const transactions = blockResponse.data!.block.transactions;
 
-      const regularTransactions = getRegularTransactions(transactions);
-      const identifiers = regularTransactions
-        .map((tx) => tx.identifiers?.[0])
-        .filter((id): id is string => !!id);
+        const regularTransactions = getRegularTransactions(transactions);
+        const identifiers = regularTransactions
+          .map((tx) => tx.identifiers?.[0])
+          .filter((id): id is string => !!id);
 
-      expect.soft(identifiers.length).toBeGreaterThanOrEqual(1);
+        expect.soft(identifiers.length).toBeGreaterThanOrEqual(1);
 
-      for (const identifier of identifiers) {
-        const transactionQueryResponse = await indexerHttpClient.getTransactionByOffset({
-          identifier,
-        });
+        for (const identifier of identifiers) {
+          const transactionQueryResponse = await indexerHttpClient.getTransactionByOffset({
+            identifier,
+          });
 
-        expect.soft(transactionQueryResponse).toBeSuccess();
-        expect.soft(transactionQueryResponse.data?.transactions).toHaveLength(1);
+          expect.soft(transactionQueryResponse).toBeSuccess();
+          expect.soft(transactionQueryResponse.data?.transactions).toHaveLength(1);
 
-        const transaction = transactionQueryResponse.data?.transactions?.[0];
-        expect.soft(transaction?.__typename).toBe('RegularTransaction');
+          const transaction = transactionQueryResponse.data?.transactions?.[0];
+          expect.soft(transaction?.__typename).toBe('RegularTransaction');
 
-        const regularTransaction = transaction as RegularTransaction;
-        expect.soft(regularTransaction.identifiers).toBeDefined();
-        expect.soft(regularTransaction.identifiers?.length).toBeGreaterThanOrEqual(1);
-        expect.soft(regularTransaction.identifiers).toContain(identifier);
-      }
-    });
+          const regularTransaction = transaction as RegularTransaction;
+          expect.soft(regularTransaction.identifiers).toBeDefined();
+          expect.soft(regularTransaction.identifiers?.length).toBeGreaterThanOrEqual(1);
+          expect.soft(regularTransaction.identifiers).toContain(identifier);
+        }
+      },
+    );
 
     /**
      * A transaction query by indentifier with a valid & non-existent identifier returns an empty list
@@ -284,7 +293,8 @@ describe('transaction queries', () => {
   });
 });
 
-describe(`genesis transactions`, () => {
+// Genesis block has no regular transactions on mainnet: skip there.
+describe.skipIf(env.isMainnetEnv())(`genesis transactions`, () => {
   describe(`transaction queries to the genesis block transactions`, async () => {
     let genesisTransactions: Transaction[];
 
