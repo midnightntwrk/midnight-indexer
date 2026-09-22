@@ -195,12 +195,12 @@ pub fn decode_slot(mut slot: &[u8]) -> Result<u64, SubxtNodeError> {
 pub async fn get_contract_state(
     address: SerializedContractAddress,
     block: &OnlineClientAtBlock,
-) -> Result<SerializedContractState, SubxtNodeError> {
+) -> Result<Option<SerializedContractState>, SubxtNodeError> {
     let get_state = super::runtime_0_22_0::runtime_apis()
         .midnight_runtime_api()
         .get_contract_state(address.as_slice().into());
 
-    let state = block
+    let state: SerializedContractState = block
         .runtime_apis()
         .call(get_state)
         .await
@@ -208,7 +208,9 @@ pub async fn get_contract_state(
         .map_err(|error| SubxtNodeError::GetContractState(address, format!("{error:?}").into()))?
         .into();
 
-    Ok(state)
+    // Node 0.22 represents an unknown contract as an empty successful response. Preserve real
+    // LedgerApiError values instead of conflating them with absence.
+    Ok((!state.is_empty()).then_some(state))
 }
 
 pub async fn get_zswap_merkle_tree_root(
