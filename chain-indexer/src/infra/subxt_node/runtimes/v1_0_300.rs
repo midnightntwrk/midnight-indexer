@@ -29,7 +29,7 @@ pub async fn make_block_details(
     block: &OnlineClientAtBlock,
     content: Option<&ContentSource>,
 ) -> Result<BlockDetails, SubxtNodeError> {
-    use super::runtime_1_0_0::{
+    use super::runtime_1_0_300::{
         Call, Event,
         runtime_types::{
             pallet_cnight_observation::pallet::Event as CnightObservationEvent,
@@ -201,7 +201,7 @@ pub async fn fetch_authorities(
 ) -> Result<Vec<[u8; 32]>, SubxtNodeError> {
     let authorities = block
         .storage()
-        .entry(super::runtime_1_0_0::storage().aura().authorities())
+        .entry(super::runtime_1_0_300::storage().aura().authorities())
         .map_err(|error| SubxtNodeError::FetchAuthorities(error.into()))?
         .fetch(())
         .await
@@ -214,7 +214,7 @@ pub async fn fetch_authorities(
 }
 
 pub fn decode_slot(mut slot: &[u8]) -> Result<u64, SubxtNodeError> {
-    let slot = super::runtime_1_0_0::runtime_types::sp_consensus_slots::Slot::decode(&mut slot)
+    let slot = super::runtime_1_0_300::runtime_types::sp_consensus_slots::Slot::decode(&mut slot)
         .map(|x| x.0)?;
     Ok(slot)
 }
@@ -222,7 +222,7 @@ pub fn decode_slot(mut slot: &[u8]) -> Result<u64, SubxtNodeError> {
 pub async fn get_zswap_merkle_tree_root(
     block: &OnlineClientAtBlock,
 ) -> Result<Vec<u8>, SubxtNodeError> {
-    let get_zswap_state_root = super::runtime_1_0_0::runtime_apis()
+    let get_zswap_state_root = super::runtime_1_0_300::runtime_apis()
         .midnight_runtime_api()
         .get_zswap_state_root();
 
@@ -255,7 +255,7 @@ pub async fn get_zswap_merkle_tree_root(
 pub async fn get_ledger_state_root(
     block: &OnlineClientAtBlock,
 ) -> Result<Option<Vec<u8>>, SubxtNodeError> {
-    let get_ledger_state_root = super::runtime_1_0_0::runtime_apis()
+    let get_ledger_state_root = super::runtime_1_0_300::runtime_apis()
         .midnight_runtime_api()
         .get_ledger_state_root();
 
@@ -270,7 +270,7 @@ pub async fn get_ledger_state_root(
 }
 
 pub async fn get_d_parameter(block: &OnlineClientAtBlock) -> Result<DParameter, SubxtNodeError> {
-    let get_d_param = super::runtime_1_0_0::runtime_apis()
+    let get_d_param = super::runtime_1_0_300::runtime_apis()
         .system_parameters_api()
         .get_d_parameter();
 
@@ -289,7 +289,7 @@ pub async fn get_d_parameter(block: &OnlineClientAtBlock) -> Result<DParameter, 
 pub async fn fetch_genesis_cnight_registrations(
     block: &OnlineClientAtBlock,
 ) -> Result<Vec<DustRegistrationEvent>, SubxtNodeError> {
-    let query = super::runtime_1_0_0::storage()
+    let query = super::runtime_1_0_300::storage()
         .c_night_observation()
         .mappings();
     block
@@ -343,7 +343,7 @@ pub async fn fetch_genesis_cnight_registrations(
 pub async fn get_terms_and_conditions(
     block: &OnlineClientAtBlock,
 ) -> Result<Option<TermsAndConditions>, SubxtNodeError> {
-    let get_tc = super::runtime_1_0_0::runtime_apis()
+    let get_tc = super::runtime_1_0_300::runtime_apis()
         .system_parameters_api()
         .get_terms_and_conditions();
 

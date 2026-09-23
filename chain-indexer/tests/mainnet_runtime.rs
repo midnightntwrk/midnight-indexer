@@ -38,6 +38,8 @@ use walkdir::WalkDir;
 
 /// The node version running the same runtime (identical metadata) as mainnet after the
 /// upgrade at block 1_774_492.
+///
+/// Not in `NODE_VERSIONS`; its `.node/` snapshot is kept for this test alone.
 const NODE_VERSION: &str = "1.0.0";
 
 #[tokio::test(flavor = "multi_thread")]

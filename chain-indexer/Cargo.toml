@@ -78,8 +78,10 @@ harness           = false
 required-features = [ "standalone" ]
 
 [build-dependencies]
-anyhow    = { workspace = true }
-itertools = { workspace = true }
+anyhow             = { workspace = true }
+itertools          = { workspace = true }
+parity-scale-codec = { workspace = true }
+subxt              = { workspace = true }
 
 [features]
 cloud      = [ "indexer-common/cloud" ]
