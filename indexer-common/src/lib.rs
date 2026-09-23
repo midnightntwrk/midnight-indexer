@@ -21,4 +21,6 @@ pub mod error;
 pub mod infra;
 pub mod stream;
 pub mod telemetry;
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
 pub mod version;
