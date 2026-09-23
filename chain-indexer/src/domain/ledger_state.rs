@@ -52,9 +52,10 @@ const FIRST_UNSKEWED_NODE_1_0_SPEC_VERSION: u32 = 1_000_300;
 /// - 1.0 from `FIRST_UNSKEWED_NODE_1_0_SPEC_VERSION` on (`Ledger8Bridge` version 2) and 2.1 (whose
 ///   ledger-8 and ledger-9 host functions never skew) verify it against the block's own time.
 ///
-/// Bumping where the node does not makes the indexer stricter on the intent TTL than the node by
-/// up to one block interval, so a short-TTL transaction the node accepted fails `well_formed`
-/// here and halts indexing.
+/// Bumping where the node does not verifies the first regular transaction at a different time than
+/// the node, so a transaction the node accepted can fail `well_formed` here and halt indexing: with
+/// a block gap under 12s an intent TTL in `[block time, parent + 12s)` has expired, and with a gap
+/// over 12s a dust `ctime` in `(parent + 12s, block time]` lies outside the dust validity window.
 fn node_skews_first_regular_tblock(protocol_version: ProtocolVersion) -> bool {
     match protocol_version {
         ProtocolVersion::V0_22(_) | ProtocolVersion::V2_0(_) => true,
