@@ -441,8 +441,8 @@ export class IndexerWsClient {
   }
 
   /**
-   * Throw when the socket is closed, or has heard nothing for longer than
-   * {@link DEAD_SOCKET_AFTER_MS}.
+   * Throw when the socket is closed, or — while the keepalive is running — has
+   * heard nothing for longer than {@link DEAD_SOCKET_AFTER_MS}.
    *
    * Callers that poll for an event use this so a dead connection surfaces as a
    * clear error instead of an expired timeout that says only "not found yet".
@@ -458,6 +458,10 @@ export class IndexerWsClient {
           'pings every 25s to prevent that, so a close here means the connection genuinely failed.',
       );
     }
+
+    // Silence only proves a dead connection while the keepalive is pinging:
+    // with it disabled, a quiet subscription on a healthy socket is silent too.
+    if (this.keepAliveTimer === null) return;
 
     const silentFor = Date.now() - this.lastInboundAt;
     if (this.lastInboundAt > 0 && silentFor > IndexerWsClient.DEAD_SOCKET_AFTER_MS) {
