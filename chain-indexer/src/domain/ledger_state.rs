@@ -55,12 +55,22 @@ const FIRST_UNSKEWED_NODE_1_0_SPEC_VERSION: u32 = 1_000_300;
 /// Bumping where the node does not makes the indexer stricter on the intent TTL than the node by
 /// up to one block interval, so a short-TTL transaction the node accepted fails `well_formed`
 /// here and halts indexing.
-pub fn node_skews_first_regular_tblock(protocol_version: ProtocolVersion) -> bool {
+fn node_skews_first_regular_tblock(protocol_version: ProtocolVersion) -> bool {
     match protocol_version {
         ProtocolVersion::V0_22(_) | ProtocolVersion::V2_0(_) => true,
         ProtocolVersion::V1_0(spec_version) => spec_version < FIRST_UNSKEWED_NODE_1_0_SPEC_VERSION,
         ProtocolVersion::V2_1(_) => false,
     }
+}
+
+/// Whether indexing a block at `height` must reproduce the node's skewed first regular
+/// transaction `tblock`. Genesis transactions never passed through the mempool, so they never use
+/// the cached validity result that caused the skew.
+pub(crate) fn should_bump_first_regular_tblock(
+    height: u64,
+    protocol_version: ProtocolVersion,
+) -> bool {
+    height > 0 && node_skews_first_regular_tblock(protocol_version)
 }
 
 /// New type for ledger state from indexer_common.
@@ -590,7 +600,7 @@ mod contract_action_tests {
 
 #[cfg(test)]
 mod tblock_skew_tests {
-    use super::node_skews_first_regular_tblock;
+    use super::{node_skews_first_regular_tblock, should_bump_first_regular_tblock};
     use indexer_common::domain::ProtocolVersion;
 
     #[test]
@@ -609,6 +619,30 @@ mod tblock_skew_tests {
         assert!(!skews(1_000_999));
         assert!(skews(2_000_000));
         assert!(!skews(2_001_000));
+    }
+
+    #[test]
+    fn bumps_only_non_genesis_blocks_built_by_skewing_runtimes() {
+        assert!(!should_bump_first_regular_tblock(
+            0,
+            ProtocolVersion::V0_22(22_000),
+        ));
+        assert!(should_bump_first_regular_tblock(
+            1,
+            ProtocolVersion::V1_0(1_000_299),
+        ));
+        assert!(!should_bump_first_regular_tblock(
+            1,
+            ProtocolVersion::V1_0(1_000_300),
+        ));
+        assert!(should_bump_first_regular_tblock(
+            1,
+            ProtocolVersion::V2_0(2_000_000),
+        ));
+        assert!(!should_bump_first_regular_tblock(
+            1,
+            ProtocolVersion::V2_1(2_001_000),
+        ));
     }
 
     /// Preview block 128537's first (and only) regular transaction, replayed as if it had waited

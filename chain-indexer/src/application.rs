@@ -18,7 +18,7 @@ use crate::{
     domain::{
         Block, BlockRef, LedgerState, SystemParametersChange, Transaction,
         node::{self, Node},
-        node_skews_first_regular_tblock,
+        should_bump_first_regular_tblock,
         storage::Storage,
     },
 };
@@ -527,7 +527,7 @@ where
                 // Only reproduce the node's first-tx `tblock` skew for non-genesis blocks built by a
                 // runtime that applies it; genesis (height 0) transactions never transited the
                 // mempool, and runtimes from node 1.0.300 on verify against the block's own time.
-                block.height > 0 && node_skews_first_regular_tblock(block.protocol_version),
+                should_bump_first_regular_tblock(block.height, block.protocol_version),
             )
             .context("apply transactions to ledger state")
     };
