@@ -4,6 +4,52 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.4.0-rc.6] - 2026-09-24
+
+Release candidate on top of `4.4.0-rc.5`. It fixes a transaction that could halt ingestion
+(GHSA-67mp-mh58-qx5h) and a halt after a node 1.0.300 runtime upgrade, clears a rustls advisory,
+restores Docker Hub publishing, and tracks the latest node and ledger releases.
+
+**In-place over `4.4.0-rc.5`**: no new migrations and no re-index. Ledger 8.1.1 → 8.1.2 changes no
+serialization output and no storage encoding. The re-index rc.4 requires still applies to anything
+upgrading from an earlier line.
+
+### 🚀 Features
+
+- Support node 2.1.0-rc.1 with ledger 9.1.0.0-rc.5 (#1505)
+
+### 🐛 Bug Fixes
+
+- *(deps)* Bump rustls to 0.23.45 to clear RUSTSEC-2026-0285 (#1493)
+- *(ci)* Restore Docker Hub publishing for tag builds (#1477)
+- Prevent a single transaction from halting indexing (#1520)
+
+  A contract call's entry point was decoded as UTF-8 with a hard error. An entry point is an
+  arbitrary byte string, so one permissionless transaction could make a block fail to build on
+  every attempt and stop ingestion for a whole deployment (GHSA-67mp-mh58-qx5h). The entry point is
+  now decoded lossily and logged.
+
+  Contract actions from segments the ledger rolled back no longer reach storage or the API. They
+  were previously served with no indication that they did not apply; `transactionResult` is the
+  supported way to tell what applied. Rows written before this release keep what they hold today.
+
+- *(chain-indexer)* Gate first-tx tblock bump on the block's runtime (#1537)
+
+  Runtime 1.0.300 validates a block's first regular transaction against the block's own time
+  instead of the parent time plus 12s, and 2.1 never used the offset. The indexer applied the offset
+  to every non-genesis block, so after a runtime upgrade to 1.0.300 it could reject a transaction
+  the node accepted and halt indexing. The offset now applies only to blocks from runtimes 0.22,
+  1.0 before 1.0.300, and 2.0, keyed on each block's protocol version.
+
+### ⚙️ Dependencies
+
+- Node: 1.0.0 → 1.0.300 (#1521), 2.0.0-rc.3 → 2.0.0-rc.4 (#1517), 2.1.0-beta.1 → 2.1.0-rc.2 (#1505,
+  #1535). Each new release shares its predecessor's metadata, so no decode module changes. 2.1.0-rc.2
+  is the default node for e2e tests and CI.
+- Ledger: 8.1.1 → 8.1.2, a security patch hardening low-level deserialization, and 9.1.0.0-rc.4 →
+  9.1.0.0-rc.5 (#1505). Crates resolved from crates.io carry `=` pins to keep arena-root parity with
+  the node at the fork boundary.
+
 ## [4.4.0-rc.5] - 2026-09-04
 
 Release candidate on top of `4.4.0-rc.4`, carrying one wallet-facing API fix found while testing
