@@ -22,6 +22,9 @@ Consequences of the gate, all of them enforced by `required-features`:
   `hardfork_e2e` test, and the fixture-driven benches build only under
   `legacy-ledgers`. So does `first_tx_on_node_1_0_300_runtime_is_verified_at_block_time`,
   whose fixture is a ledger-8 transaction.
+- `chain-indexer`'s `apply_transactions_tblock_tests` likewise: the mempool
+  `tblock` skew they drive is a ledger-8/9 runtime behaviour, and every runtime
+  on ledger 10 verifies the first regular transaction at the block's own time.
 - `LedgerState::translate` has no ledger 9 -> 10 table, so this build indexes a
   ledger-10 chain from genesis rather than crossing the fork.
 - `LedgerVersion::V8` and `V9` still exist, because the database tags rows with

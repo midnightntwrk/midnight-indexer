@@ -44,6 +44,7 @@ const-hex = { workspace = true }
 criterion = { workspace = true }
 fake      = { workspace = true }
 fs_extra  = { workspace = true }
+indexer-common = { path = "../indexer-common", features = [ "testing" ] }
 reqwest   = { workspace = true, features = [ "json", "rustls" ] }
 serde     = { workspace = true, features = [ "derive" ] }
 serde_json = { workspace = true }

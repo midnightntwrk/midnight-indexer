@@ -621,6 +621,7 @@ mod tblock_skew_tests {
         assert!(!skews(1_000_999));
         assert!(skews(2_000_000));
         assert!(!skews(2_001_000));
+        assert!(!skews(3_000_000));
     }
 
     #[test]
@@ -644,6 +645,10 @@ mod tblock_skew_tests {
         assert!(!should_bump_first_regular_tblock(
             1,
             ProtocolVersion::V2_1(2_001_000),
+        ));
+        assert!(!should_bump_first_regular_tblock(
+            1,
+            ProtocolVersion::V3_0(3_000_000),
         ));
     }
 
@@ -729,6 +734,250 @@ mod tblock_skew_tests {
                 !error.contains(INTENT_TTL_EXPIRED),
                 "node 1.0.300 runtime must not reject on the intent TTL: {error}"
             ),
+        }
+    }
+}
+
+// The mempool `tblock` skew is a ledger-8/9 runtime behaviour: every runtime on ledger 10
+// verifies the first regular transaction at the block's own time, so these cases need a skewing
+// runtime to drive.
+#[cfg(all(
+    test,
+    feature = "legacy-ledgers",
+    any(feature = "cloud", feature = "standalone")
+))]
+mod apply_transactions_tblock_tests {
+    use super::should_bump_first_regular_tblock;
+    use crate::domain::{LedgerState, Transaction, node};
+    use indexer_common::{
+        domain::{
+            BlockHash, LedgerVersion, ProtocolVersion, SerializedTransaction, TransactionResult,
+            ledger,
+        },
+        error::BoxError,
+        testing::{Malformed, NETWORK_ID, dust_registration, init_ledger_db, malformed},
+    };
+
+    // Block time of every test block, in seconds. Each test sets its parent block time relative to
+    // it, and the bumped `tblock` is `parent + 12s`.
+    const NOW: u64 = 1_800_000_000;
+
+    // Only the first regular transaction is verified at the bumped `tblock`: with the parent block
+    // in the previous 6s slot that is `NOW + 6s`, so a dust `ctime` of `NOW + 4s` passes as the
+    // first transaction and fails as the second.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn only_the_first_regular_transaction_is_verified_at_the_bumped_tblock()
+    -> Result<(), BoxError> {
+        let _ledger_db = init_ledger_db().await?;
+        let parent_block_time = NOW - 6;
+
+        for ledger_version in [LedgerVersion::V8, LedgerVersion::V9] {
+            let protocol_version = skewing_protocol_version(ledger_version);
+            let dust_ahead = dust_registration(ledger_version, NOW + 60, NOW + 4).await?;
+            let dust_current = dust_registration(ledger_version, NOW + 60, NOW).await?;
+
+            let apply = |transactions: &[&SerializedTransaction], bump_first_regular_tblock| {
+                apply(
+                    protocol_version,
+                    transactions,
+                    parent_block_time,
+                    bump_first_regular_tblock,
+                )
+            };
+
+            assert_eq!(
+                apply(&[&dust_ahead], true)?,
+                Ok(vec![TransactionResult::Success]),
+                "{ledger_version}: first, bumped"
+            );
+            assert_eq!(
+                apply(&[&dust_ahead], false)?,
+                Err(Malformed::OutOfDustValidityWindow),
+                "{ledger_version}: first, not bumped"
+            );
+            assert_eq!(
+                apply(&[&dust_current, &dust_ahead], true)?,
+                Err(Malformed::OutOfDustValidityWindow),
+                "{ledger_version}: second, bumped"
+            );
+        }
+
+        Ok(())
+    }
+
+    // A skewing runtime verifies the first regular transaction at the bumped `tblock`, `NOW + 6s`
+    // with the parent block in the previous 6s slot, and an unskewed one at the block time: an
+    // intent TTL of `NOW + 2s` passes only on the latter.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn unskewed_runtime_verifies_the_first_regular_transaction_at_the_block_time()
+    -> Result<(), BoxError> {
+        let _ledger_db = init_ledger_db().await?;
+        let parent_block_time = NOW - 6;
+
+        for ledger_version in [LedgerVersion::V8, LedgerVersion::V9] {
+            let skewing = skewing_protocol_version(ledger_version);
+            let unskewed = unskewed_protocol_version(ledger_version);
+            let transaction = dust_registration(ledger_version, NOW + 2, NOW).await?;
+
+            let apply = |protocol_version| {
+                apply(
+                    protocol_version,
+                    &[&transaction],
+                    parent_block_time,
+                    should_bump_first_regular_tblock(1, protocol_version),
+                )
+            };
+
+            assert_eq!(
+                apply(skewing)?,
+                Err(Malformed::IntentTtlExpired),
+                "{ledger_version}: {skewing:?}"
+            );
+            assert_eq!(
+                apply(unskewed)?,
+                Ok(vec![TransactionResult::Success]),
+                "{ledger_version}: {unskewed:?}"
+            );
+        }
+
+        Ok(())
+    }
+
+    // The bumped `tblock` is `parent + 12s`, not `block + 12s`: when the two 6s slots before the
+    // block are skipped, the parent block is 18s earlier and the bumped `tblock` is `NOW - 6s`, so
+    // an intent TTL of `NOW - 5s` passes `well_formed` when bumped although it lies before the
+    // block time. `apply` checks the TTL against the block time and records the transaction as
+    // failed.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn bumped_tblock_is_based_on_the_parent_block_time() -> Result<(), BoxError> {
+        let _ledger_db = init_ledger_db().await?;
+        let parent_block_time = NOW - 18;
+
+        for ledger_version in [LedgerVersion::V8, LedgerVersion::V9] {
+            let protocol_version = skewing_protocol_version(ledger_version);
+            let transaction = dust_registration(ledger_version, NOW - 5, parent_block_time).await?;
+
+            let apply = |bump_first_regular_tblock| {
+                apply(
+                    protocol_version,
+                    &[&transaction],
+                    parent_block_time,
+                    bump_first_regular_tblock,
+                )
+            };
+
+            assert_eq!(
+                apply(true)?,
+                Ok(vec![TransactionResult::Failure]),
+                "{ledger_version}: bumped"
+            );
+            assert_eq!(
+                apply(false)?,
+                Err(Malformed::IntentTtlExpired),
+                "{ledger_version}: not bumped"
+            );
+        }
+
+        Ok(())
+    }
+
+    // When the two 6s slots before the block are skipped, the parent block is 18s earlier and the
+    // bumped `tblock` `NOW - 6s` lies before the block time: a dust `ctime` of `NOW - 5s` passes at
+    // the block time but fails when bumped.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn bumped_tblock_before_the_block_time_rejects_a_later_dust_ctime() -> Result<(), BoxError>
+    {
+        let _ledger_db = init_ledger_db().await?;
+        let parent_block_time = NOW - 18;
+
+        for ledger_version in [LedgerVersion::V8, LedgerVersion::V9] {
+            let protocol_version = skewing_protocol_version(ledger_version);
+            let transaction = dust_registration(ledger_version, NOW + 40, NOW - 5).await?;
+
+            let apply = |bump_first_regular_tblock| {
+                apply(
+                    protocol_version,
+                    &[&transaction],
+                    parent_block_time,
+                    bump_first_regular_tblock,
+                )
+            };
+
+            assert_eq!(
+                apply(true)?,
+                Err(Malformed::OutOfDustValidityWindow),
+                "{ledger_version}: bumped"
+            );
+            assert_eq!(
+                apply(false)?,
+                Ok(vec![TransactionResult::Success]),
+                "{ledger_version}: not bumped"
+            );
+        }
+
+        Ok(())
+    }
+
+    // Returns a runtime on the given ledger version that skews the first regular transaction's
+    // `tblock`.
+    fn skewing_protocol_version(ledger_version: LedgerVersion) -> ProtocolVersion {
+        match ledger_version {
+            LedgerVersion::V8 => ProtocolVersion::V1_0(1_000_000),
+            LedgerVersion::V9 => ProtocolVersion::V2_0(2_000_000),
+        }
+    }
+
+    // Returns a runtime on the given ledger version that does not skew the first regular
+    // transaction's `tblock`.
+    fn unskewed_protocol_version(ledger_version: LedgerVersion) -> ProtocolVersion {
+        match ledger_version {
+            LedgerVersion::V8 => ProtocolVersion::V1_0(1_000_300),
+            LedgerVersion::V9 => ProtocolVersion::V2_1(2_001_000),
+        }
+    }
+
+    // Applies `transactions` as one block at `NOW` to a fresh ledger state; the outer error is a
+    // test setup failure, the inner one the reason the ledger rejects a transaction. Times are in
+    // seconds.
+    fn apply(
+        protocol_version: ProtocolVersion,
+        transactions: &[&SerializedTransaction],
+        parent_block_time: u64,
+        bump_first_regular_tblock: bool,
+    ) -> Result<Result<Vec<TransactionResult>, Malformed>, BoxError> {
+        let ledger_version = protocol_version.ledger_version();
+        let mut ledger_state = LedgerState::new(NETWORK_ID.try_into()?, ledger_version)?;
+        let transactions = transactions
+            .iter()
+            .map(|&raw| {
+                let transaction = ledger::Transaction::deserialize(raw, ledger_version)?;
+                Ok(node::Transaction::Regular(node::RegularTransaction {
+                    hash: transaction.hash(),
+                    protocol_version,
+                    raw: raw.clone(),
+                    identifiers: transaction.identifiers()?,
+                    contract_actions: vec![],
+                }))
+            })
+            .collect::<Result<Vec<_>, BoxError>>()?;
+
+        match ledger_state.apply_transactions(
+            transactions,
+            BlockHash::from([0; 32]),
+            NOW * 1_000,
+            parent_block_time * 1_000,
+            bump_first_regular_tblock,
+        ) {
+            Ok((transactions, _)) => Ok(Ok(transactions
+                .into_iter()
+                .filter_map(|transaction| match transaction {
+                    Transaction::Regular(transaction) => Some(transaction.transaction_result),
+                    Transaction::System(_) => None,
+                })
+                .collect())),
+            Err(error) => malformed(&error)
+                .map(Err)
+                .ok_or_else(|| format!("unexpected error: {error:#}").into()),
         }
     }
 }
