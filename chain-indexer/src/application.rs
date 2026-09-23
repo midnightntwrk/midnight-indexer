@@ -18,6 +18,7 @@ use crate::{
     domain::{
         Block, BlockRef, LedgerState, SystemParametersChange, Transaction,
         node::{self, Node},
+        should_bump_first_regular_tblock,
         storage::Storage,
     },
 };
@@ -347,9 +348,7 @@ where
                 block.parent_hash,
                 block.timestamp,
                 *parent_block_timestamp,
-                // Only reproduce the node's mempool-cached first-tx `tblock` bump for non-genesis
-                // blocks; genesis (height 0) transactions never transited the mempool.
-                block.height > 0,
+                should_bump_first_regular_tblock(block.height, block.protocol_version),
             )
             .context("apply transactions to ledger state")
     };
