@@ -11,6 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(feature = "legacy-ledgers")]
+use crate::domain::ledger::{IntentV8, IntentV9, TransactionV8, TransactionV9};
+use crate::domain::ledger::{IntentV10, TransactionV10};
 use crate::{
     domain::{
         AddressOrContract, ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome,
@@ -22,25 +25,28 @@ use crate::{
         bridge::BridgeClaim,
         dust::{self},
         ledger::{
-            ContractState, ContractZswapState, Error, IntentV8, IntentV9, LedgerDbContractState,
-            SerializableExt, TaggedSerializableExt, TransactionV8, TransactionV9,
-            contract_state::ContractStateArenaKey,
+            ContractState, ContractZswapState, Error, LedgerDbContractState, SerializableExt,
+            TaggedSerializableExt, contract_state::ContractStateArenaKey,
         },
     },
     infra::ledger_db::v1_1,
 };
 use fastrace::trace;
 use itertools::Itertools;
-use log::{error, info, warn};
+#[cfg(feature = "legacy-ledgers")]
+use log::info;
+use log::{error, warn};
 use midnight_base_crypto_v1::{
     cost_model::{FixedPoint, NormalizedCost, SyntheticCost},
     hash::{HashOutput, persistent_commit},
     time::Timestamp,
 };
+#[cfg(feature = "legacy-ledgers")]
 use midnight_coin_structure_v2::{
     coin::{NIGHT, TokenType as LedgerTokenType, UnshieldedTokenType, UserAddress},
     contract::ContractAddress as ContractAddressV8,
 };
+#[cfg(feature = "legacy-ledgers")]
 use midnight_coin_structure_v3::{
     coin::{
         NIGHT as NIGHT_V9, UnshieldedTokenType as UnshieldedTokenTypeV9,
@@ -48,6 +54,14 @@ use midnight_coin_structure_v3::{
     },
     contract::ContractAddress as ContractAddressV9,
 };
+use midnight_coin_structure_v10::{
+    coin::{
+        NIGHT as NIGHT_V10, UnshieldedTokenType as UnshieldedTokenTypeV10,
+        UserAddress as UserAddressV10,
+    },
+    contract::ContractAddress as ContractAddressV10,
+};
+#[cfg(feature = "legacy-ledgers")]
 use midnight_ledger_v8::{
     dust::{
         DustGenerationInfo as DustGenerationInfoV8, InitialNonce as InitialNonceV8,
@@ -64,6 +78,7 @@ use midnight_ledger_v8::{
     },
     verify::WellFormedStrictness as WellFormedStrictnessV8,
 };
+#[cfg(feature = "legacy-ledgers")]
 use midnight_ledger_v9::{
     dust::{
         DustGenerationInfo as DustGenerationInfoV9, InitialNonce as InitialNonceV9,
@@ -82,9 +97,31 @@ use midnight_ledger_v9::{
     },
     verify::WellFormedStrictness as WellFormedStrictnessV9,
 };
+use midnight_ledger_v10::{
+    dust::{
+        DustGenerationInfo as DustGenerationInfoV10, InitialNonce as InitialNonceV10,
+        QualifiedDustOutput as QualifiedDustOutputV10,
+    },
+    error::FeeCalculationError as FeeCalculationErrorV10,
+    events::{Event as EventV10, EventDetails as EventDetailsV10},
+    semantics::{
+        TransactionContext as TransactionContextV10, TransactionResult as TransactionResultV10,
+    },
+    structure::{
+        ClaimKind as ClaimKindV10, LedgerParameters as LedgerParametersV10,
+        LedgerState as LedgerStateV10,
+        OutputInstructionUnshielded as OutputInstructionUnshieldedV10,
+        SPECKS_PER_DUST as SPECKS_PER_DUST_V10, SystemTransaction as SystemTransactionV10,
+        Utxo as UtxoV10,
+    },
+    verify::WellFormedStrictness as WellFormedStrictnessV10,
+};
+#[cfg(feature = "legacy-ledgers")]
 use midnight_onchain_runtime_v3::context::BlockContext as BlockContextV3;
-use midnight_onchain_runtime_v4::{
-    context::BlockContext as BlockContextV4,
+#[cfg(feature = "legacy-ledgers")]
+use midnight_onchain_runtime_v4::context::BlockContext as BlockContextV4;
+use midnight_onchain_runtime_v10::{
+    context::BlockContext as BlockContextV10,
     ops::{LogEventType, VersionedLogItem},
     state::{EntryPointBuf, StateValue},
 };
@@ -96,15 +133,24 @@ use midnight_storage_core_v1::{
     db::DB,
     storage::default_storage,
 };
+#[cfg(feature = "legacy-ledgers")]
 use midnight_transient_crypto_v2::merkle_tree::{
     MerkleTreeCollapsedUpdate, MerkleTreeDigest, TreeInsertionPath,
 };
+#[cfg(feature = "legacy-ledgers")]
 use midnight_transient_crypto_v3::merkle_tree::{
     MerkleTreeCollapsedUpdate as MerkleTreeCollapsedUpdateV9,
     MerkleTreeDigest as MerkleTreeDigestV9, TreeInsertionPath as TreeInsertionPathV9,
 };
+use midnight_transient_crypto_v10::merkle_tree::{
+    MerkleTreeCollapsedUpdate as MerkleTreeCollapsedUpdateV10,
+    MerkleTreeDigest as MerkleTreeDigestV10, TreeInsertionPath as TreeInsertionPathV10,
+};
+#[cfg(feature = "legacy-ledgers")]
 use midnight_zswap_v8::ledger::State as ZswapStateV8;
+#[cfg(feature = "legacy-ledgers")]
 use midnight_zswap_v9::ledger::State as ZswapStateV9;
+use midnight_zswap_v10::ledger::State as ZswapStateV10;
 use std::{
     collections::{BTreeMap, HashSet},
     ops::Deref,
@@ -134,28 +180,43 @@ const UINT_128_SIZE: usize = 16;
 const EITHER_SIZE: usize = 1 + 2 * BYTES_32_SIZE; // is_left + left(32) + right(32).
 const MAYBE_512_SIZE: usize = 1 + 512;
 
+#[cfg(feature = "legacy-ledgers")]
 static STRICTNESS_V8: LazyLock<WellFormedStrictnessV8> = LazyLock::new(|| {
     let mut strictness = WellFormedStrictnessV8::default();
     strictness.enforce_balancing = false;
     strictness
 });
 
+#[cfg(feature = "legacy-ledgers")]
 static STRICTNESS_V9: LazyLock<WellFormedStrictnessV9> = LazyLock::new(|| {
     let mut strictness = WellFormedStrictnessV9::default();
+    strictness.enforce_balancing = false;
+    strictness
+});
+static STRICTNESS_V10: LazyLock<WellFormedStrictnessV10> = LazyLock::new(|| {
+    let mut strictness = WellFormedStrictnessV10::default();
     strictness.enforce_balancing = false;
     strictness
 });
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LedgerState {
+    #[cfg(feature = "legacy-ledgers")]
     V8 {
         ledger_state: LedgerStateV8<v1_1::LedgerDb>,
         block_fullness: SyntheticCost,
     },
+    #[cfg(feature = "legacy-ledgers")]
     V9 {
         ledger_state: LedgerStateV9<v1_1::LedgerDb>,
         // base-crypto is unified at 1.1.0 across v8 and v9, so the cost model
         // types (incl. SyntheticCost) are shared with the V8 variant.
+        block_fullness: SyntheticCost,
+    },
+    V10 {
+        ledger_state: LedgerStateV10<v1_1::LedgerDb>,
+        // base-crypto is unified at 1.1.0 across the ledger generations, so the
+        // cost model types (incl. SyntheticCost) are shared across variants.
         block_fullness: SyntheticCost,
     },
 }
@@ -164,14 +225,22 @@ impl LedgerState {
     #[allow(missing_docs)]
     pub fn new(network_id: NetworkId, ledger_version: LedgerVersion) -> Result<Self, Error> {
         let ledger_state = match ledger_version {
+            #[cfg(feature = "legacy-ledgers")]
             LedgerVersion::V8 => Self::V8 {
                 ledger_state: LedgerStateV8::new(network_id),
                 block_fullness: Default::default(),
             },
+            #[cfg(feature = "legacy-ledgers")]
             LedgerVersion::V9 => Self::V9 {
                 ledger_state: LedgerStateV9::new(network_id),
                 block_fullness: Default::default(),
             },
+            LedgerVersion::V10 => Self::V10 {
+                ledger_state: LedgerStateV10::new(network_id),
+                block_fullness: Default::default(),
+            },
+            #[cfg(not(feature = "legacy-ledgers"))]
+            ledger_version => return Err(Error::LegacyLedgerDisabled(ledger_version)),
         };
 
         Ok(ledger_state)
@@ -183,6 +252,7 @@ impl LedgerState {
         ledger_version: LedgerVersion,
     ) -> Result<Self, Error> {
         match ledger_version {
+            #[cfg(feature = "legacy-ledgers")]
             LedgerVersion::V8 => {
                 let ledger_state =
                     tagged_deserialize::<LedgerStateV8<v1_1::LedgerDb>>(&mut raw.as_ref())
@@ -207,6 +277,7 @@ impl LedgerState {
                 })
             }
 
+            #[cfg(feature = "legacy-ledgers")]
             LedgerVersion::V9 => {
                 let ledger_state =
                     tagged_deserialize::<LedgerStateV9<v1_1::LedgerDb>>(&mut raw.as_ref())
@@ -217,28 +288,55 @@ impl LedgerState {
                     block_fullness: Default::default(),
                 })
             }
+            LedgerVersion::V10 => {
+                let ledger_state =
+                    tagged_deserialize::<LedgerStateV10<v1_1::LedgerDb>>(&mut raw.as_ref())
+                        .map_err(|error| Error::Deserialize("GenesisLedgerStateV10", error))?;
+
+                Ok(Self::V10 {
+                    ledger_state,
+                    block_fullness: Default::default(),
+                })
+            }
+            #[cfg(not(feature = "legacy-ledgers"))]
+            ledger_version => Err(Error::LegacyLedgerDisabled(ledger_version)),
         }
     }
 
     pub fn ledger_parameters(&self) -> LedgerParameters {
         match self {
+            #[cfg(feature = "legacy-ledgers")]
             Self::V8 { ledger_state, .. } => {
                 LedgerParameters::V8(ledger_state.parameters.deref().to_owned())
             }
+            #[cfg(feature = "legacy-ledgers")]
             Self::V9 { ledger_state, .. } => {
                 LedgerParameters::V9(ledger_state.parameters.deref().to_owned())
+            }
+            Self::V10 { ledger_state, .. } => {
+                LedgerParameters::V10(ledger_state.parameters.deref().to_owned())
             }
         }
     }
 
     /// Net remaining-claimable for the recipient, from the ledger's `bridge_receiving` map
     /// (credited net on deposit, removed on claim). Authoritative, unlike event-derived
-    /// `deposited - claimed`, which carries the bridge fee. `0` for V8 (ledger 9 only).
+    /// `deposited - claimed`, which carries the bridge fee. `0` on ledger 8, which has no bridge.
     pub fn bridge_receiving(&self, address: UnshieldedAddress) -> u128 {
         match self {
+            #[cfg(feature = "legacy-ledgers")]
             Self::V8 { .. } => 0,
+            #[cfg(feature = "legacy-ledgers")]
             Self::V9 { ledger_state, .. } => {
                 let address = UserAddressV9(HashOutput(address.0));
+                ledger_state
+                    .bridge_receiving
+                    .get(&address)
+                    .copied()
+                    .unwrap_or(0)
+            }
+            Self::V10 { ledger_state, .. } => {
+                let address = UserAddressV10(HashOutput(address.0));
                 ledger_state
                     .bridge_receiving
                     .get(&address)
@@ -253,6 +351,7 @@ impl LedgerState {
         ledger_version: LedgerVersion,
     ) -> Result<Self, Error> {
         let ledger_state = match ledger_version {
+            #[cfg(feature = "legacy-ledgers")]
             LedgerVersion::V8 => {
                 let arena_key = TypedArenaKey::<
                     LedgerStateV8<v1_1::LedgerDb>,
@@ -270,6 +369,7 @@ impl LedgerState {
                 }
             }
 
+            #[cfg(feature = "legacy-ledgers")]
             LedgerVersion::V9 => {
                 let arena_key = TypedArenaKey::<
                     LedgerStateV9<v1_1::LedgerDb>,
@@ -286,6 +386,24 @@ impl LedgerState {
                     block_fullness: Default::default(),
                 }
             }
+            LedgerVersion::V10 => {
+                let arena_key = TypedArenaKey::<
+                    LedgerStateV10<v1_1::LedgerDb>,
+                    <v1_1::LedgerDb as DB>::Hasher,
+                >::deserialize(&mut key.as_slice(), 0)
+                .map_err(|error| Error::Deserialize("TypedArenaKeyV10", error))?;
+                let ledger_state = default_storage::<v1_1::LedgerDb>()
+                    .get_lazy(&arena_key)
+                    .map_err(|error| Error::LoadLedgerState(key.to_owned(), error))?;
+                let ledger_state = (*ledger_state).clone();
+
+                Self::V10 {
+                    ledger_state,
+                    block_fullness: Default::default(),
+                }
+            }
+            #[cfg(not(feature = "legacy-ledgers"))]
+            ledger_version => return Err(Error::LegacyLedgerDisabled(ledger_version)),
         };
 
         Ok(ledger_state)
@@ -293,13 +411,17 @@ impl LedgerState {
 
     pub fn translate(self, ledger_version: LedgerVersion) -> Result<Self, Error> {
         match (self, ledger_version) {
+            #[cfg(feature = "legacy-ledgers")]
             (s @ LedgerState::V8 { .. }, LedgerVersion::V8) => Ok(s),
+            #[cfg(feature = "legacy-ledgers")]
             (s @ LedgerState::V9 { .. }, LedgerVersion::V9) => Ok(s),
+            (s @ LedgerState::V10 { .. }, LedgerVersion::V10) => Ok(s),
             // The ledger v8 -> v9 hard-fork boundary. At `apply + 1` the indexer
             // holds a replayed V8 state and the block reports V9, so this fires
             // exactly once. The re-ported node table must reproduce the node's
             // post-migration arena root bit-for-bit (see `application.rs`'s
             // per-block root check) — guarded by the golden-root fixture.
+            #[cfg(feature = "legacy-ledgers")]
             (
                 LedgerState::V8 {
                     ledger_state,
@@ -321,36 +443,58 @@ impl LedgerState {
                     block_fullness,
                 })
             }
-            (LedgerState::V9 { .. }, LedgerVersion::V8) => Err(
-                Error::BackwardsLedgerStateTranslation(LedgerVersion::V9, LedgerVersion::V8),
-            ),
+
+            // The ledger v9 -> v10 fork boundary has no translation table here.
+            #[cfg(feature = "legacy-ledgers")]
+            (state @ (LedgerState::V8 { .. } | LedgerState::V9 { .. }), LedgerVersion::V10) => {
+                Err(Error::UnsupportedLedgerStateTranslation(
+                    state.ledger_version(),
+                    LedgerVersion::V10,
+                ))
+            }
+
+            (state, ledger_version) => Err(Error::BackwardsLedgerStateTranslation(
+                state.ledger_version(),
+                ledger_version,
+            )),
         }
     }
 
     pub fn ledger_version(&self) -> LedgerVersion {
         match self {
+            #[cfg(feature = "legacy-ledgers")]
             LedgerState::V8 { .. } => LedgerVersion::V8,
+            #[cfg(feature = "legacy-ledgers")]
             LedgerState::V9 { .. } => LedgerVersion::V9,
+            LedgerState::V10 { .. } => LedgerVersion::V10,
         }
     }
 
     pub fn root(&self) -> Result<ByteVec, Error> {
         match self {
+            #[cfg(feature = "legacy-ledgers")]
             Self::V8 { ledger_state, .. } => default_storage::<v1_1::LedgerDb>()
                 .alloc(ledger_state.to_owned())
                 .as_typed_key()
                 .serialize()
                 .map_err(|error| Error::Serialize("LedgerStateV8", error)),
+            #[cfg(feature = "legacy-ledgers")]
             Self::V9 { ledger_state, .. } => default_storage::<v1_1::LedgerDb>()
                 .alloc(ledger_state.to_owned())
                 .as_typed_key()
                 .serialize()
                 .map_err(|error| Error::Serialize("LedgerStateV9", error)),
+            Self::V10 { ledger_state, .. } => default_storage::<v1_1::LedgerDb>()
+                .alloc(ledger_state.to_owned())
+                .as_typed_key()
+                .serialize()
+                .map_err(|error| Error::Serialize("LedgerStateV10", error)),
         }
     }
 
     pub fn persist(self) -> Result<(Self, SerializedLedgerStateKey), Error> {
         match self {
+            #[cfg(feature = "legacy-ledgers")]
             LedgerState::V8 {
                 ledger_state,
                 block_fullness,
@@ -373,6 +517,7 @@ impl LedgerState {
                 Ok((ledger_state, key))
             }
 
+            #[cfg(feature = "legacy-ledgers")]
             LedgerState::V9 {
                 ledger_state,
                 block_fullness,
@@ -388,6 +533,27 @@ impl LedgerState {
 
                 let ledger_state = Sp::into_inner(ledger_state).expect("ledger state exists");
                 let ledger_state = LedgerState::V9 {
+                    ledger_state,
+                    block_fullness,
+                };
+
+                Ok((ledger_state, key))
+            }
+            LedgerState::V10 {
+                ledger_state,
+                block_fullness,
+            } => {
+                let mut ledger_state = Sp::new(ledger_state);
+                ledger_state.persist();
+                default_storage::<v1_1::LedgerDb>().with_backend(|b| b.flush_all_changes_to_db());
+
+                let key = ledger_state
+                    .as_typed_key()
+                    .serialize()
+                    .map_err(|error| Error::Serialize("TypedArenaKeyV10", error))?;
+
+                let ledger_state = Sp::into_inner(ledger_state).expect("ledger state exists");
+                let ledger_state = LedgerState::V10 {
                     ledger_state,
                     block_fullness,
                 };
@@ -474,6 +640,7 @@ impl LedgerState {
         ledger_version: LedgerVersion,
     ) -> Result<ArenaHash<<v1_1::LedgerDb as DB>::Hasher>, Error> {
         match ledger_version {
+            #[cfg(feature = "legacy-ledgers")]
             LedgerVersion::V8 => {
                 let arena_key = TypedArenaKey::<
                     LedgerStateV8<v1_1::LedgerDb>,
@@ -484,6 +651,7 @@ impl LedgerState {
                 Ok(arena_key.key.hash().clone())
             }
 
+            #[cfg(feature = "legacy-ledgers")]
             LedgerVersion::V9 => {
                 let arena_key = TypedArenaKey::<
                     LedgerStateV9<v1_1::LedgerDb>,
@@ -493,6 +661,17 @@ impl LedgerState {
 
                 Ok(arena_key.key.hash().clone())
             }
+            LedgerVersion::V10 => {
+                let arena_key = TypedArenaKey::<
+                    LedgerStateV10<v1_1::LedgerDb>,
+                    <v1_1::LedgerDb as DB>::Hasher,
+                >::deserialize(&mut key.as_slice(), 0)
+                .map_err(|error| Error::Deserialize("TypedArenaKeyV10", error))?;
+
+                Ok(arena_key.key.hash().clone())
+            }
+            #[cfg(not(feature = "legacy-ledgers"))]
+            ledger_version => Err(Error::LegacyLedgerDisabled(ledger_version)),
         }
     }
 
@@ -523,6 +702,7 @@ impl LedgerState {
         well_formed_timestamp: u64,
     ) -> Result<ApplyRegularTransactionOutcome, Error> {
         match self {
+            #[cfg(feature = "legacy-ledgers")]
             Self::V8 {
                 ledger_state,
                 block_fullness,
@@ -607,6 +787,7 @@ impl LedgerState {
                 })
             }
 
+            #[cfg(feature = "legacy-ledgers")]
             Self::V9 {
                 ledger_state,
                 block_fullness,
@@ -721,6 +902,120 @@ impl LedgerState {
                     bridge_claim,
                 })
             }
+            Self::V10 {
+                ledger_state,
+                block_fullness,
+            } => {
+                let transaction =
+                    tagged_deserialize::<TransactionV10<v1_1::LedgerDb>>(&mut transaction.as_ref())
+                        .map_err(|error| Error::Deserialize("LedgerTransactionV10", error))?;
+
+                let cx = TransactionContextV10 {
+                    ref_state: ledger_state.clone(),
+                    block_context: BlockContextV10 {
+                        tblock: timestamp(block_timestamp),
+                        tblock_err: 30,
+                        parent_block_hash: HashOutput(parent_block_hash.0),
+                        last_block_time: timestamp(parent_block_timestamp),
+                    },
+                    whitelist: None,
+                };
+
+                // Must match the node byte-for-byte: the node feeds `block_fullness`
+                // with the stateless `cost`, and fee prices derive from this
+                // accumulator — a state-aware cost diverges on contract calls and
+                // poisons all fee-derived ledger values (shielded-sre#515).
+                let fullness_cost = transaction
+                    .cost(&ledger_state.parameters, true)
+                    .map_err(|error| Error::TransactionCost(error.into()))?;
+                // State-aware cost (accurate for contract calls) — for the reported
+                // `fees` only, never for consensus-relevant state.
+                let cost = transaction
+                    .cost_with_state(&ledger_state.parameters, ledger_state, true)
+                    .map_err(|error| Error::TransactionCost(error.into()))?;
+                let fees = {
+                    let normalized = cost
+                        .normalize(ledger_state.parameters.limits.block_limits)
+                        .ok_or(FeeCalculationErrorV10::BlockLimitExceeded)
+                        .map_err(|error| Error::TransactionCost(error.into()))?;
+                    ledger_state
+                        .parameters
+                        .fee_prices
+                        .overall_cost(&normalized)
+                        .into_atomic_units(SPECKS_PER_DUST_V10)
+                };
+                let verified_ledger_transaction = transaction
+                    .well_formed(
+                        &cx.ref_state,
+                        *STRICTNESS_V10,
+                        timestamp(well_formed_timestamp),
+                    )
+                    .map_err(|error| Error::MalformedTransaction(error.into()))?;
+                let (ledger_state, transaction_result) =
+                    ledger_state.apply(&verified_ledger_transaction, &cx);
+
+                let (transaction_result, events, should_count_cost) = match transaction_result {
+                    TransactionResultV10::Success(events) => {
+                        (TransactionResult::Success, events, true)
+                    }
+
+                    TransactionResultV10::PartialSuccess(segments, events) => {
+                        let segments = segments
+                            .into_iter()
+                            .map(|(id, result)| (id, result.is_ok()))
+                            .collect::<Vec<_>>();
+                        (TransactionResult::PartialSuccess(segments), events, true)
+                    }
+
+                    TransactionResultV10::Failure(_) => (TransactionResult::Failure, vec![], false),
+                };
+
+                // Only count cost for successful/partial transactions (match node behavior)
+                let block_fullness = if should_count_cost {
+                    *block_fullness + fullness_cost
+                } else {
+                    *block_fullness
+                };
+
+                // Extract a Cardano-bridge claim before `transaction` is moved into
+                // `make_unshielded_utxos_for_regular_transaction_v10`. A `ClaimRewards` with
+                // `ClaimKind::CardanoBridge` is a user claiming bridged NIGHT: the recipient is the
+                // claim owner and the amount is the claim value.
+                let bridge_claim = match &transaction {
+                    TransactionV10::ClaimRewards(claim)
+                        if claim.kind == ClaimKindV10::CardanoBridge =>
+                    {
+                        Some(BridgeClaim {
+                            recipient: UserAddressV10::from(claim.owner.clone()).0.0.into(),
+                            amount: claim.value,
+                        })
+                    }
+                    _ => None,
+                };
+
+                let (created_unshielded_utxos, spent_unshielded_utxos) =
+                    make_unshielded_utxos_for_regular_transaction_v10(
+                        transaction,
+                        &transaction_result,
+                        &ledger_state,
+                    );
+
+                let ledger_events = make_ledger_events_v10(events)?;
+
+                *self = Self::V10 {
+                    ledger_state,
+                    block_fullness,
+                };
+
+                Ok(ApplyRegularTransactionOutcome {
+                    transaction_result,
+                    created_unshielded_utxos,
+                    spent_unshielded_utxos,
+                    ledger_events,
+                    fees,
+                    bridge_claim,
+                })
+            }
         }
     }
 
@@ -732,6 +1027,7 @@ impl LedgerState {
         block_timestamp: u64,
     ) -> Result<ApplySystemTransactionOutcome, Error> {
         match self {
+            #[cfg(feature = "legacy-ledgers")]
             Self::V8 {
                 ledger_state,
                 block_fullness,
@@ -762,6 +1058,7 @@ impl LedgerState {
                 })
             }
 
+            #[cfg(feature = "legacy-ledgers")]
             Self::V9 {
                 ledger_state,
                 block_fullness,
@@ -791,32 +1088,72 @@ impl LedgerState {
                     ledger_events,
                 })
             }
+            Self::V10 {
+                ledger_state,
+                block_fullness,
+            } => {
+                let transaction =
+                    tagged_deserialize::<SystemTransactionV10>(&mut transaction.as_ref())
+                        .map_err(|error| Error::Deserialize("SystemTransactionV10", error))?;
+
+                let cost = transaction.cost(&ledger_state.parameters);
+                let (ledger_state, events) = ledger_state
+                    .apply_system_tx(&transaction, timestamp(block_timestamp))
+                    .map_err(|error| Error::SystemTransaction(error.into()))?;
+                let block_fullness = *block_fullness + cost;
+
+                let created_unshielded_utxos =
+                    make_unshielded_utxos_for_system_transaction_v10(transaction, &ledger_state);
+
+                let ledger_events = make_ledger_events_v10(events)?;
+
+                *self = Self::V10 {
+                    ledger_state,
+                    block_fullness,
+                };
+
+                Ok(ApplySystemTransactionOutcome {
+                    created_unshielded_utxos,
+                    ledger_events,
+                })
+            }
         }
     }
 
     /// Get the first free index of the zswap state.
     pub fn zswap_first_free(&self) -> u64 {
         match self {
+            #[cfg(feature = "legacy-ledgers")]
             Self::V8 { ledger_state, .. } => ledger_state.zswap.first_free,
+            #[cfg(feature = "legacy-ledgers")]
             Self::V9 { ledger_state, .. } => ledger_state.zswap.first_free,
+            Self::V10 { ledger_state, .. } => ledger_state.zswap.first_free,
         }
     }
 
     /// Get the first free index of the dust commitment tree.
     pub fn dust_commitments_first_free(&self) -> u64 {
         match self {
+            #[cfg(feature = "legacy-ledgers")]
             Self::V8 { ledger_state, .. } => ledger_state.dust.utxo.commitments_first_free,
+            #[cfg(feature = "legacy-ledgers")]
             Self::V9 { ledger_state, .. } => ledger_state.dust.utxo.commitments_first_free,
+            Self::V10 { ledger_state, .. } => ledger_state.dust.utxo.commitments_first_free,
         }
     }
 
     /// Get the first free index of the dust generation tree.
     pub fn dust_generations_first_free(&self) -> u64 {
         match self {
+            #[cfg(feature = "legacy-ledgers")]
             Self::V8 { ledger_state, .. } => {
                 ledger_state.dust.generation.generating_tree_first_free
             }
+            #[cfg(feature = "legacy-ledgers")]
             Self::V9 { ledger_state, .. } => {
+                ledger_state.dust.generation.generating_tree_first_free
+            }
+            Self::V10 { ledger_state, .. } => {
                 ledger_state.dust.generation.generating_tree_first_free
             }
         }
@@ -825,6 +1162,7 @@ impl LedgerState {
     /// Get the Merkle tree root of the zswap state.
     pub fn zswap_merkle_tree_root(&self) -> ZswapMerkleTreeRoot {
         match self {
+            #[cfg(feature = "legacy-ledgers")]
             Self::V8 { ledger_state, .. } => {
                 let root = ledger_state
                     .zswap
@@ -834,6 +1172,7 @@ impl LedgerState {
                     .expect("zswap state Merkle tree root should exist");
                 ZswapMerkleTreeRoot::V8(root)
             }
+            #[cfg(feature = "legacy-ledgers")]
             Self::V9 { ledger_state, .. } => {
                 let root = ledger_state
                     .zswap
@@ -843,12 +1182,22 @@ impl LedgerState {
                     .expect("zswap state Merkle tree root should exist");
                 ZswapMerkleTreeRoot::V9(root)
             }
+            Self::V10 { ledger_state, .. } => {
+                let root = ledger_state
+                    .zswap
+                    .coin_coms
+                    .rehash()
+                    .root()
+                    .expect("zswap state Merkle tree root should exist");
+                ZswapMerkleTreeRoot::V10(root)
+            }
         }
     }
 
     /// Get the serialized merkle tree root of the dust commitment tree.
     pub fn dust_commitment_merkle_tree_root(&self) -> Result<ByteVec, Error> {
         match self {
+            #[cfg(feature = "legacy-ledgers")]
             Self::V8 { ledger_state, .. } => ledger_state
                 .dust
                 .utxo
@@ -858,7 +1207,17 @@ impl LedgerState {
                 .expect("dust commitment merkle tree root should exist")
                 .serialize()
                 .map_err(|error| Error::Serialize("DustCommitmentMerkleTreeRoot", error)),
+            #[cfg(feature = "legacy-ledgers")]
             Self::V9 { ledger_state, .. } => ledger_state
+                .dust
+                .utxo
+                .commitments
+                .rehash()
+                .root()
+                .expect("dust commitment merkle tree root should exist")
+                .serialize()
+                .map_err(|error| Error::Serialize("DustCommitmentMerkleTreeRoot", error)),
+            Self::V10 { ledger_state, .. } => ledger_state
                 .dust
                 .utxo
                 .commitments
@@ -873,6 +1232,7 @@ impl LedgerState {
     /// Get the serialized merkle tree root of the dust generation tree.
     pub fn dust_generation_merkle_tree_root(&self) -> Result<ByteVec, Error> {
         match self {
+            #[cfg(feature = "legacy-ledgers")]
             Self::V8 { ledger_state, .. } => ledger_state
                 .dust
                 .generation
@@ -882,7 +1242,17 @@ impl LedgerState {
                 .expect("dust generation merkle tree root should exist")
                 .serialize()
                 .map_err(|error| Error::Serialize("DustGenerationMerkleTreeRoot", error)),
+            #[cfg(feature = "legacy-ledgers")]
             Self::V9 { ledger_state, .. } => ledger_state
+                .dust
+                .generation
+                .generating_tree
+                .rehash()
+                .root()
+                .expect("dust generation merkle tree root should exist")
+                .serialize()
+                .map_err(|error| Error::Serialize("DustGenerationMerkleTreeRoot", error)),
+            Self::V10 { ledger_state, .. } => ledger_state
                 .dust
                 .generation
                 .generating_tree
@@ -925,6 +1295,7 @@ impl LedgerState {
         // `lookup_sp` hands back the `Sp` that is already in the map, so nothing is hashed,
         // copied or re-allocated here.
         match self {
+            #[cfg(feature = "legacy-ledgers")]
             Self::V8 { ledger_state, .. } => {
                 let address = ContractAddressV8::deserialize(&mut address.as_ref(), 0)
                     .map_err(|error| Error::Deserialize("ContractAddressV8", error))?;
@@ -945,6 +1316,7 @@ impl LedgerState {
                     .transpose()
             }
 
+            #[cfg(feature = "legacy-ledgers")]
             Self::V9 { ledger_state, .. } => {
                 let address = ContractAddressV9::deserialize(&mut address.as_ref(), 0)
                     .map_err(|error| Error::Deserialize("ContractAddressV9", error))?;
@@ -959,6 +1331,25 @@ impl LedgerState {
                             .tagged_serialize()
                             .map(SerializedContractStateKey::from)
                             .map_err(|error| Error::Serialize("ContractStateKeyV9", error))?;
+
+                        Ok((key, ContractState::V4(contract_state)))
+                    })
+                    .transpose()
+            }
+            Self::V10 { ledger_state, .. } => {
+                let address = ContractAddressV10::deserialize(&mut address.as_ref(), 0)
+                    .map_err(|error| Error::Deserialize("ContractAddressV10", error))?;
+
+                ledger_state
+                    .contract
+                    .lookup_sp(&address)
+                    .map(|mut contract_state| {
+                        contract_state.persist();
+                        let key = contract_state
+                            .as_typed_key()
+                            .tagged_serialize()
+                            .map(SerializedContractStateKey::from)
+                            .map_err(|error| Error::Serialize("ContractStateKeyV10", error))?;
 
                         Ok((key, ContractState::V4(contract_state)))
                     })
@@ -984,6 +1375,7 @@ impl LedgerState {
 
         // As above: persist before taking the key.
         let key = match self {
+            #[cfg(feature = "legacy-ledgers")]
             Self::V8 { ledger_state, .. } => {
                 let address = ContractAddressV8::deserialize(&mut address.as_ref(), 0)
                     .map_err(|error| Error::Deserialize("ContractAddressV8", error))?;
@@ -999,6 +1391,7 @@ impl LedgerState {
                     .map_err(|error| Error::Serialize("ZswapStateKeyV8", error))?
             }
 
+            #[cfg(feature = "legacy-ledgers")]
             Self::V9 { ledger_state, .. } => {
                 let address = ContractAddressV9::deserialize(&mut address.as_ref(), 0)
                     .map_err(|error| Error::Deserialize("ContractAddressV9", error))?;
@@ -1012,6 +1405,20 @@ impl LedgerState {
                     .as_typed_key()
                     .tagged_serialize()
                     .map_err(|error| Error::Serialize("ZswapStateKeyV9", error))?
+            }
+            Self::V10 { ledger_state, .. } => {
+                let address = ContractAddressV10::deserialize(&mut address.as_ref(), 0)
+                    .map_err(|error| Error::Deserialize("ContractAddressV10", error))?;
+
+                let mut contract_zswap_state = ZswapStateV10::new();
+                contract_zswap_state.coin_coms = ledger_state.zswap.filter(&[address]);
+
+                let mut contract_zswap_state = storage.alloc(contract_zswap_state);
+                contract_zswap_state.persist();
+                contract_zswap_state
+                    .as_typed_key()
+                    .tagged_serialize()
+                    .map_err(|error| Error::Serialize("ZswapStateKeyV10", error))?
             }
         };
 
@@ -1043,6 +1450,7 @@ impl LedgerState {
         address: &SerializedContractAddress,
     ) -> Result<SerializedZswapState, Error> {
         match self {
+            #[cfg(feature = "legacy-ledgers")]
             Self::V8 { ledger_state, .. } => {
                 let address = ContractAddressV8::deserialize(&mut address.as_ref(), 0)
                     .map_err(|error| Error::Deserialize("ContractAddressV8", error))?;
@@ -1055,6 +1463,7 @@ impl LedgerState {
                     .map_err(|error| Error::Serialize("ZswapStateV8", error))
             }
 
+            #[cfg(feature = "legacy-ledgers")]
             Self::V9 { ledger_state, .. } => {
                 let address = ContractAddressV9::deserialize(&mut address.as_ref(), 0)
                     .map_err(|error| Error::Deserialize("ContractAddressV9", error))?;
@@ -1066,6 +1475,17 @@ impl LedgerState {
                     .tagged_serialize()
                     .map_err(|error| Error::Serialize("ZswapStateV9", error))
             }
+            Self::V10 { ledger_state, .. } => {
+                let address = ContractAddressV10::deserialize(&mut address.as_ref(), 0)
+                    .map_err(|error| Error::Deserialize("ContractAddressV10", error))?;
+
+                let mut contract_zswap_state = ZswapStateV10::new();
+                contract_zswap_state.coin_coms = ledger_state.zswap.filter(&[address]);
+
+                contract_zswap_state
+                    .tagged_serialize()
+                    .map_err(|error| Error::Serialize("ZswapStateV10", error))
+            }
         }
     }
 
@@ -1076,6 +1496,7 @@ impl LedgerState {
         end_index: u64,
     ) -> Result<ByteVec, Error> {
         match self {
+            #[cfg(feature = "legacy-ledgers")]
             Self::V8 { ledger_state, .. } => MerkleTreeCollapsedUpdate::new(
                 &ledger_state.zswap.coin_coms.rehash(),
                 start_index,
@@ -1084,7 +1505,16 @@ impl LedgerState {
             .map_err(|error| Error::InvalidUpdate(error.into()))?
             .tagged_serialize()
             .map_err(|error| Error::Serialize("MerkleTreeCollapsedUpdate", error)),
+            #[cfg(feature = "legacy-ledgers")]
             Self::V9 { ledger_state, .. } => MerkleTreeCollapsedUpdateV9::new(
+                &ledger_state.zswap.coin_coms.rehash(),
+                start_index,
+                end_index,
+            )
+            .map_err(|error| Error::InvalidUpdate(error.into()))?
+            .tagged_serialize()
+            .map_err(|error| Error::Serialize("MerkleTreeCollapsedUpdate", error)),
+            Self::V10 { ledger_state, .. } => MerkleTreeCollapsedUpdateV10::new(
                 &ledger_state.zswap.coin_coms.rehash(),
                 start_index,
                 end_index,
@@ -1102,6 +1532,7 @@ impl LedgerState {
         end_index: u64,
     ) -> Result<ByteVec, Error> {
         match self {
+            #[cfg(feature = "legacy-ledgers")]
             Self::V8 { ledger_state, .. } => MerkleTreeCollapsedUpdate::new(
                 &ledger_state.dust.generation.generating_tree.rehash(),
                 start_index,
@@ -1110,7 +1541,16 @@ impl LedgerState {
             .map_err(|error| Error::InvalidUpdate(error.into()))?
             .tagged_serialize()
             .map_err(|error| Error::Serialize("DustGenerationsMerkleTreeCollapsedUpdate", error)),
+            #[cfg(feature = "legacy-ledgers")]
             Self::V9 { ledger_state, .. } => MerkleTreeCollapsedUpdateV9::new(
+                &ledger_state.dust.generation.generating_tree.rehash(),
+                start_index,
+                end_index,
+            )
+            .map_err(|error| Error::InvalidUpdate(error.into()))?
+            .tagged_serialize()
+            .map_err(|error| Error::Serialize("DustGenerationsMerkleTreeCollapsedUpdate", error)),
+            Self::V10 { ledger_state, .. } => MerkleTreeCollapsedUpdateV10::new(
                 &ledger_state.dust.generation.generating_tree.rehash(),
                 start_index,
                 end_index,
@@ -1128,6 +1568,7 @@ impl LedgerState {
         end_index: u64,
     ) -> Result<ByteVec, Error> {
         match self {
+            #[cfg(feature = "legacy-ledgers")]
             Self::V8 { ledger_state, .. } => MerkleTreeCollapsedUpdate::new(
                 &ledger_state.dust.utxo.commitments.rehash(),
                 start_index,
@@ -1136,7 +1577,16 @@ impl LedgerState {
             .map_err(|error| Error::InvalidUpdate(error.into()))?
             .tagged_serialize()
             .map_err(|error| Error::Serialize("DustCommitmentsMerkleTreeCollapsedUpdate", error)),
+            #[cfg(feature = "legacy-ledgers")]
             Self::V9 { ledger_state, .. } => MerkleTreeCollapsedUpdateV9::new(
+                &ledger_state.dust.utxo.commitments.rehash(),
+                start_index,
+                end_index,
+            )
+            .map_err(|error| Error::InvalidUpdate(error.into()))?
+            .tagged_serialize()
+            .map_err(|error| Error::Serialize("DustCommitmentsMerkleTreeCollapsedUpdate", error)),
+            Self::V10 { ledger_state, .. } => MerkleTreeCollapsedUpdateV10::new(
                 &ledger_state.dust.utxo.commitments.rehash(),
                 start_index,
                 end_index,
@@ -1153,6 +1603,7 @@ impl LedgerState {
         block_timestamp: u64,
     ) -> Result<LedgerParameters, Error> {
         match self {
+            #[cfg(feature = "legacy-ledgers")]
             Self::V8 {
                 ledger_state,
                 block_fullness,
@@ -1189,6 +1640,7 @@ impl LedgerState {
                 Ok(LedgerParameters::V8(ledger_parameters))
             }
 
+            #[cfg(feature = "legacy-ledgers")]
             Self::V9 {
                 ledger_state,
                 block_fullness,
@@ -1224,6 +1676,41 @@ impl LedgerState {
 
                 Ok(LedgerParameters::V9(ledger_parameters))
             }
+            Self::V10 {
+                ledger_state,
+                block_fullness,
+            } => {
+                let timestamp = timestamp(block_timestamp);
+                let block_limits = ledger_state.parameters.limits.block_limits;
+                let normalized_fullness =
+                    clamp_and_normalize(block_fullness, &block_limits, "post_block_update");
+                let overall_fullness = FixedPoint::max(
+                    FixedPoint::max(
+                        FixedPoint::max(
+                            normalized_fullness.read_time,
+                            normalized_fullness.compute_time,
+                        ),
+                        normalized_fullness.block_usage,
+                    ),
+                    FixedPoint::max(
+                        normalized_fullness.bytes_written,
+                        normalized_fullness.bytes_churned,
+                    ),
+                );
+
+                let ledger_state = ledger_state
+                    .post_block_update(timestamp, normalized_fullness, overall_fullness)
+                    .map_err(|error| Error::BlockLimitExceeded(error.into()))?;
+
+                let ledger_parameters = ledger_state.parameters.deref().to_owned();
+
+                *self = Self::V10 {
+                    ledger_state,
+                    block_fullness: Default::default(),
+                };
+
+                Ok(LedgerParameters::V10(ledger_parameters))
+            }
         }
     }
 }
@@ -1231,8 +1718,11 @@ impl LedgerState {
 /// Facade for ledger parameters across supported (protocol) versions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LedgerParameters {
+    #[cfg(feature = "legacy-ledgers")]
     V8(LedgerParametersV8),
+    #[cfg(feature = "legacy-ledgers")]
     V9(LedgerParametersV9),
+    V10(LedgerParametersV10),
 }
 
 impl LedgerParameters {
@@ -1240,12 +1730,17 @@ impl LedgerParameters {
     #[trace]
     pub fn serialize(&self) -> Result<SerializedLedgerParameters, Error> {
         match self {
+            #[cfg(feature = "legacy-ledgers")]
             Self::V8(parameters) => parameters
                 .tagged_serialize()
                 .map_err(|error| Error::Serialize("SerializedLedgerParametersV8", error)),
+            #[cfg(feature = "legacy-ledgers")]
             Self::V9(parameters) => parameters
                 .tagged_serialize()
                 .map_err(|error| Error::Serialize("SerializedLedgerParametersV9", error)),
+            Self::V10(parameters) => parameters
+                .tagged_serialize()
+                .map_err(|error| Error::Serialize("SerializedLedgerParametersV10", error)),
         }
     }
 }
@@ -1253,8 +1748,11 @@ impl LedgerParameters {
 /// Facade for zswap state Merkle tree root across supported (protocol) versions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ZswapMerkleTreeRoot {
+    #[cfg(feature = "legacy-ledgers")]
     V8(MerkleTreeDigest),
+    #[cfg(feature = "legacy-ledgers")]
     V9(MerkleTreeDigestV9),
+    V10(MerkleTreeDigestV10),
 }
 
 impl ZswapMerkleTreeRoot {
@@ -1265,16 +1763,25 @@ impl ZswapMerkleTreeRoot {
         ledger_version: LedgerVersion,
     ) -> Result<Self, Error> {
         let zswap_state_root = match ledger_version {
+            #[cfg(feature = "legacy-ledgers")]
             LedgerVersion::V8 => {
                 let digest = MerkleTreeDigest::deserialize(&mut zswap_state_root.as_ref(), 0)
                     .map_err(|error| Error::Deserialize("MerkleTreeDigestV8", error))?;
                 Self::V8(digest)
             }
+            #[cfg(feature = "legacy-ledgers")]
             LedgerVersion::V9 => {
                 let digest = MerkleTreeDigestV9::deserialize(&mut zswap_state_root.as_ref(), 0)
                     .map_err(|error| Error::Deserialize("MerkleTreeDigestV9", error))?;
                 Self::V9(digest)
             }
+            LedgerVersion::V10 => {
+                let digest = MerkleTreeDigestV10::deserialize(&mut zswap_state_root.as_ref(), 0)
+                    .map_err(|error| Error::Deserialize("MerkleTreeDigestV10", error))?;
+                Self::V10(digest)
+            }
+            #[cfg(not(feature = "legacy-ledgers"))]
+            ledger_version => return Err(Error::LegacyLedgerDisabled(ledger_version)),
         };
 
         Ok(zswap_state_root)
@@ -1284,12 +1791,17 @@ impl ZswapMerkleTreeRoot {
     #[trace]
     pub fn serialize(&self) -> Result<SerializedZswapMerkleTreeRoot, Error> {
         match self {
+            #[cfg(feature = "legacy-ledgers")]
             Self::V8(digest) => digest
                 .serialize()
                 .map_err(|error| Error::Serialize("MerkleTreeDigestV8", error)),
+            #[cfg(feature = "legacy-ledgers")]
             Self::V9(digest) => digest
                 .serialize()
                 .map_err(|error| Error::Serialize("MerkleTreeDigestV9", error)),
+            Self::V10(digest) => digest
+                .serialize()
+                .map_err(|error| Error::Serialize("MerkleTreeDigestV10", error)),
         }
     }
 }
@@ -1298,6 +1810,7 @@ fn timestamp(block_timestamp: u64) -> Timestamp {
     Timestamp::from_secs(block_timestamp / 1000)
 }
 
+#[cfg(feature = "legacy-ledgers")]
 fn make_ledger_events_v8<D>(events: Vec<EventV8<D>>) -> Result<Vec<LedgerEvent>, Error>
 where
     D: DB,
@@ -1356,6 +1869,7 @@ where
         .collect::<Result<_, _>>()
 }
 
+#[cfg(feature = "legacy-ledgers")]
 fn make_dust_initial_utxo_v8(
     output: QualifiedDustOutputV8,
     generation: DustGenerationInfoV8,
@@ -1399,6 +1913,7 @@ fn make_dust_initial_utxo_v8(
     ))
 }
 
+#[cfg(feature = "legacy-ledgers")]
 fn make_dust_generation_dtime_update_v8(
     update: TreeInsertionPath<DustGenerationInfoV8>,
     raw: ByteVec,
@@ -1444,6 +1959,7 @@ fn make_dust_generation_dtime_update_v8(
     ))
 }
 
+#[cfg(feature = "legacy-ledgers")]
 fn make_unshielded_utxos_for_regular_transaction_v8<D>(
     transaction: TransactionV8<D>,
     transaction_result: &TransactionResult,
@@ -1548,6 +2064,7 @@ where
     }
 }
 
+#[cfg(feature = "legacy-ledgers")]
 fn make_unshielded_utxos_for_system_transaction_v8<D>(
     transaction: SystemTransactionV8,
     ledger_state: &LedgerStateV8<D>,
@@ -1597,6 +2114,7 @@ where
     }
 }
 
+#[cfg(feature = "legacy-ledgers")]
 fn extend_unshielded_utxos_v8<D>(
     outputs: &mut Vec<UnshieldedUtxo>,
     inputs: &mut Vec<UnshieldedUtxo>,
@@ -1679,12 +2197,14 @@ fn extend_unshielded_utxos_v8<D>(
     inputs.extend(intent_inputs);
 }
 
+#[cfg(feature = "legacy-ledgers")]
 fn make_initial_nonce_v8(output_index: u32, intent_hash: IntentHash) -> Nonce {
     let intent_hash = HashOutput(intent_hash.0);
     let initial_nonce = InitialNonceV8(persistent_commit(&output_index, intent_hash));
     ByteArray(initial_nonce.0.0)
 }
 
+#[cfg(feature = "legacy-ledgers")]
 fn registered_for_dust_generation_v8<D>(
     output_index: u32,
     intent_hash: IntentHash,
@@ -1702,6 +2222,7 @@ where
         .contains_key(&initial_nonce)
 }
 
+#[cfg(feature = "legacy-ledgers")]
 fn ctime_v8<D>(utxo: &UtxoV8, ledger_state: &LedgerStateV8<D>) -> Option<u64>
 where
     D: DB,
@@ -1713,12 +2234,13 @@ where
         .map(|meta| meta.ctime.to_secs())
 }
 
-// --- ledger v9 mirrors of the above helpers ---
+// --- ledger v9 and v10 mirrors of the above helpers ---
 //
-// base-crypto, coin-structure and transient-crypto are unified across v8 and
-// v9, so the shared domain / cost / merkle types are reused; only the ledger
-// (events, dust, structure) types are v9-specific.
+// base-crypto is unified across all three generations, so the cost and domain
+// types are reused; the ledger (events, dust, structure), coin-structure and
+// transient-crypto types are per generation.
 
+#[cfg(feature = "legacy-ledgers")]
 fn make_ledger_events_v9<D>(events: Vec<EventV9<D>>) -> Result<Vec<LedgerEvent>, Error>
 where
     D: DB,
@@ -1789,7 +2311,77 @@ where
         .collect::<Result<_, _>>()
 }
 
-/// Map a v9 `VersionedLogItem` to the corresponding `LedgerEventAttributes`
+fn make_ledger_events_v10<D>(events: Vec<EventV10<D>>) -> Result<Vec<LedgerEvent>, Error>
+where
+    D: DB,
+{
+    events
+        .into_iter()
+        .map(|event| {
+            let raw = event
+                .tagged_serialize()
+                .map_err(|error| Error::Serialize("EventV10", error))?;
+            Ok::<_, Error>((event, raw))
+        })
+        .filter_map_ok(|(event, raw)| match event.content {
+            EventDetailsV10::ZswapInput { nullifier, .. } => Some(Ok(LedgerEvent::zswap_input(
+                raw,
+                nullifier.0.0.to_vec().into(),
+            ))),
+
+            EventDetailsV10::ZswapOutput { .. } => Some(Ok(LedgerEvent::zswap_output(raw))),
+
+            EventDetailsV10::ContractDeploy { .. } => None,
+
+            EventDetailsV10::ContractLog {
+                address,
+                entry_point,
+                logged_item,
+            } => {
+                let attributes = make_contract_event_attributes(&logged_item, entry_point);
+                Some(Ok(LedgerEvent::contract_event(
+                    raw,
+                    address.0.0.to_vec().into(),
+                    None,
+                    attributes,
+                )))
+            }
+
+            EventDetailsV10::ParamChange(..) => Some(Ok(LedgerEvent::param_change(raw))),
+
+            EventDetailsV10::DustInitialUtxo {
+                output,
+                generation,
+                generation_index,
+                ..
+            } => Some(make_dust_initial_utxo_v10(
+                output,
+                generation,
+                generation_index,
+                raw,
+            )),
+
+            EventDetailsV10::DustGenerationDtimeUpdate { update, .. } => {
+                Some(make_dust_generation_dtime_update_v10(update, raw))
+            }
+
+            EventDetailsV10::DustSpendProcessed {
+                nullifier,
+                commitment,
+                ..
+            } => Some(Ok(LedgerEvent::dust_spend_processed(
+                raw,
+                nullifier.0.0.to_bytes_le().to_vec().into(),
+                commitment.0.0.to_bytes_le().to_vec().into(),
+            ))),
+
+            other => Some(Err(Error::UnsupportedEventVariant(format!("{other:?}")))),
+        })
+        .flatten()
+        .collect::<Result<_, _>>()
+}
+
+/// Map a `VersionedLogItem` to the corresponding `LedgerEventAttributes`
 /// variant based on its `LogEventType` and decode the per-event payload from
 /// `StateValue<D>`. The decoder follows the CoIP-442 + MIP-0002 spec exactly.
 ///
@@ -2156,6 +2748,7 @@ fn take_either_address(bytes: &[u8], offset: usize) -> Option<AddressOrContract>
     })
 }
 
+#[cfg(feature = "legacy-ledgers")]
 fn make_dust_initial_utxo_v9(
     output: QualifiedDustOutputV9,
     generation: DustGenerationInfoV9,
@@ -2198,7 +2791,50 @@ fn make_dust_initial_utxo_v9(
         generation_index,
     ))
 }
+fn make_dust_initial_utxo_v10(
+    output: QualifiedDustOutputV10,
+    generation: DustGenerationInfoV10,
+    generation_index: u64,
+    raw: ByteVec,
+) -> Result<LedgerEvent, Error> {
+    let owner = output
+        .owner
+        .serialize()
+        .map_err(|error| Error::Serialize("DustPublicKeyV10", error))?;
 
+    let qualified_output = dust::QualifiedDustOutput {
+        initial_value: output.initial_value,
+        owner,
+        nonce: output.nonce.0.to_bytes_le().into(),
+        seq: output.seq,
+        ctime: output.ctime.to_secs(),
+        backing_night: output.backing_night.0.0.into(),
+        mt_index: output.mt_index,
+    };
+
+    let owner = generation
+        .owner
+        .serialize()
+        .map_err(|error| Error::Serialize("DustPublicKeyV10", error))?;
+
+    let generation_info = dust::DustGenerationInfo {
+        night_utxo_hash: output.backing_night.0.0.into(),
+        value: generation.value,
+        owner,
+        nonce: generation.nonce.0.0.into(),
+        ctime: output.ctime.to_secs(),
+        dtime: generation.dtime.to_secs(),
+    };
+
+    Ok(LedgerEvent::dust_initial_utxo(
+        raw,
+        qualified_output,
+        generation_info,
+        generation_index,
+    ))
+}
+
+#[cfg(feature = "legacy-ledgers")]
 fn make_dust_generation_dtime_update_v9(
     update: TreeInsertionPathV9<DustGenerationInfoV9>,
     raw: ByteVec,
@@ -2243,7 +2879,52 @@ fn make_dust_generation_dtime_update_v9(
         tree_insertion_path,
     ))
 }
+fn make_dust_generation_dtime_update_v10(
+    update: TreeInsertionPathV10<DustGenerationInfoV10>,
+    raw: ByteVec,
+) -> Result<LedgerEvent, Error> {
+    let generation = &update.leaf.1;
 
+    let owner = generation
+        .owner
+        .serialize()
+        .map_err(|error| Error::Serialize("DustPublicKeyV10", error))?;
+
+    let generation_info = dust::DustGenerationInfo {
+        night_utxo_hash: generation.nonce.0.0.into(),
+        value: generation.value,
+        owner,
+        nonce: generation.nonce.0.0.into(),
+        ctime: 0, // DustGenerationInfo from ledger doesn't have ctime, only dtime
+        dtime: generation.dtime.to_secs(),
+    };
+
+    let mt_index = update
+        .path
+        .iter()
+        .rev()
+        .enumerate()
+        .fold(0u64, |mt_index, (depth, entry)| {
+            if !entry.goes_left {
+                mt_index | (1u64 << depth)
+            } else {
+                mt_index
+            }
+        });
+
+    let tree_insertion_path = update
+        .tagged_serialize()
+        .map_err(|error| Error::Serialize("TreeInsertionPath<DustGenerationInfoV10>", error))?;
+
+    Ok(LedgerEvent::dust_generation_dtime_update(
+        raw,
+        generation_info,
+        mt_index,
+        tree_insertion_path,
+    ))
+}
+
+#[cfg(feature = "legacy-ledgers")]
 fn make_unshielded_utxos_for_regular_transaction_v9<D>(
     transaction: TransactionV9<D>,
     transaction_result: &TransactionResult,
@@ -2348,6 +3029,111 @@ where
     }
 }
 
+fn make_unshielded_utxos_for_regular_transaction_v10<D>(
+    transaction: TransactionV10<D>,
+    transaction_result: &TransactionResult,
+    ledger_state: &LedgerStateV10<D>,
+) -> (Vec<UnshieldedUtxo>, Vec<UnshieldedUtxo>)
+where
+    D: DB,
+{
+    // Skip UTXO creation entirely for failed transactions, because no state changes occurred on the
+    // ledger.
+    if matches!(transaction_result, TransactionResult::Failure) {
+        return (vec![], vec![]);
+    }
+
+    match transaction {
+        TransactionV10::Standard(transaction) => {
+            let successful_segments = match &transaction_result {
+                TransactionResult::Success => transaction.segments().into_iter().collect(),
+
+                TransactionResult::PartialSuccess(segments) => segments
+                    .iter()
+                    .filter_map(|(id, success)| success.then_some(id))
+                    .copied()
+                    .collect(),
+
+                TransactionResult::Failure => HashSet::new(),
+            };
+
+            let mut outputs = vec![];
+            let mut inputs = vec![];
+
+            for segment in transaction.segments() {
+                // Guaranteed phase.
+                if segment == 0 {
+                    for intent in transaction.intents.values() {
+                        extend_unshielded_utxos_v10(
+                            &mut outputs,
+                            &mut inputs,
+                            segment,
+                            &intent,
+                            true,
+                            ledger_state,
+                        );
+                    }
+
+                // Fallible phase.
+                } else if let Some(intent) = transaction.intents.get(&segment)
+                    && successful_segments.contains(&segment)
+                {
+                    extend_unshielded_utxos_v10(
+                        &mut outputs,
+                        &mut inputs,
+                        segment,
+                        &intent,
+                        false,
+                        ledger_state,
+                    );
+                }
+            }
+
+            (outputs, inputs)
+        }
+
+        // ClaimRewards creates a single unshielded UTXO for the claimed amount.
+        TransactionV10::ClaimRewards(claim) => {
+            let owner = UserAddressV10::from(claim.owner);
+            let ledger_intent_hash = {
+                // ClaimRewards don't have intents, but UTXOs need an intent hash. We compute this
+                // hash the same way that the ledger does internally.
+                let output = OutputInstructionUnshieldedV10 {
+                    amount: claim.value,
+                    target_address: owner,
+                    nonce: claim.nonce,
+                };
+                output.mk_intent_hash(NIGHT_V10)
+            };
+            let intent_hash = ledger_intent_hash.0.0.into();
+            let initial_nonce = make_initial_nonce_v10(OUTPUT_INDEX_ZERO, intent_hash);
+            let registered_for_dust_generation =
+                registered_for_dust_generation_v10(OUTPUT_INDEX_ZERO, intent_hash, ledger_state);
+            let utxo = UtxoV10 {
+                value: claim.value,
+                owner,
+                type_: UnshieldedTokenTypeV10::default(),
+                intent_hash: ledger_intent_hash,
+                output_no: OUTPUT_INDEX_ZERO,
+            };
+
+            let utxo = UnshieldedUtxo {
+                owner: owner.0.0.into(),
+                token_type: TokenType::default(), // Native token (all zeros).
+                value: claim.value,
+                intent_hash,
+                output_index: OUTPUT_INDEX_ZERO,
+                ctime: ctime_v10(&utxo, ledger_state),
+                initial_nonce,
+                registered_for_dust_generation,
+            };
+
+            (vec![utxo], vec![]) // Creates one UTXO, spends none.
+        }
+    }
+}
+
+#[cfg(feature = "legacy-ledgers")]
 fn make_unshielded_utxos_for_system_transaction_v9<D>(
     transaction: SystemTransactionV9,
     ledger_state: &LedgerStateV9<D>,
@@ -2393,6 +3179,52 @@ where
     }
 }
 
+fn make_unshielded_utxos_for_system_transaction_v10<D>(
+    transaction: SystemTransactionV10,
+    ledger_state: &LedgerStateV10<D>,
+) -> Vec<UnshieldedUtxo>
+where
+    D: DB,
+{
+    match transaction {
+        SystemTransactionV10::PayFromTreasuryUnshielded {
+            outputs,
+            token_type,
+        } => outputs
+            .iter()
+            .enumerate()
+            .map(|(index, output)| {
+                let ledger_intent_hash = output.clone().mk_intent_hash(token_type);
+                let intent_hash = ledger_intent_hash.0.0.into();
+                let initial_nonce = make_initial_nonce_v10(index as u32, intent_hash);
+                let registered_for_dust_generation =
+                    registered_for_dust_generation_v10(index as u32, intent_hash, ledger_state);
+                let utxo = UtxoV10 {
+                    value: output.amount,
+                    owner: output.target_address,
+                    type_: token_type,
+                    intent_hash: ledger_intent_hash,
+                    output_no: index as u32,
+                };
+
+                UnshieldedUtxo {
+                    owner: output.target_address.0.0.into(),
+                    token_type: token_type.0.0.into(),
+                    value: output.amount,
+                    intent_hash,
+                    output_index: index as u32,
+                    ctime: ctime_v10(&utxo, ledger_state),
+                    initial_nonce,
+                    registered_for_dust_generation,
+                }
+            })
+            .collect(),
+
+        _ => vec![], // Other system transaction types don't create unshielded UTXOs.
+    }
+}
+
+#[cfg(feature = "legacy-ledgers")]
 fn extend_unshielded_utxos_v9<D>(
     outputs: &mut Vec<UnshieldedUtxo>,
     inputs: &mut Vec<UnshieldedUtxo>,
@@ -2475,12 +3307,101 @@ fn extend_unshielded_utxos_v9<D>(
     inputs.extend(intent_inputs);
 }
 
+fn extend_unshielded_utxos_v10<D>(
+    outputs: &mut Vec<UnshieldedUtxo>,
+    inputs: &mut Vec<UnshieldedUtxo>,
+    segment_id: u16,
+    intent: &IntentV10<D>,
+    guaranteed: bool,
+    ledger_state: &LedgerStateV10<D>,
+) where
+    D: DB,
+{
+    let ledger_intent_hash = intent
+        .erase_proofs()
+        .erase_signatures()
+        .intent_hash(segment_id);
+    let intent_hash = ledger_intent_hash.0.0.into();
+
+    let intent_outputs = if guaranteed {
+        intent.guaranteed_outputs()
+    } else {
+        intent.fallible_outputs()
+    };
+    let intent_outputs = intent_outputs
+        .into_iter()
+        .enumerate()
+        .map(|(output_index, output)| {
+            let output_index = output_index as u32;
+            let initial_nonce = make_initial_nonce_v10(output_index, intent_hash);
+            let registered_for_dust_generation =
+                registered_for_dust_generation_v10(output_index, intent_hash, ledger_state);
+            let utxo = UtxoV10 {
+                value: output.value,
+                owner: output.owner,
+                type_: output.type_,
+                intent_hash: ledger_intent_hash,
+                output_no: output_index,
+            };
+
+            UnshieldedUtxo {
+                owner: output.owner.0.0.into(),
+                token_type: output.type_.0.0.into(),
+                value: output.value,
+                intent_hash,
+                output_index,
+                ctime: ctime_v10(&utxo, ledger_state),
+                initial_nonce,
+                registered_for_dust_generation,
+            }
+        });
+    outputs.extend(intent_outputs);
+
+    let intent_inputs = if guaranteed {
+        intent.guaranteed_inputs()
+    } else {
+        intent.fallible_inputs()
+    };
+    let intent_inputs = intent_inputs.into_iter().map(|spend| {
+        let intent_hash = spend.intent_hash.0.0.into();
+        let initial_nonce = make_initial_nonce_v10(spend.output_no, intent_hash);
+        let registered_for_dust_generation =
+            registered_for_dust_generation_v10(spend.output_no, intent_hash, ledger_state);
+        let utxo = UtxoV10 {
+            value: spend.value,
+            owner: UserAddressV10::from(spend.owner.clone()),
+            type_: spend.type_,
+            intent_hash: spend.intent_hash,
+            output_no: spend.output_no,
+        };
+
+        UnshieldedUtxo {
+            owner: UserAddressV10::from(spend.owner).0.0.into(),
+            token_type: spend.type_.0.0.into(),
+            value: spend.value,
+            intent_hash,
+            output_index: spend.output_no,
+            ctime: ctime_v10(&utxo, ledger_state),
+            initial_nonce,
+            registered_for_dust_generation,
+        }
+    });
+    inputs.extend(intent_inputs);
+}
+
+#[cfg(feature = "legacy-ledgers")]
 fn make_initial_nonce_v9(output_index: u32, intent_hash: IntentHash) -> Nonce {
     let intent_hash = HashOutput(intent_hash.0);
     let initial_nonce = InitialNonceV9(persistent_commit(&output_index, intent_hash));
     ByteArray(initial_nonce.0.0)
 }
+fn make_initial_nonce_v10(output_index: u32, intent_hash: IntentHash) -> Nonce {
+    let intent_hash = HashOutput(intent_hash.0);
+    let initial_nonce = InitialNonceV10(persistent_commit(&output_index, intent_hash));
+    ByteArray(initial_nonce.0.0)
+}
 
+#[cfg(feature = "legacy-ledgers")]
 fn registered_for_dust_generation_v9<D>(
     output_index: u32,
     intent_hash: IntentHash,
@@ -2498,7 +3419,36 @@ where
         .contains_key(&initial_nonce)
 }
 
+fn registered_for_dust_generation_v10<D>(
+    output_index: u32,
+    intent_hash: IntentHash,
+    ledger_state: &LedgerStateV10<D>,
+) -> bool
+where
+    D: DB,
+{
+    let intent_hash = HashOutput(intent_hash.0);
+    let initial_nonce = InitialNonceV10(persistent_commit(&output_index, intent_hash));
+    ledger_state
+        .dust
+        .generation
+        .night_indices
+        .contains_key(&initial_nonce)
+}
+
+#[cfg(feature = "legacy-ledgers")]
 fn ctime_v9<D>(utxo: &UtxoV9, ledger_state: &LedgerStateV9<D>) -> Option<u64>
+where
+    D: DB,
+{
+    ledger_state
+        .utxo
+        .utxos
+        .get(utxo)
+        .map(|meta| meta.ctime.to_secs())
+}
+
+fn ctime_v10<D>(utxo: &UtxoV10, ledger_state: &LedgerStateV10<D>) -> Option<u64>
 where
     D: DB,
 {
@@ -2692,12 +3642,13 @@ mod tests {
         cost_model::SyntheticCost,
         fab::{AlignedValue, Alignment, Value, ValueAtom},
     };
-    use midnight_onchain_runtime_v4::{
+    use midnight_onchain_runtime_v10::{
         ops::{LogEventType, VersionedLogItem},
         state::{EntryPointBuf, StateValue},
     };
     use midnight_storage_core_v1::{arena::Sp, db::InMemoryDB};
 
+    #[cfg(feature = "legacy-ledgers")]
     #[cfg(any(feature = "cloud", feature = "standalone"))]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_translate() -> Result<(), BoxError> {
@@ -2779,13 +3730,13 @@ mod tests {
             .expect("ledger DB can be initialized");
         }
 
-        let ledger_state = LedgerState::new("undeployed".try_into()?, LedgerVersion::V8)
+        let ledger_state = LedgerState::new("undeployed".try_into()?, LedgerVersion::V10)
             .expect("ledger state can be constructed");
-        assert_eq!(ledger_state.ledger_version(), LedgerVersion::V8);
+        assert_eq!(ledger_state.ledger_version(), LedgerVersion::V10);
 
         let new_ledger_state = ledger_state
             .clone()
-            .translate(LedgerVersion::V8)
+            .translate(LedgerVersion::V10)
             .expect("ledger state v8 can be translated to v8");
         assert_eq!(new_ledger_state, ledger_state);
 
@@ -2806,7 +3757,7 @@ mod tests {
             .translate(LedgerVersion::V9)
             .expect("ledger state v8 can be translated to v9");
         assert_eq!(translated_v9.ledger_version(), LedgerVersion::V9);
-        assert!(ledger_state_v9.translate(LedgerVersion::V8).is_err());
+        assert!(ledger_state_v9.translate(LedgerVersion::V10).is_err());
 
         // Characterization guard for the v8 -> v9 translation. `application.rs`
         // compares exactly this serialized arena root against the node's
@@ -2854,9 +3805,9 @@ mod tests {
             env!("CARGO_MANIFEST_DIR")
         ))
         .expect("read v8 devnet genesis fixture");
-        let v8_devnet_state = LedgerState::from_genesis(&v8_devnet, LedgerVersion::V8)
+        let v8_devnet_state = LedgerState::from_genesis(&v8_devnet, LedgerVersion::V10)
             .expect("deserialize v8 devnet genesis");
-        assert_eq!(v8_devnet_state.ledger_version(), LedgerVersion::V8);
+        assert_eq!(v8_devnet_state.ledger_version(), LedgerVersion::V10);
         let v9_devnet_state = v8_devnet_state
             .translate(LedgerVersion::V9)
             .expect("translate devnet v8 -> v9");
@@ -2890,7 +3841,7 @@ mod tests {
     async fn test_zswap_collapsed_update_survives_lazy_reload() -> Result<(), BoxError> {
         use midnight_serialize_v1::tagged_deserialize;
         use midnight_storage_core_v1::arena::Sp;
-        use midnight_transient_crypto_v2::{curve::Fr, merkle_tree::MerkleTreeCollapsedUpdate};
+        use midnight_transient_crypto_v10::{curve::Fr, merkle_tree::MerkleTreeCollapsedUpdate};
 
         const LEAVES: u64 = 86;
 
@@ -2963,10 +3914,10 @@ mod tests {
             temp_dir
         };
 
-        let mut state = LedgerState::new("undeployed".try_into()?, LedgerVersion::V8)
+        let mut state = LedgerState::new("undeployed".try_into()?, LedgerVersion::V10)
             .expect("ledger state can be constructed");
         match &mut state {
-            LedgerState::V8 { ledger_state, .. } => {
+            LedgerState::V10 { ledger_state, .. } => {
                 let mut zswap = (*ledger_state.zswap).clone();
                 let coin_coms = (0..LEAVES).fold(zswap.coin_coms.clone(), |tree, i| {
                     tree.try_update(i, &Fr::from(i + 1), None)
@@ -2976,28 +3927,26 @@ mod tests {
                 zswap.first_free = LEAVES;
                 ledger_state.zswap = Sp::new(zswap);
             }
-            LedgerState::V9 { .. } => unreachable!("constructed as V8"),
         }
 
         let (state, key) = state.persist()?;
         drop(state);
 
-        let reloaded = LedgerState::load(&key, LedgerVersion::V8)?;
+        let reloaded = LedgerState::load(&key, LedgerVersion::V10)?;
 
+        #[allow(clippy::infallible_destructuring_match)]
         let served = match reloaded.zswap_merkle_tree_root() {
-            super::ZswapMerkleTreeRoot::V8(root) => root,
-            super::ZswapMerkleTreeRoot::V9(_) => panic!("expected a V8 zswap root"),
+            super::ZswapMerkleTreeRoot::V10(root) => root,
         };
 
         let update_bytes = reloaded.make_zswap_collapsed_update(0, LEAVES - 1)?;
         let update = tagged_deserialize::<MerkleTreeCollapsedUpdate>(&mut update_bytes.as_ref())
             .map_err(|error| format!("deserialize collapsed update: {error}"))?;
 
-        let blank = LedgerState::new("undeployed".try_into()?, LedgerVersion::V8)
+        let blank = LedgerState::new("undeployed".try_into()?, LedgerVersion::V10)
             .expect("ledger state can be constructed");
         let blank_coin_coms = match &blank {
-            LedgerState::V8 { ledger_state, .. } => ledger_state.zswap.coin_coms.clone(),
-            LedgerState::V9 { .. } => unreachable!("constructed as V8"),
+            LedgerState::V10 { ledger_state, .. } => ledger_state.zswap.coin_coms.clone(),
         };
         let reconstructed = blank_coin_coms
             .apply_collapsed_update(&update)
@@ -3029,7 +3978,7 @@ mod tests {
     async fn test_two_collapsed_updates_from_lazy_reloads_replay_over_blank_state()
     -> Result<(), BoxError> {
         use midnight_serialize_v1::tagged_deserialize;
-        use midnight_transient_crypto_v2::{curve::Fr, merkle_tree::MerkleTreeCollapsedUpdate};
+        use midnight_transient_crypto_v10::{curve::Fr, merkle_tree::MerkleTreeCollapsedUpdate};
 
         const FIRST_LEAVES: u64 = 86;
         const SECOND_LEAVES: u64 = 35;
@@ -3106,7 +4055,7 @@ mod tests {
         // Insert the given range of coin commitments and advance `first_free`, as applying
         // transactions would.
         let add_zswap_leaves = |state: &mut LedgerState, leaves: std::ops::Range<u64>| match state {
-            LedgerState::V8 { ledger_state, .. } => {
+            LedgerState::V10 { ledger_state, .. } => {
                 let mut zswap = (*ledger_state.zswap).clone();
                 let coin_coms = leaves.clone().fold(zswap.coin_coms.clone(), |tree, i| {
                     tree.try_update(i, &Fr::from(i + 1), None)
@@ -3116,38 +4065,37 @@ mod tests {
                 zswap.first_free = leaves.end;
                 ledger_state.zswap = Sp::new(zswap);
             }
-            LedgerState::V9 { .. } => unreachable!("constructed as V8"),
         };
 
-        let v8_zswap_root = |state: &LedgerState| match state.zswap_merkle_tree_root() {
-            super::ZswapMerkleTreeRoot::V8(root) => root,
-            super::ZswapMerkleTreeRoot::V9(_) => panic!("expected a V8 zswap root"),
+        #[allow(clippy::infallible_destructuring_match)]
+        let zswap_root = |state: &LedgerState| match state.zswap_merkle_tree_root() {
+            super::ZswapMerkleTreeRoot::V10(root) => root,
         };
 
         // Pre-populate the tree, persist, and reload via the lazy `get_lazy` path.
-        let mut state = LedgerState::new("undeployed".try_into()?, LedgerVersion::V8)
+        let mut state = LedgerState::new("undeployed".try_into()?, LedgerVersion::V10)
             .expect("ledger state can be constructed");
         add_zswap_leaves(&mut state, 0..FIRST_LEAVES);
         let (state, key) = state.persist()?;
         drop(state);
-        let reloaded = LedgerState::load(&key, LedgerVersion::V8)?;
+        let reloaded = LedgerState::load(&key, LedgerVersion::V10)?;
 
         // First collapsed update and served root, as the subscription API serves them.
         let first_update_bytes = reloaded.make_zswap_collapsed_update(0, FIRST_LEAVES - 1)?;
-        let first_root = v8_zswap_root(&reloaded);
+        let first_root = zswap_root(&reloaded);
 
         // Add more leaves to the lazily reloaded state, persist, and reload again.
         let mut state = reloaded;
         add_zswap_leaves(&mut state, FIRST_LEAVES..FIRST_LEAVES + SECOND_LEAVES);
         let (state, key) = state.persist()?;
         drop(state);
-        let reloaded = LedgerState::load(&key, LedgerVersion::V8)?;
+        let reloaded = LedgerState::load(&key, LedgerVersion::V10)?;
 
         // Second collapsed update over the newly added range only — contiguous with the first,
         // matching the `[index, zswap_start_index - 1]` ranges of the shielded subscription.
         let second_update_bytes =
             reloaded.make_zswap_collapsed_update(FIRST_LEAVES, FIRST_LEAVES + SECOND_LEAVES - 1)?;
-        let second_root = v8_zswap_root(&reloaded);
+        let second_root = zswap_root(&reloaded);
 
         let first_update =
             tagged_deserialize::<MerkleTreeCollapsedUpdate>(&mut first_update_bytes.as_ref())
@@ -3158,11 +4106,10 @@ mod tests {
 
         // A wallet replays both updates over a blank tree, rehashing after each to compute the
         // root it compares against the served one.
-        let blank = LedgerState::new("undeployed".try_into()?, LedgerVersion::V8)
+        let blank = LedgerState::new("undeployed".try_into()?, LedgerVersion::V10)
             .expect("ledger state can be constructed");
         let blank_coin_coms = match &blank {
-            LedgerState::V8 { ledger_state, .. } => ledger_state.zswap.coin_coms.clone(),
-            LedgerState::V9 { .. } => unreachable!("constructed as V8"),
+            LedgerState::V10 { ledger_state, .. } => ledger_state.zswap.coin_coms.clone(),
         };
 
         let after_first = blank_coin_coms
@@ -3204,24 +4151,24 @@ mod tests {
             ledger::{LedgerDbContractState, SerializableExt, TaggedSerializableExt},
         };
         use midnight_base_crypto_v1::hash::HashOutput;
-        use midnight_coin_structure_v2::{
+        use midnight_coin_structure_v10::{
             coin::{TokenType as MidnightTokenType, UnshieldedTokenType},
-            contract::ContractAddress as ContractAddressV8,
+            contract::ContractAddress as ContractAddressV10,
         };
-        use midnight_onchain_runtime_v3::state::ContractState as ContractStateV3;
+        use midnight_onchain_runtime_v10::state::ContractState as ContractStateV4;
         use midnight_storage_core_v1::{DefaultDB, storage::default_storage};
 
         const AMOUNT: u128 = 1_000_000;
 
         let _ledger_db = init_ledger_db().await?;
 
-        let address = ContractAddressV8(HashOutput([9; 32]));
+        let address = ContractAddressV10(HashOutput([9; 32]));
         let serialized_address = address.serialize()?;
 
         // The same logical state in the in-memory arena: content addressing is backend-independent
         // (both arenas hash with `DefaultHasher`), so this is what the reload must serialize to.
         let expected = {
-            let mut contract_state = ContractStateV3::<DefaultDB>::default();
+            let mut contract_state = ContractStateV4::<DefaultDB>::default();
             contract_state.balance = contract_state.balance.insert(
                 MidnightTokenType::Unshielded(UnshieldedTokenType(HashOutput([7; 32]))),
                 AMOUNT,
@@ -3229,18 +4176,17 @@ mod tests {
             contract_state.tagged_serialize()?
         };
 
-        let mut state = LedgerState::new("undeployed".try_into()?, LedgerVersion::V8)
+        let mut state = LedgerState::new("undeployed".try_into()?, LedgerVersion::V10)
             .expect("ledger state can be constructed");
         match &mut state {
-            LedgerState::V8 { ledger_state, .. } => {
-                let mut contract_state = ContractStateV3::default();
+            LedgerState::V10 { ledger_state, .. } => {
+                let mut contract_state = ContractStateV4::default();
                 contract_state.balance = contract_state.balance.insert(
                     MidnightTokenType::Unshielded(UnshieldedTokenType(HashOutput([7; 32]))),
                     AMOUNT,
                 );
                 ledger_state.contract = ledger_state.contract.insert(address, contract_state);
             }
-            LedgerState::V9 { .. } => unreachable!("constructed as V8"),
         }
 
         let (key, captured) = state
@@ -3299,13 +4245,13 @@ mod tests {
 
         // An absent contract yields no key rather than an error, which is how a failed action is
         // represented.
-        let absent = ContractAddressV8(HashOutput([1; 32])).serialize()?;
+        let absent = ContractAddressV10(HashOutput([1; 32])).serialize()?;
         let state = LedgerState::load(
-            &LedgerState::new("undeployed".try_into()?, LedgerVersion::V8)
+            &LedgerState::new("undeployed".try_into()?, LedgerVersion::V10)
                 .expect("ledger state can be constructed")
                 .persist()?
                 .1,
-            LedgerVersion::V8,
+            LedgerVersion::V10,
         )?;
         assert!(state.contract_state(&absent)?.is_none());
 
@@ -3329,20 +4275,20 @@ mod tests {
     async fn contract_zswap_state_key_round_trips_and_dedups() -> Result<(), BoxError> {
         use crate::domain::ledger::{ContractZswapState, SerializableExt};
         use midnight_base_crypto_v1::hash::HashOutput;
-        use midnight_coin_structure_v2::contract::ContractAddress as ContractAddressV8;
-        use midnight_transient_crypto_v2::curve::Fr;
+        use midnight_coin_structure_v10::contract::ContractAddress as ContractAddressV10;
+        use midnight_transient_crypto_v10::curve::Fr;
         use std::ops::Deref;
 
         const LEAVES: u64 = 12;
 
         let _ledger_db = init_ledger_db().await?;
 
-        let serialized_address = ContractAddressV8(HashOutput([9; 32])).serialize()?;
+        let serialized_address = ContractAddressV10(HashOutput([9; 32])).serialize()?;
 
-        let mut state = LedgerState::new("undeployed".try_into()?, LedgerVersion::V8)
+        let mut state = LedgerState::new("undeployed".try_into()?, LedgerVersion::V10)
             .expect("ledger state can be constructed");
         match &mut state {
-            LedgerState::V8 { ledger_state, .. } => {
+            LedgerState::V10 { ledger_state, .. } => {
                 let mut zswap = ledger_state.zswap.deref().to_owned();
                 zswap.coin_coms = (0..LEAVES).fold(zswap.coin_coms.clone(), |tree, i| {
                     tree.try_update(i, &Fr::from(i + 1), None)
@@ -3351,7 +4297,6 @@ mod tests {
                 zswap.first_free = LEAVES;
                 ledger_state.zswap = Sp::new(zswap);
             }
-            LedgerState::V9 { .. } => unreachable!("constructed as V8"),
         }
 
         let expected = state.extract_contract_zswap_state(&serialized_address)?;
@@ -4233,7 +5178,7 @@ mod root_count_repair_tests {
         .await
         .context("init ledger DB")?;
 
-        let (state, key) = LedgerState::new("undeployed".try_into()?, LedgerVersion::V8)
+        let (state, key) = LedgerState::new("undeployed".try_into()?, LedgerVersion::V10)
             .context("create ledger state")?
             .persist()
             .context("persist ledger state")?;
@@ -4327,13 +5272,13 @@ mod merkle_collapsed_update_tests {
     const LEAVES: u64 = 86;
     const HEIGHT: u8 = 32;
 
-    /// V8 (transient-crypto v2): a tree rebuilt from the collapsed update
+    /// A tree rebuilt from the collapsed update
     /// covering the newest leaf reconstructs the rehashed root. This is the
     /// invariant PR #1266 guarantees; it would break if the collapsed update
     /// were built from a tree carrying a stale hash for the newest leaf.
     #[test]
-    fn v8_collapsed_update_over_newest_leaf_reconstructs_rehashed_root() {
-        use midnight_transient_crypto_v2::{
+    fn collapsed_update_over_newest_leaf_reconstructs_rehashed_root() {
+        use midnight_transient_crypto_v10::{
             curve::Fr,
             merkle_tree::{MerkleTree, MerkleTreeCollapsedUpdate},
         };
@@ -4366,13 +5311,13 @@ mod merkle_collapsed_update_tests {
         );
     }
 
-    /// V8 (transient-crypto v2): building the collapsed update off an
-    /// un-rehashed tree fails with `NotFullyRehashed`. This is the concrete
+    /// Building the collapsed update off an un-rehashed tree fails with
+    /// `NotFullyRehashed`. This is the concrete
     /// reason the fix adds `.rehash()` — the pre-fix call path could not
     /// produce a correct update from a tree whose hashes were not finalised.
     #[test]
-    fn v8_collapsed_update_requires_rehash() {
-        use midnight_transient_crypto_v2::{
+    fn collapsed_update_requires_rehash() {
+        use midnight_transient_crypto_v10::{
             curve::Fr,
             merkle_tree::{InvalidUpdate, MerkleTree, MerkleTreeCollapsedUpdate},
         };
@@ -4387,36 +5332,6 @@ mod merkle_collapsed_update_tests {
         assert!(
             matches!(result, Err(InvalidUpdate::NotFullyRehashed)),
             "collapsed update off an un-rehashed tree must fail with NotFullyRehashed, got {result:?}",
-        );
-    }
-
-    #[test]
-    fn v9_collapsed_update_over_newest_leaf_reconstructs_rehashed_root() {
-        use midnight_transient_crypto_v3::{
-            curve::Fr,
-            merkle_tree::{MerkleTree, MerkleTreeCollapsedUpdate},
-        };
-
-        let tree = (0..LEAVES)
-            .try_fold(MerkleTree::<(), InMemoryDB>::blank(HEIGHT), |tree, i| {
-                tree.try_update(i, &Fr::from(i + 1), ())
-            })
-            .expect("insert leaves")
-            .rehash();
-        let served_root = tree.root().expect("rehashed tree has a root");
-
-        let update = MerkleTreeCollapsedUpdate::new(&tree, 0, LEAVES - 1)
-            .expect("collapsed update over a rehashed tree");
-
-        let rebuilt = MerkleTree::<(), InMemoryDB>::blank(HEIGHT)
-            .apply_collapsed_update(&update)
-            .expect("apply collapsed update")
-            .rehash();
-
-        assert_eq!(
-            rebuilt.root().expect("rebuilt tree has a root"),
-            served_root,
-            "tree rebuilt from the collapsed update must match the rehashed served root",
         );
     }
 }

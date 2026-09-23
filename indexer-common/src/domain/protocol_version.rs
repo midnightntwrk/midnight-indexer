@@ -23,6 +23,7 @@ pub enum ProtocolVersion {
     V1_0(u32),
     V2_0(u32),
     V2_1(u32),
+    V3_0(u32),
 }
 
 impl ProtocolVersion {
@@ -32,6 +33,7 @@ impl ProtocolVersion {
             ProtocolVersion::V1_0(_) => LedgerVersion::V8,
             ProtocolVersion::V2_0(_) => LedgerVersion::V9,
             ProtocolVersion::V2_1(_) => LedgerVersion::V9,
+            ProtocolVersion::V3_0(_) => LedgerVersion::V10,
         }
     }
 
@@ -41,6 +43,7 @@ impl ProtocolVersion {
             ProtocolVersion::V1_0(_) => NodeVersion::V1_0,
             ProtocolVersion::V2_0(_) => NodeVersion::V2_0,
             ProtocolVersion::V2_1(_) => NodeVersion::V2_1,
+            ProtocolVersion::V3_0(_) => NodeVersion::V3_0,
         }
     }
 
@@ -56,6 +59,7 @@ impl From<ProtocolVersion> for u32 {
             ProtocolVersion::V1_0(n) => n,
             ProtocolVersion::V2_0(n) => n,
             ProtocolVersion::V2_1(n) => n,
+            ProtocolVersion::V3_0(n) => n,
         }
     }
 }
@@ -81,6 +85,8 @@ impl TryFrom<u32> for ProtocolVersion {
             Ok(Self::V2_0(version))
         } else if (2_001_000..2_002_000).contains(&version) {
             Ok(Self::V2_1(version))
+        } else if (3_000_000..3_001_000).contains(&version) {
+            Ok(Self::V3_0(version))
         } else {
             Err(ProtocolVersionError::Unsupported(version))
         }
@@ -113,14 +119,15 @@ pub enum ProtocolVersionError {
 pub enum LedgerVersion {
     V8,
     V9,
+    V10,
 }
 
 impl LedgerVersion {
     pub const OLDEST: Self = Self::V8;
-    // Dust-query decode version. This build serves ledger-9 chains (devnet and
-    // stagenet under the node 2.0 rollout). Deriving the version per chain
-    // rather than from this constant is the tracked follow-up.
-    pub const LATEST: Self = Self::V9;
+    // Dust-query decode version. This build serves ledger-10 chains. Deriving
+    // the version per chain rather than from this constant is the tracked
+    // follow-up.
+    pub const LATEST: Self = Self::V10;
 
     /// Which incarnation of the DUST generation tree this ledger version writes
     /// into.
@@ -142,10 +149,13 @@ impl LedgerVersion {
     /// - V9 -> 1, because the 8 -> 9 translation replaces dust state with
     ///   `DustState::default()` (midnight-node #2012, backported as #2057) and
     ///   the node then replays only cNIGHT's slice of the generating set.
+    /// - V10 -> 1, because the 9 -> 10 fork re-serializes the dust wallet into
+    ///   the new types instead of resetting it, so the tree carries over.
     pub const fn dust_epoch(self) -> i64 {
         match self {
             Self::V8 => 0,
             Self::V9 => 1,
+            Self::V10 => 1,
         }
     }
 }
@@ -156,6 +166,7 @@ pub enum NodeVersion {
     V1_0,
     V2_0,
     V2_1,
+    V3_0,
 }
 
 #[cfg(test)]
@@ -180,6 +191,9 @@ mod tests {
         let version = ProtocolVersion::try_from(2_002_000_u32);
         assert_matches!(version, Err(ProtocolVersionError::Unsupported(v)) if v == 2_002_000);
 
+        let version = ProtocolVersion::try_from(3_001_000_u32);
+        assert_matches!(version, Err(ProtocolVersionError::Unsupported(v)) if v == 3_001_000);
+
         let version =
             ProtocolVersion::try_from(0_022_666_u32).expect("0_022_666 is valid protocol version");
         assert_eq!(version.ledger_version(), LedgerVersion::V8);
@@ -199,5 +213,10 @@ mod tests {
             ProtocolVersion::try_from(2_001_000_u32).expect("2_001_000 is valid protocol version");
         assert_eq!(version.ledger_version(), LedgerVersion::V9);
         assert_eq!(version.node_version(), NodeVersion::V2_1);
+
+        let version =
+            ProtocolVersion::try_from(3_000_000_u32).expect("3_000_000 is valid protocol version");
+        assert_eq!(version.ledger_version(), LedgerVersion::V10);
+        assert_eq!(version.node_version(), NodeVersion::V3_0);
     }
 }

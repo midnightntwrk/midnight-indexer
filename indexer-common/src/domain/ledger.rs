@@ -15,6 +15,7 @@ mod contract_state;
 mod contract_zswap_state;
 mod ledger_state;
 mod secret_key;
+#[cfg(feature = "legacy-ledgers")]
 mod state_translation_v8_to_v9;
 mod transaction;
 
@@ -33,27 +34,40 @@ use crate::{
     error::BoxError,
 };
 use fastrace::trace;
+#[cfg(feature = "legacy-ledgers")]
 use midnight_base_crypto_v1::signatures::Signature;
+#[cfg(feature = "legacy-ledgers")]
 use midnight_ledger_v8::{
     dust::INITIAL_DUST_PARAMETERS as INITIAL_DUST_PARAMETERS_V8,
     structure::ProofMarker as ProofMarkerV8,
 };
+#[cfg(feature = "legacy-ledgers")]
 use midnight_ledger_v9::{
     dust::INITIAL_DUST_PARAMETERS as INITIAL_DUST_PARAMETERS_V9,
     structure::{ProofMarker as ProofMarkerV9, Signature as SignatureV9},
 };
+use midnight_ledger_v10::{
+    dust::INITIAL_DUST_PARAMETERS as INITIAL_DUST_PARAMETERS_V10,
+    structure::{ProofMarker as ProofMarkerV10, Signature as SignatureV10},
+};
 use midnight_serialize_v1::{Serializable, Tagged, tagged_serialize};
+#[cfg(feature = "legacy-ledgers")]
 use midnight_transient_crypto_v2::commitment::PureGeneratorPedersen;
+#[cfg(feature = "legacy-ledgers")]
 use midnight_transient_crypto_v3::commitment::PureGeneratorPedersen as PureGeneratorPedersenV9;
+use midnight_transient_crypto_v10::commitment::PureGeneratorPedersen as PureGeneratorPedersenV10;
 use std::{io, string::FromUtf8Error};
 use thiserror::Error;
 
+#[cfg(feature = "legacy-ledgers")]
 type TransactionV8<D> =
     midnight_ledger_v8::structure::Transaction<Signature, ProofMarkerV8, PureGeneratorPedersen, D>;
 
+#[cfg(feature = "legacy-ledgers")]
 type IntentV8<D> =
     midnight_ledger_v8::structure::Intent<Signature, ProofMarkerV8, PureGeneratorPedersen, D>;
 
+#[cfg(feature = "legacy-ledgers")]
 type TransactionV9<D> = midnight_ledger_v9::structure::Transaction<
     SignatureV9,
     ProofMarkerV9,
@@ -61,8 +75,23 @@ type TransactionV9<D> = midnight_ledger_v9::structure::Transaction<
     D,
 >;
 
+#[cfg(feature = "legacy-ledgers")]
 type IntentV9<D> =
     midnight_ledger_v9::structure::Intent<SignatureV9, ProofMarkerV9, PureGeneratorPedersenV9, D>;
+
+type TransactionV10<D> = midnight_ledger_v10::structure::Transaction<
+    SignatureV10,
+    ProofMarkerV10,
+    PureGeneratorPedersenV10,
+    D,
+>;
+
+type IntentV10<D> = midnight_ledger_v10::structure::Intent<
+    SignatureV10,
+    ProofMarkerV10,
+    PureGeneratorPedersenV10,
+    D,
+>;
 
 /// Ledger related errors.
 #[derive(Debug, Error)]
@@ -120,6 +149,9 @@ pub enum Error {
 
     #[error("unsupported EventDetailsV8 variant: {0}")]
     UnsupportedEventVariant(String),
+
+    #[error("ledger version {0} needs the `legacy-ledgers` feature")]
+    LegacyLedgerDisabled(LedgerVersion),
 }
 
 /// Extension methods for `Serializable` implementations.
@@ -162,16 +194,25 @@ impl<T> TaggedSerializableExt for T where T: Serializable + Tagged {}
 /// - `dust_grace_period`: Maximum time window for DUST spends (3 hours).
 pub fn dust_parameters(ledger_version: LedgerVersion) -> Result<DustParameters, Error> {
     let parameters = match ledger_version {
+        #[cfg(feature = "legacy-ledgers")]
         LedgerVersion::V8 => DustParameters {
             night_dust_ratio: INITIAL_DUST_PARAMETERS_V8.night_dust_ratio,
             generation_decay_rate: INITIAL_DUST_PARAMETERS_V8.generation_decay_rate,
             dust_grace_period: INITIAL_DUST_PARAMETERS_V8.dust_grace_period.as_seconds() as u64,
         },
+        #[cfg(feature = "legacy-ledgers")]
         LedgerVersion::V9 => DustParameters {
             night_dust_ratio: INITIAL_DUST_PARAMETERS_V9.night_dust_ratio,
             generation_decay_rate: INITIAL_DUST_PARAMETERS_V9.generation_decay_rate,
             dust_grace_period: INITIAL_DUST_PARAMETERS_V9.dust_grace_period.as_seconds() as u64,
         },
+        LedgerVersion::V10 => DustParameters {
+            night_dust_ratio: INITIAL_DUST_PARAMETERS_V10.night_dust_ratio,
+            generation_decay_rate: INITIAL_DUST_PARAMETERS_V10.generation_decay_rate,
+            dust_grace_period: INITIAL_DUST_PARAMETERS_V10.dust_grace_period.as_seconds() as u64,
+        },
+        #[cfg(not(feature = "legacy-ledgers"))]
+        ledger_version => return Err(Error::LegacyLedgerDisabled(ledger_version)),
     };
 
     Ok(parameters)

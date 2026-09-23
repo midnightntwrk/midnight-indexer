@@ -15,26 +15,33 @@ all-features = true
 rustdoc-args = [ "--cfg", "docsrs" ]
 
 [dependencies]
-# ledger v8 + shared
-midnight-base-crypto_v1      = { workspace = true }
-midnight-coin-structure_v2   = { workspace = true }
-midnight-ledger_v8           = { workspace = true }
-midnight-onchain-runtime_v3  = { workspace = true }
-midnight-onchain-state_v3    = { workspace = true }
-midnight-serialize_v1        = { workspace = true }
-midnight-storage-core_v1     = { workspace = true, features = [ "layout-v2", "gc-v1" ] }
-midnight-storage_v2          = { workspace = true, features = [ "state-translation" ] }
-midnight-transient-crypto_v2 = { workspace = true }
-midnight-zswap_v8            = { workspace = true }
+# shared across ledger generations
+midnight-base-crypto_v1       = { workspace = true }
+midnight-serialize_v1         = { workspace = true }
+midnight-storage-core_v1      = { workspace = true, features = [ "layout-v2", "gc-v1" ] }
+# ledger v10
+midnight-coin-structure_v10   = { workspace = true }
+midnight-ledger_v10           = { workspace = true }
+midnight-onchain-runtime_v10  = { workspace = true }
+midnight-transient-crypto_v10 = { workspace = true }
+midnight-zswap_v10            = { workspace = true }
+# --- legacy-ledgers (ledger 8 and 9), disabled --------------------------------
+# midnight-coin-structure_v2   = { workspace = true }
+# midnight-ledger_v8           = { workspace = true }
+# midnight-onchain-runtime_v3  = { workspace = true }
+# midnight-onchain-state_v3    = { workspace = true }
+# midnight-storage_v2          = { workspace = true, features = [ "state-translation" ] }
+# midnight-transient-crypto_v2 = { workspace = true }
+# midnight-zswap_v8            = { workspace = true }
 # ledger v9 rc (base-crypto, serialize and storage-core stay unified across v8
 # and v9; coin-structure and transient-crypto are cross-major at this rc, hence
 # their own v9 aliases)
-midnight-coin-structure_v3   = { workspace = true }
-midnight-ledger_v9           = { workspace = true }
-midnight-onchain-runtime_v4  = { workspace = true }
-midnight-onchain-state_v4    = { workspace = true }
-midnight-transient-crypto_v3 = { workspace = true }
-midnight-zswap_v9            = { workspace = true }
+# midnight-coin-structure_v3   = { workspace = true }
+# midnight-ledger_v9           = { workspace = true }
+# midnight-onchain-runtime_v4  = { workspace = true }
+# midnight-onchain-state_v4    = { workspace = true }
+# midnight-transient-crypto_v3 = { workspace = true }
+# midnight-zswap_v9            = { workspace = true }
 # The ledger team's v8->v9 translation table. Unpublished and in no release tag
 # — it lives only on the ledger repo's `state-translation/v8-to-v9` branch — so
 # it is pinned by rev, exactly as midnight-node does it. Keep this rev equal to
@@ -44,7 +51,7 @@ midnight-zswap_v9            = { workspace = true }
 # through the workspace `[patch.crates-io]` rc pins, sharing one
 # `midnight-storage` / `midnight-onchain-state` instance with the rest of the
 # graph.
-v8-to-v9-state-translation = { git = "https://github.com/midnightntwrk/midnight-ledger", rev = "da96e33d78ee9b7d3867b15c1037510d499cd909" }
+# v8-to-v9-state-translation = { git = "https://github.com/midnightntwrk/midnight-ledger", rev = "da96e33d78ee9b7d3867b15c1037510d499cd909" }
 async-nats                   = { workspace = true, optional = true }
 chacha20poly1305             = { workspace = true, features = [ "std" ] }
 const-hex                    = { workspace = true, features = [ "serde" ] }
@@ -93,8 +100,13 @@ tokio                  = { workspace = true, features = [ "macros", "rt-multi-th
 [features]
 cloud      = [ "async-nats", "serde_with", "sqlx/postgres", "sqlx/tls-rustls" ]
 standalone = [ "sqlx/sqlite" ]
+# Ledger 8 and 9 support. Cannot currently be enabled: their rc.5 crates and the
+# ledger-10 alpha's path-dep tree cannot coexist in one graph (see the workspace
+# Cargo.toml). Kept as the cfg the gated code is written against, so re-enabling
+# is a Cargo.toml change, not a rewrite.
+legacy-ledgers = []
 
 [[bench]]
 name              = "ledger_transaction"
 harness           = false
-required-features = [ "standalone" ]
+required-features = [ "legacy-ledgers", "standalone" ]

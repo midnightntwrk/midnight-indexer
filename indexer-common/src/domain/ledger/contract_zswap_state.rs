@@ -25,7 +25,7 @@ use midnight_storage_core_v1::{
     db::DB,
     storage::default_storage,
 };
-use midnight_zswap_v9::ledger::State as ZswapStateV9;
+use midnight_zswap_v10::ledger::State as ZswapStateV10;
 
 /// Hasher of the ledger DB.
 type Hasher = <v1_1::LedgerDb as DB>::Hasher;
@@ -33,15 +33,15 @@ type Hasher = <v1_1::LedgerDb as DB>::Hasher;
 /// A contract's filtered zswap state, resident in the ledger arena.
 ///
 /// Unlike [super::ContractState] this is not version-dispatched, because there is nothing to
-/// dispatch on and nothing to gain: zswap's `State` tags itself `zswap-ledger-state[v5]` in both
-/// ledger v8 and v9, so a key written under either version deserializes as either type and the
-/// bytes handed back to clients are the same in both cases — exactly as today, where the stored
+/// dispatch on and nothing to gain: zswap's `State` tags itself `zswap-ledger-state[v5]` in ledger
+/// v8, v9 and v10, so a key written under any version deserializes as any of the types and the
+/// bytes handed back to clients are the same in every case — exactly as today, where the stored
 /// blob carries that one tag regardless of the block's protocol version.
 ///
 /// This is sound because the value is never forced: `get_lazy` hands back a lazy pointer without
 /// reading the node, and re-serializing walks the stored node payloads at the byte level. The type
 /// parameter therefore only supplies the tag and the `Storable` bound.
-pub struct ContractZswapState(Sp<ZswapStateV9<v1_1::LedgerDb>, v1_1::LedgerDb>);
+pub struct ContractZswapState(Sp<ZswapStateV10<v1_1::LedgerDb>, v1_1::LedgerDb>);
 
 impl ContractZswapState {
     /// Load the zswap state at the given arena key, breadth-first prefetching its whole DAG:
@@ -74,7 +74,7 @@ impl ContractZswapState {
 
     pub(super) fn arena_key(
         key: &SerializedZswapStateKey,
-    ) -> Result<TypedArenaKey<ZswapStateV9<v1_1::LedgerDb>, Hasher>, Error> {
+    ) -> Result<TypedArenaKey<ZswapStateV10<v1_1::LedgerDb>, Hasher>, Error> {
         tagged_deserialize(&mut key.as_ref())
             .map_err(|error| Error::Deserialize("ZswapStateKey", error))
     }
