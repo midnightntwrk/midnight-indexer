@@ -524,9 +524,6 @@ where
                 block.parent_hash,
                 block.timestamp,
                 *parent_block_timestamp,
-                // Only reproduce the node's first-tx `tblock` skew for non-genesis blocks built by a
-                // runtime that applies it; genesis (height 0) transactions never transited the
-                // mempool, and runtimes from node 1.0.300 on verify against the block's own time.
                 should_bump_first_regular_tblock(block.height, block.protocol_version),
             )
             .context("apply transactions to ledger state")
