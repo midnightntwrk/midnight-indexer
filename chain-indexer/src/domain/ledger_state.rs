@@ -42,14 +42,14 @@ const MEMPOOL_TBLOCK_BUMP_MILLIS: u64 = 2 * 6_000;
 const FIRST_UNSKEWED_NODE_1_0_SPEC_VERSION: u32 = 1_000_300;
 
 /// Whether the node skewed the first regular transaction's well-formed `tblock` by
-/// [MEMPOOL_TBLOCK_BUMP_MILLIS] off the parent block time, for a block built by the runtime with the
+/// `MEMPOOL_TBLOCK_BUMP_MILLIS` off the parent block time, for a block built by the runtime with the
 /// given protocol version; that is the runtime recorded in the block's MNSV digest, not the one in
 /// its state, which is newer at a runtime-upgrade enactment block.
 ///
-/// - 0.22, 1.0 before [FIRST_UNSKEWED_NODE_1_0_SPEC_VERSION] and 2.0 serve the first transaction's
+/// - 0.22, 1.0 before `FIRST_UNSKEWED_NODE_1_0_SPEC_VERSION` and 2.0 serve the first transaction's
 ///   validity from the strict cache warmed during mempool ingress, i.e. verify it at the bumped
 ///   `tblock`.
-/// - 1.0 from [FIRST_UNSKEWED_NODE_1_0_SPEC_VERSION] on (`Ledger8Bridge` version 2) and 2.1 (whose
+/// - 1.0 from `FIRST_UNSKEWED_NODE_1_0_SPEC_VERSION` on (`Ledger8Bridge` version 2) and 2.1 (whose
 ///   ledger-8 and ledger-9 host functions never skew) verify it against the block's own time.
 ///
 /// Bumping where the node does not makes the indexer stricter on the intent TTL than the node by
