@@ -20,7 +20,8 @@ Consequences of the gate, all of them enforced by `required-features`:
 
 - `chain-indexer`'s `mainnet_runtime` and `contract_state_arena` tests, the
   `hardfork_e2e` test, and the fixture-driven benches build only under
-  `legacy-ledgers`.
+  `legacy-ledgers`. So does `first_tx_on_node_1_0_300_runtime_is_verified_at_block_time`,
+  whose fixture is a ledger-8 transaction.
 - `LedgerState::translate` has no ledger 9 -> 10 table, so this build indexes a
   ledger-10 chain from genesis rather than crossing the fork.
 - `LedgerVersion::V8` and `V9` still exist, because the database tags rows with

@@ -161,7 +161,7 @@ midnight-transient-crypto-old = { git = "https://github.com/midnightntwrk/midnig
 # crates.io yet, hence git tags. rc.4 -> rc.5 moves storage and storage-core to
 # versions compatible with ledger 8.1.2, mirroring midnight-node#2096.
 #
-# These pins match midnight-node `node-2.1.0-rc.1` crate for crate — same
+# These pins match midnight-node `node-2.1.0-rc.2` crate for crate — same
 # per-crate rc tags on the v9 side, same `=8.1.2` / `=3.0.1` / `=3.1.1` v8 side,
 # same `layout-v2` + `gc-v1` on storage-core, same `v8-to-v9-state-translation`
 # rev. They have to: the indexer re-derives the translated arena root and
