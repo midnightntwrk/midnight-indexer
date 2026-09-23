@@ -144,31 +144,35 @@ describe.skipIf(env.isUndeployedEnv())('dust generation merkle tree update queri
      * @when we query for a dust generation update covering the full range from genesis
      * @then Indexer should return a valid collapsed update spanning the entire range
      */
-    test('should return a collapsed update for the full genesis dust range', async (ctx: TestContext) => {
-      ctx.task!.meta.custom = {
-        labels: ['Query', 'Dust', 'GenerationMerkleTree', 'CollapsedUpdate', 'FullRange'],
-      };
+    // Genesis block has no regular transactions on mainnet: skip there.
+    test.skipIf(env.isMainnetEnv())(
+      'should return a collapsed update for the full genesis dust range',
+      async (ctx: TestContext) => {
+        ctx.task!.meta.custom = {
+          labels: ['Query', 'Dust', 'GenerationMerkleTree', 'CollapsedUpdate', 'FullRange'],
+        };
 
-      const maxEndIndex = await getMaxDustGenerationEndIndex(0);
+        const maxEndIndex = await getMaxDustGenerationEndIndex(0);
 
-      log.debug(`Highest dustGenerationEndIndex from genesis: ${maxEndIndex}`);
-      expect(maxEndIndex).toBeGreaterThan(0);
+        log.debug(`Highest dustGenerationEndIndex from genesis: ${maxEndIndex}`);
+        expect(maxEndIndex).toBeGreaterThan(0);
 
-      // dustGenerationEndIndex is exclusive, collapsed update endIndex is inclusive
-      const endIndex = maxEndIndex - 1;
+        // dustGenerationEndIndex is exclusive, collapsed update endIndex is inclusive
+        const endIndex = maxEndIndex - 1;
 
-      log.debug(`Requesting dust generation update with startIndex=0, endIndex=${endIndex}`);
-      const response = await indexerHttpClient.getDustGenerationMerkleTreeUpdate(0, endIndex);
+        log.debug(`Requesting dust generation update with startIndex=0, endIndex=${endIndex}`);
+        const response = await indexerHttpClient.getDustGenerationMerkleTreeUpdate(0, endIndex);
 
-      expect(response).toBeSuccess();
-      expect(response.data?.dustGenerationMerkleTreeUpdate).toBeDefined();
+        expect(response).toBeSuccess();
+        expect(response.data?.dustGenerationMerkleTreeUpdate).toBeDefined();
 
-      const collapsedUpdate = response.data!.dustGenerationMerkleTreeUpdate;
-      expect(collapsedUpdate.startIndex).toBe(0);
-      expect(collapsedUpdate.endIndex).toBe(endIndex);
-      expect(collapsedUpdate.update).toBeDefined();
-      expect(collapsedUpdate.protocolVersion).toBeDefined();
-    });
+        const collapsedUpdate = response.data!.dustGenerationMerkleTreeUpdate;
+        expect(collapsedUpdate.startIndex).toBe(0);
+        expect(collapsedUpdate.endIndex).toBe(endIndex);
+        expect(collapsedUpdate.update).toBeDefined();
+        expect(collapsedUpdate.protocolVersion).toBeDefined();
+      },
+    );
   });
 
   describe('a collapsed update query with equal start and end indices', () => {
