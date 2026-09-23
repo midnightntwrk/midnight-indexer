@@ -410,6 +410,7 @@ There are a number of deployed environments that are used for testing components
 - qanet
 - preview
 - preprod
+- mainnet
 
 Endpoints are derived automatically from the `TARGET_ENV` name (e.g. `qanet.midnight.network`), so you do **not** need to configure URLs manually. (`testnet` is a Cardano network type, not a `TARGET_ENV` value.)
 
@@ -435,7 +436,7 @@ TARGET_ENV=preprod INDEXER_API_VERSION=v3 yarn test:integration
 
 | Variable              | Required                          | Default                | Description                                                                                          |
 | --------------------- | --------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------- |
-| `TARGET_ENV`          | Yes                               | —                      | Target environment: `undeployed`, `devnet`, `qanet`, `preview`, `preprod` (lower case). Required; unset or invalid throws. |
+| `TARGET_ENV`          | Yes                               | —                      | Target environment: `undeployed`, `devnet`, `qanet`, `preview`, `preprod`, `mainnet` (lower case). Required; unset or invalid throws. |
 | `NODE_TAG`            | Yes (undeployed only)             | —                      | Node image tag. **Must be a value listed in [`NODE_VERSIONS`](../../NODE_VERSIONS) (repo root).** No auto-derivation. Must NOT be set for deployed envs (fixed by the env). |
 | `INDEXER_TAG`         | Yes (undeployed only)             | —                      | Indexer image tag. **Must be compatible with the selected `NODE_TAG`.** Must NOT be set for deployed envs (fixed by the env). |
 | `NODE_TOOLKIT_TAG`    | No                                | `latest-main`          | Node Toolkit version used by e2e/integration tests.                                                  |
