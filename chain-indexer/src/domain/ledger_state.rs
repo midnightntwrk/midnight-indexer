@@ -16,8 +16,8 @@ use derive_more::derive::{Deref, From};
 use fastrace::trace;
 use indexer_common::domain::{
     ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, BlockHash, LedgerVersion,
-    NetworkId, SerializedContractAddress, SerializedLedgerStateKey, TransactionHash,
-    TransactionResult,
+    NetworkId, ProtocolVersion, SerializedContractAddress, SerializedLedgerStateKey,
+    TransactionHash, TransactionResult,
     ledger::{LedgerParameters, RootCountRepair},
 };
 use std::{
@@ -31,6 +31,37 @@ use thiserror::Error;
 /// `slot_duration_secs + skipped_slots_margin` (one slot each, two slots by default) ahead of block
 /// time. Midnight slots are 6s, so the default bump is two slots. Block timestamps are milliseconds.
 const MEMPOOL_TBLOCK_BUMP_MILLIS: u64 = 2 * 6_000;
+
+/// First node 1.0 runtime `spec_version` whose ledger-8 host functions no longer skew the first
+/// regular transaction's well-formed `tblock`. Node 1.0.300 added version 2 of
+/// `Ledger8Bridge::apply_transaction`/`validate_guaranteed_execution`, which verify against the
+/// block's own time; runtimes before it import version 1, which keeps the skew. Which one ran is
+/// decided by the runtime that built the block, so blocks before the `set_code` still skew.
+///
+/// See <https://github.com/midnightntwrk/midnight-node/issues/1924>.
+const FIRST_UNSKEWED_NODE_1_0_SPEC_VERSION: u32 = 1_000_300;
+
+/// Whether the node skewed the first regular transaction's well-formed `tblock` by
+/// [MEMPOOL_TBLOCK_BUMP_MILLIS] off the parent block time, for a block built by the runtime with the
+/// given protocol version; that is the runtime recorded in the block's MNSV digest, not the one in
+/// its state, which is newer at a runtime-upgrade enactment block.
+///
+/// - 0.22, 1.0 before [FIRST_UNSKEWED_NODE_1_0_SPEC_VERSION] and 2.0 serve the first transaction's
+///   validity from the strict cache warmed during mempool ingress, i.e. verify it at the bumped
+///   `tblock`.
+/// - 1.0 from [FIRST_UNSKEWED_NODE_1_0_SPEC_VERSION] on (`Ledger8Bridge` version 2) and 2.1 (whose
+///   ledger-8 and ledger-9 host functions never skew) verify it against the block's own time.
+///
+/// Bumping where the node does not makes the indexer stricter on the intent TTL than the node by
+/// up to one block interval, so a short-TTL transaction the node accepted fails `well_formed`
+/// here and halts indexing.
+pub fn node_skews_first_regular_tblock(protocol_version: ProtocolVersion) -> bool {
+    match protocol_version {
+        ProtocolVersion::V0_22(_) | ProtocolVersion::V2_0(_) => true,
+        ProtocolVersion::V1_0(spec_version) => spec_version < FIRST_UNSKEWED_NODE_1_0_SPEC_VERSION,
+        ProtocolVersion::V2_1(_) => false,
+    }
+}
 
 /// New type for ledger state from indexer_common.
 #[derive(Debug, Clone, From, Deref)]
@@ -119,7 +150,8 @@ impl LedgerState {
     /// block (height 0): the transactions embedded in genesis never transited the mempool, so the
     /// node never cached a bumped result for them and validated them against the real block time.
     /// Bumping them would push the well-formed `tblock` past a bootstrap transaction's intent TTL
-    /// and wrongly reject it.
+    /// and wrongly reject it. It must also be `false` for blocks built by a runtime that no longer
+    /// skews, see [node_skews_first_regular_tblock].
     #[trace(properties = { "parent_block_hash": "{parent_block_hash}" })]
     pub fn apply_transactions(
         &mut self,
@@ -553,5 +585,114 @@ mod contract_action_tests {
 
     fn segments(actions: &[ContractAction]) -> Vec<u16> {
         actions.iter().map(|action| action.segment).collect()
+    }
+}
+
+#[cfg(test)]
+mod tblock_skew_tests {
+    use super::node_skews_first_regular_tblock;
+    use indexer_common::domain::ProtocolVersion;
+
+    #[test]
+    fn skews_only_for_runtimes_importing_the_skewing_host_functions() {
+        let skews = |spec_version: u32| {
+            node_skews_first_regular_tblock(
+                ProtocolVersion::try_from(spec_version).expect("supported protocol version"),
+            )
+        };
+
+        assert!(skews(22_000));
+        assert!(skews(1_000_000));
+        assert!(skews(1_000_002));
+        assert!(skews(1_000_299));
+        assert!(!skews(1_000_300));
+        assert!(!skews(1_000_999));
+        assert!(skews(2_000_000));
+        assert!(!skews(2_001_000));
+    }
+
+    /// Preview block 128537's first (and only) regular transaction, replayed as if it had waited
+    /// one block in the pool and been included on a node 1.0.300 runtime: parent 1784987076 (the
+    /// original block's time), block 1784987082, intent TTL 1784987084.
+    ///
+    /// Node 1.0.300 verifies it at the block's own time (1784987082 <= TTL) and accepts it. The
+    /// unconditional bump verifies it at parent + 12s (1784987088 > TTL) and halts indexing on a
+    /// block the node accepted. This is the regression for gating the bump on the runtime.
+    #[cfg(feature = "standalone")]
+    #[tokio::test]
+    async fn first_tx_on_node_1_0_300_runtime_is_verified_at_block_time() {
+        use crate::domain::{LedgerState, node};
+        use indexer_common::{
+            domain::{BlockHash, ByteVec, LedgerVersion, NetworkId, ledger},
+            infra::ledger_db,
+        };
+
+        const PARENT_BLOCK_TIMESTAMP: u64 = 1_784_987_076_000;
+        const BLOCK_TIMESTAMP: u64 = 1_784_987_082_000;
+        const INTENT_TTL_EXPIRED: &str = "Intent TTL has expired";
+
+        let temp_dir = tempfile::tempdir().expect("create tempdir");
+        ledger_db::init(ledger_db::Config {
+            cache_max_nodes: 1_024,
+            cnn_url: temp_dir
+                .path()
+                .join("ledger-db.sqlite")
+                .display()
+                .to_string(),
+        })
+        .await
+        .expect("init ledger DB");
+
+        let raw: ByteVec = std::fs::read(format!(
+            "{}/../indexer-common/tests/block_128537_tx.raw",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("read block_128537_tx.raw")
+        .into();
+        let transaction = ledger::Transaction::deserialize(&raw, LedgerVersion::V8)
+            .expect("deserialize fixture transaction");
+        let hash = transaction.hash();
+        let identifiers = transaction.identifiers().expect("identifiers");
+
+        let apply = |protocol_version: ProtocolVersion| {
+            let network_id: NetworkId = "preview".try_into().expect("network id");
+            let mut ledger_state =
+                LedgerState::new(network_id, LedgerVersion::V8).expect("create ledger state");
+            let transaction = node::Transaction::Regular(node::RegularTransaction {
+                hash,
+                protocol_version,
+                raw: raw.clone(),
+                identifiers: identifiers.clone(),
+                contract_actions: vec![],
+            });
+
+            ledger_state
+                .apply_transactions(
+                    [transaction],
+                    BlockHash::from([0; 32]),
+                    BLOCK_TIMESTAMP,
+                    PARENT_BLOCK_TIMESTAMP,
+                    node_skews_first_regular_tblock(protocol_version),
+                )
+                .map(|_| ())
+                .map_err(|error| format!("{:#}", anyhow::Error::from(error)))
+        };
+
+        // A skewing runtime: the bump rejects the transaction on the intent TTL.
+        let error = apply(ProtocolVersion::V1_0(1_000_000)).expect_err("bump must reject");
+        assert!(
+            error.contains(INTENT_TTL_EXPIRED) && error.contains("Timestamp(1784987088)"),
+            "unexpected error: {error}"
+        );
+
+        // A node 1.0.300 runtime: the intent TTL check passes. The transaction still fails later,
+        // against a fresh state instead of preview's, which is irrelevant to the `tblock`.
+        match apply(ProtocolVersion::V1_0(1_000_300)) {
+            Ok(()) => {}
+            Err(error) => assert!(
+                !error.contains(INTENT_TTL_EXPIRED),
+                "node 1.0.300 runtime must not reject on the intent TTL: {error}"
+            ),
+        }
     }
 }

@@ -18,6 +18,7 @@ use crate::{
     domain::{
         Block, BlockRef, LedgerState, SystemParametersChange, Transaction,
         node::{self, Node},
+        node_skews_first_regular_tblock,
         storage::Storage,
     },
 };
@@ -523,9 +524,10 @@ where
                 block.parent_hash,
                 block.timestamp,
                 *parent_block_timestamp,
-                // Only reproduce the node's mempool-cached first-tx `tblock` bump for non-genesis
-                // blocks; genesis (height 0) transactions never transited the mempool.
-                block.height > 0,
+                // Only reproduce the node's first-tx `tblock` skew for non-genesis blocks built by a
+                // runtime that applies it; genesis (height 0) transactions never transited the
+                // mempool, and runtimes from node 1.0.300 on verify against the block's own time.
+                block.height > 0 && node_skews_first_regular_tblock(block.protocol_version),
             )
             .context("apply transactions to ledger state")
     };
