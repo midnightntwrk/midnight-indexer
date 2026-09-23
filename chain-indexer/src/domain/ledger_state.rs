@@ -161,7 +161,7 @@ impl LedgerState {
     /// node never cached a bumped result for them and validated them against the real block time.
     /// Bumping them would push the well-formed `tblock` past a bootstrap transaction's intent TTL
     /// and wrongly reject it. It must also be `false` for blocks built by a runtime that no longer
-    /// skews, see [node_skews_first_regular_tblock].
+    /// skews; the caller decides this with `should_bump_first_regular_tblock`.
     #[trace(properties = { "parent_block_hash": "{parent_block_hash}" })]
     pub fn apply_transactions(
         &mut self,
