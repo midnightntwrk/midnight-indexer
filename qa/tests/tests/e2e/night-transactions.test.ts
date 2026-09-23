@@ -14,6 +14,7 @@
 // limitations under the License.
 
 import type { TestContext } from 'vitest';
+import { env } from 'environment/model';
 import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
 import { EventCoordinator } from '@utils/event-coordinator';
@@ -131,7 +132,11 @@ function validateCrossWalletTransaction(
   });
 }
 
-describe('unshielded NIGHT transactions', { timeout: UNSHIELDED_TRANSFER_TIMEOUT }, () => {
+// NIGHT not yet available on Midnight mainnet: skip this suite there until
+// mainnet has a funded NIGHT source to transfer from.
+const skipNight = env.isMainnetEnv();
+const NIGHT_SUITE_OPTS = { timeout: UNSHIELDED_TRANSFER_TIMEOUT };
+describe.skipIf(skipNight)('unshielded NIGHT transactions', NIGHT_SUITE_OPTS, () => {
   const indexerEventCoordinator = new EventCoordinator();
 
   // Distinct unshielded token types held by the genesis block. A dev chain is minted
