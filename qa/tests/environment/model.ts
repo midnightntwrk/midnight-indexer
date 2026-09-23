@@ -122,6 +122,7 @@ const hostEntries: HostEntry[] = [
     indexerHost: 'indexer.stagenet.shielded.tools',
     nodeHost: 'rpc.stagenet.shielded.tools',
   },
+  { env: EnvironmentName.MAINNET, domain: 'mainnet.midnight.network' },
 ];
 
 const hostConfigByEnvName: Record<EnvironmentName, HostConfig> = hostEntries.reduce(
@@ -236,6 +237,13 @@ export class Environment {
 
   isUndeployedEnv(): boolean {
     return this.isUndeployed;
+  }
+
+  // Revisit the isMainnetEnv() skips across the suite if mainnet ever gets
+  // NIGHT support — right now this is a straightforward environment-name
+  // check, not a capability probe.
+  isMainnetEnv(): boolean {
+    return this.envName === EnvironmentName.MAINNET;
   }
 
   getCurrentEnvironmentName(): EnvironmentName {
