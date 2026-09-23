@@ -27,5 +27,3 @@ pub use dust::*;
 pub use ledger_state::*;
 pub use system_parameters::*;
 pub use transaction::*;
-
-pub(crate) use ledger_state::should_bump_first_regular_tblock;
