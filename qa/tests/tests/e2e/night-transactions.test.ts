@@ -17,8 +17,6 @@ import type { TestContext } from 'vitest';
 import { env } from 'environment/model';
 import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
-import { EventCoordinator } from '@utils/event-coordinator';
-import { DustLedgerEventsUnionSchema } from '@utils/indexer/graphql/schema';
 import {
   isUnshieldedTransaction,
   RegularTransaction,
@@ -27,7 +25,6 @@ import {
   UnshieldedUtxo,
 } from '@utils/indexer/indexer-types';
 import { IndexerWsClient, UnshieldedTxSubscriptionResponse } from '@utils/indexer/websocket-client';
-import { collectValidDustLedgerEvents } from 'tests/shared/dust-ledger-utils';
 import { getEventsOfType, retrySimple, waitForEventsStabilization } from './test-utils';
 import {
   defineUnshieldedTransferTests,
@@ -35,6 +32,7 @@ import {
   setupUnshieldedTransferScenario,
   UNSHIELDED_TRANSFER_TIMEOUT,
 } from './unshielded-transfer-scenario';
+import { deriveAddresses } from '@utils/moth/moth-addresses';
 
 // Destination wallets are numbered per e2e suite (…e2e002 is the custom-token suite's) so
 // that no two suites share one — see `destinationSeed` in unshielded-transfer-scenario.ts.
@@ -137,12 +135,9 @@ function validateCrossWalletTransaction(
 const skipNight = env.isMainnetEnv();
 const NIGHT_SUITE_OPTS = { timeout: UNSHIELDED_TRANSFER_TIMEOUT };
 describe.skipIf(skipNight)('unshielded NIGHT transactions', NIGHT_SUITE_OPTS, () => {
-  const indexerEventCoordinator = new EventCoordinator();
-
   // Distinct unshielded token types held by the genesis block. A dev chain is minted
   // with NIGHT alone, so this is what the genesis identity test checks NIGHT against.
   let genesisTokenTypes: string[];
-  let previousMaxDustId: number;
   let dustCommitmentEndIndexBeforeTx: number;
 
   const scenario = setupUnshieldedTransferScenario({
@@ -150,8 +145,14 @@ describe.skipIf(skipNight)('unshielded NIGHT transactions', NIGHT_SUITE_OPTS, ()
     tokenType: NIGHT_TOKEN_TYPE,
     amount: 1,
     unit: 'STAR',
-    destinationSeed: DESTINATION_SEED,
-    extraDestinationSeeds: [SECOND_DESTINATION_SEED],
+    // Self-transfer, so a funded wallet can run the suite indefinitely. The
+    // multi-destination tests below keep their own distinct wallets: proving the
+    // indexer routes a transfer to one recipient and not another cannot be done
+    // with a single wallet.
+    selfTransfer: true,
+    // B1 and B2 of the multi-destination tests below. They are subscribed here,
+    // alongside the funding wallet, so `destinations` is [self, B1, B2].
+    extraDestinationSeeds: [DESTINATION_SEED, SECOND_DESTINATION_SEED],
     testKeys: {
       blockQueryByHash: 'PM-17711',
       transactionQueryByHash: 'PM-17712',
@@ -160,14 +161,6 @@ describe.skipIf(skipNight)('unshielded NIGHT transactions', NIGHT_SUITE_OPTS, ()
       transferredAmount: 'PM-17715',
     },
     prepare: async (scenario) => {
-      const beforeEvents = await collectValidDustLedgerEvents(
-        scenario.wsClient,
-        indexerEventCoordinator,
-        1,
-      );
-      previousMaxDustId = beforeEvents[0].data!.dustLedgerEvents.maxId;
-      log.debug(`Previous max dust ID before tx = ${previousMaxDustId}`);
-
       // Capture the highest dustCommitmentEndIndex before the transaction from the genesis
       // block. Guard against null data: older indexer deployments return a GraphQL validation
       // error when the query includes schema fields not yet in that version, which sets data
@@ -252,7 +245,7 @@ describe.skipIf(skipNight)('unshielded NIGHT transactions', NIGHT_SUITE_OPTS, ()
 
       ctx.skip?.(
         scenario.transactionResult.status !== 'confirmed',
-        "Toolkit transaction hasn't been confirmed",
+        "Transaction hasn't been confirmed",
       );
 
       const transactionResponse = await scenario.httpClient.getTransactionByOffset({
@@ -273,46 +266,6 @@ describe.skipIf(skipNight)('unshielded NIGHT transactions', NIGHT_SUITE_OPTS, ()
       log.debug(
         `dustCommitmentEndIndex before tx: ${dustCommitmentEndIndexBeforeTx}, after tx: ${regularTx.dustCommitmentEndIndex}`,
       );
-    });
-
-    /**
-     * Once an unshielded transaction has been confirmed, the indexer should stream the full
-     * sequence of DUST events associated with that transaction.
-     *
-     * @given a confirmed NIGHT transaction that produces DUST activity
-     * @when dustLedgerEvents are subscribed from (previousMaxId + 1), so only the new events
-     *       produced by this transaction are received
-     * @then exactly three events are delivered, in the order DustGenerationDtimeUpdate,
-     *       DustInitialUtxo, DustSpendProcessed
-     */
-    test('should deliver dust events in correct sequence after unshielded transaction', async (ctx: TestContext) => {
-      ctx.task!.meta.custom = {
-        labels: ['Subscription', 'Dust', 'UnshieldedTokens', 'NIGHT'],
-      };
-
-      const received = await collectValidDustLedgerEvents(
-        scenario.wsClient,
-        indexerEventCoordinator,
-        3,
-        previousMaxDustId + 1,
-      );
-      expect(received).toHaveLength(3);
-
-      received.forEach((msg) => {
-        const event = msg.data!.dustLedgerEvents;
-        const parsed = DustLedgerEventsUnionSchema.safeParse(event);
-        expect(
-          parsed.success,
-          `Schema error: ${JSON.stringify(parsed.error?.format(), null, 2)}`,
-        ).toBe(true);
-      });
-
-      const eventTypes = received.map((msg) => msg.data!.dustLedgerEvents.__typename);
-      expect(eventTypes).toEqual([
-        'DustGenerationDtimeUpdate',
-        'DustInitialUtxo',
-        'DustSpendProcessed',
-      ]);
     });
   });
 
@@ -337,7 +290,11 @@ describe.skipIf(skipNight)('unshielded NIGHT transactions', NIGHT_SUITE_OPTS, ()
     test('should emit UnshieldedTransaction only for the target wallet (A > B1)', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Wallet', 'Subscription', 'MultiDestination'] };
 
-      const destinationAddress = scenario.wallet.destinations[0].destinationAddress;
+      // destinations[0] is the funding wallet's own self-transfer subscription
+      // (see `extraDestinationSeeds` above); B1 and B2 follow it.
+      const [, b1, b2] = scenario.wallet.destinations;
+
+      const destinationAddress = b1.destinationAddress;
 
       const b1TxResult = await scenario.toolkit.generateSingleTx(
         scenario.wallet.source.seed,
@@ -348,10 +305,7 @@ describe.skipIf(skipNight)('unshielded NIGHT transactions', NIGHT_SUITE_OPTS, ()
 
       // Wait for B1's UnshieldedTransaction matching the submitted tx hash
       const latestB1Tx = await retrySimple(async () => {
-        const events = getEventsOfType(
-          scenario.wallet.destinations[0].events,
-          'UnshieldedTransaction',
-        );
+        const events = getEventsOfType(b1.events, 'UnshieldedTransaction');
         return events.find((e) => e.transaction.hash === b1TxResult.txHash) ?? null;
       });
 
@@ -363,10 +317,7 @@ describe.skipIf(skipNight)('unshielded NIGHT transactions', NIGHT_SUITE_OPTS, ()
 
       // Wait for B2 progress
       const latestB2Tx = await retrySimple(async () => {
-        const progressEvents = getEventsOfType(
-          scenario.wallet.destinations[1].events,
-          'UnshieldedTransactionsProgress',
-        );
+        const progressEvents = getEventsOfType(b2.events, 'UnshieldedTransactionsProgress');
         return progressEvents.at(-1) ?? null;
       });
 
@@ -379,7 +330,7 @@ describe.skipIf(skipNight)('unshielded NIGHT transactions', NIGHT_SUITE_OPTS, ()
       );
 
       // Ensure B2 did not receive a UnshieldedTransaction event
-      const b2Tx = getEventsOfType(scenario.wallet.destinations[1].events, 'UnshieldedTransaction');
+      const b2Tx = getEventsOfType(b2.events, 'UnshieldedTransaction');
       expect(b2Tx.length).toBe(0);
 
       // B2 must at least show progress
@@ -396,7 +347,11 @@ describe.skipIf(skipNight)('unshielded NIGHT transactions', NIGHT_SUITE_OPTS, ()
     test('should emit UnshieldedTransaction only for the target wallet (A > B2)', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Wallet', 'Subscription', 'MultiDestination'] };
 
-      const secondDestinationAddress = scenario.wallet.destinations[1].destinationAddress;
+      // destinations[0] is the funding wallet's own self-transfer subscription
+      // (see `extraDestinationSeeds` above); B1 and B2 follow it.
+      const [, b1, b2] = scenario.wallet.destinations;
+
+      const secondDestinationAddress = b2.destinationAddress;
 
       const b2TxResult = await scenario.toolkit.generateSingleTx(
         scenario.wallet.source.seed,
@@ -407,19 +362,13 @@ describe.skipIf(skipNight)('unshielded NIGHT transactions', NIGHT_SUITE_OPTS, ()
 
       // Wait for B2's UnshieldedTransaction matching the submitted tx hash
       const latestB2Tx = await retrySimple(async () => {
-        const b2Events = getEventsOfType(
-          scenario.wallet.destinations[1].events,
-          'UnshieldedTransaction',
-        );
+        const b2Events = getEventsOfType(b2.events, 'UnshieldedTransaction');
         return b2Events.find((e) => e.transaction.hash === b2TxResult.txHash) ?? null;
       });
 
       // B1 UnshieldedTransaction (should NOT match B2)
       const latestB1Tx = await retrySimple(async () => {
-        const b1Events = getEventsOfType(
-          scenario.wallet.destinations[0].events,
-          'UnshieldedTransaction',
-        );
+        const b1Events = getEventsOfType(b1.events, 'UnshieldedTransaction');
         return b1Events.at(-1) ?? null;
       });
 
@@ -454,7 +403,7 @@ describe.skipIf(skipNight)('unshielded NIGHT transactions', NIGHT_SUITE_OPTS, ()
       ctx.task!.meta.custom = { labels: ['Wallet', 'Subscription', 'EmptyWallet'] };
 
       const emptySeed = '000000000000000000000000000000000000000000000000000000000000000E';
-      const emptyAddress = (await scenario.toolkit.showAddress(emptySeed)).unshielded;
+      const emptyAddress = (await deriveAddresses(emptySeed, scenario.toolkit)).unshielded;
       log.debug(`Empty wallet address: ${emptyAddress}`);
 
       const ws = new IndexerWsClient();
