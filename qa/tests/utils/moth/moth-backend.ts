@@ -272,7 +272,19 @@ export const openMothWallet = (seed: string, echoProgress = false): Promise<Moth
       name,
       false,
     );
-    await awaitSettled(synced.facade, SYNC_TIMEOUT_MS, echoProgress);
+    // A failed settle (timeout, dead stream, zero-total) never reaches
+    // openWallets as a usable wallet, so closeMothWallets() cannot stop it:
+    // stop the sync here or its websocket and sync engine stay alive.
+    try {
+      await awaitSettled(synced.facade, SYNC_TIMEOUT_MS, echoProgress);
+    } catch (error) {
+      await synced
+        .stop()
+        .catch((stopError: unknown) =>
+          log.warn(`moth wallet ${name}: stop after failed sync also failed: ${stopError}`),
+        );
+      throw error;
+    }
     log.info(`moth wallet ${name} synced`);
     return { synced, keys, networkId: network.id };
   })();
