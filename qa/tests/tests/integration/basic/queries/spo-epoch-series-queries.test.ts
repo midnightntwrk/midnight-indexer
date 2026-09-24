@@ -52,18 +52,18 @@ function isEpochSpanRejection(response: GraphQLResponse<unknown>): boolean {
 let capEnforced: boolean | undefined;
 
 /**
- * Skip a cap assertion when the target indexer has no cap to assert on, logging
- * the measured span so the skip carries its reason. Returns true when the caller
- * should stop.
+ * Skip a cap assertion when the target indexer has no cap to assert on, passing
+ * the measured span as the skip note so the reason shows up in the test report
+ * rather than only in the logs. Returns true when the caller should stop.
  */
 function capNotEnforced(ctx: TestContext): boolean {
   if (capEnforced) return false;
 
-  log.warn(
-    `Skipping: target indexer does not enforce the ${MAX_EPOCH_SPAN}-epoch span cap ` +
-      `(a span of ${OVER_CAP_TO_EPOCH} epochs was accepted).`,
+  ctx.skip(
+    true,
+    `target indexer does not enforce the ${MAX_EPOCH_SPAN}-epoch span cap ` +
+      `(a span of ${OVER_CAP_TO_EPOCH} epochs was accepted)`,
   );
-  ctx.skip();
   return true;
 }
 
