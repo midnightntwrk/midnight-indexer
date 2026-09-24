@@ -254,6 +254,12 @@ async function findTransferEvent(
         (txEvent) => txEvent.transaction.hash === scenario.transactionResult.txHash,
       );
       if (!event) {
+        // Every event this poll waits for arrives over the subscription socket,
+        // so a dead socket means nothing more can arrive. Say so at once instead
+        // of reporting "not found yet" until the attempts run out. Checked only
+        // after the search: `events` keeps what was already received, so an
+        // event that arrived before the socket dropped must still be found.
+        scenario.wsClient.assertSocketAlive();
         throw new Error(`${addressLabel} address transaction event not found yet`);
       }
       return event;
@@ -301,6 +307,7 @@ function findProgressUpdateEvent(
 
 /** Asserts a progress update past the baseline arrives for one of the two addresses. */
 async function expectProgressUpdate(
+  wsClient: IndexerWsClient,
   events: UnshieldedTxSubscriptionResponse[],
   historicalEvents: UnshieldedTxSubscriptionResponse[],
   addressLabel: string,
@@ -330,7 +337,18 @@ async function expectProgressUpdate(
   );
 
   const event = await retry(
-    async () => findProgressUpdateEvent(events, highestTransactionIdBefore, addressLabel),
+    async () => {
+      try {
+        return findProgressUpdateEvent(events, highestTransactionIdBefore, addressLabel);
+      } catch (error) {
+        // This is the longest poll in the suite (60 attempts, 5s apart). Without
+        // the liveness check a socket dropped early costs the full five minutes
+        // and still only reports that the event was not found. Checked only
+        // after the search, so an event received before the drop still counts.
+        wsClient.assertSocketAlive();
+        throw error;
+      }
+    },
     {
       maxRetries: 60,
       delayMs: 5000,
@@ -577,6 +595,7 @@ export function defineUnshieldedTransferTests(scenario: UnshieldedTransferScenar
         ]);
 
         await expectProgressUpdate(
+          scenario.wsClient,
           scenario.wallet.source.events,
           scenario.wallet.source.historicalEvents,
           'source',
@@ -604,6 +623,7 @@ export function defineUnshieldedTransferTests(scenario: UnshieldedTransferScenar
         ]);
 
         await expectProgressUpdate(
+          scenario.wsClient,
           scenario.wallet.destinations[0].events,
           scenario.wallet.destinations[0].historicalDestinationEvents,
           'destination',
