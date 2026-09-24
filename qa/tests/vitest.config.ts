@@ -77,6 +77,7 @@ export default defineConfig({
       './vitest.config.smoke.ts',
       './vitest.config.e2e.ts',
       './vitest.config.integration.ts',
+      './vitest.config.sync.ts',
     ],
   },
 });
