@@ -209,13 +209,22 @@ async function warmMoth(): Promise<void> {
   // moth builds its proving service during startWalletSync, so even a sync-only
   // warm-up needs a reachable server.
   const proofServerUrl = await ensureProofServer();
-  process.env.PROOF_SERVER_URL = proofServerUrl;
-  console.log(`[SETUP] Proof server: ${await describeProofServer(proofServerUrl)}`);
-  const mothSeed = dataProvider.getFundingSeed();
-  console.log('[SETUP] Warming moth wallet cache (first sync can take a while)...');
-  const mothStart = Date.now();
-  await warmMothWallet(mothSeed);
-  console.log(`[SETUP] moth wallet cache warm (${((Date.now() - mothStart) / 1000).toFixed(2)}s)`);
+  // Vitest skips teardown when setup throws, so a failed warm-up (network drop,
+  // sync timeout, ...) has to stop the proof server itself or it leaks.
+  try {
+    process.env.PROOF_SERVER_URL = proofServerUrl;
+    console.log(`[SETUP] Proof server: ${await describeProofServer(proofServerUrl)}`);
+    const mothSeed = dataProvider.getFundingSeed();
+    console.log('[SETUP] Warming moth wallet cache (first sync can take a while)...');
+    const mothStart = Date.now();
+    await warmMothWallet(mothSeed);
+    console.log(
+      `[SETUP] moth wallet cache warm (${((Date.now() - mothStart) / 1000).toFixed(2)}s)`,
+    );
+  } catch (error) {
+    await stopProofServer();
+    throw error;
+  }
 }
 
 export async function teardown() {

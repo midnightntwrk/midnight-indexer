@@ -290,7 +290,11 @@ describe.skipIf(skipNight)('unshielded NIGHT transactions', NIGHT_SUITE_OPTS, ()
     test('should emit UnshieldedTransaction only for the target wallet (A > B1)', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Wallet', 'Subscription', 'MultiDestination'] };
 
-      const destinationAddress = scenario.wallet.destinations[1].destinationAddress;
+      // destinations[0] is the funding wallet's own self-transfer subscription
+      // (see `extraDestinationSeeds` above); B1 and B2 follow it.
+      const [, b1, b2] = scenario.wallet.destinations;
+
+      const destinationAddress = b1.destinationAddress;
 
       const b1TxResult = await scenario.toolkit.generateSingleTx(
         scenario.wallet.source.seed,
@@ -301,10 +305,7 @@ describe.skipIf(skipNight)('unshielded NIGHT transactions', NIGHT_SUITE_OPTS, ()
 
       // Wait for B1's UnshieldedTransaction matching the submitted tx hash
       const latestB1Tx = await retrySimple(async () => {
-        const events = getEventsOfType(
-          scenario.wallet.destinations[1].events,
-          'UnshieldedTransaction',
-        );
+        const events = getEventsOfType(b1.events, 'UnshieldedTransaction');
         return events.find((e) => e.transaction.hash === b1TxResult.txHash) ?? null;
       });
 
@@ -316,10 +317,7 @@ describe.skipIf(skipNight)('unshielded NIGHT transactions', NIGHT_SUITE_OPTS, ()
 
       // Wait for B2 progress
       const latestB2Tx = await retrySimple(async () => {
-        const progressEvents = getEventsOfType(
-          scenario.wallet.destinations[2].events,
-          'UnshieldedTransactionsProgress',
-        );
+        const progressEvents = getEventsOfType(b2.events, 'UnshieldedTransactionsProgress');
         return progressEvents.at(-1) ?? null;
       });
 
@@ -332,7 +330,7 @@ describe.skipIf(skipNight)('unshielded NIGHT transactions', NIGHT_SUITE_OPTS, ()
       );
 
       // Ensure B2 did not receive a UnshieldedTransaction event
-      const b2Tx = getEventsOfType(scenario.wallet.destinations[2].events, 'UnshieldedTransaction');
+      const b2Tx = getEventsOfType(b2.events, 'UnshieldedTransaction');
       expect(b2Tx.length).toBe(0);
 
       // B2 must at least show progress
@@ -349,7 +347,11 @@ describe.skipIf(skipNight)('unshielded NIGHT transactions', NIGHT_SUITE_OPTS, ()
     test('should emit UnshieldedTransaction only for the target wallet (A > B2)', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Wallet', 'Subscription', 'MultiDestination'] };
 
-      const secondDestinationAddress = scenario.wallet.destinations[2].destinationAddress;
+      // destinations[0] is the funding wallet's own self-transfer subscription
+      // (see `extraDestinationSeeds` above); B1 and B2 follow it.
+      const [, b1, b2] = scenario.wallet.destinations;
+
+      const secondDestinationAddress = b2.destinationAddress;
 
       const b2TxResult = await scenario.toolkit.generateSingleTx(
         scenario.wallet.source.seed,
@@ -360,19 +362,13 @@ describe.skipIf(skipNight)('unshielded NIGHT transactions', NIGHT_SUITE_OPTS, ()
 
       // Wait for B2's UnshieldedTransaction matching the submitted tx hash
       const latestB2Tx = await retrySimple(async () => {
-        const b2Events = getEventsOfType(
-          scenario.wallet.destinations[2].events,
-          'UnshieldedTransaction',
-        );
+        const b2Events = getEventsOfType(b2.events, 'UnshieldedTransaction');
         return b2Events.find((e) => e.transaction.hash === b2TxResult.txHash) ?? null;
       });
 
       // B1 UnshieldedTransaction (should NOT match B2)
       const latestB1Tx = await retrySimple(async () => {
-        const b1Events = getEventsOfType(
-          scenario.wallet.destinations[1].events,
-          'UnshieldedTransaction',
-        );
+        const b1Events = getEventsOfType(b1.events, 'UnshieldedTransaction');
         return b1Events.at(-1) ?? null;
       });
 

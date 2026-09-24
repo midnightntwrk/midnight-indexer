@@ -254,10 +254,13 @@ export class Environment {
    * `local_mds/wire-moth-wallet-in-indexer-qa-test.md`.
    */
   getTxBackend(): 'toolkit' | 'moth' {
-    const raw = process.env.TX_BACKEND?.trim().toLowerCase();
-    if (!raw || raw === 'toolkit') return 'toolkit';
-    if (raw === 'moth') return 'moth';
-    throw new Error(`Invalid TX_BACKEND="${process.env.TX_BACKEND}". Use "toolkit" or "moth".`);
+    // Only an unset or empty TX_BACKEND means the default; a whitespace-only
+    // value is a typo, not a choice, so it is rejected like any other.
+    const raw = process.env.TX_BACKEND;
+    if (raw === undefined || raw === '') return 'toolkit';
+    const backend = raw.trim().toLowerCase();
+    if (backend === 'toolkit' || backend === 'moth') return backend;
+    throw new Error(`Invalid TX_BACKEND="${raw}". Use "toolkit" or "moth".`);
   }
 
   /**
