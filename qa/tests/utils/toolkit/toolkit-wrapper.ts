@@ -775,16 +775,10 @@ class ToolkitWrapper {
     amount: number,
     tokenType?: string,
   ): Promise<ToolkitTransactionResult> {
-    // When TX_BACKEND=moth, build and submit unshielded transfers through moth's
-    // sync engine instead of the toolkit container. The container need not be
-    // started for this path; every other operation stays on the toolkit.
-    //
-    // Shielded transfers deliberately stay on the toolkit for now. moth builds
-    // them fine, but here it cannot parse a shielded destination: the 132-char
-    // bech32m address goes through `@scure/base` 2.4.0, whose `decodeToBytes`
-    // caps input at 90 chars (2.2.0, which moth itself is built and tested on,
-    // does not). Route them to moth once that dependency is fixed in scope.
-    if (env.getTxBackend() === 'moth' && addressType === 'unshielded') {
+    // When TX_BACKEND=moth, build and submit through moth's sync engine instead
+    // of the toolkit container. Transfers only; every other operation stays on
+    // the toolkit. The container need not be started for this path.
+    if (env.getTxBackend() === 'moth') {
       return generateSingleTxViaMoth(
         sourceSeed,
         addressType,
