@@ -70,14 +70,29 @@ function capNotEnforced(ctx: TestContext): boolean {
 describe('SPO epoch series queries', () => {
   beforeAll(async () => {
     const response = await httpClient.getRegisteredTotalsSeries(0, OVER_CAP_TO_EPOCH);
-    capEnforced = isEpochSpanRejection(response);
 
-    if (!capEnforced) {
-      log.warn(
-        `Epoch-span cap not enforced by the target indexer: a span of ${OVER_CAP_TO_EPOCH} ` +
-          `epochs was not rejected. Cap assertions will be skipped.`,
+    if (isEpochSpanRejection(response)) {
+      capEnforced = true;
+      return;
+    }
+
+    // Any other error means the probe never measured the cap: the surface is
+    // missing, the request was rejected upstream, or the query itself is wrong.
+    // Treating that as "no cap" would silently skip every rejection case, so
+    // fail the suite instead of reporting a green run that asserted nothing.
+    const errors = response.errors ?? [];
+    if (errors.length > 0) {
+      throw new Error(
+        `Epoch-span probe failed for an unrelated reason, so the cap could not be ` +
+          `determined: ${errors.map((error) => error.message).join('; ')}`,
       );
     }
+
+    capEnforced = false;
+    log.warn(
+      `Epoch-span cap not enforced by the target indexer: a span of ${OVER_CAP_TO_EPOCH} ` +
+        `epochs was not rejected. Cap assertions will be skipped.`,
+    );
   });
 
   describe('a registered totals series query with an epoch span within the maximum', () => {
