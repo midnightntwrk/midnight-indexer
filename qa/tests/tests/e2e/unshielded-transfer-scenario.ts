@@ -23,6 +23,7 @@
 // Not a *.test.ts file, so it is never collected on its own — it only defines
 // tests when a suite calls defineUnshieldedTransferTests.
 
+import { env } from 'environment/model';
 import type { TestContext } from 'vitest';
 import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
@@ -89,8 +90,28 @@ export interface UnshieldedTokenUnderTest {
    * destination lets one suite's transfer show up in the other's event stream — and
    * where a suite asserts that a wallet received no transaction event at all (the
    * NIGHT suite's multi-destination tests do), that turns into a false failure.
+   *
+   * Ignored when `selfTransfer` is set.
    */
-  destinationSeed: string;
+  destinationSeed?: string;
+  /**
+   * Send the transfer back to the funding wallet instead of to a separate
+   * destination.
+   *
+   * WHY. A transfer to another wallet spends the funding wallet's balance for
+   * good. For NIGHT that is affordable, but a contract-minted custom token is
+   * issued once in a fixed amount: every run burns one unit, and when the
+   * balance runs out the suite stops failing and starts skipping with
+   * "environment not provisioned", which is easy to miss. Sending to self keeps
+   * the balance flat, so a funded wallet can run the suite indefinitely.
+   *
+   * WHAT IT COSTS. Source and destination become the same wallet, so the paired
+   * source/destination tests assert the same thing twice and the transfer no
+   * longer proves the indexer routes a transfer *between* two wallets. That
+   * routing is still covered, on NIGHT, by the multi-destination tests, which
+   * keep using distinct wallets because they cannot work without them.
+   */
+  selfTransfer?: boolean;
   /**
    * Seeds of further wallets to subscribe alongside the destination, exposed as
    * `wallet.destinations[1..]`. A suite adds them when it also asserts on how the
@@ -140,15 +161,34 @@ export function setupUnshieldedTransferScenario(
     scenario.wsClient = new IndexerWsClient();
     await scenario.wsClient.connectionInit();
 
+    // The wrapper is always constructed — `generateSingleTx` dispatches on
+    // TX_BACKEND inside it — but its CONTAINER is only started when the toolkit
+    // backend is actually going to be used. On the moth backend nothing in this
+    // scenario touches the container: transfers go through moth, and addresses
+    // come from local key derivation. Starting it anyway cost a container for
+    // the life of the suite and did no work.
     scenario.toolkit = new ToolkitWrapper({});
-    await scenario.toolkit.start();
+    if (env.getTxBackend() === 'toolkit') {
+      await scenario.toolkit.start();
+    }
 
-    const sourceSeed = dataProvider.getFundingSeed();
+    const sourceSeed = dataProvider.getTransferFundingSeed();
+    // On a self-transfer the funding wallet is also the recipient, so it is
+    // subscribed twice: once as `source`, once as `destinations[0]`. Both
+    // subscriptions watch the same address and see the same events, which is
+    // what makes the paired source/destination tests degenerate rather than
+    // fail. See `selfTransfer`.
+    const destinationSeed = token.selfTransfer ? sourceSeed : token.destinationSeed;
+    if (destinationSeed === undefined) {
+      throw new Error(
+        'The transfer scenario needs either a destinationSeed or selfTransfer: true.',
+      );
+    }
     scenario.wallet = await setupWalletEventSubscriptions(
       scenario.toolkit,
       scenario.wsClient,
       sourceSeed,
-      [token.destinationSeed, ...(token.extraDestinationSeeds ?? [])],
+      [destinationSeed, ...(token.extraDestinationSeeds ?? [])],
     );
 
     scenario.skipReason = (await token.prepare?.(scenario)) ?? null;
@@ -198,7 +238,7 @@ function startTest(
 function skipUnlessConfirmed(scenario: UnshieldedTransferScenario, ctx: TestContext): void {
   ctx.skip?.(
     scenario.transactionResult.status !== 'confirmed',
-    "Toolkit transaction hasn't been confirmed",
+    "Transaction hasn't been confirmed",
   );
 }
 
@@ -500,7 +540,14 @@ export function defineUnshieldedTransferTests(scenario: UnshieldedTransferScenar
       const receivedUtxos = ofTokenUnderTest(scenario, destinationAddressEvent.createdUtxos).filter(
         (utxo) => utxo.owner === scenario.wallet.destinations[0].destinationAddress,
       );
-      expect(receivedUtxos.map((utxo) => utxo.value)).toEqual([String(amount)]);
+      // On a self-transfer the destination is also the source, so it owns the change
+      // output as well as the transferred one. Assert the transferred amount is there
+      // rather than that it is the only thing there. See `selfTransfer`.
+      if (scenario.token.selfTransfer) {
+        expect(receivedUtxos.map((utxo) => utxo.value)).toContain(String(amount));
+      } else {
+        expect(receivedUtxos.map((utxo) => utxo.value)).toEqual([String(amount)]);
+      }
     });
 
     /**
@@ -531,7 +578,12 @@ export function defineUnshieldedTransferTests(scenario: UnshieldedTransferScenar
       const destinationOutputs = createdOutputs.filter(
         (output) => output.owner === scenario.wallet.destinations[0].destinationAddress,
       );
-      expect(destinationOutputs.map((output) => output.value)).toEqual([String(amount)]);
+      // Self-transfer: the change output is the destination's too. See `selfTransfer`.
+      if (scenario.token.selfTransfer) {
+        expect(destinationOutputs.map((output) => output.value)).toContain(String(amount));
+      } else {
+        expect(destinationOutputs.map((output) => output.value)).toEqual([String(amount)]);
+      }
 
       expect(spentOutputs.length).toBeGreaterThan(0);
       expect(spentOutputs.every((output) => output.owner === scenario.wallet.source.address)).toBe(
@@ -541,7 +593,14 @@ export function defineUnshieldedTransferTests(scenario: UnshieldedTransferScenar
       const changeOutputs = createdOutputs.filter(
         (output) => output.owner === scenario.wallet.source.address,
       );
-      expect(totalValue(changeOutputs)).toBe(totalValue(spentOutputs) - BigInt(amount));
+      // A transfer to another wallet returns everything it spent except the amount
+      // sent. A self-transfer sends to the source itself, so nothing leaves the
+      // wallet and the source gets the whole spent value back — the transferred
+      // output is one of its own. See `selfTransfer`.
+      const expectedRetained = scenario.token.selfTransfer
+        ? totalValue(spentOutputs)
+        : totalValue(spentOutputs) - BigInt(amount);
+      expect(totalValue(changeOutputs)).toBe(expectedRetained);
     });
 
     /**
