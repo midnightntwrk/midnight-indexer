@@ -172,7 +172,7 @@ export function setupUnshieldedTransferScenario(
       await scenario.toolkit.start();
     }
 
-    const sourceSeed = dataProvider.getFundingSeed();
+    const sourceSeed = dataProvider.getTransferFundingSeed();
     // On a self-transfer the funding wallet is also the recipient, so it is
     // subscribed twice: once as `source`, once as `destinations[0]`. Both
     // subscriptions watch the same address and see the same events, which is

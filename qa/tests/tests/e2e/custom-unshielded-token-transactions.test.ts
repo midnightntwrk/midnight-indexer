@@ -65,7 +65,7 @@ describe('unshielded custom token transactions', { timeout: UNSHIELDED_TRANSFER_
     selfTransfer: true,
     prepare: async (scenario) => {
       const holdings = await listUnshieldedHoldings(
-        dataProvider.getFundingSeed(),
+        dataProvider.getTransferFundingSeed(),
         scenario.wallet.source.address,
         scenario.toolkit,
       );

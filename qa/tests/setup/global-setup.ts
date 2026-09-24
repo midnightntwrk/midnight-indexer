@@ -214,7 +214,7 @@ async function warmMoth(): Promise<void> {
   try {
     process.env.PROOF_SERVER_URL = proofServerUrl;
     console.log(`[SETUP] Proof server: ${await describeProofServer(proofServerUrl)}`);
-    const mothSeed = dataProvider.getFundingSeed();
+    const mothSeed = dataProvider.getTransferFundingSeed();
     console.log('[SETUP] Warming moth wallet cache (first sync can take a while)...');
     const mothStart = Date.now();
     await warmMothWallet(mothSeed);

@@ -89,7 +89,7 @@ describe('shielded transactions', () => {
   let transactionResult: ToolkitTransactionResult;
 
   // Deterministic seeds (hex) that work with the toolkit
-  const sourceSeed = dataProvider.getFundingSeed();
+  const sourceSeed = dataProvider.getTransferFundingSeed();
   // Self-transfer: the funding wallet sends to itself, so its balance stays flat
   // and a funded wallet can run this suite indefinitely.
   //

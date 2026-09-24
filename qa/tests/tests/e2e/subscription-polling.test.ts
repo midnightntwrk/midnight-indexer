@@ -176,7 +176,7 @@ describe.skipIf(!env.isUndeployedEnv())('subscription polling', () => {
         const baselineValue = progressSamples.at(-1)!.value;
 
         const transactionResult = await toolkit.generateSingleTx(
-          dataProvider.getFundingSeed(),
+          dataProvider.getTransferFundingSeed(),
           'unshielded',
           destinationAddress,
           1,

@@ -124,15 +124,6 @@ class TestDataProvider {
    * Gets the funding seed for the current environment.
    * First checks for an environment-specific variable (e.g., FUNDING_SEED_PREVIEW),
    * then falls back to a default seed for undeployed environments.
-   *
-   * When the moth transaction backend is selected, a `_LIGHT` variant
-   * (e.g. FUNDING_SEED_PREVIEW_LIGHT) is preferred if it is set. moth restores
-   * a wallet's own state from disk, and that cost tracks the size of the
-   * wallet's state, not the length of the chain: on preprod a light wallet
-   * restores in under a minute where the shared funding wallet takes ~46. The
-   * swap happens here, not inside the backend, because tests derive the
-   * sender's address and viewing key from the seed they are handed — the
-   * generator and the assertions must be looking at the same wallet.
    * @returns The funding seed as a string.
    */
   getFundingSeed() {
@@ -141,13 +132,6 @@ class TestDataProvider {
     let envNameUppercase = envName.toUpperCase().replace(/-/g, '_').replace('.', '_');
 
     const envVarName = `FUNDING_SEED_${envNameUppercase}`;
-
-    if (env.getTxBackend() === 'moth') {
-      const lightSeed = process.env[`${envVarName}_LIGHT`];
-      if (lightSeed) {
-        return lightSeed;
-      }
-    }
 
     // Try environment-specific variable first
     const fundingSeed = process.env[envVarName];
@@ -165,6 +149,42 @@ class TestDataProvider {
     // Default fallback
     const undeployedFundingSeed = '0'.repeat(63) + '1';
     return undeployedFundingSeed;
+  }
+
+  /**
+   * Gets the seed that funds transfers submitted through `generateSingleTx`.
+   *
+   * Under the moth transaction backend a `_LIGHT` variant (e.g.
+   * FUNDING_SEED_PREVIEW_LIGHT) is preferred if it is set: a funded wallet with
+   * few transactions, so its state is small. moth restores a wallet's own state
+   * from disk, and that cost tracks the size of the wallet's state, not the
+   * length of the chain: on preprod a light wallet restores in under a minute
+   * where the shared funding wallet takes ~46. Otherwise this is
+   * `getFundingSeed()`.
+   *
+   * Only transfer callers use this. Suites that still build through the
+   * toolkit (contract actions, the toolkit suites) or that rely on the shared
+   * funding wallet's history (integration subscriptions) keep calling
+   * `getFundingSeed()`, so selecting moth does not change their wallet. The
+   * light seed is handed to the test rather than swapped inside the backend
+   * because tests derive the sender's address and viewing key from the seed
+   * they are handed — the generator and the assertions must be looking at the
+   * same wallet.
+   * @returns The transfer funding seed as a string.
+   */
+  getTransferFundingSeed() {
+    if (env.getTxBackend() === 'moth') {
+      const envNameUppercase = env
+        .getCurrentEnvironmentName()
+        .toUpperCase()
+        .replace(/-/g, '_')
+        .replace('.', '_');
+      const lightSeed = process.env[`FUNDING_SEED_${envNameUppercase}_LIGHT`];
+      if (lightSeed) {
+        return lightSeed;
+      }
+    }
+    return this.getFundingSeed();
   }
 
   /**
