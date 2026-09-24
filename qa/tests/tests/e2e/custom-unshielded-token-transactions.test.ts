@@ -24,13 +24,17 @@
 // A custom token is not on the chain from genesis — it has to be minted by a
 // contract and put in the funding wallet. That provisioning is an environment
 // concern, not something this suite does, so the suite skips (never fails) when the
-// environment has not been provisioned:
-//   * no candidate in data/static/<env>/unshielded-token-types.jsonc (the fixture
-//     the block-scanner generates) -> the whole suite is skipped at collection;
-//   * candidates exist but the funding wallet can spend none of them
-//     -> every test skips with an "environment not provisioned" reason.
-// The second case is the normal one to expect: the fixture records what was unspent
-// at scan time, so its candidates can have been spent since.
+// funding wallet holds no custom token it can spend.
+//
+// WHERE THE TOKEN COMES FROM. The suite asks the funding wallet what it can spend,
+// at the moment it runs. It deliberately does NOT read
+// `data/static/<env>/unshielded-token-types.jsonc`: that fixture is a chain-wide
+// scan, so it says which custom token types exist and who held them at scan time,
+// but it cannot establish that the wallet under test owns any of them now. An e2e
+// transfer has to spend the token, so existence is not enough — ownership is, and
+// only the live balance knows it. The fixture remains the right input for the
+// query and subscription suites, which only need a token type that exists.
+//
 // Minting the token from the test itself, through the toolkit minter flow the
 // wrapper already implements (deployMintSendUnshielded), is a known future option
 // and was deliberately deferred — it would make every run deploy a contract.
@@ -38,64 +42,53 @@
 import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
 import dataProvider from '@utils/testdata-provider';
+import { listUnshieldedHoldings, pickSpendableCustomToken } from '@utils/moth/moth-holdings';
 import {
   defineUnshieldedTransferTests,
   setupUnshieldedTransferScenario,
   UNSHIELDED_TRANSFER_TIMEOUT,
 } from './unshielded-transfer-scenario';
 
-const CANDIDATE_TOKEN_TYPES = dataProvider.getCustomUnshieldedTokenTypes();
-
-// Destination wallets are numbered per e2e suite (…e2e001 is the NIGHT suite's) so that
-// no two suites share one — see `destinationSeed` in unshielded-transfer-scenario.ts.
-const DESTINATION_SEED = '0000000000000000000000000000000000000000000000000000000000e2e002';
 const TRANSFER_AMOUNT = 1;
 
-describe.skipIf(CANDIDATE_TOKEN_TYPES.length === 0)(
-  'unshielded custom token transactions',
-  { timeout: UNSHIELDED_TRANSFER_TIMEOUT },
-  () => {
-    const scenario = setupUnshieldedTransferScenario({
-      label: 'CustomToken',
-      // Placeholder: `prepare` below replaces it with the candidate the funding wallet
-      // can actually spend. Indexing is safe — the describe is skipped when there is
-      // no candidate at all.
-      tokenType: CANDIDATE_TOKEN_TYPES[0],
-      amount: TRANSFER_AMOUNT,
-      unit: 'token',
-      destinationSeed: DESTINATION_SEED,
-      prepare: async (scenario) => {
-        // The toolkit reports UTXO token types under `token_type`, in the same hex
-        // encoding the indexer reports as `tokenType`; if this probe ever skips a
-        // provisioned environment, compare the two encodings first.
-        const walletState = await scenario.toolkit.showPublicWalletState(
-          scenario.wallet.source.address,
+describe('unshielded custom token transactions', { timeout: UNSHIELDED_TRANSFER_TIMEOUT }, () => {
+  const scenario = setupUnshieldedTransferScenario({
+    label: 'CustomToken',
+    // Placeholder: `prepare` below replaces it with the token the funding wallet can
+    // actually spend, discovered from its live balance. Nothing reads this value
+    // before `prepare` has run.
+    tokenType: '',
+    amount: TRANSFER_AMOUNT,
+    unit: 'token',
+    // Self-transfer: the minted supply is fixed, so sending to another wallet
+    // would burn one unit per run until the suite silently starts skipping.
+    selfTransfer: true,
+    prepare: async (scenario) => {
+      const holdings = await listUnshieldedHoldings(
+        dataProvider.getTransferFundingSeed(),
+        scenario.wallet.source.address,
+        scenario.toolkit,
+      );
+      log.debug(
+        `Funding wallet holds ${holdings.size} unshielded token type(s): ` +
+          [...holdings.entries()].map(([type, value]) => `${type}=${value}`).join(', '),
+      );
+
+      const tokenType = pickSpendableCustomToken(holdings, BigInt(TRANSFER_AMOUNT));
+      if (tokenType === undefined) {
+        return (
+          'environment not provisioned: the funding wallet holds no custom unshielded ' +
+          `token with more than ${TRANSFER_AMOUNT} spendable, so ${TRANSFER_AMOUNT} cannot ` +
+          'be transferred leaving change behind. Mint one into the funding wallet.'
         );
-        const holdings = CANDIDATE_TOKEN_TYPES.map((tokenType) => ({
-          tokenType,
-          spendable: walletState.utxos
-            .filter((utxo) => utxo.token_type === tokenType)
-            .reduce((total, utxo) => total + utxo.value, 0),
-        }));
-        log.debug(
-          'Funding wallet holdings of the candidate token types: ' +
-            holdings.map(({ tokenType, spendable }) => `${tokenType}=${spendable}`).join(', '),
-        );
+      }
 
-        // Strictly greater: the transfer has to leave change behind, so that it creates
-        // a destination output and a source output just as the NIGHT transfer does.
-        const usable = holdings.find((holding) => holding.spendable > TRANSFER_AMOUNT);
-        if (usable === undefined) {
-          return `environment not provisioned: the funding wallet cannot spend any of the ${holdings.length} custom unshielded token type(s) recorded for this environment, so ${TRANSFER_AMOUNT} cannot be transferred leaving change behind`;
-        }
+      // Assigned before the scenario submits the transfer, which happens once this
+      // hook has returned.
+      scenario.token.tokenType = tokenType;
+      return null;
+    },
+  });
 
-        // Assigned before the scenario submits the transfer, which happens once this
-        // hook has returned.
-        scenario.token.tokenType = usable.tokenType;
-        return null;
-      },
-    });
-
-    defineUnshieldedTransferTests(scenario);
-  },
-);
+  defineUnshieldedTransferTests(scenario);
+});
