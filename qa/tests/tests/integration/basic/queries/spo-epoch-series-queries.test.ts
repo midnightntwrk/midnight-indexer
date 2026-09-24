@@ -78,7 +78,7 @@ describe('SPO epoch series queries', () => {
           `epochs was not rejected. Cap assertions will be skipped.`,
       );
     }
-  }, 120_000);
+  });
 
   describe('a registered totals series query with an epoch span within the maximum', () => {
     /**
