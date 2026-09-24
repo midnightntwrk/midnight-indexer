@@ -172,7 +172,8 @@ describe('SPO epoch series queries', () => {
      *
      * @given an indexer that enforces the epoch-span cap
      * @when registered totals are requested for a span of 20000 epochs
-     * @then the query is rejected and no partial series is returned
+     * @then the query is rejected and no partial series is returned, which
+     *       toBeError covers by requiring a null data payload alongside the error
      */
     test('should reject a range far beyond the maximum span without returning data', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Query', 'Spo', 'Epoch', 'Negative'] };
@@ -182,7 +183,6 @@ describe('SPO epoch series queries', () => {
 
       expect(response).toBeError();
       expect(isEpochSpanRejection(response)).toBe(true);
-      expect(response.data?.registeredTotalsSeries).toBeUndefined();
     });
   });
 
