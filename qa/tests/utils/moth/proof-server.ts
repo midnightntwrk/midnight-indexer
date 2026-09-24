@@ -125,7 +125,20 @@ export async function stopProofServer(): Promise<void> {
 }
 
 async function bootstrap(): Promise<string> {
-  const existing = await inspectContainer();
+  const tag = proofServerTag();
+  let existing = await inspectContainer();
+  // A container under our name that runs another tag is a leftover from an
+  // earlier run with a different PROOF_SERVER_TAG (teardown never stops a
+  // container it reused). Reusing it would silently ignore the requested tag
+  // and fail later inside proving, so replace it with the requested one.
+  if (existing && existing.image !== `${IMAGE_REPO}:${tag}`) {
+    console.log(
+      `[SETUP] Replacing ${CONTAINER_NAME} (${existing.image ?? 'unknown image'}) ` +
+        `with ${IMAGE_REPO}:${tag} to honour PROOF_SERVER_TAG.`,
+    );
+    await execFileAsync('docker', ['rm', '-f', CONTAINER_NAME]);
+    existing = null;
+  }
   if (existing) {
     if (!existing.running) await execFileAsync('docker', ['start', CONTAINER_NAME]);
     const port = existing.port ?? (await inspectContainer())?.port;
@@ -138,7 +151,6 @@ async function bootstrap(): Promise<string> {
     return url;
   }
 
-  const tag = proofServerTag();
   const port = await getFreePort();
   fs.mkdirSync(ZK_PARAMS_DIR, { recursive: true });
   const cold = fs.readdirSync(ZK_PARAMS_DIR).length === 0;
@@ -287,6 +299,8 @@ async function probe(url: string): Promise<void> {
 interface ContainerInfo {
   running: boolean;
   port?: number;
+  /** Image reference the container was created from, e.g. `midnightntwrk/proof-server:8.1.0`. */
+  image?: string;
 }
 
 async function inspectContainer(): Promise<ContainerInfo | null> {
@@ -294,12 +308,16 @@ async function inspectContainer(): Promise<ContainerInfo | null> {
     const { stdout } = await execFileAsync('docker', [
       'inspect',
       '--format',
-      `{{.State.Running}}|{{with index .NetworkSettings.Ports "${INTERNAL_PORT}/tcp"}}{{(index . 0).HostPort}}{{end}}`,
+      `{{.State.Running}}|{{with index .NetworkSettings.Ports "${INTERNAL_PORT}/tcp"}}{{(index . 0).HostPort}}{{end}}|{{.Config.Image}}`,
       CONTAINER_NAME,
     ]);
-    const [runningStr, portStr] = stdout.trim().split('|');
+    const [runningStr, portStr, image] = stdout.trim().split('|');
     const port = portStr ? parseInt(portStr, 10) : undefined;
-    return { running: runningStr === 'true', port: Number.isFinite(port) ? port : undefined };
+    return {
+      running: runningStr === 'true',
+      port: Number.isFinite(port) ? port : undefined,
+      image: image || undefined,
+    };
   } catch {
     return null;
   }
