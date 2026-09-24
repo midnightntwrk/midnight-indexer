@@ -141,3 +141,36 @@ export async function isBlockHashDustGenerationsSupported(): Promise<boolean> {
   const dustGenerations = fields?.find((f) => f.name === 'dustGenerations');
   return dustGenerations?.args?.some((arg) => arg.name === 'blockHash') ?? false;
 }
+
+/**
+ * The names of every root `Query` field served by the deployed indexer.
+ *
+ * Suites that gate on a whole surface (e.g. the SPO queries, #1003) use this to
+ * decide presence from the schema rather than from a domain query's success: a
+ * domain query that fails for any reason (outage, 5xx, timeout) must fail the
+ * suite, not read as "the surface is not deployed here" and skip it.
+ *
+ * Throws, with its own name in the message, when the introspection cannot run
+ * or the schema has no `Query` type at all — neither says anything about which
+ * fields exist.
+ */
+export async function fetchQueryFieldNames(): Promise<Set<string>> {
+  const fields = await introspectTypeFields('Query', '').catch((error) => {
+    throw new Error(
+      `Query field probe failed against ${env.getIndexerHttpBaseURL()}: ` +
+        `${(error as Error).message}`,
+      { cause: error },
+    );
+  });
+  if (fields === null) {
+    throw new Error(
+      `Query field probe against ${env.getIndexerHttpBaseURL()} found no Query type in the schema`,
+    );
+  }
+  return new Set(fields.map((f) => f.name));
+}
+
+/** Whether the deployed indexer serves the given root `Query` field. */
+export async function isQueryFieldPresent(fieldName: string): Promise<boolean> {
+  return (await fetchQueryFieldNames()).has(fieldName);
+}

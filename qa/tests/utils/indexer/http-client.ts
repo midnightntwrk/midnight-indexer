@@ -54,6 +54,29 @@ import type {
   ContractType,
   ContractActionTypeEnum,
   ContractResponse,
+  DParameterHistoryResponse,
+  CurrentEpochInfoResponse,
+  CommitteeResponse,
+  SpoCountResponse,
+  SpoListResponse,
+  SpoIdentitiesResponse,
+  StakePoolOperatorsResponse,
+  SpoByPoolIdResponse,
+  SpoIdentityByPoolIdResponse,
+  RegisteredTotalsSeriesResponse,
+  TermsAndConditionsHistoryResponse,
+  BlockSystemParametersResponse,
+  PoolMetadataResponse,
+  PoolMetadataListResponse,
+  SpoCompositeByPoolIdResponse,
+  SpoPerformanceLatestResponse,
+  SpoPerformanceBySpoSkResponse,
+  EpochPerformanceResponse,
+  EpochUtilizationResponse,
+  RegisteredSpoSeriesResponse,
+  RegisteredPresenceResponse,
+  RegisteredFirstValidEpochsResponse,
+  StakeDistributionResponse,
 } from './indexer-types';
 import {
   GET_LATEST_BLOCK,
@@ -61,6 +84,7 @@ import {
   GET_ZSWAP_MERKLE_TREE_COLLAPSED_UPDATE,
   GET_BLOCK_CONTRACT_ZSWAP_STATE,
   GET_EXECUTION_INPUTS,
+  GET_BLOCK_SYSTEM_PARAMETERS,
 } from './graphql/block-queries';
 import { GET_TRANSACTION_BY_OFFSET } from './graphql/transaction-queries';
 import { GET_CONTRACT_EVENTS } from './graphql/contract-event-queries';
@@ -82,6 +106,30 @@ import {
   GET_BRIDGE_RESERVE_INFLOWS,
   GET_BRIDGE_TREASURY_INFLOWS,
 } from './graphql/bridge-pool-queries';
+import {
+  GET_D_PARAMETER_HISTORY,
+  GET_CURRENT_EPOCH_INFO,
+  GET_COMMITTEE,
+  GET_SPO_COUNT,
+  GET_SPO_LIST,
+  GET_SPO_IDENTITIES,
+  GET_STAKE_POOL_OPERATORS,
+  GET_SPO_BY_POOL_ID,
+  GET_SPO_IDENTITY_BY_POOL_ID,
+  GET_REGISTERED_TOTALS_SERIES,
+  GET_TERMS_AND_CONDITIONS_HISTORY,
+  GET_POOL_METADATA,
+  GET_POOL_METADATA_LIST,
+  GET_SPO_COMPOSITE_BY_POOL_ID,
+  GET_SPO_PERFORMANCE_LATEST,
+  GET_SPO_PERFORMANCE_BY_SPO_SK,
+  GET_EPOCH_PERFORMANCE,
+  GET_EPOCH_UTILIZATION,
+  GET_REGISTERED_SPO_SERIES,
+  GET_REGISTERED_PRESENCE,
+  GET_REGISTERED_FIRST_VALID_EPOCHS,
+  GET_STAKE_DISTRIBUTION,
+} from './graphql/spo-queries';
 
 /**
  * Recognise operation-level GraphQL errors that look like *server* failures
@@ -663,6 +711,371 @@ export class IndexerHttpClient {
     };
 
     const response = await this.rawRequestWithRetry<{ contract: ContractType | null }>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  // --- SPO indexer surface (#1003) ---
+
+  async getDParameterHistory(queryOverride?: string): Promise<DParameterHistoryResponse> {
+    const query = queryOverride || GET_D_PARAMETER_HISTORY;
+
+    const response = await this.rawRequestWithRetry<DParameterHistoryResponse['data']>(query);
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getCurrentEpochInfo(queryOverride?: string): Promise<CurrentEpochInfoResponse> {
+    const query = queryOverride || GET_CURRENT_EPOCH_INFO;
+
+    const response = await this.rawRequestWithRetry<CurrentEpochInfoResponse['data']>(query);
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getCommittee(epoch: number, queryOverride?: string): Promise<CommitteeResponse> {
+    const query = queryOverride || GET_COMMITTEE;
+    const variables = { EPOCH: epoch };
+
+    const response = await this.rawRequestWithRetry<CommitteeResponse['data']>(query, variables);
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getSpoCount(queryOverride?: string): Promise<SpoCountResponse> {
+    const query = queryOverride || GET_SPO_COUNT;
+
+    const response = await this.rawRequestWithRetry<SpoCountResponse['data']>(query);
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getSpoList(
+    options: { limit?: number; offset?: number; search?: string } = {},
+    queryOverride?: string,
+  ): Promise<SpoListResponse> {
+    const query = queryOverride || GET_SPO_LIST;
+    const variables = { LIMIT: options.limit, OFFSET: options.offset, SEARCH: options.search };
+
+    const response = await this.rawRequestWithRetry<SpoListResponse['data']>(query, variables);
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getSpoIdentities(
+    options: { limit?: number; offset?: number } = {},
+    queryOverride?: string,
+  ): Promise<SpoIdentitiesResponse> {
+    const query = queryOverride || GET_SPO_IDENTITIES;
+    const variables = { LIMIT: options.limit, OFFSET: options.offset };
+
+    const response = await this.rawRequestWithRetry<SpoIdentitiesResponse['data']>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getStakePoolOperators(
+    limit?: number,
+    queryOverride?: string,
+  ): Promise<StakePoolOperatorsResponse> {
+    const query = queryOverride || GET_STAKE_POOL_OPERATORS;
+    const variables = { LIMIT: limit };
+
+    const response = await this.rawRequestWithRetry<StakePoolOperatorsResponse['data']>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getSpoByPoolId(poolIdHex: string, queryOverride?: string): Promise<SpoByPoolIdResponse> {
+    const query = queryOverride || GET_SPO_BY_POOL_ID;
+    const variables = { POOL_ID_HEX: poolIdHex };
+
+    const response = await this.rawRequestWithRetry<SpoByPoolIdResponse['data']>(query, variables);
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getSpoIdentityByPoolId(
+    poolIdHex: string,
+    queryOverride?: string,
+  ): Promise<SpoIdentityByPoolIdResponse> {
+    const query = queryOverride || GET_SPO_IDENTITY_BY_POOL_ID;
+    const variables = { POOL_ID_HEX: poolIdHex };
+
+    const response = await this.rawRequestWithRetry<SpoIdentityByPoolIdResponse['data']>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getRegisteredTotalsSeries(
+    fromEpoch: number,
+    toEpoch: number,
+    queryOverride?: string,
+  ): Promise<RegisteredTotalsSeriesResponse> {
+    const query = queryOverride || GET_REGISTERED_TOTALS_SERIES;
+    const variables = { FROM_EPOCH: fromEpoch, TO_EPOCH: toEpoch };
+
+    const response = await this.rawRequestWithRetry<RegisteredTotalsSeriesResponse['data']>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getTermsAndConditionsHistory(
+    queryOverride?: string,
+  ): Promise<TermsAndConditionsHistoryResponse> {
+    const query = queryOverride || GET_TERMS_AND_CONDITIONS_HISTORY;
+
+    const response =
+      await this.rawRequestWithRetry<TermsAndConditionsHistoryResponse['data']>(query);
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  /**
+   * Governance parameters in force at a block; the latest block when `offset`
+   * is omitted.
+   */
+  async getBlockSystemParameters(
+    offset?: BlockOffset,
+    queryOverride?: string,
+  ): Promise<BlockSystemParametersResponse> {
+    const query = queryOverride || GET_BLOCK_SYSTEM_PARAMETERS;
+    const variables = { OFFSET: offset };
+
+    const response = await this.rawRequestWithRetry<BlockSystemParametersResponse['data']>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getPoolMetadata(poolIdHex: string, queryOverride?: string): Promise<PoolMetadataResponse> {
+    const query = queryOverride || GET_POOL_METADATA;
+    const variables = { POOL_ID_HEX: poolIdHex };
+
+    const response = await this.rawRequestWithRetry<PoolMetadataResponse['data']>(query, variables);
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getPoolMetadataList(
+    options: { limit?: number; offset?: number; withNameOnly?: boolean } = {},
+    queryOverride?: string,
+  ): Promise<PoolMetadataListResponse> {
+    const query = queryOverride || GET_POOL_METADATA_LIST;
+    const variables = {
+      LIMIT: options.limit,
+      OFFSET: options.offset,
+      WITH_NAME_ONLY: options.withNameOnly,
+    };
+
+    const response = await this.rawRequestWithRetry<PoolMetadataListResponse['data']>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getSpoCompositeByPoolId(
+    poolIdHex: string,
+    queryOverride?: string,
+  ): Promise<SpoCompositeByPoolIdResponse> {
+    const query = queryOverride || GET_SPO_COMPOSITE_BY_POOL_ID;
+    const variables = { POOL_ID_HEX: poolIdHex };
+
+    const response = await this.rawRequestWithRetry<SpoCompositeByPoolIdResponse['data']>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getSpoPerformanceLatest(
+    options: { limit?: number; offset?: number } = {},
+    queryOverride?: string,
+  ): Promise<SpoPerformanceLatestResponse> {
+    const query = queryOverride || GET_SPO_PERFORMANCE_LATEST;
+    const variables = { LIMIT: options.limit, OFFSET: options.offset };
+
+    const response = await this.rawRequestWithRetry<SpoPerformanceLatestResponse['data']>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getSpoPerformanceBySpoSk(
+    spoSkHex: string,
+    options: { limit?: number; offset?: number } = {},
+    queryOverride?: string,
+  ): Promise<SpoPerformanceBySpoSkResponse> {
+    const query = queryOverride || GET_SPO_PERFORMANCE_BY_SPO_SK;
+    const variables = { SPO_SK_HEX: spoSkHex, LIMIT: options.limit, OFFSET: options.offset };
+
+    const response = await this.rawRequestWithRetry<SpoPerformanceBySpoSkResponse['data']>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getEpochPerformance(
+    epoch: number,
+    options: { limit?: number; offset?: number } = {},
+    queryOverride?: string,
+  ): Promise<EpochPerformanceResponse> {
+    const query = queryOverride || GET_EPOCH_PERFORMANCE;
+    const variables = { EPOCH: epoch, LIMIT: options.limit, OFFSET: options.offset };
+
+    const response = await this.rawRequestWithRetry<EpochPerformanceResponse['data']>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getEpochUtilization(
+    epoch: number,
+    queryOverride?: string,
+  ): Promise<EpochUtilizationResponse> {
+    const query = queryOverride || GET_EPOCH_UTILIZATION;
+    const variables = { EPOCH: epoch };
+
+    const response = await this.rawRequestWithRetry<EpochUtilizationResponse['data']>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getRegisteredSpoSeries(
+    fromEpoch: number,
+    toEpoch: number,
+    queryOverride?: string,
+  ): Promise<RegisteredSpoSeriesResponse> {
+    const query = queryOverride || GET_REGISTERED_SPO_SERIES;
+    const variables = { FROM_EPOCH: fromEpoch, TO_EPOCH: toEpoch };
+
+    const response = await this.rawRequestWithRetry<RegisteredSpoSeriesResponse['data']>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getRegisteredPresence(
+    fromEpoch: number,
+    toEpoch: number,
+    queryOverride?: string,
+  ): Promise<RegisteredPresenceResponse> {
+    const query = queryOverride || GET_REGISTERED_PRESENCE;
+    const variables = { FROM_EPOCH: fromEpoch, TO_EPOCH: toEpoch };
+
+    const response = await this.rawRequestWithRetry<RegisteredPresenceResponse['data']>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getRegisteredFirstValidEpochs(
+    uptoEpoch?: number,
+    queryOverride?: string,
+  ): Promise<RegisteredFirstValidEpochsResponse> {
+    const query = queryOverride || GET_REGISTERED_FIRST_VALID_EPOCHS;
+    const variables = { UPTO_EPOCH: uptoEpoch };
+
+    const response = await this.rawRequestWithRetry<RegisteredFirstValidEpochsResponse['data']>(
+      query,
+      variables,
+    );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  async getStakeDistribution(
+    options: { limit?: number; offset?: number; search?: string; orderByStakeDesc?: boolean } = {},
+    queryOverride?: string,
+  ): Promise<StakeDistributionResponse> {
+    const query = queryOverride || GET_STAKE_DISTRIBUTION;
+    const variables = {
+      LIMIT: options.limit,
+      OFFSET: options.offset,
+      SEARCH: options.search,
+      ORDER_BY_STAKE_DESC: options.orderByStakeDesc,
+    };
+
+    const response = await this.rawRequestWithRetry<StakeDistributionResponse['data']>(
       query,
       variables,
     );
