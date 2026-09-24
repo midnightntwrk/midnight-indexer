@@ -49,6 +49,7 @@ interface AddressInfo {
   coinPublic: string;
   coinPublicTagged: string;
   unshieldedUserAddressUntagged: string;
+  userAddress: string;
 }
 
 interface ToolkitConfig {

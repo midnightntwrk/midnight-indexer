@@ -40,14 +40,17 @@ readonly node_dir="$(pwd)/.node/$node_version"
 #
 #   ledger | node/toolkit line          | compactc    | compact-runtime
 #   -------|-----------------------------|-------------|----------------
-#   v8     | 1.x (this repo's default)  | 0.30.0      | 0.15.0
+#   v8     | 1.x                         | 0.30.0      | 0.15.0
 #   v9     | 2.1.0-beta.1+               | 0.33.0-rc.2 | 0.18.0-rc.1
 #
-# Override COMPACTC_VERSION to match whatever NODE_VERSION targets; the
-# default keeps today's ledger-8 behaviour unchanged. Ledger tokens
-# token-issuer mints go to whichever wallet its mintUnshielded call names as
-# recipient.
-readonly compactc_version="${COMPACTC_VERSION:-0.30.0}"
+# The default follows node_version per the table above; set COMPACTC_VERSION
+# to override it. Ledger tokens token-issuer mints go to whichever wallet its
+# mintUnshielded call names as recipient.
+case "$node_version" in
+    2.1.*) default_compactc_version="0.33.0-rc.2" ;;
+    *) default_compactc_version="0.30.0" ;;
+esac
+readonly compactc_version="${COMPACTC_VERSION:-$default_compactc_version}"
 readonly token_issuer_dir="$(pwd)/contracts/token-issuer"
 readonly token_issuer_mint_seed="0000000000000000000000000000000000000000000000000000000000000001"
 readonly token_issuer_mint_amount="100000000000"
