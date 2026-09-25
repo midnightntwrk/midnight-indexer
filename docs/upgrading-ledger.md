@@ -2,6 +2,34 @@
 
 How to move the indexer to a new `midnight-ledger` release.
 
+## Ledger-10-only build
+
+This build resolves ledger 10 alone, from the `ledger-10.1.0.0-alpha.1`
+workspace tag. Ledger 8 and 9 sit behind the `legacy-ledgers` cargo feature,
+which cannot be enabled: the alpha's crates carry `path = "../x"` deps, so its
+`serialize` / `base-crypto` / `storage-core` cannot share a dependency graph
+with the per-crate rc.5 tags ledger 8 and 9 pin. Either generation set resolves,
+not both, until the ledger team publishes per-crate isolate tags for ledger 10.
+midnight-node#2173 gates its own ledger 8 and 9 support the same way.
+
+The rest of this document describes the multi-major shape the repository returns
+to once those tags exist. The v8/v9 pins it refers to are present in
+`Cargo.toml`, commented out, as the record of what `legacy-ledgers` restores.
+
+Consequences of the gate, all of them enforced by `required-features`:
+
+- `chain-indexer`'s `mainnet_runtime` and `contract_state_arena` tests, the
+  `hardfork_e2e` test, and the fixture-driven benches build only under
+  `legacy-ledgers`. So does `first_tx_on_node_1_0_300_runtime_is_verified_at_block_time`,
+  whose fixture is a ledger-8 transaction.
+- `chain-indexer`'s `apply_transactions_tblock_tests` likewise: the mempool
+  `tblock` skew they drive is a ledger-8/9 runtime behaviour, and every runtime
+  on ledger 10 verifies the first regular transaction at the block's own time.
+- `LedgerState::translate` has no ledger 9 -> 10 table, so this build indexes a
+  ledger-10 chain from genesis rather than crossing the fork.
+- `LedgerVersion::V8` and `V9` still exist, because the database tags rows with
+  them; reaching either at runtime yields `Error::LegacyLedgerDisabled`.
+
 ## Why this is fiddly
 
 The indexer supports **two ledger majors at once**, so it can index chains that
@@ -11,6 +39,7 @@ straddle a protocol upgrade:
 | ------ | ----------------- | ----------------------------------- |
 | v8     | `0.22`, `1.0`     | crates.io                           |
 | v9     | `2.0`             | git tags (RCs not yet on crates.io) |
+| v10    | `3.0`             | git tag (alpha not on crates.io)    |
 
 The mapping is `ProtocolVersion::ledger_version` in
 `indexer-common/src/domain/protocol_version.rs`. Both stacks come in side by

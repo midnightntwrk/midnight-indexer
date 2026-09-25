@@ -48,8 +48,8 @@ fn bench_ledger_state_new(c: &mut Criterion) {
 
     let network_id: NetworkId = "undeployed".try_into().expect("network id");
 
-    c.bench_function("LedgerState::new (undeployed, V8)", |b| {
-        b.iter(|| LedgerState::new(black_box(network_id.clone()), LedgerVersion::V8).expect("new"))
+    c.bench_function("LedgerState::new (undeployed, V10)", |b| {
+        b.iter(|| LedgerState::new(black_box(network_id.clone()), LedgerVersion::V10).expect("new"))
     });
 }
 
@@ -64,7 +64,7 @@ fn bench_apply_transactions_empty(c: &mut Criterion) {
 
     c.bench_function("LedgerState::apply_transactions (empty batch)", |b| {
         b.iter_batched(
-            || LedgerState::new(network_id.clone(), LedgerVersion::V8).expect("new"),
+            || LedgerState::new(network_id.clone(), LedgerVersion::V10).expect("new"),
             |mut ledger_state| {
                 ledger_state
                     .apply_transactions(

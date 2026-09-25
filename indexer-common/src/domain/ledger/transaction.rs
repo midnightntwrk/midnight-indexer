@@ -11,42 +11,67 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::domain::ledger::TransactionV10;
+#[cfg(feature = "legacy-ledgers")]
+use crate::domain::ledger::{TransactionV8, TransactionV9};
 use crate::{
     domain::{
         ContractAction, ContractAttributes, LedgerVersion, SerializedContractAddress,
         SerializedTransactionIdentifier, TransactionHash, ViewingKey,
-        ledger::{Error, SerializableExt, TransactionV8, TransactionV9},
+        ledger::{Error, SerializableExt},
     },
     infra::ledger_db::v1_1,
 };
 use fastrace::trace;
 use log::warn;
+#[cfg(feature = "legacy-ledgers")]
 use midnight_coin_structure_v2::{coin::Info, contract::ContractAddress};
+#[cfg(feature = "legacy-ledgers")]
 use midnight_coin_structure_v3::{
     coin::Info as InfoV9, contract::ContractAddress as ContractAddressV9,
 };
+use midnight_coin_structure_v10::{
+    coin::Info as InfoV10, contract::ContractAddress as ContractAddressV10,
+};
+#[cfg(feature = "legacy-ledgers")]
 use midnight_ledger_v8::structure::{
     ContractAction as ContractActionV8, StandardTransaction as StandardTransactionV8,
     SystemTransaction as LedgerSystemTransactionV8,
 };
+#[cfg(feature = "legacy-ledgers")]
 use midnight_ledger_v9::structure::{
     ContractAction as ContractActionV9, StandardTransaction as StandardTransactionV9,
     SystemTransaction as LedgerSystemTransactionV9,
 };
+use midnight_ledger_v10::structure::{
+    ContractAction as ContractActionV10, StandardTransaction as StandardTransactionV10,
+    SystemTransaction as LedgerSystemTransactionV10,
+};
 use midnight_serialize_v1::tagged_deserialize;
 use midnight_storage_core_v1::db::DB;
+#[cfg(feature = "legacy-ledgers")]
 use midnight_transient_crypto_v2::{encryption::SecretKey, proofs::Proof};
+#[cfg(feature = "legacy-ledgers")]
 use midnight_transient_crypto_v3::{
     encryption::SecretKey as SecretKeyV9, proofs::Proof as ProofV9,
 };
+use midnight_transient_crypto_v10::{
+    encryption::SecretKey as SecretKeyV10, proofs::Proof as ProofV10,
+};
+#[cfg(feature = "legacy-ledgers")]
 use midnight_zswap_v8::Offer as OfferV8;
+#[cfg(feature = "legacy-ledgers")]
 use midnight_zswap_v9::Offer as OfferV9;
+use midnight_zswap_v10::Offer as OfferV10;
 use std::str;
 
 #[derive(Debug, Clone)]
 pub enum Transaction {
+    #[cfg(feature = "legacy-ledgers")]
     V8(TransactionV8<v1_1::LedgerDb>),
+    #[cfg(feature = "legacy-ledgers")]
     V9(TransactionV9<v1_1::LedgerDb>),
+    V10(TransactionV10<v1_1::LedgerDb>),
 }
 
 impl Transaction {
@@ -56,16 +81,25 @@ impl Transaction {
         ledger_version: LedgerVersion,
     ) -> Result<Self, Error> {
         let transaction = match ledger_version {
+            #[cfg(feature = "legacy-ledgers")]
             LedgerVersion::V8 => {
                 let transaction = tagged_deserialize(&mut transaction.as_ref())
                     .map_err(|error| Error::Deserialize("LedgerTransactionV8", error))?;
                 Self::V8(transaction)
             }
+            #[cfg(feature = "legacy-ledgers")]
             LedgerVersion::V9 => {
                 let transaction = tagged_deserialize(&mut transaction.as_ref())
                     .map_err(|error| Error::Deserialize("LedgerTransactionV9", error))?;
                 Self::V9(transaction)
             }
+            LedgerVersion::V10 => {
+                let transaction = tagged_deserialize(&mut transaction.as_ref())
+                    .map_err(|error| Error::Deserialize("LedgerTransactionV10", error))?;
+                Self::V10(transaction)
+            }
+            #[cfg(not(feature = "legacy-ledgers"))]
+            ledger_version => return Err(Error::LegacyLedgerDisabled(ledger_version)),
         };
 
         Ok(transaction)
@@ -74,14 +108,18 @@ impl Transaction {
     /// Get the hash.
     pub fn hash(&self) -> TransactionHash {
         match self {
+            #[cfg(feature = "legacy-ledgers")]
             Self::V8(transaction) => transaction.transaction_hash().0.0.into(),
+            #[cfg(feature = "legacy-ledgers")]
             Self::V9(transaction) => transaction.transaction_hash().0.0.into(),
+            Self::V10(transaction) => transaction.transaction_hash().0.0.into(),
         }
     }
 
     /// Get the identifiers.
     pub fn identifiers(&self) -> Result<Vec<SerializedTransactionIdentifier>, Error> {
         match self {
+            #[cfg(feature = "legacy-ledgers")]
             Self::V8(transaction) => transaction
                 .identifiers()
                 .map(|identifier| {
@@ -91,12 +129,22 @@ impl Transaction {
                     Ok(identifier)
                 })
                 .collect(),
+            #[cfg(feature = "legacy-ledgers")]
             Self::V9(transaction) => transaction
                 .identifiers()
                 .map(|identifier| {
                     let identifier = identifier
                         .serialize()
                         .map_err(|error| Error::Serialize("TransactionIdentifierV9", error))?;
+                    Ok(identifier)
+                })
+                .collect(),
+            Self::V10(transaction) => transaction
+                .identifiers()
+                .map(|identifier| {
+                    let identifier = identifier
+                        .serialize()
+                        .map_err(|error| Error::Serialize("TransactionIdentifierV10", error))?;
                     Ok(identifier)
                 })
                 .collect(),
@@ -113,6 +161,7 @@ impl Transaction {
     #[trace]
     pub fn contract_actions(&self) -> Result<Vec<ContractAction>, Error> {
         match self {
+            #[cfg(feature = "legacy-ledgers")]
             Self::V8(transaction) => match transaction {
                 TransactionV8::Standard(standard_transaction) => standard_transaction
                     .actions()
@@ -151,6 +200,7 @@ impl Transaction {
                 TransactionV8::ClaimRewards(_) => Ok(vec![]),
             },
 
+            #[cfg(feature = "legacy-ledgers")]
             Self::V9(transaction) => match transaction {
                 TransactionV9::Standard(standard_transaction) => standard_transaction
                     .actions()
@@ -188,12 +238,50 @@ impl Transaction {
 
                 TransactionV9::ClaimRewards(_) => Ok(vec![]),
             },
+            Self::V10(transaction) => match transaction {
+                TransactionV10::Standard(standard_transaction) => standard_transaction
+                    .actions()
+                    .map(|(segment, contract_action)| match contract_action {
+                        ContractActionV10::Deploy(deploy) => Ok(ContractAction {
+                            address: serialize_contract_address_v10(deploy.address())?,
+                            segment,
+                            has_guaranteed_transcript: false,
+                            raw_entry_point: None,
+                            attributes: ContractAttributes::Deploy,
+                        }),
+
+                        ContractActionV10::Call(call) => {
+                            let address = serialize_contract_address_v10(call.address)?;
+                            let entry_point = decode_entry_point(call.entry_point.as_ref());
+
+                            Ok(ContractAction {
+                                address,
+                                segment,
+                                has_guaranteed_transcript: call.guaranteed_transcript.is_some(),
+                                raw_entry_point: Some(call.entry_point.as_ref().to_vec().into()),
+                                attributes: ContractAttributes::Call { entry_point },
+                            })
+                        }
+
+                        ContractActionV10::Maintain(update) => Ok(ContractAction {
+                            address: serialize_contract_address_v10(update.address)?,
+                            segment,
+                            has_guaranteed_transcript: false,
+                            raw_entry_point: None,
+                            attributes: ContractAttributes::Update,
+                        }),
+                    })
+                    .collect(),
+
+                TransactionV10::ClaimRewards(_) => Ok(vec![]),
+            },
         }
     }
 
     // Check if this transaction belongs to the given viewing key.
     pub fn relevant(&self, viewing_key: ViewingKey) -> bool {
         match self {
+            #[cfg(feature = "legacy-ledgers")]
             Self::V8(transaction) => match transaction {
                 TransactionV8::Standard(StandardTransactionV8 {
                     guaranteed_coins,
@@ -220,6 +308,7 @@ impl Transaction {
                 TransactionV8::ClaimRewards(_) => false,
             },
 
+            #[cfg(feature = "legacy-ledgers")]
             Self::V9(transaction) => match transaction {
                 TransactionV9::Standard(StandardTransactionV9 {
                     guaranteed_coins,
@@ -245,6 +334,31 @@ impl Transaction {
 
                 TransactionV9::ClaimRewards(_) => false,
             },
+            Self::V10(transaction) => match transaction {
+                TransactionV10::Standard(StandardTransactionV10 {
+                    guaranteed_coins,
+                    fallible_coins,
+                    ..
+                }) => {
+                    let secret_key = SecretKeyV10::from_repr(&viewing_key.expose_secret().0)
+                        .expect("SecretKey can be created from repr");
+
+                    let can_decrypt_guaranteed_coins = guaranteed_coins
+                        .as_ref()
+                        .map(|guaranteed_coins| can_decrypt_v10(&secret_key, guaranteed_coins))
+                        .unwrap_or_default();
+
+                    let can_decrypt_fallible_coins = || {
+                        fallible_coins
+                            .values()
+                            .any(|fallible_coins| can_decrypt_v10(&secret_key, &fallible_coins))
+                    };
+
+                    can_decrypt_guaranteed_coins || can_decrypt_fallible_coins()
+                }
+
+                TransactionV10::ClaimRewards(_) => false,
+            },
         }
     }
 }
@@ -252,8 +366,11 @@ impl Transaction {
 /// Facade for `SystemTransaction` from `midnight_ledger` across supported (protocol) versions.
 #[derive(Debug, Clone)]
 pub enum SystemTransaction {
+    #[cfg(feature = "legacy-ledgers")]
     V8(LedgerSystemTransactionV8),
+    #[cfg(feature = "legacy-ledgers")]
     V9(LedgerSystemTransactionV9),
+    V10(LedgerSystemTransactionV10),
 }
 
 impl SystemTransaction {
@@ -263,16 +380,25 @@ impl SystemTransaction {
         ledger_version: LedgerVersion,
     ) -> Result<Self, Error> {
         let transaction = match ledger_version {
+            #[cfg(feature = "legacy-ledgers")]
             LedgerVersion::V8 => {
                 let transaction = tagged_deserialize(&mut transaction.as_ref())
                     .map_err(|error| Error::Deserialize("LedgerSystemTransactionV8", error))?;
                 Self::V8(transaction)
             }
+            #[cfg(feature = "legacy-ledgers")]
             LedgerVersion::V9 => {
                 let transaction = tagged_deserialize(&mut transaction.as_ref())
                     .map_err(|error| Error::Deserialize("LedgerSystemTransactionV9", error))?;
                 Self::V9(transaction)
             }
+            LedgerVersion::V10 => {
+                let transaction = tagged_deserialize(&mut transaction.as_ref())
+                    .map_err(|error| Error::Deserialize("LedgerSystemTransactionV10", error))?;
+                Self::V10(transaction)
+            }
+            #[cfg(not(feature = "legacy-ledgers"))]
+            ledger_version => return Err(Error::LegacyLedgerDisabled(ledger_version)),
         };
 
         Ok(transaction)
@@ -281,12 +407,16 @@ impl SystemTransaction {
     /// Get the hash.
     pub fn hash(&self) -> TransactionHash {
         match self {
+            #[cfg(feature = "legacy-ledgers")]
             Self::V8(transaction) => transaction.transaction_hash().0.0.into(),
+            #[cfg(feature = "legacy-ledgers")]
             Self::V9(transaction) => transaction.transaction_hash().0.0.into(),
+            Self::V10(transaction) => transaction.transaction_hash().0.0.into(),
         }
     }
 }
 
+#[cfg(feature = "legacy-ledgers")]
 fn serialize_contract_address(
     address: ContractAddress,
 ) -> Result<SerializedContractAddress, Error> {
@@ -295,12 +425,20 @@ fn serialize_contract_address(
         .map_err(|error| Error::Serialize("ContractAddress", error))
 }
 
+#[cfg(feature = "legacy-ledgers")]
 fn serialize_contract_address_v9(
     address: ContractAddressV9,
 ) -> Result<SerializedContractAddress, Error> {
     address
         .serialize()
         .map_err(|error| Error::Serialize("ContractAddressV9", error))
+}
+fn serialize_contract_address_v10(
+    address: ContractAddressV10,
+) -> Result<SerializedContractAddress, Error> {
+    address
+        .serialize()
+        .map_err(|error| Error::Serialize("ContractAddressV10", error))
 }
 
 /// Decode arbitrary entry-point bytes for the text-only API representation without allowing a
@@ -330,6 +468,7 @@ fn decode_entry_point(entry_point: &[u8]) -> String {
     }
 }
 
+#[cfg(feature = "legacy-ledgers")]
 fn can_decrypt_v8<D: DB>(key: &SecretKey, offer: &OfferV8<Proof, D>) -> bool {
     let outputs = offer.outputs.iter().filter_map(|o| o.ciphertext.clone());
     let transient = offer.transient.iter().filter_map(|o| o.ciphertext.clone());
@@ -341,6 +480,7 @@ fn can_decrypt_v8<D: DB>(key: &SecretKey, offer: &OfferV8<Proof, D>) -> bool {
     })
 }
 
+#[cfg(feature = "legacy-ledgers")]
 fn can_decrypt_v9<D: DB>(key: &SecretKeyV9, offer: &OfferV9<ProofV9, D>) -> bool {
     let outputs = offer.outputs.iter().filter_map(|o| o.ciphertext.clone());
     let transient = offer.transient.iter().filter_map(|o| o.ciphertext.clone());
@@ -351,7 +491,18 @@ fn can_decrypt_v9<D: DB>(key: &SecretKeyV9, offer: &OfferV9<ProofV9, D>) -> bool
             .is_some()
     })
 }
+fn can_decrypt_v10<D: DB>(key: &SecretKeyV10, offer: &OfferV10<ProofV10, D>) -> bool {
+    let outputs = offer.outputs.iter().filter_map(|o| o.ciphertext.clone());
+    let transient = offer.transient.iter().filter_map(|o| o.ciphertext.clone());
+    let mut ciphertexts = outputs.chain(transient);
 
+    ciphertexts.any(|ciphertext| {
+        key.decrypt::<InfoV10>(&(*ciphertext).to_owned().into())
+            .is_some()
+    })
+}
+
+#[cfg(feature = "legacy-ledgers")]
 #[cfg(test)]
 mod tests {
     use crate::{

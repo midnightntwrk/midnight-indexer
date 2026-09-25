@@ -17,8 +17,8 @@ Maintainer and contributor guides. For local setup see the top-level
   procedure for validating the hard-fork crossing.
 - [Upgrading the node version](./updating-node-version.md) - `NODE_VERSIONS`,
   metadata, per-runtime decode modules.
-- [Upgrading the ledger](./upgrading-ledger.md) - the `v8`/`v9` coexistence and
-  the `[patch.crates-io]` git-tag pins.
+- [Upgrading the ledger](./upgrading-ledger.md) - the ledger-10-only build, the
+  `v8`/`v9` coexistence and the `[patch.crates-io]` git-tag pins.
 - [Re-indexing from genesis](./re-indexing.md) - which changes require it, and
   why both stores must be wiped together.
 
