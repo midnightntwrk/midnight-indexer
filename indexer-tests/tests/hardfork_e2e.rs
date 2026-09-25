@@ -70,7 +70,9 @@ use indexer_tests::graphql_ws_client;
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
-    env, fs,
+    env,
+    fmt::{self, Display, Formatter},
+    fs,
     net::TcpListener,
     path::Path,
     pin::pin,
@@ -551,20 +553,23 @@ impl ProgressWatcher {
         let state = self.state.lock().expect("progress state mutex poisoned");
         (state.frames.clone(), state.error.clone(), state.closed)
     }
+}
 
-    /// Describes what the subscription has done, for a failure message.
-    fn describe(&self) -> String {
-        let (frames, error, closed) = self.snapshot();
-        let versions = frames
+// Describes what the subscription has done, for a failure message.
+impl Display for ProgressWatcher {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        let state = self.state.lock().expect("progress state mutex poisoned");
+        let versions = state
+            .frames
             .iter()
             .map(|frame| frame.protocol_version)
             .collect::<Vec<_>>();
-        let liveness = match (&error, closed) {
-            (Some(error), _) => format!("stream failed: {error}"),
-            (None, true) => "stream closed cleanly".to_string(),
-            (None, false) => "stream still open".to_string(),
-        };
-        format!("{} frame(s) {versions:?}, {liveness}", frames.len())
+        write!(formatter, "{} frame(s) {versions:?}, ", state.frames.len())?;
+        match (&state.error, state.closed) {
+            (Some(error), _) => write!(formatter, "stream failed: {error}"),
+            (None, true) => formatter.write_str("stream closed cleanly"),
+            (None, false) => formatter.write_str("stream still open"),
+        }
     }
 }
 
@@ -955,7 +960,7 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
         },
     )
     .await
-    .with_context(|| format!("idle progress subscription: {}", progress.describe()))?;
+    .with_context(|| format!("idle progress subscription: {progress}"))?;
 
     let first_ledger_9 = frames
         .iter()
@@ -967,14 +972,12 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
             .iter()
             .any(|frame| frame.protocol_version < LEDGER_9_SPEC_VERSION),
         "the subscription never reported a ledger-8 protocol version, so it cannot have \
-         observed a crossing: {}",
-        progress.describe()
+         observed a crossing: {progress}"
     );
     assert!(
         frames.iter().all(|frame| frame.highest_transaction_id == 0),
         "the watched address received a transaction, so any version it learned could have come \
-         from that instead of from the progress updates: {}",
-        progress.describe()
+         from that instead of from the progress updates: {progress}"
     );
 
     // The protocol version also feeds idle-backoff change detection, so the fork must pull the
@@ -991,22 +994,16 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
 
     assert!(
         backed_off >= PROGRESS_UPDATE_INTERVAL * 2,
-        "the idle subscription never backed off before the fork (longest pre-fork gap {:?}, \
-         base {:?}), so the reset it is meant to demonstrate would be vacuous: {}",
-        backed_off,
-        PROGRESS_UPDATE_INTERVAL,
-        progress.describe()
+        "the idle subscription never backed off before the fork (longest pre-fork gap \
+         {backed_off:?}, base {PROGRESS_UPDATE_INTERVAL:?}), so the reset it is meant to \
+         demonstrate would be vacuous: {progress}"
     );
     assert!(
         after_crossing <= PROGRESS_UPDATE_INTERVAL * 2,
         "the protocol version moved but the poll interval stayed backed off: the gap after the \
-         first ledger-9 frame was {:?}, expected about the base interval {:?} (the pre-fork gap \
-         had reached {:?}, cap is {}x base): {}",
-        after_crossing,
-        PROGRESS_UPDATE_INTERVAL,
-        backed_off,
-        IDLE_BACKOFF_MAX_MULTIPLE,
-        progress.describe()
+         first ledger-9 frame was {after_crossing:?}, expected about the base interval \
+         {PROGRESS_UPDATE_INTERVAL:?} (the pre-fork gap had reached {backed_off:?}, cap is \
+         {IDLE_BACKOFF_MAX_MULTIPLE}x base): {progress}"
     );
 
     println!(
