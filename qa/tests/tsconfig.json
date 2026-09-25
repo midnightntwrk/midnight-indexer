@@ -29,7 +29,8 @@
     "vitest.config.smoke.ts",
     "vitest.config.integration.ts",
     "vitest.config.e2e.ts",
-    "vitest.config.sync.ts"
+    "vitest.config.sync.ts",
+    "vitest.config.unit.ts"
   ],
   // Excluded pending #1423: both custom reporters implement the vitest<=3
   // `onFinished` hook, which vitest 4 no longer dispatches. Deliberate,
