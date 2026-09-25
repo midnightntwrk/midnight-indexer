@@ -4,6 +4,93 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.3.800-rc.2] - 2026-09-25
+
+Security release candidate for the ledger-v8 mainnet line, cut on top of `4.3.800-rc.1`. It fixes a
+transaction that could halt ingestion (GHSA-67mp-mh58-qx5h), a halt after a node 1.0.300 runtime
+upgrade, a ledger-DB root-count crash loop and API worker starvation under ledger query load, clears
+five dependency advisories, and tracks node 1.0.300 with ledger 8.1.2.
+
+**In-place over `4.3.800-rc.1` or `4.3.7`**: no new migrations and no re-index. Ledger 8.1.0 →
+8.1.2 changes no serialization output and no storage encoding. One config change is required
+before starting rc.2: the ledger DB `cache_size` key is renamed to `cache_max_nodes` (see Bug
+Fixes).
+
+Supported nodes: 0.22.0 and 1.0.300. Node 1.0.2 is not supported: it stops the first-transaction
+`tblock` skew at a fixed date (2026-10-31) rather than at the 1.0.300 runtime upgrade. Deploy rc.2
+before the network's `set_code` to the 1.0.300 runtime.
+
+### 🚀 Features
+
+- *(chain-indexer)* Align ledger crates with ledger 8.1.2 (#1532)
+- *(chain-indexer)* Support node 1.0.300 (#1521)
+
+### 🐛 Bug Fixes
+
+- *(indexer-common)* Read stored count in ledger-db get_root_count (#1378)
+
+  `get_root_count` counted rows by primary key, so it returned 0 or 1 whatever the stored count. A
+  later unpersist could drive the count negative and crash-loop chain-indexer with "roots counts
+  can't be negative".
+
+- *(indexer-common)* [**breaking**] Make the ledger DB cache size a node count and raise it (#1385)
+
+  `ledger_db.cache_size` is renamed to `cache_max_nodes` and takes a plain integer node count
+  instead of a byte-unit string. The shipped `"1kiB"` meant 1024 nodes; the default is now 100000,
+  matching the node. Operators must update `config.yaml`, or rename
+  `APP__INFRA__LEDGER_DB__CACHE_SIZE` to `APP__INFRA__LEDGER_DB__CACHE_MAX_NODES`, before starting
+  rc.2. This applies to chain-indexer, wallet-indexer, indexer-api and indexer-standalone.
+
+- *(deps)* Bump rtrb, spin and chacha20 to clear advisories (#1475)
+- *(deps)* Bump rustls to 0.23.45 to clear RUSTSEC-2026-0285 (#1493)
+- *(deps)* Bump anyhow to 1.0.103 to clear RUSTSEC-2026-0190 (#1527)
+- *(standalone)* Tune sqlite for concurrency and bound the SPO HTTP pool (#1094)
+
+  The indexer database opens in WAL mode with a 30s `busy_timeout` and writers take the lock up
+  front, so contention no longer surfaces as "database is locked". A new optional
+  `infra.spo_node.http_pool` block bounds idle Blockfrost sockets.
+
+- Prevent a single transaction from halting indexing (#1520)
+
+  Building a block could fail on every attempt, so one permissionless transaction could stop
+  ingestion for a whole deployment (GHSA-67mp-mh58-qx5h). Two causes are fixed. A contract call's
+  entry point is an arbitrary byte string and is now decoded lossily, with NUL replaced because
+  PostgreSQL JSONB rejects it. A contract action from a segment that never applied no longer drives
+  a contract state lookup the node cannot answer.
+
+  Contract actions from segments the ledger rolled back no longer reach the API. They were
+  previously served with an empty `state`; `transactionResult` is the supported way to tell what
+  applied. A Call with a guaranteed transcript is kept when that transcript applied. Rows written
+  before this release keep what they hold today.
+
+- *(indexer-common)* Read contract balances via deref, not Sp::into_inner (#1246)
+
+  `unshieldedBalances` was empty for every contract action the API served.
+
+- *(indexer-api)* Bound concurrent ledger-DB queries to prevent worker starvation (#1440)
+
+  A burst of unauthenticated ledger-backed queries could grow the blocking pool without limit and
+  wedge the runtime, liveness probe included. Ledger-DB walks now share a semaphore, and the Tokio
+  blocking pool is capped at 64. The new optional keys `ledger_query_concurrency` (default: half of
+  `infra.storage.max_connections`, 12 in the shipped config) and `max_blocking_threads` override
+  both; startup fails if the first is not below the second.
+
+- *(chain-indexer)* Gate first-tx tblock bump on the block's runtime (#1537)
+
+  Runtime 1.0.300 validates a block's first regular transaction against the block's own time
+  instead of the parent time plus 12s. The indexer applied the offset to every non-genesis block, so
+  after a runtime upgrade to 1.0.300 it could reject a transaction the node accepted and halt
+  indexing. The offset now applies only to blocks from runtimes 0.22 and 1.0 before 1.0.300, keyed
+  on each block's protocol version.
+
+### ⚙️ Dependencies
+
+- Bump crossbeam-epoch to 0.9.20 for RUSTSEC-2026-0204 (#1315)
+- Bump h2 to 0.4.17 for RUSTSEC-2026-0258 (#1449)
+- Node: 1.0.0 → 1.0.300 (#1521). Runtime 1.0.300 shares 1.0.0's metadata, so decoding does not
+  change. The 1.0.0 snapshot remains for mainnet tests.
+- Ledger: 8.1.0 → 8.1.2 (#1532), a security patch hardening low-level deserialization.
+
 ## [4.3.800-rc.1] - 2026-08-25
 
 Security release candidate for the ledger-v8 mainnet line, cut on top of `4.3.7`. It carries a
