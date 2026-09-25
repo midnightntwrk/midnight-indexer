@@ -31,7 +31,7 @@ that the zswap/state-root match guards each block.
 `ci-standalone.yaml`):
 
 - Starts a **real `midnightntwrk/midnight-node` container** (version = last line of
-  `NODE_VERSIONS`, currently `2.0.0-rc.3`) whose chain DB is **pre-seeded from fixed data in
+  `NODE_VERSIONS`, currently `2.1.0-rc.2`) whose chain DB is **pre-seeded from fixed data in
   `.node/<version>/`** (bind-mounted, `CFG_PRESET=dev`) so it replays a known, deterministic
   chain, plus postgres + nats via testcontainers, and runs the **actual** chain-indexer /
   wallet-indexer / indexer-api binaries (cloud) or `indexer-standalone` + SQLite (standalone).

@@ -12,6 +12,9 @@
     "getDustCommitmentMerkleTreeUpdate": [
       { "rootType": "Query", "field": "dustCommitmentMerkleTreeUpdate" }
     ],
+    "getRegisteredTotalsSeries": [{ "rootType": "Query", "field": "registeredTotalsSeries" }],
+    "getRegisteredSpoSeries": [{ "rootType": "Query", "field": "registeredSpoSeries" }],
+    "getRegisteredPresence": [{ "rootType": "Query", "field": "registeredPresence" }],
     "subscribeToBlockEvents": [{ "rootType": "Subscription", "field": "blocks" }],
     "subscribeToUnshieldedTransactionEvents": [
       { "rootType": "Subscription", "field": "unshieldedTransactions" }

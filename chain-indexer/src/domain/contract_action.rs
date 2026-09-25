@@ -12,8 +12,8 @@
 // limitations under the License.
 
 use indexer_common::domain::{
-    ContractAttributes, ContractBalance, SerializedContractAddress, SerializedContractStateKey,
-    SerializedZswapStateKey,
+    ByteVec, ContractAttributes, ContractBalance, SerializedContractAddress,
+    SerializedContractStateKey, SerializedZswapStateKey,
 };
 
 /// A contract action.
@@ -28,6 +28,16 @@ use indexer_common::domain::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContractAction {
     pub address: SerializedContractAddress,
+
+    /// Physical segment containing this action.
+    pub segment: u16,
+
+    /// Whether this Call also has work in guaranteed logical segment 0.
+    pub has_guaranteed_transcript: bool,
+
+    /// Original Call entry-point bytes for event correlation; None for Deploy and Update.
+    pub raw_entry_point: Option<ByteVec>,
+
     pub state_key: Option<SerializedContractStateKey>,
     pub zswap_state_key: Option<SerializedZswapStateKey>,
     pub extracted_balances: Vec<ContractBalance>,
@@ -38,6 +48,9 @@ impl From<indexer_common::domain::ContractAction> for ContractAction {
     fn from(contract_action: indexer_common::domain::ContractAction) -> Self {
         Self {
             address: contract_action.address,
+            segment: contract_action.segment,
+            has_guaranteed_transcript: contract_action.has_guaranteed_transcript,
+            raw_entry_point: contract_action.raw_entry_point,
             state_key: Default::default(),
             zswap_state_key: Default::default(),
             extracted_balances: Default::default(),

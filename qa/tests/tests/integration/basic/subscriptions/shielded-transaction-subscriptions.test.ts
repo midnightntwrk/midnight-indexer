@@ -31,7 +31,11 @@ import { IndexerHttpClient } from '@utils/indexer/http-client';
 import {
   MerkleTreeCollapsedUpdateSchema,
   ShieldedTransactionEventSchema,
+  ShieldedTransactionsProgressWithProtocolVersionSchema,
 } from '@utils/indexer/graphql/schema';
+import { SHIELDED_TX_PROGRESS_SUBSCRIPTION_BY_SESSION_ID } from '@utils/indexer/graphql/subscriptions';
+import { isProgressProtocolVersionSupported } from '@utils/indexer/schema-feature-probe';
+import type { ShieldedTransactionsProgress } from '@utils/indexer/indexer-types';
 import dataProvider from '@utils/testdata-provider';
 
 // This is longer because it might take some time when
@@ -39,15 +43,29 @@ import dataProvider from '@utils/testdata-provider';
 // it needs to be pulled the first time
 const TOOLKIT_STARTUP_TIMEOUT = 60_000;
 
+const httpClient = new IndexerHttpClient();
+
+// midnight-indexer#1463 added protocolVersion to the progress event. Probed once
+// per file because the document that selects it fails GraphQL validation where the
+// change has not landed.
+const PROGRESS_PROTOCOL_VERSION_ABSENT =
+  'ShieldedTransactionsProgress.protocolVersion is absent on this environment (midnight-indexer#1463)';
+
 describe('shielded transaction subscriptions', () => {
   let randomSeed: string;
   let toolkit: ToolkitWrapper;
   let indexerWsClient: IndexerWsClient;
+  let progressProtocolVersionSupported = false;
 
   beforeAll(async () => {
     // Initialise the toolkit wrapper
     toolkit = new ToolkitWrapper({});
     await toolkit.start();
+
+    progressProtocolVersionSupported = await isProgressProtocolVersionSupported();
+    if (!progressProtocolVersionSupported) {
+      log.warn(PROGRESS_PROTOCOL_VERSION_ABSENT);
+    }
   }, TOOLKIT_STARTUP_TIMEOUT);
 
   afterAll(async () => {
@@ -338,10 +356,9 @@ describe('shielded transaction subscriptions', () => {
       expect(highestZswapEndIndex).toBeGreaterThan(0);
 
       // highestZswapEndIndex is exclusive, so the collapsed update query needs (highestZswapEndIndex - 1)
-      const indexerHttpClient = new IndexerHttpClient();
       const endIndex = highestZswapEndIndex - 1;
       log.debug(`Querying collapsed update with startIndex=0, endIndex=${endIndex}`);
-      const response = await indexerHttpClient.getZswapMerkleTreeCollapsedUpdate(0, endIndex);
+      const response = await httpClient.getZswapMerkleTreeCollapsedUpdate(0, endIndex);
 
       expect(response).toBeSuccess();
       expect(response.data?.zswapMerkleTreeCollapsedUpdate).toBeDefined();
@@ -356,6 +373,67 @@ describe('shielded transaction subscriptions', () => {
         parsed.success,
         `Collapsed update schema validation failed ${JSON.stringify(parsed.error, null, 2)}`,
       ).toBe(true);
+
+      await indexerWsClient.closeWalletSession(sessionId);
+    }, 30_000);
+
+    /**
+     * A wallet with no relevant transactions only ever receives progress events, so
+     * the progress event's protocolVersion is the only way such a wallet observes a
+     * protocol upgrade. It reports the chain tip, which the latest indexed block
+     * reports independently — the block is read after the event so a fork cannot be
+     * straddled the wrong way round.
+     *
+     * @given a valid viewing key and an open wallet session
+     * @when the first ShieldedTransactionsProgress event of the subscription is received
+     * @then its protocolVersion equals the protocolVersion of the latest indexed block
+     * @and the value is non-zero, the sentinel reserved for a chain with no indexed block
+     *
+     * midnight-indexer#1463
+     */
+    test('should report the chain tip protocol version in the progress event', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Subscription', 'Wallet', 'Progress'] };
+      if (!progressProtocolVersionSupported) {
+        return ctx.skip(true, PROGRESS_PROTOCOL_VERSION_ABSENT);
+      }
+
+      const viewingKey = await toolkit.showViewingKey(dataProvider.getFundingSeed());
+      const sessionId: string = await indexerWsClient.openWalletSession(viewingKey);
+
+      // The first progress event is emitted immediately on subscribe, so the 15s
+      // ceiling is generous even under the idle backoff introduced in 4.4.0.
+      const progress = await new Promise<ShieldedTransactionsProgress>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('Timed out waiting for ShieldedTransactionsProgress event'));
+        }, 15_000);
+
+        const unsubscribe = indexerWsClient.subscribeToShieldedTransactionEvents(
+          {
+            next: (payload) => {
+              const event = payload.data?.shieldedTransactions;
+              if (event?.__typename === 'ShieldedTransactionsProgress') {
+                clearTimeout(timeout);
+                unsubscribe();
+                resolve(event);
+              }
+            },
+          },
+          sessionId,
+          SHIELDED_TX_PROGRESS_SUBSCRIPTION_BY_SESSION_ID,
+        );
+      });
+
+      const latestBlock = await httpClient.getLatestBlock();
+      expect(latestBlock).toBeSuccess();
+
+      const parsed = ShieldedTransactionsProgressWithProtocolVersionSchema.safeParse(progress);
+      expect(
+        parsed.success,
+        `Progress event schema validation failed: ${JSON.stringify(parsed.error?.format(), null, 2)}`,
+      ).toBe(true);
+
+      expect(progress.protocolVersion).toBe(latestBlock.data?.block.protocolVersion);
+      expect(progress.protocolVersion).toBeGreaterThan(0);
 
       await indexerWsClient.closeWalletSession(sessionId);
     }, 30_000);

@@ -50,7 +50,9 @@ export const BlockSchema = z.lazy(() =>
 );
 
 export const UnshieldedUtxoSchema = z.object({
-  owner: z.string().regex(/^mn_addr_/),
+  owner: z.string().regex(/^mn_addr(_[a-z0-9]+)?1/, {
+    message: 'must be a bech32m unshielded address (mn_addr... / mn_addr_<network>...)',
+  }),
   intentHash: Hash64,
   value: z.string(),
   tokenType: z
@@ -433,6 +435,9 @@ export const UnshieldedTransactionsProgressSchema = z.object({
   highestTransactionId: z.number(),
 });
 
+export const UnshieldedTransactionsProgressWithProtocolVersionSchema =
+  UnshieldedTransactionsProgressSchema.extend({ protocolVersion: z.number() });
+
 export const UnshieldedTxSubscriptionResponseSchema = z.union([
   UnshieldedTransactionEventSchema,
   UnshieldedTransactionsProgressSchema,
@@ -459,6 +464,9 @@ export const ShieldedTransactionsProgressSchema = z.object({
   highestCheckedZswapEndIndex: z.number(),
   highestRelevantZswapEndIndex: z.number(),
 });
+
+export const ShieldedTransactionsProgressWithProtocolVersionSchema =
+  ShieldedTransactionsProgressSchema.extend({ protocolVersion: z.number() });
 
 export const ShieldedTransactionEventSchema = z.union([
   RelevantTransactionSchema,
@@ -510,6 +518,9 @@ export const DustGenerationsProgressSchema = z.object({
   highestIndex: z.number(),
   collapsedMerkleTree: CollapsedMerkleTreeSchema.nullable(),
 });
+
+export const DustGenerationsProgressWithProtocolVersionSchema =
+  DustGenerationsProgressSchema.extend({ protocolVersion: z.number() });
 
 export const DustGenerationDtimeUpdateItemSchema = z.object({
   __typename: z.literal('DustGenerationDtimeUpdateItem'),

@@ -40,6 +40,9 @@ jobs:
       - name: Compile check
         run: bun run compile-check
 
+      - name: Unit tests
+        run: bun run test:unit
+
       - name: Lint
         run: bun run lint
 

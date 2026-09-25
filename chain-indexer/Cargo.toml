@@ -44,6 +44,7 @@ const-hex = { workspace = true }
 criterion = { workspace = true }
 fake      = { workspace = true }
 fs_extra  = { workspace = true }
+indexer-common = { path = "../indexer-common", features = [ "testing" ] }
 reqwest   = { workspace = true, features = [ "json", "rustls" ] }
 serde     = { workspace = true, features = [ "derive" ] }
 serde_json = { workspace = true }
@@ -78,8 +79,10 @@ harness           = false
 required-features = [ "standalone" ]
 
 [build-dependencies]
-anyhow    = { workspace = true }
-itertools = { workspace = true }
+anyhow             = { workspace = true }
+itertools          = { workspace = true }
+parity-scale-codec = { workspace = true }
+subxt              = { workspace = true }
 
 [features]
 cloud      = [ "indexer-common/cloud" ]

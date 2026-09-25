@@ -20,6 +20,12 @@ import { ToolkitWrapper } from '../utils/toolkit/toolkit-wrapper';
 import { startCacheProgressReporter, CacheProgressReporter } from '../utils/toolkit/toolkit-cache';
 import { env } from '../environment/model';
 import dataProvider from '../utils/testdata-provider';
+import { warmMothWallet } from '../utils/moth/moth-backend';
+import {
+  describeProofServer,
+  ensureProofServer,
+  stopProofServer,
+} from '../utils/moth/proof-server';
 
 let warmupToolkit: ToolkitWrapper | undefined;
 
@@ -84,8 +90,61 @@ async function prewarmFundingSeed(toolkit: ToolkitWrapper, seed: string): Promis
   }
 }
 
-export async function setup() {
+/**
+ * Report whether the e2e files will run one at a time, and say so loudly when
+ * they will not.
+ *
+ * `vitest.config.e2e.ts` sets `fileParallelism: false`, but an explicit
+ * `--file-parallelism` on the command line overrides config. Rather than assume
+ * the config won the argument, read back what Vitest actually resolved, so the
+ * line printed here is always true.
+ */
+function reportFileParallelism(project: { config?: { fileParallelism?: boolean } }): void {
+  // Undefined means Vitest did not report it; treat that as parallel, which is
+  // its default, so an unknown state warns rather than reassures.
+  const sequential = project?.config?.fileParallelism === false;
+
+  if (sequential) {
+    console.log(
+      '[SETUP] The e2e tests will be executed in sequence, back to back! ' +
+        'Parallel execution is not supported yet — every suite spends from the same ' +
+        'funding wallet, so concurrent runs fight over the same unspent outputs.',
+    );
+    return;
+  }
+
+  console.warn(
+    '[SETUP] WARNING: the e2e tests are running with file parallelism ENABLED, which ' +
+      'is not supported yet. Suites share one funding wallet, so concurrent transfers ' +
+      'can leave one another unconfirmed and whole suites will skip instead of failing. ' +
+      'Drop `--file-parallelism` to restore the supported sequential run.',
+  );
+}
+
+export async function setup(project: { config?: { fileParallelism?: boolean } }) {
   cleanupOrphanedToolkitDirs();
+  reportFileParallelism(project);
+
+  // On the moth backend, skip the toolkit cache warm-up entirely.
+  //
+  // That warm-up fetches every block of the target chain into the shared
+  // toolkit Postgres. On preview (~905k blocks) it is hours of work, and the
+  // whole reason for the moth backend is that this cost grows with the chain
+  // and makes long-lived environments untestable. Paying it anyway would
+  // cancel the benefit out.
+  //
+  // A few suites still reach for the toolkit for things moth cannot do yet
+  // (notably `show-viewing-key`). They keep working — they just pay their own
+  // fetch cost on first call instead of having it pre-paid here.
+  if (env.getTxBackend() === 'moth') {
+    console.log(
+      '[SETUP] TX_BACKEND=moth — skipping the toolkit cache warm-up. ' +
+        'Any test that still calls the toolkit will pay its own fetch cost on first use.',
+    );
+    await warmMoth();
+    return;
+  }
+
   console.log('[SETUP] Warming up toolkit cache (this may take several minutes)...');
 
   let reporter: CacheProgressReporter | undefined;
@@ -98,12 +157,9 @@ export async function setup() {
     console.log('[SETUP] Starting toolkit container...');
     await warmupToolkit.start();
 
-    // Derive the node HTTP RPC URL from the websocket URL so the reporter
-    // can show a live percentage (e.g. "fetch progress: 39,485/715,051 (5.5%) blocks complete").
-    const nodeRpcUrl = env
-      .getNodeWebsocketBaseURL()
-      .replace(/^wss:\/\//, 'https://')
-      .replace(/^ws:\/\//, 'http://');
+    // The node's HTTP RPC URL lets the reporter show a live percentage
+    // (e.g. "fetch progress: 39,485/715,051 (5.5%) blocks complete").
+    const nodeRpcUrl = env.getNodeHttpBaseURL();
     reporter = startCacheProgressReporter(process.env.TARGET_ENV ?? 'cache', nodeRpcUrl);
 
     console.log('[SETUP] Syncing cache (please wait, this will take time)...');
@@ -128,6 +184,51 @@ export async function setup() {
   }
 }
 
+/**
+ * Warm moth's on-disk wallet cache.
+ *
+ * Test workers are separate processes and cannot inherit a synced facade; what
+ * they inherit is this cache, which turns their cold sync into a short restore.
+ * Global setup has no test timeout to burn, so a first sync belongs here.
+ */
+async function warmMoth(): Promise<void> {
+  // The proof server is a plain service, so it is started ONCE here and stopped
+  // in teardown, rather than being negotiated by every worker.
+  //
+  // Publishing the URL into the environment is what makes that work: test
+  // workers are forked after global setup and inherit `process.env`, so their
+  // `ensureProofServer()` takes the PROOF_SERVER_URL short-circuit and neither
+  // inspects docker nor starts anything. It also puts ownership in one place —
+  // previously `startedByUs` was per-process, so a container started here could
+  // never be stopped by a worker, and teardown did nothing: the container
+  // leaked after every run.
+  //
+  // A PROOF_SERVER_URL the caller set is left exactly as it is, and is not
+  // stopped in teardown, because we did not start it.
+  //
+  // moth builds its proving service during startWalletSync, so even a sync-only
+  // warm-up needs a reachable server.
+  const proofServerUrl = await ensureProofServer();
+  // Vitest skips teardown when setup throws, so a failed warm-up (network drop,
+  // sync timeout, ...) has to stop the proof server itself or it leaks.
+  try {
+    process.env.PROOF_SERVER_URL = proofServerUrl;
+    console.log(`[SETUP] Proof server: ${await describeProofServer(proofServerUrl)}`);
+    const mothSeed = dataProvider.getTransferFundingSeed();
+    console.log('[SETUP] Warming moth wallet cache (first sync can take a while)...');
+    const mothStart = Date.now();
+    await warmMothWallet(mothSeed);
+    console.log(
+      `[SETUP] moth wallet cache warm (${((Date.now() - mothStart) / 1000).toFixed(2)}s)`,
+    );
+  } catch (error) {
+    await stopProofServer();
+    throw error;
+  }
+}
+
 export async function teardown() {
-  // no-op
+  // Stops the proof server only if global setup started it; a server supplied
+  // through PROOF_SERVER_URL is left running.
+  await stopProofServer();
 }
