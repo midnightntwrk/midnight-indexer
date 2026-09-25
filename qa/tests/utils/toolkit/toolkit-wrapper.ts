@@ -63,6 +63,42 @@ interface ToolkitConfig {
   nodeTag?: string;
   nodeToolkitTag?: string;
   coinSeed?: string;
+  /**
+   * Host directory holding a compiled Compact contract: its toolkit-js
+   * `config.ts` plus the compactc output directory. Mounted into the
+   * toolkit-js tree so the custom-contract commands can reach it.
+   */
+  customContractDir?: string;
+  /**
+   * The compactc release `customContractDir` was compiled with, e.g. `0.30.0`.
+   *
+   * Toolkit 2.x resolves `compact-js` / `compact-runtime` imports through a
+   * hook that picks a sibling `compact-<version>/` workspace by
+   * `COMPACTC_VERSION`, and has no default. Left unset, resolution falls
+   * through to the hoisted root copy and loading the contract config dies with
+   * `Version mismatch: compiled code expects X, runtime is Y`. Toolkit 1.x has
+   * no such hook and ignores the variable.
+   */
+  compactcVersion?: string;
+}
+
+/**
+ * Identifies which contract inside `customContractDir` to drive. Paths are
+ * relative to that directory.
+ */
+export interface CustomContractSpec {
+  /** The toolkit-js config file, e.g. `segment-split.config.ts`. */
+  configFile: string;
+  /** The compactc output directory. Defaults to `managed`. */
+  managedDir?: string;
+}
+
+/** A built-but-not-yet-submitted custom contract call. */
+export interface CustomContractCall {
+  /** Caller-supplied name, used to keep per-call files distinct and to label errors. */
+  label: string;
+  /** Generated transaction file, relative to the container's `/out`. */
+  txFileName: string;
 }
 
 export interface ToolkitTransactionResult {
@@ -91,12 +127,49 @@ export interface DeployContractResult {
 
 const TOOLKIT_BIN = '/midnight-node-toolkit';
 const CONTRACT_SIMPLE = 'contract-simple';
+const CONTRACT_CUSTOM = 'contract-custom';
+const TOOLKIT_JS_PATH = '/toolkit-js';
+/**
+ * Where a custom contract's compiled assets are mounted. It has to live inside
+ * the toolkit-js tree: the contract's `config.ts` imports
+ * `@midnight-ntwrk/compact-js`, which only resolves from toolkit-js'
+ * own node_modules.
+ */
+const CUSTOM_CONTRACT_MOUNT = `${TOOLKIT_JS_PATH}/test/custom-contract`;
+const DEFAULT_MANAGED_DIR = 'managed';
+/**
+ * Reports every `@midnight-ntwrk/compact-runtime` in the toolkit-js tree, as
+ * `<package.json path> "version": "<v>"` lines.
+ *
+ * The path matters as much as the version: 2.x keeps one runtime per compactc
+ * variant workspace alongside a hoisted root copy, and which one a contract
+ * gets depends on `COMPACTC_VERSION`, not on mere presence. Variant
+ * directories have been named `v7`/`v8` (toolkit 1.x), `compact-0.30` (2.0.x)
+ * and `compact-0.30.0` (2.1.x), so this globs one level down rather than
+ * assuming a layout. The image has no `find`, hence the shell loop.
+ */
+const TOOLKIT_JS_RUNTIME_PROBE = [
+  'for f in',
+  `${TOOLKIT_JS_PATH}/node_modules/@midnight-ntwrk/compact-runtime/package.json`,
+  `${TOOLKIT_JS_PATH}/*/node_modules/@midnight-ntwrk/compact-runtime/package.json;`,
+  'do [ -f "$f" ] && { printf \'%s \' "$f"; grep -m1 \'"version"\' "$f"; }; done; true',
+].join(' ');
+
+/** Marks a compactc variant workspace, e.g. `/toolkit-js/compact-0.30.0/…` — 2.x only. */
+const TOOLKIT_JS_VARIANT = /\/compact-([0-9][^/]*)\//;
+/** The tree a runtime was found in, for reporting: `compact-0.30.0`, `v8`, or `node_modules`. */
+const TOOLKIT_JS_TREE = new RegExp(`^${TOOLKIT_JS_PATH}/([^/]+)/`);
+const DEFAULT_COIN_PUBLIC_SEED = '0000000000000000000000000000000000000000000000000000000000000001';
 const DEFAULT_RNG_SEED = '0000000000000000000000000000000000000000000000000000000000000037';
 // Default coin/funding seed used by the toolkit minter e2e (matches the node-repo
 // scripts/tests/toolkit-tokens-minter-e2e.sh). Used by deployMintSendUnshielded (#1253).
 const DEFAULT_FUNDING_SEED = '0000000000000000000000000000000000000000000000000000000000000001';
 const DEFAULT_NEW_AUTHORITY_SEED =
   '1000000000000000000000000000000000000000000000000000000000000001';
+
+/** Strip terminal colour codes, so parsing never depends on whether the toolkit colorizes. */
+// eslint-disable-next-line no-control-regex
+const stripAnsi = (value: string): string => value.replace(/\x1b\[[0-9;]*m/g, '');
 
 // Human-readable description of the schema `getDustBalance` accepts, reused in its error
 // messages so a mismatch reports expected-vs-actual rather than a cryptic "structure not found".
@@ -170,8 +243,6 @@ class ToolkitWrapper {
   }
 
   private parseTransactionOutput(output: string): ToolkitTransactionResult {
-    // eslint-disable-next-line no-control-regex
-    const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '');
     const lines = stripAnsi(output).trim().split('\n');
     const jsonLines = lines.filter((line) => line.trim().startsWith('{'));
 
@@ -381,8 +452,14 @@ class ToolkitWrapper {
           source: ledgerCacheDir,
           target: '/ledger-cache',
         },
+        ...(this.config.customContractDir
+          ? [{ source: this.config.customContractDir, target: CUSTOM_CONTRACT_MOUNT }]
+          : []),
       ])
-      .withEnvironment({ MN_LEDGER_CACHE_DB: '/ledger-cache' })
+      .withEnvironment({
+        MN_LEDGER_CACHE_DB: '/ledger-cache',
+        ...(this.config.compactcVersion ? { COMPACTC_VERSION: this.config.compactcVersion } : {}),
+      })
       .withCommand(['sleep', 'infinity']);
   }
 
@@ -1218,6 +1295,425 @@ class ToolkitWrapper {
       expectedRemainder: opts.mintAmount - opts.sendAmount,
       mintSendTx,
     };
+  }
+
+  /**
+   * Deploy a custom compiled Compact contract.
+   *
+   * Unlike {@link deployContract}, which drives the toolkit's built-in
+   * `contract-simple`, this goes through the lower-level custom-contract path:
+   * `generate-intent deploy` produces an intent, `generate-txs contract-custom`
+   * turns it into a transaction, and the shared `sendGeneratedTx` submits it —
+   * so contract-address extraction and hash parsing stay identical to the
+   * built-in path.
+   *
+   * Requires `customContractDir` to have been passed to the constructor.
+   *
+   * @param contract - Which config/managed pair inside `customContractDir` to use.
+   * @param constructorArgs - Arguments forwarded to the Compact constructor.
+   * @param fundingSeed - Seed of the wallet that funds the deployment.
+   * @returns The deployed contract's tagged/untagged addresses and deploy hashes.
+   */
+  async deployCustomContract(
+    contract: CustomContractSpec,
+    constructorArgs: string[] = [],
+    fundingSeed?: string,
+  ): Promise<DeployContractResult> {
+    this.assertCustomContractMounted();
+
+    // Pinned, not derived from `fundingSeed` — same rule as `deployContract`. A
+    // compiled contract's toolkit-js config hard-codes the coin public key it
+    // was built for, so deriving this from whatever seed happens to be funding
+    // the deployment would silently disagree with the fixture the moment
+    // FUNDING_SEED_<ENV> is set.
+    const { coinPublic } = await this.showAddress(DEFAULT_COIN_PUBLIC_SEED);
+
+    // Namespaced per contract so two custom contracts driven by one wrapper
+    // never overwrite each other's intent, transaction or private state.
+    const prefix = this.customFilePrefix(contract);
+    const intentFile = `/out/${prefix}_deploy_intent.mn`;
+    const deployTxFileName = `${prefix}_deploy_tx.mn`;
+    const privateStateFile = this.customPrivateStateFile(contract);
+
+    await this.execToolkit(
+      [
+        TOOLKIT_BIN,
+        'generate-intent',
+        'deploy',
+        '--toolkit-js-path',
+        TOOLKIT_JS_PATH,
+        '--config',
+        this.customConfigPath(contract),
+        '--coin-public',
+        coinPublic,
+        '--network',
+        env.getNetworkId().toLowerCase(),
+        '--output-intent',
+        intentFile,
+        '--output-private-state',
+        `/out/${privateStateFile}`,
+        '--output-zswap-state',
+        `/out/${prefix}_deploy_zswap.state`,
+        ...constructorArgs,
+      ],
+      'custom contract deploy intent generation failed',
+    );
+
+    this.assertOutputFile(privateStateFile, 'custom contract deploy intent');
+
+    await this.execToolkit(
+      [
+        ...this.buildCustomContractTxBase(`/out/${deployTxFileName}`, contract),
+        '--intent-file',
+        intentFile,
+        '--zswap-state-file',
+        `/out/${prefix}_deploy_zswap.state`,
+        ...(fundingSeed != null && fundingSeed !== '' ? ['--funding-seed', fundingSeed] : []),
+      ],
+      'custom contract deploy tx generation failed',
+    );
+
+    this.assertOutputFile(deployTxFileName, 'custom contract deploy');
+
+    await this.sendGeneratedTx(deployTxFileName);
+
+    const contractAddressTagged = await this.getContractAddress(deployTxFileName, 'tagged');
+    const contractAddressUntagged = await this.getContractAddress(deployTxFileName, 'untagged');
+    const { txHash, blockHash } = await getContractDeploymentHashes(contractAddressUntagged);
+
+    return {
+      'contract-address-untagged': contractAddressUntagged,
+      'contract-address-tagged': contractAddressTagged,
+      'coin-public': coinPublic,
+      'deploy-tx-hash': txHash,
+      'deploy-block-hash': blockHash,
+    };
+  }
+
+  /**
+   * Snapshot a contract's current on-chain state to a file inside the container.
+   *
+   * The returned path is what {@link generateCustomContractCall} takes as its
+   * `onchainStateFile`. Reusing one snapshot for two calls is what makes the
+   * second call *stale*: the ledger re-runs its transcript against the state as
+   * it is at apply time, not the state the proof was built against.
+   *
+   * @param contractAddressUntagged - Untagged hex contract address.
+   * @param fileName - Name of the snapshot file to write under `/out`.
+   * @returns The in-container path of the snapshot.
+   */
+  async snapshotContractState(
+    contractAddressUntagged: string,
+    fileName = 'contract_state.bin',
+  ): Promise<string> {
+    await this.execToolkit(
+      [
+        TOOLKIT_BIN,
+        'contract-state',
+        '--src-url',
+        this.getRpcUrl(),
+        '--contract-address',
+        contractAddressUntagged,
+        '--dest-file',
+        `/out/${fileName}`,
+      ],
+      'contract-state snapshot failed',
+    );
+    this.assertOutputFile(fileName, 'contract-state snapshot');
+    return `/out/${fileName}`;
+  }
+
+  /**
+   * Build (but do not submit) a call to a circuit of a custom contract.
+   *
+   * Generation is split from submission so a test can build several calls
+   * against the *same* on-chain state snapshot before any of them is applied.
+   *
+   * @param options - Circuit, deployment, contract spec and state snapshot.
+   * @returns A handle to pass to {@link sendCustomContractCall}.
+   */
+  async generateCustomContractCall(options: {
+    circuitId: string;
+    deploymentResult: DeployContractResult;
+    contract: CustomContractSpec;
+    onchainStateFile: string;
+    label: string;
+    callArgs?: string[];
+    fundingSeed?: string;
+  }): Promise<CustomContractCall> {
+    this.assertCustomContractMounted();
+
+    const {
+      circuitId,
+      deploymentResult,
+      contract,
+      onchainStateFile,
+      label,
+      callArgs = [],
+      fundingSeed,
+    } = options;
+
+    const contractAddress = deploymentResult['contract-address-untagged'];
+    if (!contractAddress) {
+      throw new Error('Deployment result is missing contract-address-untagged');
+    }
+
+    const prefix = this.customFilePrefix(contract);
+    const intentFile = `/out/${prefix}_${label}_intent.mn`;
+    const zswapStateFile = `/out/${prefix}_${label}_zswap.state`;
+    const txFileName = `${prefix}_${label}_tx.mn`;
+
+    await this.execToolkit(
+      [
+        TOOLKIT_BIN,
+        'generate-intent',
+        'circuit',
+        '--src-url',
+        this.getRpcUrl(),
+        '--toolkit-js-path',
+        TOOLKIT_JS_PATH,
+        '--config',
+        this.customConfigPath(contract),
+        '--contract-address',
+        contractAddress,
+        '--coin-public',
+        deploymentResult['coin-public'],
+        '--network',
+        env.getNetworkId().toLowerCase(),
+        '--input-onchain-state',
+        onchainStateFile,
+        '--input-private-state',
+        this.customPrivateStateFilePath(contract),
+        '--output-intent',
+        intentFile,
+        // Every call reads the deploy-time private state and writes its own
+        // successor, which nothing then consumes — the private-state chain is
+        // deliberately not carried forward. That is only sound for a contract
+        // with vacant witnesses, like the fixtures this path currently drives;
+        // a contract with real witness state would need the output of one call
+        // fed in as the input of the next.
+        '--output-private-state',
+        `/out/${prefix}_${label}_priv.state`,
+        '--output-zswap-state',
+        zswapStateFile,
+        circuitId,
+        ...callArgs,
+      ],
+      `custom contract circuit intent generation failed (${label})`,
+    );
+
+    await this.execToolkit(
+      [
+        ...this.buildCustomContractTxBase(`/out/${txFileName}`, contract),
+        '--intent-file',
+        intentFile,
+        '--zswap-state-file',
+        zswapStateFile,
+        ...(fundingSeed != null && fundingSeed !== '' ? ['--funding-seed', fundingSeed] : []),
+      ],
+      `custom contract call tx generation failed (${label})`,
+    );
+
+    this.assertOutputFile(txFileName, `custom contract call (${label})`);
+
+    return { label, txFileName };
+  }
+
+  /**
+   * Submit a call previously built by {@link generateCustomContractCall}.
+   *
+   * @param call - Handle returned by {@link generateCustomContractCall}.
+   * @returns The transaction hash and block hash reported by the toolkit.
+   */
+  async sendCustomContractCall(call: CustomContractCall): Promise<ToolkitTransactionResult> {
+    const rawOutput = await this.sendGeneratedTx(call.txFileName);
+    const result = this.parseTransactionOutput(rawOutput);
+    await resolveBlockHash(result);
+    return result;
+  }
+
+  /**
+   * Decode a generated transaction with the toolkit's own deserializer.
+   *
+   * This is deliberately independent of the indexer: it is how a test confirms
+   * the fixture really produced the transcript shape it intended (for example a
+   * non-empty guaranteed transcript) before asserting anything about what the
+   * indexer reports.
+   *
+   * @param call - Handle returned by {@link generateCustomContractCall}.
+   * @returns The decoded transaction as text.
+   */
+  async showTransaction(call: CustomContractCall): Promise<string> {
+    const result = await this.execToolkit(
+      [TOOLKIT_BIN, 'show-transaction', '--src-file', `/out/${call.txFileName}`],
+      `show-transaction failed (${call.label})`,
+    );
+    return result.output;
+  }
+
+  /**
+   * True when the decoded transaction carries a non-empty guaranteed transcript,
+   * i.e. the ledger's partition algorithm kept a guaranteed prefix for the call.
+   *
+   * Throws when the field is absent altogether. A caller asserting "no
+   * guaranteed transcript" cannot tell a genuine `None` from output this
+   * function failed to understand, so an unrecognised shape has to be loud:
+   * silently returning `false` would let that assertion pass for the wrong
+   * reason.
+   *
+   * @param decodedTransaction - Output of {@link showTransaction}.
+   * @throws Error if the output carries no `guaranteed_transcript` field.
+   */
+  static hasGuaranteedTranscript(decodedTransaction: string): boolean {
+    // `Some()` is matched ahead of `Some(` so an empty transcript is not read as a present one.
+    const match = /guaranteed_transcript:\s*(None|Some\(\s*\)|Some\()/.exec(
+      stripAnsi(decodedTransaction),
+    );
+    if (!match) {
+      throw new Error(
+        'show-transaction output carries no guaranteed_transcript field. The toolkit output ' +
+          'format has changed; this check would otherwise report "no guaranteed transcript" ' +
+          'for every call.',
+      );
+    }
+    return match[1] === 'Some(';
+  }
+
+  /**
+   * Fail early when the toolkit image cannot execute a contract compiled
+   * against `requiredRuntime`.
+   *
+   * How sharp this can be depends on whether the image's dispatch rule is
+   * known. Toolkit 2.x selects a `compact-<version>/` workspace from
+   * `COMPACTC_VERSION`, which {@link ToolkitConfig.compactcVersion} sets, so
+   * when a matching workspace exists it is authoritative and its runtime is
+   * compared directly. Toolkit 1.x instead keys its variants on the ledger
+   * version (`/toolkit-js/v8`) and resolves them internally; that rule is not
+   * modelled here, so the check falls back to presence — fail only when no
+   * tree in the image carries the runtime at all.
+   *
+   * Being wrong in the permissive direction is deliberate: a false failure
+   * blocks a working configuration, while a missed one still surfaces as
+   * `Version mismatch: compiled code expects X, runtime is Y` on the first
+   * call.
+   *
+   * @param requiredRuntime - Runtime version the compiled contract declares.
+   * @throws Error if the image cannot supply `requiredRuntime`.
+   */
+  async assertCompactRuntimeSupported(requiredRuntime: string): Promise<void> {
+    const { output } = await this.execToolkit(
+      ['sh', '-c', TOOLKIT_JS_RUNTIME_PROBE],
+      'probing the toolkit-js compact runtimes failed',
+    );
+
+    const found = [...stripAnsi(output).matchAll(/^(\S+)\s+"version":\s*"([^"]+)"/gm)].map(
+      ([, path, version]) => ({
+        version,
+        tree: TOOLKIT_JS_TREE.exec(path)?.[1] ?? 'root',
+        variant: TOOLKIT_JS_VARIANT.exec(path)?.[1],
+      }),
+    );
+
+    if (found.length === 0) {
+      log.warn(
+        `Toolkit image ${this.config.nodeToolkitTag} exposes no compact-runtime package; ` +
+          `cannot verify that it can run a contract built for runtime ${requiredRuntime}`,
+      );
+      return;
+    }
+
+    const inventory = found.map((entry) => `${entry.tree}=${entry.version}`).join(', ');
+
+    // Variant directories are named inconsistently across releases —
+    // `compact-0.30` on 2.0.x, `compact-0.30.0` on 2.1.x — so match on the
+    // minor version, which is what the runtime line is keyed by.
+    const minor = (version: string) => version.split('.').slice(0, 2).join('.');
+    const selected = this.config.compactcVersion
+      ? found.find(
+          (entry) => entry.variant && minor(entry.variant) === minor(this.config.compactcVersion!),
+        )
+      : undefined;
+
+    if (selected) {
+      if (selected.version === requiredRuntime) {
+        log.debug(`Toolkit image resolves compact-runtime ${selected.version} (${selected.tree})`);
+        return;
+      }
+      throw new Error(
+        `Toolkit image ${this.config.nodeToolkitTag} selects ${selected.tree} for ` +
+          `COMPACTC_VERSION=${this.config.compactcVersion}, which provides compact-runtime ` +
+          `${selected.version}, but the contract was compiled for ${requiredRuntime}. ` +
+          `Runtimes in the image: ${inventory}. Set COMPACT_COMPILER_VERSION to a compactc ` +
+          'release whose variant provides the required runtime.',
+      );
+    }
+
+    if (found.some((entry) => entry.version === requiredRuntime)) {
+      log.debug(`Toolkit image carries compact-runtime ${requiredRuntime} (${inventory})`);
+      return;
+    }
+
+    throw new Error(
+      `Toolkit image ${this.config.nodeToolkitTag} carries no compact-runtime ${requiredRuntime}, ` +
+        `which the contract was compiled for. Runtimes in the image: ${inventory}. ` +
+        'Set COMPACT_COMPILER_VERSION to a compactc release targeting one of those, or use a ' +
+        'toolkit image that carries this runtime.',
+    );
+  }
+
+  private assertCustomContractMounted(): void {
+    if (!this.config.customContractDir) {
+      throw new Error(
+        'ToolkitWrapper was constructed without customContractDir; ' +
+          'custom-contract commands need the compiled contract mounted into the toolkit-js tree.',
+      );
+    }
+  }
+
+  /**
+   * A filename prefix unique to one contract, derived from its config file, so
+   * files two contracts write under `/out` never collide.
+   */
+  private customFilePrefix(contract: CustomContractSpec): string {
+    return contract.configFile.replace(/\.config\.ts$/, '').replace(/[^A-Za-z0-9_-]/g, '_');
+  }
+
+  private customPrivateStateFile(contract: CustomContractSpec): string {
+    return `${this.customFilePrefix(contract)}_private.state`;
+  }
+
+  private customPrivateStateFilePath(contract: CustomContractSpec): string {
+    return `/out/${this.customPrivateStateFile(contract)}`;
+  }
+
+  /**
+   * The config file must be addressed *inside* the toolkit-js tree: it imports
+   * `@midnight-ntwrk/compact-js`, which only resolves from toolkit-js' own
+   * node_modules.
+   */
+  private customConfigPath(contract: CustomContractSpec): string {
+    return `${CUSTOM_CONTRACT_MOUNT}/${contract.configFile}`;
+  }
+
+  private buildCustomContractTxBase(destFile: string, contract: CustomContractSpec): string[] {
+    return [
+      TOOLKIT_BIN,
+      'generate-txs',
+      '--src-url',
+      this.getRpcUrl(),
+      '--dest-file',
+      destFile,
+      CONTRACT_CUSTOM,
+      '--compiled-contract-dir',
+      `${CUSTOM_CONTRACT_MOUNT}/${contract.managedDir ?? DEFAULT_MANAGED_DIR}`,
+    ];
+  }
+
+  private assertOutputFile(fileName: string, context: string): void {
+    const hostPath = join(this.config.targetDir!, fileName);
+    if (!fs.existsSync(hostPath)) {
+      throw new Error(`${context} did not produce expected output file: ${fileName}`);
+    }
   }
 }
 
