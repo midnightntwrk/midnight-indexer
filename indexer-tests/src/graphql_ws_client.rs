@@ -98,10 +98,8 @@ pub async fn subscribe_raw(
         .await
         .context("send subscribe message")?;
 
-    // The write half is carried alongside the read half rather than dropped here: a
-    // `ping` has to be answered with a `pong`, and a dropped sink cannot answer. A
-    // `None` next-state ends the stream, so an error is terminal, as it was when this
-    // was a `try_filter_map`.
+    // The state carries the write half so a `ping` can be answered with a `pong`. An error
+    // is yielded with a `None` next-state, which ends the stream after that item.
     let messages = unfold(Some((read, write)), |state| async move {
         let (mut read, mut write) = state?;
 
