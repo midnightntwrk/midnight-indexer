@@ -13,7 +13,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import log from '@utils/logging/logger';
 import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
@@ -44,57 +43,11 @@ function isEpochSpanRejection(response: GraphQLResponse<unknown>): boolean {
 }
 
 /**
- * Whether the deployed indexer enforces the epoch-span cap. Deployed builds are
- * not homogeneous: the guard landed in 4.3.800/4.3.300, so an environment on an
- * earlier build has no cap to assert on. Probing once keeps the assertions
- * honest instead of failing on envs that legitimately lack the surface.
+ * The rejection cases are deliberately never skipped: every line carrying this
+ * suite also carries the guard, so a target that accepts an over-cap span is a
+ * regression of the fix and must fail the run rather than pass it silently.
  */
-let capEnforced: boolean | undefined;
-
-/**
- * Skip a cap assertion when the target indexer has no cap to assert on, passing
- * the measured span as the skip note so the reason shows up in the test report
- * rather than only in the logs. Returns true when the caller should stop.
- */
-function capNotEnforced(ctx: TestContext): boolean {
-  if (capEnforced) return false;
-
-  ctx.skip(
-    true,
-    `target indexer does not enforce the ${MAX_EPOCH_SPAN}-epoch span cap ` +
-      `(a span of ${OVER_CAP_TO_EPOCH} epochs was accepted)`,
-  );
-  return true;
-}
-
 describe('SPO epoch series queries', () => {
-  beforeAll(async () => {
-    const response = await httpClient.getRegisteredTotalsSeries(0, OVER_CAP_TO_EPOCH);
-
-    if (isEpochSpanRejection(response)) {
-      capEnforced = true;
-      return;
-    }
-
-    // Any other error means the probe never measured the cap: the surface is
-    // missing, the request was rejected upstream, or the query itself is wrong.
-    // Treating that as "no cap" would silently skip every rejection case, so
-    // fail the suite instead of reporting a green run that asserted nothing.
-    const errors = response.errors ?? [];
-    if (errors.length > 0) {
-      throw new Error(
-        `Epoch-span probe failed for an unrelated reason, so the cap could not be ` +
-          `determined: ${errors.map((error) => error.message).join('; ')}`,
-      );
-    }
-
-    capEnforced = false;
-    log.warn(
-      `Epoch-span cap not enforced by the target indexer: a span of ${OVER_CAP_TO_EPOCH} ` +
-        `epochs was not rejected. Cap assertions will be skipped.`,
-    );
-  });
-
   describe('a registered totals series query with an epoch span within the maximum', () => {
     /**
      * A single-epoch range is the narrowest valid span and must be served.
@@ -150,13 +103,12 @@ describe('SPO epoch series queries', () => {
     /**
      * One epoch beyond the cap is the tightest rejection case and pins the boundary.
      *
-     * @given an indexer that enforces the epoch-span cap
+     * @given an indexer carrying the epoch-span cap
      * @when registered totals are requested for a span of 10001 epochs
      * @then the query is rejected as a client error naming the exceeded maximum
      */
     test('should reject a range one epoch beyond the maximum span', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Query', 'Spo', 'Epoch', 'Negative'] };
-      if (capNotEnforced(ctx)) return;
 
       const response = await httpClient.getRegisteredTotalsSeries(0, OVER_CAP_TO_EPOCH);
 
@@ -168,13 +120,12 @@ describe('SPO epoch series queries', () => {
      * The guard measures an absolute width, so a descending range must be rejected
      * on the same basis as an ascending one.
      *
-     * @given an indexer that enforces the epoch-span cap
+     * @given an indexer carrying the epoch-span cap
      * @when registered totals are requested with the from epoch above the to epoch, spanning 10001 epochs
      * @then the query is rejected, because the span is measured regardless of argument order
      */
     test('should reject a reversed range whose span exceeds the maximum', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Query', 'Spo', 'Epoch', 'Negative'] };
-      if (capNotEnforced(ctx)) return;
 
       const response = await httpClient.getRegisteredTotalsSeries(OVER_CAP_TO_EPOCH, 0);
 
@@ -185,14 +136,13 @@ describe('SPO epoch series queries', () => {
     /**
      * A span well past the cap must be refused outright rather than partially served.
      *
-     * @given an indexer that enforces the epoch-span cap
+     * @given an indexer carrying the epoch-span cap
      * @when registered totals are requested for a span of 20000 epochs
      * @then the query is rejected and no partial series is returned, which
      *       toBeError covers by requiring a null data payload alongside the error
      */
     test('should reject a range far beyond the maximum span without returning data', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Query', 'Spo', 'Epoch', 'Negative'] };
-      if (capNotEnforced(ctx)) return;
 
       const response = await httpClient.getRegisteredTotalsSeries(0, WIDE_OVER_CAP_TO_EPOCH);
 
@@ -205,13 +155,12 @@ describe('SPO epoch series queries', () => {
     /**
      * The cap guards every series resolver, not only the totals one.
      *
-     * @given an indexer that enforces the epoch-span cap
+     * @given an indexer carrying the epoch-span cap
      * @when registered SPO statistics are requested for a span of 10001 epochs
      * @then the query is rejected as a client error naming the exceeded maximum
      */
     test('should reject a range beyond the maximum span', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Query', 'Spo', 'Epoch', 'Negative'] };
-      if (capNotEnforced(ctx)) return;
 
       const response = await httpClient.getRegisteredSpoSeries(0, OVER_CAP_TO_EPOCH);
 
@@ -241,13 +190,12 @@ describe('SPO epoch series queries', () => {
      * The presence resolver expands per epoch as the series resolvers do, so it
      * carries the same cap.
      *
-     * @given an indexer that enforces the epoch-span cap
+     * @given an indexer carrying the epoch-span cap
      * @when raw presence events are requested for a span of 10001 epochs
      * @then the query is rejected as a client error naming the exceeded maximum
      */
     test('should reject a range beyond the maximum span', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Query', 'Spo', 'Epoch', 'Negative'] };
-      if (capNotEnforced(ctx)) return;
 
       const response = await httpClient.getRegisteredPresence(0, OVER_CAP_TO_EPOCH);
 
