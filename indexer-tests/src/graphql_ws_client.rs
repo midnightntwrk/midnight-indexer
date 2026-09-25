@@ -20,7 +20,6 @@ use futures::{
 use graphql_client::{GraphQLQuery, QueryBody};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::sync::LazyLock;
 use tokio::net::TcpStream;
 use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream, connect_async,
@@ -31,19 +30,8 @@ type WsWrite = SplitSink<WsStream, Message>;
 type WsRead = SplitStream<WsStream>;
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
-static CONNECTION_INIT: LazyLock<String> = LazyLock::new(|| {
-    json!({
-        "type": "connection_init",
-    })
-    .to_string()
-});
-
-static PONG: LazyLock<String> = LazyLock::new(|| {
-    json!({
-        "type": "pong",
-    })
-    .to_string()
-});
+const CONNECTION_INIT: &str = r#"{"type":"connection_init"}"#;
+const PONG: &str = r#"{"type":"pong"}"#;
 
 /// Subscribe to the given GraphQL Websocket URL (typically ending with /graphql/ws) and
 /// query variables.
@@ -178,7 +166,7 @@ pub async fn subscribe_raw(
                 ServerMessage::Error { payload } => return Some((Err(anyhow!(payload)), None)),
 
                 ServerMessage::Ping => {
-                    if let Err(error) = write.send(Message::text(&*PONG)).await {
+                    if let Err(error) = write.send(Message::text(PONG)).await {
                         return Some((Err(anyhow!(error).context("send pong")), None));
                     }
                 }
@@ -248,7 +236,7 @@ async fn connect_graphql_ws(url: &str) -> anyhow::Result<WsStream> {
 pub async fn init_graphql_ws(write: &mut WsWrite, read: &mut WsRead) -> anyhow::Result<()> {
     // Send the connection_init message.
     write
-        .send(Message::text(&*CONNECTION_INIT))
+        .send(Message::text(CONNECTION_INIT))
         .await
         .context("send connection_init")?;
 
