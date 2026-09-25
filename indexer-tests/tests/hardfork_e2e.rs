@@ -1206,9 +1206,9 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
     // The registration funds itself from the retroactive DUST its
     // now-generationless NIGHT accrued -- the same path a real holder takes.
     //
-    // NOT a hard assertion, because it exercises the *toolkit*, not the indexer,
-    // and the toolkit is flaky here: replaying a wallet from genesis across the
-    // boundary panics in the ledger arena roughly half the time --
+    // The one tolerated failure is a toolkit panic: replaying a wallet from
+    // genesis across the boundary panics in the ledger arena roughly half the
+    // time --
     //
     //   thread 'main' panicked at storage-core/src/arena.rs:
     //   root should be in the arena (T=...MerklePatriciaTrie<(Sp<Utxo>, Sp<UtxoMeta>),
@@ -1269,18 +1269,15 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
             println!("[9] post-fork ledger-9 transaction submitted");
             true
         }
-        Err(error) => {
-            let panicked = format!("{error:#}").contains("root should be in the arena");
+        Err(error) if format!("{error:#}").contains("root should be in the arena") => {
             println!(
-                "[9] WARNING: post-fork toolkit traffic failed{}; continuing. Cause:\n{error:#}",
-                if panicked {
-                    " (known toolkit cross-fork wallet-replay panic)"
-                } else {
-                    ""
-                }
+                "[9] WARNING: post-fork toolkit traffic hit the known toolkit cross-fork \
+                 wallet-replay panic; continuing. Cause:\n{error:#}"
             );
             false
         }
+
+        Err(error) => return Err(error.context("post-fork toolkit traffic")),
     };
 
     // Whatever the toolkit managed, give the indexer a few more blocks so step 10
