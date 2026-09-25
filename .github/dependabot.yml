@@ -19,7 +19,10 @@ updates:
   - package-ecosystem: "github-actions"
     labels:
       - "bot:github-actions"
-    directory: "/"
+    # "/" covers .github/workflows only; composite actions need listing.
+    directories:
+      - "/"
+      - "/.github/actions/*"
     schedule:
       interval: "weekly"
     cooldown:

@@ -19,11 +19,6 @@ on:
           - qanet
           - preview
           - preprod
-      publish_to_xray:
-        type: boolean
-        description: Publish the test results to Xray
-        required: false
-        default: false
       ref:
         type: string
         description: Git ref
@@ -55,11 +50,6 @@ on:
         type: string
         description: Git ref
         required: false
-      publish_to_xray:
-        type: boolean
-        description: Publish the test results to Xray
-        required: false
-        default: false
       node_tag:
         type: string
         description: Node tag
@@ -93,21 +83,14 @@ on:
         required: false
       APP__INFRA__PUB_SUB__PASSWORD:
         required: false
-      APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD:
-        required: false
-      XRAY_CLIENT_ID:
-        required: false
-      XRAY_CLIENT_SECRET:
-        required: false
 
 concurrency:
   group: ${{github.workflow}}-${{github.head_ref || github.run_id}}
   cancel-in-progress: true
 
 # A thin wrapper around .github/actions/qa-integration-tests. The steps live in
-# a composite so build-indexer-images can run the same suite as an ordinary
-# `continue-on-error` job - which a job with `uses:` cannot be - instead of
-# chaining a second workflow off a workflow_run trigger.
+# a composite so build-indexer-images can run the same suite in the job that
+# derives the tags, instead of chaining a second workflow off workflow_run.
 jobs:
   basic-integration-tests:
     name: Execute basic integration tests
@@ -118,6 +101,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
 
       - uses: ./.github/actions/qa-integration-tests
         with:
@@ -126,10 +110,7 @@ jobs:
           indexer_tag: ${{ inputs.indexer_tag }}
           node_toolkit_tag: ${{ inputs.node_toolkit_tag }}
           image_registry: ${{ inputs.image_registry }}
-          publish_to_xray: ${{ inputs.publish_to_xray }}
           packages_read_token: ${{ secrets.MIDNIGHTCI_PACKAGES_READ }}
           app_infra_secret: ${{ secrets.APP__INFRA__SECRET }}
           storage_password: ${{ secrets.APP__INFRA__STORAGE__PASSWORD }}
           pub_sub_password: ${{ secrets.APP__INFRA__PUB_SUB__PASSWORD }}
-          xray_client_id: ${{ secrets.XRAY_CLIENT_ID }}
-          xray_client_secret: ${{ secrets.XRAY_CLIENT_SECRET }}

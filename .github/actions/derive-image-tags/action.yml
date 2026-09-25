@@ -88,6 +88,10 @@ runs:
         fi
         emit indexer_tag "$indexer_tag"
 
+        # The newest supported node, as ci-cloud's e2e pre-pull takes it. The QA
+        # harness defaults to the second line instead (_lib.sh resolve_node_tag,
+        # model.ts readSupportedNodeVersion) - so qa-integration-tests forwards
+        # this tag to the test process rather than letting that default apply.
         if [ -n "$NODE_TAG_INPUT" ]; then
           node_tag="$NODE_TAG_INPUT"
         else

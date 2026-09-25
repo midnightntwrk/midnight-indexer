@@ -10,11 +10,6 @@ permissions:
 on:
   workflow_dispatch:
     inputs:
-      publish_to_xray:
-        type: boolean
-        description: Publish the test results to Xray
-        required: false
-        default: false
       node_tag:
         type: string
         description: Node tag
@@ -25,6 +20,13 @@ on:
         description: Indexer tag
         required: false
         default: latest
+      image_registry:
+        type: string
+        description: >-
+          Indexer image registry. Leave empty for Docker Hub (release tags only);
+          per-commit main builds (<version>-<sha8>) are on ghcr.io/midnight-ntwrk.
+        required: false
+        default: ""
 
 jobs:
   test:
@@ -33,14 +35,11 @@ jobs:
     with:
       target_env: undeployed
       ref: main
-      publish_to_xray: ${{ inputs.publish_to_xray }}
       node_tag: ${{ inputs.node_tag }}
       indexer_tag: ${{ inputs.indexer_tag }}
+      image_registry: ${{ inputs.image_registry }}
     secrets:
       MIDNIGHTCI_PACKAGES_READ: ${{ secrets.MIDNIGHTCI_PACKAGES_READ }}
       APP__INFRA__SECRET: ${{ secrets.APP__INFRA__SECRET }}
       APP__INFRA__STORAGE__PASSWORD: ${{ secrets.APP__INFRA__STORAGE__PASSWORD }}
       APP__INFRA__PUB_SUB__PASSWORD: ${{ secrets.APP__INFRA__PUB_SUB__PASSWORD }}
-      APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD: ${{ secrets.APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD }}
-      XRAY_CLIENT_ID: ${{ secrets.XRAY_CLIENT_ID }}
-      XRAY_CLIENT_SECRET: ${{ secrets.XRAY_CLIENT_SECRET }}

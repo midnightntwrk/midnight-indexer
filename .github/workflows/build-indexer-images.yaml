@@ -325,10 +325,13 @@ jobs:
     # Tag builds have their own release verification flow.
     if: github.ref_type != 'tag'
     runs-on: ubuntu-latest
-    # Legal here in a way it is not on a job with `uses:`, which is the whole
-    # reason this used to be a separate workflow_run-triggered workflow: a
-    # failing QA suite must never red the image pipeline.
-    continue-on-error: true
+    # No continue-on-error: a QA failure reds this run, as it used to red the
+    # separate workflow_run-triggered one. Nothing waits on this job - the
+    # images are already pushed and merge-manifests runs alongside - so red
+    # costs a signal, not a release.
+    # Measured 2-6 min on main; the cap stops a hang holding the repo-wide
+    # concurrency group (and every later main push) for the 6h default.
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: read
@@ -352,14 +355,14 @@ jobs:
           indexer_tag: ${{ steps.tags.outputs.indexer_tag }}-amd64
           node_tag: ${{ steps.tags.outputs.node_tag }}
           node_toolkit_tag: ${{ steps.tags.outputs.node_toolkit_tag }}
-          # Must match `Set image registry` in build-and-push: Docker Hub
-          # (midnightntwrk) only receives release-tag builds, so the per-commit
-          # <version>-<sha8> images this job tests exist on GHCR alone. This job
-          # never runs for a tag ref, so the registry is unconditional here.
+          # Must match `Set image registry` in docker-compose-validation: Docker
+          # Hub (midnightntwrk) only receives release-tag builds, so the
+          # per-commit <version>-<sha8> images this job tests exist on GHCR
+          # alone. This job never runs for a tag ref, so the registry is
+          # unconditional here.
           # midnight-ntwrk is the legacy GHCR org that build-and-push still
           # dual-publishes to; switch to midnightntwrk once it stops.
           image_registry: ghcr.io/midnight-ntwrk
-          publish_to_xray: "false"
           packages_read_token: ${{ secrets.MIDNIGHTCI_PACKAGES_READ }}
           app_infra_secret: ${{ secrets.APP__INFRA__SECRET }}
           storage_password: ${{ secrets.APP__INFRA__STORAGE__PASSWORD }}

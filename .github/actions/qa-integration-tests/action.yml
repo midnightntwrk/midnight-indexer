@@ -3,10 +3,10 @@ description: >-
   Run the QA smoke and integration suites against a target environment, standing
   a local docker-compose stack up first when the target is `undeployed`.
 
-  A composite rather than a reusable workflow because a job with `uses:` cannot
-  carry `continue-on-error`, which is what forced the QA run into a separate
-  workflow_run-triggered workflow. Callers that want their own workflow run wrap
-  this in qa-integration-tests-base-workflow.yml.
+  A composite rather than a reusable workflow so build-indexer-images can run it
+  in the same job that derives the tags, instead of chaining a second workflow
+  off workflow_run (zizmor: dangerous-triggers, high). Callers that want their
+  own workflow run wrap this in qa-integration-tests-base-workflow.yml.
 
 inputs:
   target_env:
@@ -31,10 +31,6 @@ inputs:
       GHCR only, so callers testing those images must set this explicitly.
     required: false
     default: ""
-  publish_to_xray:
-    description: Publish the test results to Xray
-    required: false
-    default: "false"
   packages_read_token:
     description: Token with read access to the GHCR packages and the npm registry
     required: true
@@ -48,14 +44,6 @@ inputs:
     default: ""
   pub_sub_password:
     description: APP__INFRA__PUB_SUB__PASSWORD for the local stack (undeployed only)
-    required: false
-    default: ""
-  xray_client_id:
-    description: Xray client id (only read when publish_to_xray is true)
-    required: false
-    default: ""
-  xray_client_secret:
-    description: Xray client secret (only read when publish_to_xray is true)
     required: false
     default: ""
 
@@ -143,6 +131,12 @@ runs:
         NODE_AUTH_TOKEN: ${{ inputs.packages_read_token }}
       run: bun install --frozen-lockfile
 
+    # The test process reads NODE_TAG / NODE_TOOLKIT_TAG too (environment/model.ts,
+    # toolkit-wrapper.ts). Unset, they fall back to the second NODE_VERSIONS line
+    # and `latest-main` - not the node the stack above runs, and the toolkit/node
+    # skew behind the IncompatibleCodegen failure in tests/e2e/README.md. The
+    # toolkit pairing mirrors startup-localenv-with-data.sh. Deployed targets get
+    # "", which the test process reads as unset.
     - name: Run smoke tests
       shell: bash
       working-directory: qa/tests
@@ -151,10 +145,8 @@ runs:
         GITHUB_TOKEN: ${{ inputs.packages_read_token }}
         NODE_AUTH_TOKEN: ${{ inputs.packages_read_token }}
         LOG_LEVEL: DEBUG
-        XRAY_COMPONENT: indexer
-        XRAY_PROJECT_KEY: PM
-        XRAY_TEST_PLAN_KEY: PM-19197
-        XRAY_REPORT_TESTS_MISSING_METADATA: "false"
+        NODE_TAG: ${{ inputs.target_env == 'undeployed' && inputs.node_tag || '' }}
+        NODE_TOOLKIT_TAG: ${{ inputs.target_env == 'undeployed' && (inputs.node_toolkit_tag || inputs.node_tag) || '' }}
       run: bun run test smoke
 
     - name: Run integration tests
@@ -165,10 +157,8 @@ runs:
         GITHUB_TOKEN: ${{ inputs.packages_read_token }}
         NODE_AUTH_TOKEN: ${{ inputs.packages_read_token }}
         LOG_LEVEL: DEBUG
-        XRAY_COMPONENT: indexer
-        XRAY_PROJECT_KEY: PM
-        XRAY_TEST_PLAN_KEY: PM-19197
-        XRAY_REPORT_TESTS_MISSING_METADATA: "false"
+        NODE_TAG: ${{ inputs.target_env == 'undeployed' && inputs.node_tag || '' }}
+        NODE_TOOLKIT_TAG: ${{ inputs.target_env == 'undeployed' && (inputs.node_toolkit_tag || inputs.node_tag) || '' }}
       run: bun run test integration
 
     - name: Generate API coverage report (non-blocking)
@@ -181,28 +171,12 @@ runs:
       # take. Same effect: a coverage-tooling failure never reds the suite.
       run: bun run coverage:generate --target-env="$TARGET_ENV" --indexer-api-version=v4 || true
 
-    - name: Publish to Xray
-      if: always() && inputs.publish_to_xray == 'true'
-      uses: GiuseppeSalvatoreShielded/TestActions/xray-upload@e5cf0c100e61b96f5bc73963312fc8064d7b2d2d
-      with:
-        test_results_path: ./qa/tests/reports/xray/test-results.json
-        xray_client_id: ${{ inputs.xray_client_id }}
-        xray_client_secret: ${{ inputs.xray_client_secret }}
-
     - name: Upload Integration Test Reports
       if: always()
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: junit-integration-test-reports-${{ inputs.target_env }}
         path: ./qa/tests/reports/custom-junit-report.xml
-        if-no-files-found: warn
-
-    - name: Upload XRay Test Reports
-      if: always()
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-      with:
-        name: xray-integration-test-reports-${{ inputs.target_env }}
-        path: ./qa/tests/reports/xray/test-results.json
         if-no-files-found: warn
 
     - name: Upload logs
