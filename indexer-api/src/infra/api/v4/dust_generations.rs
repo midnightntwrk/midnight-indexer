@@ -96,3 +96,14 @@ impl DustGenerations {
         }
     }
 }
+
+/// The effective freshness policy for `dustGenerations` snapshots, reflecting this deployment's
+/// runtime configuration rather than a compiled-in default.
+#[derive(Debug, Clone, Copy, SimpleObject)]
+pub struct DustGenerationsSnapshotPolicy {
+    /// Maximum age, in blocks, of a snapshot `blockHash` relative to the latest indexed block. A
+    /// `dustGenerations` subscription whose block is more than this many blocks below the tip is
+    /// rejected with a re-subscribe hint. The tip advances continuously, so treat this as an upper
+    /// bound and leave headroom for indexing lag when choosing a block.
+    pub max_age_blocks: u32,
+}

@@ -579,3 +579,76 @@ async fn resolve_height<S: Storage>(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// Build a full [`SubscriptionConfig`] mirroring `indexer-api/config.yaml`. When
+    /// `max_snapshot_age` is `None`, the `dust_generations` section omits the key so the serde
+    /// default (500) applies; otherwise it is set to the given override.
+    fn subscription_config(max_snapshot_age: Option<u32>) -> SubscriptionConfig {
+        let mut dust_generations = json!({ "batch_size": 20 });
+        if let Some(max_snapshot_age) = max_snapshot_age {
+            dust_generations["max_snapshot_age"] = json!(max_snapshot_age);
+        }
+
+        serde_json::from_value(json!({
+            "blocks": { "batch_size": 20 },
+            "contract_actions": { "batch_size": 20 },
+            "contract_events": { "batch_size": 20 },
+            "dust_generations": dust_generations,
+            "dust_ledger_events": { "batch_size": 20 },
+            "dust_nullifier_transactions": { "batch_size": 20 },
+            "shielded_nullifier_transactions": { "batch_size": 20 },
+            "shielded_transactions": {
+                "batch_size": 20,
+                "progress_update_interval": "30s",
+                "keep_wallet_alive_interval": "10m",
+            },
+            "unshielded_transactions": {
+                "batch_size": 20,
+                "progress_update_interval": "30s",
+            },
+            "zswap_ledger_events": { "batch_size": 20 },
+            "progress_cache": { "max_capacity": 10000, "time_to_live": "5s" },
+        }))
+        .expect("subscription config can be deserialized")
+    }
+
+    /// Execute the `dustGenerationsSnapshotPolicy` query against a schema carrying `config` and
+    /// return the reported `maxAgeBlocks`.
+    async fn query_max_age_blocks(config: SubscriptionConfig) -> u64 {
+        let schema = schema_builder::<NoopStorage, NoopSubscriber>()
+            .data(config)
+            .finish();
+
+        let response = schema
+            .execute("{ dustGenerationsSnapshotPolicy { maxAgeBlocks } }")
+            .await;
+        assert!(response.errors.is_empty(), "{:?}", response.errors);
+
+        response
+            .data
+            .into_json()
+            .expect("response data is JSON")["dustGenerationsSnapshotPolicy"]["maxAgeBlocks"]
+            .as_u64()
+            .expect("maxAgeBlocks is an integer")
+    }
+
+    #[tokio::test]
+    async fn dust_generations_snapshot_policy_reflects_default() {
+        // No override configured, so the compiled-in default (500) is exposed.
+        assert_eq!(query_max_age_blocks(subscription_config(None)).await, 500);
+    }
+
+    #[tokio::test]
+    async fn dust_generations_snapshot_policy_reflects_override() {
+        // A runtime override must be reflected, proving the field is not a hardcoded constant.
+        assert_eq!(
+            query_max_age_blocks(subscription_config(Some(123))).await,
+            123
+        );
+    }
+}
