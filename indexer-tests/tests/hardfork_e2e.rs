@@ -275,6 +275,24 @@ impl Harness {
             .context("no specVersion in response")
     }
 
+    /// Height of the node's best block.
+    async fn node_height(&self) -> anyhow::Result<u64> {
+        let response = reqwest::Client::new()
+            .post(&self.node_rpc)
+            .json(&json!({"id": 1, "jsonrpc": "2.0", "method": "chain_getHeader"}))
+            .send()
+            .await
+            .context("chain_getHeader")?
+            .json::<Value>()
+            .await
+            .context("decode header")?;
+        let number = response["result"]["number"]
+            .as_str()
+            .context("no number in header")?;
+        u64::from_str_radix(number.trim_start_matches("0x"), 16)
+            .with_context(|| format!("parse block number {number}"))
+    }
+
     /// `dustGenerationEndIndex` at `height`, i.e. the ledger's dust generation
     /// tree `first_free` as the indexer reconstructed it.
     async fn generation_end_index(&self, height: u64) -> anyhow::Result<u64> {
@@ -749,6 +767,17 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
         "chain must start on a ledger-8 runtime, got spec_version {pre_fork_spec}"
     );
     println!("[3] node up on ledger-8 spec_version {pre_fork_spec}");
+
+    // spo-indexer reads block 1's timestamp on startup and exits if the block does not exist yet,
+    // which takes the whole `indexer-standalone` process down with it.
+    wait_for("node block 1", Duration::from_secs(60), || async {
+        Ok(harness
+            .node_height()
+            .await
+            .ok()
+            .filter(|height| *height >= 1))
+    })
+    .await?;
 
     // --- 4. Attach the indexer and let it index the pre-fork chain ----------
     let api_port = free_port()?;
