@@ -732,44 +732,29 @@ async fn save_spent_unshielded_utxos(
 
     #[cfg(feature = "standalone")]
     {
-        let mut query = QueryBuilder::new(indoc! {"
-            WITH pairs(intent_hash, output_index) AS (
-        "});
+        // One indexed update per UTXO: SQLite plans a correlated EXISTS (or a
+        // row-value IN) as a full scan of unshielded_utxos, which took >1s per
+        // statement on large tables. Equality on (intent_hash, output_index)
+        // hits the UNIQUE index instead.
+        let query = indoc! {"
+            UPDATE unshielded_utxos
+            SET spending_transaction_id = $1
+            WHERE intent_hash = $2
+            AND output_index = $3
+            AND spending_transaction_id IS NULL
+        "};
 
-        let (first, rest) = utxos.split_first().unwrap(); // utxos is non-empty!
-        query
-            .push("SELECT ")
-            .push_bind(first.intent_hash.as_ref())
-            .push(", ")
-            .push_bind(first.output_index as i64);
-        for utxo in rest {
-            query
-                .push(" UNION ALL SELECT ")
-                .push_bind(utxo.intent_hash.as_ref())
-                .push(", ")
-                .push_bind(utxo.output_index as i64);
+        let mut affected = 0;
+        for utxo in utxos {
+            affected += sqlx::query(query)
+                .bind(transaction_id)
+                .bind(utxo.intent_hash.as_ref())
+                .bind(utxo.output_index as i64)
+                .execute(&mut **tx)
+                .await?
+                .rows_affected();
         }
-
-        rows_affected = query
-            .push(indoc! {"
-                )
-                UPDATE unshielded_utxos
-                SET spending_transaction_id =
-            "})
-            .push_bind(transaction_id)
-            .push(indoc! {"
-                WHERE EXISTS (
-                    SELECT 1
-                    FROM pairs
-                    WHERE intent_hash = unshielded_utxos.intent_hash
-                    AND output_index = unshielded_utxos.output_index
-                )
-                AND spending_transaction_id IS NULL
-            "})
-            .build()
-            .execute(&mut **tx)
-            .await?
-            .rows_affected();
+        rows_affected = affected;
     }
 
     if rows_affected != utxos.len() as u64 {
