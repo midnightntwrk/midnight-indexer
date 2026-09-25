@@ -292,6 +292,12 @@ Stack flavour by suite:
 
 > ℹ️ **`.node/<NODE_TAG>/` must exist** for the with-data flavour. Generate it
 > via `./generate_node_data.sh <NODE_TAG>` from the repo root if it isn't there.
+> The script needs `docker` and the `compact` CLI. For compactc versions with no
+> final release (e.g. `0.33.0-rc.2`, used for node `2.1.*`), it also needs an
+> authenticated `gh` and `unzip`. `COMPACTC_VERSION` overrides the compactc
+> version it picks. See
+> [Upgrading the node version](../../docs/updating-node-version.md#1-generate-and-add-node-metadata)
+> for details.
 
 ### Smoke and integration
 
