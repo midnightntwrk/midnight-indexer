@@ -53,10 +53,11 @@
 //! - `midnight-node:1.0.0` -- ledger-8 chain-spec source.
 //! - `midnight-node:2.1.0-rc.2` + matching toolkit -- the migration node.
 //!
-//! Ignored by default: it pulls/boots containers and takes a few minutes. Run it
-//! with
+//! Ignored by default: it pulls/boots containers and takes a few minutes. It runs
+//! the release build of `indexer-standalone`. Run it with
 //!
 //! ```text
+//! cargo build --release -p indexer-standalone --features standalone
 //! cargo nextest run -p indexer-tests --features standalone --run-ignored all hardfork
 //! ```
 
@@ -1357,7 +1358,7 @@ fn start_indexer(dir: &Path, node_rpc_port: u16, api_port: u16) -> anyhow::Resul
     let log = fs::File::create(dir.join("indexer.log")).context("create indexer log")?;
     let errors = log.try_clone().context("clone indexer log handle")?;
 
-    Command::new(format!("{target_dir}/debug/indexer-standalone"))
+    Command::new(format!("{target_dir}/release/indexer-standalone"))
         .env(
             "RUST_LOG",
             "indexer_standalone=info,chain_indexer=info,indexer_api=info,error",
@@ -1403,5 +1404,8 @@ fn start_indexer(dir: &Path, node_rpc_port: u16, api_port: u16) -> anyhow::Resul
         .stdout(Stdio::from(log))
         .stderr(Stdio::from(errors))
         .spawn()
-        .context("spawn indexer-standalone")
+        .context(
+            "spawn indexer-standalone; build it with `cargo build --release -p indexer-standalone \
+             --features standalone`",
+        )
 }
