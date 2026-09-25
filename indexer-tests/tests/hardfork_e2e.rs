@@ -1344,7 +1344,18 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
                  {post_fork_height}..={final_height}"
             );
         } else {
-            println!("[9b] post-fork unshielded outputs: {post_fork_created:?}");
+            println!("[9b] post-fork unshielded outputs:");
+            for (transaction_hash, outputs) in &post_fork_created {
+                let registered = outputs
+                    .iter()
+                    .filter(|output| output.registered_for_dust_generation)
+                    .count();
+                println!(
+                    "[9b]   {transaction_hash}: {} output(s), {registered} registered for DUST \
+                     generation",
+                    outputs.len()
+                );
+            }
         }
     } else {
         println!("[9b] no post-fork traffic landed, nothing to report");
