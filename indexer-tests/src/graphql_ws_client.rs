@@ -51,10 +51,8 @@ where
 
     let data = subscribe_raw(url, operation_name, query, variables).await?;
 
-    Ok(data.map(|data| {
-        data.and_then(|data| {
-            serde_json::from_value::<T::ResponseData>(data).context("deserialize response data")
-        })
+    Ok(data.and_then(|data| async move {
+        serde_json::from_value::<T::ResponseData>(data).context("deserialize response data")
     }))
 }
 
