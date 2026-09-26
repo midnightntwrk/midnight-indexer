@@ -100,7 +100,8 @@ The scanner creates:
   - `contractActionsFound` — Number of blocks with contract actions
   - `totalScanDurationSeconds` — Cumulative scan duration in seconds
   - `lastUpdated` — ISO timestamp of last update
-- `*.jsonc` — A number of jsonc files created from the templates which are needed as Indexer test data (when a test data folder path is provided)
+- `*.jsonc` — A number of jsonc files created from the templates which are needed as Indexer test data (when a test data folder path is provided):
+  - `unshielded-token-types.jsonc` — the unshielded token types the scanned range holds, so the custom unshielded token e2e suite can pick a token the funding wallet is able to spend. Every unshielded UTXO of the scan is grouped by token type and owner and kept when still unspent; NIGHT (the all-zero token type) is summarised only, since it is on every chain and dominates every scan. The entries are **candidates, not guarantees**: "unspent" is point-in-time, so a recorded UTXO can be spent right after the scan and holdings created outside the scanned range are not seen — consumers probe the live balance and skip when it is gone, and several candidates are recorded so a single spend does not disable a suite.
 
 ## Troubleshooting
 
