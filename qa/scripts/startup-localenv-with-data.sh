@@ -120,6 +120,7 @@ echo "Plase make sure all the services are running and healthy"
 clear_block_scanner_cache
 
 echo "Regenarating new test data... "
+ensure_block_scanner_deps
 pushd qa/tools/block-scanner
 bun run generate:data
 popd
