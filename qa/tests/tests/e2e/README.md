@@ -42,7 +42,7 @@ E2E tests should be executed:
 ```bash
 # Run only e2e tests (includes cache warmup)
 bash qa/scripts/startup-localenv-from-genesis.sh
-TARGET_ENV=undeployed yarn test:e2e
+TARGET_ENV=undeployed bun run test:e2e
 ```
 
 These tests require:
