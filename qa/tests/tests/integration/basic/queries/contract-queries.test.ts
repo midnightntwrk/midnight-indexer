@@ -17,11 +17,12 @@ import log from '@utils/logging/logger';
 import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
 import {
+  ContractBalanceSchema,
   ContractDeployActionSchema,
   ContractCallActionSchema,
   ContractUpdateActionSchema,
 } from '@utils/indexer/graphql/schema';
-import dataProvider from '@utils/testdata-provider';
+import dataProvider, { type TokenHoldingContractInfo } from '@utils/testdata-provider';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 
 const indexerHttpClient = new IndexerHttpClient();
@@ -106,6 +107,54 @@ describe('contract queries', () => {
         const response = await indexerHttpClient.getContractAction(malformedAddress);
 
         expect.soft(response).toBeError();
+      }
+    });
+
+    /**
+     * A contract known to hold unshielded tokens reports non-empty unshieldedBalances
+     *
+     * Regression test for #1245: unshieldedBalances silently returned an empty array for
+     * every contract from 3.0.0 to 4.3.3, which format-only assertions could not catch.
+     * Requires an indexer with the #1246 fix and repaired history (backfill or re-index);
+     * skipped on environments without configured token-holding contracts.
+     *
+     * @given we have contracts known to hold non-zero unshielded token balances
+     * @when we send a contract query for each of them
+     * @then unshieldedBalances is non-empty, well-formed, has positive amounts, and
+     *       contains the expected token type
+     */
+    test('should return non-empty unshieldedBalances for contracts known to hold tokens', async (ctx: TestContext) => {
+      let tokenHoldingContracts: TokenHoldingContractInfo[];
+      try {
+        tokenHoldingContracts = dataProvider.getTokenHoldingContracts();
+      } catch (error) {
+        log.warn(error);
+        ctx.skip?.(true, (error as Error).message);
+        return;
+      }
+      if (tokenHoldingContracts.length === 0) {
+        ctx.skip?.(true, 'no token-holding contracts configured for this environment');
+        return;
+      }
+
+      for (const contract of tokenHoldingContracts) {
+        const response = await indexerHttpClient.getContractAction(contract['contract-address']);
+
+        expect(response).toBeSuccess();
+        const balances = response.data?.contractAction?.unshieldedBalances;
+        expect(balances).toBeDefined();
+        expect(balances!.length).toBeGreaterThan(0);
+
+        for (const balance of balances!) {
+          expect(ContractBalanceSchema.safeParse(balance).success).toBe(true);
+          expect(BigInt(balance.amount)).toBeGreaterThan(0n);
+        }
+
+        if (contract['token-type'] !== undefined) {
+          expect(balances!.map((balance) => balance.tokenType.toLowerCase())).toContain(
+            contract['token-type'].toLowerCase(),
+          );
+        }
       }
     });
   });
