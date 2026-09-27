@@ -23,12 +23,20 @@ mkdir -p target/debug
 
 tree target/data
 
-export NODE_TAG=${NODE_TAG:-`cat NODE_VERSION`}
-if [ -n "$NODE_TOOLKIT_TAG" ]; then
+if [ -z "${NODE_TAG:-}" ]; then
+  NODE_TAG=$(resolve_node_tag) || exit 1
+  echo "NODE_TAG not set; using $NODE_TAG from the repo's node versions file"
+fi
+export NODE_TAG
+
+if [ -n "${NODE_TOOLKIT_TAG:-}" ]; then
   echo "Using explicit NODE_TOOLKIT_TAG: $NODE_TOOLKIT_TAG"
 else
-  export NODE_TOOLKIT_TAG=latest-main
-  echo "NODE_TOOLKIT_TAG not set; defaulting to 'latest-main'"
+  # The toolkit publishes a tag per node release, and a toolkit built for another
+  # node fails against this one with SubxtError(Metadata(IncompatibleCodegen)) —
+  # so pair it with the node, as the CI workflows do, rather than 'latest-main'.
+  export NODE_TOOLKIT_TAG="$NODE_TAG"
+  echo "NODE_TOOLKIT_TAG not set; pairing it with the node: $NODE_TOOLKIT_TAG"
 fi
 
 # Use the derived Docker Compose project name to create volume name
@@ -45,36 +53,7 @@ echo "Empty node data volume created successfully"
 echo "NOTE: Any docker-compose warning about 'volume already exists' is harmless and expected"
 echo "      We explicitly manage the node volume externally to ensure it exists before docker compose"
 
-# To workout the default indexer tag, find the latest 8-digit sha1 of the commit where
-# NODE_VERSION file was updated with the $NODE_TAG value
-if [ -z "${INDEXER_TAG:-}" ]; then
-    # Find the commit where NODE_VERSION was set to the current NODE_TAG
-    COMMIT_SHA=$(git log --all --format=%H --max-count=1 -S"$NODE_TAG" -- NODE_VERSION)
-
-    if [ -n "$COMMIT_SHA" ]; then
-        TMP_INDEXER_TAG="3.0.0-$(git rev-parse --short=8 $COMMIT_SHA)"
-        echo "Found NODE_VERSION=$NODE_TAG in commit $COMMIT_SHA"
-    else
-        # Fallback to current HEAD if not found
-        TMP_INDEXER_TAG="3.0.0-$(git rev-parse --short=8 HEAD)"
-        echo "Could not find commit for NODE_VERSION=$NODE_TAG, using HEAD"
-    fi
-
-    docker pull midnightntwrk/wallet-indexer:$TMP_INDEXER_TAG
-
-    if [ $? -ne 0 ]; then
-        echo "Failed to pull indexer image $TMP_INDEXER_TAG trying with the latest known one"
-        export TMP_INDEXER_TAG="3.0.0-d850c371"
-        docker pull midnightntwrk/wallet-indexer:$TMP_INDEXER_TAG
-        if [ $? -ne 0 ]; then
-            echo "Failed again even with 3.0.0-d850c371"
-            exit 1
-        fi
-    fi
-    export INDEXER_TAG=$TMP_INDEXER_TAG
-else
-    echo "Using externally defined INDEXER_TAG: $INDEXER_TAG"
-fi
+resolve_indexer_image || exit 1
 
 echo "Using the following tags:"
 echo " NODE_TAG: $NODE_TAG"
