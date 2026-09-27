@@ -397,3 +397,37 @@ export interface ShieldedNullifierTransaction {
 }
 
 export type ViewingKey = string & { __brand: 'ViewingKey' };
+
+export interface RegisteredTotals {
+  epochNo: number;
+  totalRegistered: number;
+  newlyRegistered: number;
+}
+
+export type RegisteredTotalsSeriesResponse = GraphQLResponse<{
+  registeredTotalsSeries: RegisteredTotals[];
+}>;
+
+export interface RegisteredStat {
+  epochNo: number;
+  federatedValidCount: number;
+  federatedInvalidCount: number;
+  registeredValidCount: number;
+  registeredInvalidCount: number;
+  dparam: number | null;
+}
+
+export type RegisteredSpoSeriesResponse = GraphQLResponse<{
+  registeredSpoSeries: RegisteredStat[];
+}>;
+
+export interface PresenceEvent {
+  epochNo: number;
+  idKey: string;
+  source: string;
+  status: string | null;
+}
+
+export type RegisteredPresenceResponse = GraphQLResponse<{
+  registeredPresence: PresenceEvent[];
+}>;
