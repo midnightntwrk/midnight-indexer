@@ -373,9 +373,7 @@ export interface DustGenerationDtimeUpdateItem {
 }
 
 export type DustGenerationsEvent =
-  | DustGenerationsItem
-  | DustGenerationsProgress
-  | DustGenerationDtimeUpdateItem;
+  DustGenerationsItem | DustGenerationsProgress | DustGenerationDtimeUpdateItem;
 
 export interface DustNullifierTransaction {
   nullifierLeBytes: string;
