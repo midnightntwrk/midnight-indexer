@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   qa-tests:
-    name: tests — lint, format, audit
+    name: tests — compile, lint, format, audit
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -36,6 +36,9 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: Compile check
+        run: bun run compile-check
 
       - name: Lint
         run: bun run lint
