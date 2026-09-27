@@ -120,6 +120,7 @@ The test suite is organized using **Vitest projects**, which allows running diff
 - **[Smoke Tests](tests/smoke/README.md)** - Quick health checks and API validation (~1 second runtime)
 - **[Integration Tests](tests/integration/README.md)** - Comprehensive GraphQL API testing with pre-seeded data
 - **[E2E Tests](tests/e2e/README.md)** - End-to-end validation using the Node Toolkit (includes cache warmup)
+- **[Unit Tests](tests/unit/README.md)** - Pure checks of the harness's own helpers (retry, websocket liveness); no environment, no Docker
 - **[Sync Tests](tests/sync/README.md)** - Runs a chosen indexer version against a deployed chain and watches it index from genesis, to prove that version can sync that chain
 
 Each project can be run independently or together. E2E tests include a cache warmup phase for the Node Toolkit, while smoke and integration tests start immediately. Sync tests are deliberately excluded from the aggregate `test`, `test:coverage` and `test:ui` scripts, each of which names its projects explicitly: a sync run takes minutes at best, and days if its block budget is lifted.
@@ -490,6 +491,7 @@ TARGET_ENV=preprod INDEXER_API_VERSION=v3 bun run test:integration
 - **[Integration Tests](tests/integration/README.md)**: Fine-grained GraphQL query and subscription tests for blocks, transactions, and contract actions
 
 - **[E2E Tests](tests/e2e/README.md)**: Tests that use the Node Toolkit to perform actions on the blockchain and validate indexer results
+- **[Unit Tests](tests/unit/README.md)**: Hermetic checks of the harness's own helpers, run in CI on every change to `qa/`
 
 - **Smart Cache Management**: E2E tests include toolkit cache warmup; integration and smoke tests start immediately
 
