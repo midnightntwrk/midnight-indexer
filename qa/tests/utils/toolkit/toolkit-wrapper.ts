@@ -87,6 +87,9 @@ export interface DeployContractResult {
 const TOOLKIT_BIN = '/midnight-node-toolkit';
 const CONTRACT_SIMPLE = 'contract-simple';
 const DEFAULT_RNG_SEED = '0000000000000000000000000000000000000000000000000000000000000037';
+// Default coin/funding seed used by the toolkit minter e2e (matches the node-repo
+// scripts/tests/toolkit-tokens-minter-e2e.sh). Used by deployMintSendUnshielded (#1253).
+const DEFAULT_FUNDING_SEED = '0000000000000000000000000000000000000000000000000000000000000001';
 const DEFAULT_NEW_AUTHORITY_SEED =
   '1000000000000000000000000000000000000000000000000000000000000001';
 
@@ -995,7 +998,237 @@ class ToolkitWrapper {
 
     return deploymentResult;
   }
+
+  // SCAFFOLD for #1253 (for @whankinsiv). Mirrors midnight-node toolkit-tokens-minter-e2e.sh
+  // + minter.compact (mintUnshieldedToSelfTest = the #1245 reporter's scenario).
+  // TODO(#1253): make the compiled minter contract reachable in the container (set the
+  // MinterContract paths) and validate on ledger-8 (ledger-9 needs a v9 compactc).
+
+  /** Deploy minter, mint `mintAmount` to self, send `sendAmount` (< mintAmount) out; the
+   * contract keeps `mintAmount - sendAmount`. */
+  async deployMintSendUnshielded(opts: MinterFlowOptions): Promise<MinterFlowResult> {
+    if (!this.startedContainer) {
+      throw new Error('Container is not started. Call start() first.');
+    }
+    if (opts.sendAmount >= opts.mintAmount) {
+      throw new Error('sendAmount must be < mintAmount to leave a non-zero contract remainder');
+    }
+
+    const seed = opts.fundingSeed ?? DEFAULT_FUNDING_SEED;
+    const network = opts.network ?? 'undeployed'; // TODO(#1253): use the env's network for deployed runs.
+    const { compiledContractDir, configFile, toolkitJsPath } = opts.contract;
+    const out = (file: string) => `/out/${file}`;
+    const rpcUrl = this.getRpcUrl();
+
+    const { coinPublic } = await this.showAddress(seed);
+
+    // 1. Deploy the minter: generate deploy intent → send-intent → submit.
+    await this.execToolkit(
+      [
+        TOOLKIT_BIN,
+        'generate-intent',
+        'deploy',
+        '-c',
+        configFile,
+        '--toolkit-js-path',
+        toolkitJsPath,
+        '--coin-public',
+        coinPublic,
+        '--output-intent',
+        out('deploy.bin'),
+        '--output-private-state',
+        out('initial_state.json'),
+        '--output-zswap-state',
+        out('deploy_zswap.json'),
+      ],
+      'minter generate-intent deploy failed',
+    );
+    await this.execToolkit(
+      [
+        TOOLKIT_BIN,
+        'send-intent',
+        '--intent-file',
+        out('deploy.bin'),
+        '--compiled-contract-dir',
+        compiledContractDir,
+        '--dest-file',
+        out('deploy.mn'),
+      ],
+      'minter send-intent (deploy) failed',
+    );
+    await this.execToolkit(
+      [TOOLKIT_BIN, 'generate-txs', '--src-file', out('deploy.mn'), 'send', '-d', rpcUrl],
+      'minter deploy submit failed',
+    );
+
+    // 2. Resolve the contract address, its on-chain state, and the unshielded token type.
+    const contractAddress = (
+      await this.execToolkit(
+        [TOOLKIT_BIN, 'contract-address', '--src-file', out('deploy.mn')],
+        'minter contract-address failed',
+      )
+    ).output.trim();
+    await this.execToolkit(
+      [
+        TOOLKIT_BIN,
+        'contract-state',
+        '--contract-address',
+        contractAddress,
+        '--dest-file',
+        out('state.mn'),
+      ],
+      'minter contract-state failed',
+    );
+    const tokenType = (
+      await this.execToolkit(
+        [
+          TOOLKIT_BIN,
+          'show-token-type',
+          '--contract-address',
+          contractAddress,
+          '--domain-sep',
+          opts.domainSep,
+          '--unshielded',
+        ],
+        'minter show-token-type failed',
+      )
+    ).output.trim();
+    const userAddress = (
+      await this.execToolkit(
+        [TOOLKIT_BIN, 'show-address', '--network', network, '--seed', seed, '--unshielded'],
+        'minter show-address (unshielded) failed',
+      )
+    ).output.trim();
+
+    // 3. Mint to self, then send a portion out — threading on-chain/private state across
+    //    the two intents exactly as the shell script does.
+    await this.execToolkit(
+      [
+        TOOLKIT_BIN,
+        'generate-intent',
+        'circuit',
+        '-c',
+        configFile,
+        '--toolkit-js-path',
+        toolkitJsPath,
+        '--coin-public',
+        coinPublic,
+        '--input-onchain-state',
+        out('state.mn'),
+        '--input-private-state',
+        out('initial_state.json'),
+        '--contract-address',
+        contractAddress,
+        '--output-intent',
+        out('mint_unshielded.bin'),
+        '--output-onchain-state',
+        out('state_after_mint.mn'),
+        '--output-private-state',
+        out('private_after_mint.json'),
+        '--output-zswap-state',
+        out('mint_zswap.json'),
+        'mintUnshieldedToSelfTest',
+        opts.domainSep,
+        String(opts.mintAmount),
+      ],
+      'minter mintUnshieldedToSelfTest failed',
+    );
+    await this.execToolkit(
+      [
+        TOOLKIT_BIN,
+        'generate-intent',
+        'circuit',
+        '-c',
+        configFile,
+        '--toolkit-js-path',
+        toolkitJsPath,
+        '--coin-public',
+        coinPublic,
+        '--input-onchain-state',
+        out('state_after_mint.mn'),
+        '--input-private-state',
+        out('private_after_mint.json'),
+        '--contract-address',
+        contractAddress,
+        '--output-intent',
+        out('send_unshielded.bin'),
+        '--output-onchain-state',
+        out('state_after_send.mn'),
+        '--output-private-state',
+        out('private_after_send.json'),
+        '--output-zswap-state',
+        out('send_zswap.json'),
+        'sendUnshieldedToUser',
+        tokenType,
+        userAddress,
+        String(opts.sendAmount),
+      ],
+      'minter sendUnshieldedToUser failed',
+    );
+
+    // 4. Submit the combined mint+send tx; reuse the existing parser for hash/block.
+    const submit = await this.execToolkit(
+      [
+        TOOLKIT_BIN,
+        'send-intent',
+        '--intent-file',
+        out('mint_unshielded.bin'),
+        '--intent-file',
+        out('send_unshielded.bin'),
+        '--compiled-contract-dir',
+        compiledContractDir,
+        '--dest-url',
+        rpcUrl,
+      ],
+      'minter send-intent (mint+send) failed',
+    );
+    const mintSendTx = this.parseTransactionOutput(submit.output.trim());
+
+    return {
+      contractAddress,
+      tokenType,
+      mintAmount: opts.mintAmount,
+      sendAmount: opts.sendAmount,
+      expectedRemainder: opts.mintAmount - opts.sendAmount,
+      mintSendTx,
+    };
+  }
+}
+
+/** Paths (as seen inside the toolkit container) to the compiled minter contract assets. */
+interface MinterContract {
+  compiledContractDir: string;
+  configFile: string;
+  toolkitJsPath: string;
+}
+
+interface MinterFlowOptions {
+  contract: MinterContract;
+  domainSep: string;
+  mintAmount: number;
+  sendAmount: number;
+  fundingSeed?: string;
+  network?: string;
+}
+
+interface MinterFlowResult {
+  contractAddress: string;
+  tokenType: string;
+  mintAmount: number;
+  sendAmount: number;
+  expectedRemainder: number;
+  mintSendTx: ToolkitTransactionResult;
 }
 
 export { ToolkitWrapper, ToolkitConfig };
-export type { Coin, DustBalance, DustOutput, PrivateWalletState, PublicWalletState, Utxo };
+export type {
+  Coin,
+  DustBalance,
+  DustOutput,
+  PrivateWalletState,
+  PublicWalletState,
+  Utxo,
+  MinterContract,
+  MinterFlowOptions,
+  MinterFlowResult,
+};
