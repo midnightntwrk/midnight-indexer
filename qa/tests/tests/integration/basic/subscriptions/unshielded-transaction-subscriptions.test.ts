@@ -18,6 +18,7 @@ import '@utils/logging/test-logging-hooks';
 import { env } from 'environment/model';
 import dataProvider from 'utils/testdata-provider';
 import { GraphQLError } from 'graphql/error/GraphQLError';
+import type { TestContext } from 'vitest';
 import {
   IndexerWsClient,
   SubscriptionHandlers,
@@ -34,11 +35,24 @@ import type {
 import {
   UnshieldedTransactionEventSchema,
   UnshieldedTransactionsProgressSchema,
+  UnshieldedTransactionsProgressWithProtocolVersionSchema,
 } from '@utils/indexer/graphql/schema';
+import { UNSHIELDED_TX_PROGRESS_SUBSCRIPTION_BY_ADDRESS } from '@utils/indexer/graphql/subscriptions';
+import { isProgressProtocolVersionSupported } from '@utils/indexer/schema-feature-probe';
+import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
+
+const httpClient = new IndexerHttpClient();
 
 let toolkit: ToolkitWrapper;
 let indexerWsClient: IndexerWsClient;
+
+// midnight-indexer#1463 added protocolVersion to the progress update. Probed once
+// per file because the document that selects it fails GraphQL validation where the
+// change has not landed.
+let progressProtocolVersionSupported = false;
+const PROGRESS_PROTOCOL_VERSION_ABSENT =
+  'UnshieldedTransactionsProgress.protocolVersion is absent on this environment (midnight-indexer#1463)';
 
 /**
  * Factory that returns a stateful stop-condition predicate for
@@ -85,6 +99,7 @@ async function subscribeToUnshieldedTransactionEvents(
   subscriptionParams: UnshieldedTransactionSubscriptionParams,
   stopCondition: (message: UnshieldedTxSubscriptionResponse[]) => boolean,
   timeout: number = 5000,
+  queryOverride?: string,
 ): Promise<UnshieldedTxSubscriptionResponse[]> {
   const receivedUnshieldedTransactions: UnshieldedTxSubscriptionResponse[] = [];
 
@@ -129,6 +144,7 @@ async function subscribeToUnshieldedTransactionEvents(
   const unsubscribe = indexerWsClient.subscribeToUnshieldedTransactionEvents(
     unshieldedTransactionSubscriptionHandler,
     subscriptionParams,
+    queryOverride,
   );
 
   // Once subscribed, we will wait for either the stop condition to be met,
@@ -149,6 +165,11 @@ describe('unshielded transaction subscriptions', async () => {
     toolkit = new ToolkitWrapper({});
     if (toolkit) {
       await toolkit.start();
+    }
+
+    progressProtocolVersionSupported = await isProgressProtocolVersionSupported();
+    if (!progressProtocolVersionSupported) {
+      log.warn(PROGRESS_PROTOCOL_VERSION_ABSENT);
     }
   }, 120000);
 
@@ -348,6 +369,56 @@ describe('unshielded transaction subscriptions', async () => {
 
       // ... with no transactions present for this address -> highestTransactionId must be 0
       expect(transactionProgressEvent.highestTransactionId).toBe(0);
+    });
+
+    /**
+     * An address with no transactions only ever receives progress updates, so the
+     * progress update's protocolVersion is the only way such a wallet observes a
+     * protocol upgrade. It reports the chain tip, which the latest indexed block
+     * reports independently — the block is read after the update so a fork cannot
+     * be straddled the wrong way round.
+     *
+     * @given an unshielded address that has no transactions
+     * @when a subscription to unshielded transaction events is opened for that address
+     * @then exactly one progress update arrives, with highestTransactionId 0
+     * @and its protocolVersion equals the protocolVersion of the latest indexed block
+     * @and the value is non-zero, the sentinel reserved for a chain with no indexed block
+     *
+     * midnight-indexer#1463
+     */
+    test('should report the chain tip protocol version in the progress update, given that address does not have transactions', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Subscription', 'UnshieldedTokens', 'Progress'] };
+      if (!progressProtocolVersionSupported) {
+        return ctx.skip(true, PROGRESS_PROTOCOL_VERSION_ABSENT);
+      }
+
+      const unshieldedAddress = (await toolkit.showAddress('0'.repeat(64))).unshielded;
+      messages = await subscribeToUnshieldedTransactionEvents(
+        { address: unshieldedAddress },
+        (messages) => messages.length >= 10,
+        5000,
+        UNSHIELDED_TX_PROGRESS_SUBSCRIPTION_BY_ADDRESS,
+      );
+
+      const latestBlock = await httpClient.getLatestBlock();
+      expect(latestBlock).toBeSuccess();
+
+      // The frame-count and highestTransactionId assertions restate the sibling
+      // test's deliberately: this case sends a different document, so those are the
+      // preconditions its own protocolVersion comparison rests on, not a copy.
+      expect(messages.length).toBe(1);
+      expect(messages[0]).toBeSuccess();
+
+      const progress = messages[0].data?.unshieldedTransactions as UnshieldedTransactionsProgress;
+      const parsed = UnshieldedTransactionsProgressWithProtocolVersionSchema.safeParse(progress);
+      expect(
+        parsed.success,
+        `Progress update schema validation failed: ${JSON.stringify(parsed.error?.format(), null, 2)}`,
+      ).toBe(true);
+
+      expect(progress.highestTransactionId).toBe(0);
+      expect(progress.protocolVersion).toBe(latestBlock.data?.block.protocolVersion);
+      expect(progress.protocolVersion).toBeGreaterThan(0);
     });
 
     /**

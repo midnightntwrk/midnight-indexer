@@ -11,7 +11,7 @@ The indexer must continue indexing across the boundary.
 locally built binaries instead of a candidate image:
 
 ```bash
-cargo build -p indexer-standalone --features standalone
+cargo build --release -p indexer-standalone --features standalone
 cargo nextest run -p indexer-tests --features standalone --run-ignored all hardfork
 ```
 
