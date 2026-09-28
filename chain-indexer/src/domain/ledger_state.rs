@@ -673,87 +673,6 @@ mod tblock_skew_tests {
             ProtocolVersion::V2_1(2_001_000),
         ));
     }
-
-    /// Preview block 128537's first (and only) regular transaction, replayed as if it had waited
-    /// one block in the pool and been included on a node 1.0.300 runtime: parent 1784987076 (the
-    /// original block's time), block 1784987082, intent TTL 1784987084.
-    ///
-    /// Node 1.0.300 verifies it at the block's own time (1784987082 <= TTL) and accepts it.
-    /// Verifying it only at parent + 12s (1784987088 > TTL) halts indexing on a block the node
-    /// accepted.
-    #[cfg(feature = "standalone")]
-    #[tokio::test]
-    async fn first_tx_on_node_1_0_300_runtime_is_verified_at_block_time() {
-        use crate::domain::{LedgerState, node};
-        use indexer_common::{
-            domain::{BlockHash, ByteVec, LedgerVersion, NetworkId, ledger},
-            infra::ledger_db,
-        };
-
-        const PARENT_BLOCK_TIMESTAMP: u64 = 1_784_987_076_000;
-        const BLOCK_TIMESTAMP: u64 = 1_784_987_082_000;
-        const INTENT_TTL_EXPIRED: &str = "Intent TTL has expired";
-
-        let temp_dir = tempfile::tempdir().expect("create tempdir");
-        ledger_db::init(ledger_db::Config {
-            cache_max_nodes: 1_024,
-            cnn_url: temp_dir
-                .path()
-                .join("ledger-db.sqlite")
-                .display()
-                .to_string(),
-        })
-        .await
-        .expect("init ledger DB");
-
-        let raw: ByteVec = std::fs::read(format!(
-            "{}/../indexer-common/tests/block_128537_tx.raw",
-            env!("CARGO_MANIFEST_DIR")
-        ))
-        .expect("read block_128537_tx.raw")
-        .into();
-        let transaction = ledger::Transaction::deserialize(&raw, LedgerVersion::V8)
-            .expect("deserialize fixture transaction");
-        let hash = transaction.hash();
-        let identifiers = transaction.identifiers().expect("identifiers");
-
-        let apply = |protocol_version: ProtocolVersion| {
-            let network_id: NetworkId = "preview".try_into().expect("network id");
-            let mut ledger_state =
-                LedgerState::new(network_id, LedgerVersion::V8).expect("create ledger state");
-            let transaction = node::Transaction::Regular(node::RegularTransaction {
-                hash,
-                protocol_version,
-                raw: raw.clone(),
-                identifiers: identifiers.clone(),
-                contract_actions: vec![],
-            });
-
-            ledger_state
-                .apply_transactions(
-                    [transaction],
-                    BlockHash::from([0; 32]),
-                    BLOCK_TIMESTAMP,
-                    PARENT_BLOCK_TIMESTAMP,
-                    node_skews_first_regular_tblock(protocol_version),
-                )
-                .map(|_| ())
-                .map_err(|error| format!("{:#}", anyhow::Error::from(error)))
-        };
-
-        // On a skewing and a node 1.0.300 runtime, the intent TTL check passes. The transaction
-        // still fails later, against a fresh state instead of preview's, which is irrelevant to the
-        // `tblock`.
-        use ProtocolVersion::*;
-        for protocol_version in [V1_0(1_000_000), V1_0(1_000_300)] {
-            if let Err(error) = apply(protocol_version) {
-                assert!(
-                    !error.contains(INTENT_TTL_EXPIRED),
-                    "{protocol_version:?} must not reject on the intent TTL: {error}"
-                );
-            }
-        }
-    }
 }
 
 #[cfg(all(test, any(feature = "cloud", feature = "standalone")))]
@@ -900,8 +819,10 @@ mod apply_transactions_tblock_tests {
 
                 assert_eq!(
                     apply(
+                        NETWORK_ID,
                         protocol_version,
                         &transactions,
+                        NOW,
                         case.parent_block_time,
                         case.bump_first_regular_tblock,
                     )?,
@@ -917,15 +838,15 @@ mod apply_transactions_tblock_tests {
 
     // Preprod block 164460's first (and only) regular transaction, built by a 0.22 runtime: parent
     // 1775081610, block 1775081616, intent TTL 1775081620. The node accepted it, so it verified the
-    // transaction at the block time; the bumped `tblock` 1775081622 is past the TTL. The block
+    // transaction at the block time; the adjusted `tblock` 1775081622 is past the TTL. The block
     // author validated the transaction against an older state than the parent block's, so the
     // cached validity result did not apply at inclusion.
     #[tokio::test(flavor = "multi_thread")]
-    async fn first_regular_transaction_of_a_skewing_runtime_block_accepted_by_the_node()
+    async fn preprod_164460_transaction_with_its_ttl_between_the_tblocks_is_accepted_at_block_time()
     -> Result<(), BoxError> {
         const BLOCK_HEIGHT: u64 = 164_460;
-        const BLOCK_TIMESTAMP: u64 = 1_775_081_616_000;
-        const PARENT_BLOCK_TIMESTAMP: u64 = 1_775_081_610_000;
+        const BLOCK_TIME: u64 = 1_775_081_616;
+        const PARENT_BLOCK_TIME: u64 = 1_775_081_610;
         const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::V0_22(22_000);
         const TRANSACTION_HASH: &str =
             "6a1005eecf695a8f950e8f8e74de0c6336daf55448326bf0db0b3b55c089ad0b";
@@ -933,47 +854,85 @@ mod apply_transactions_tblock_tests {
             "18835f54e98cfbf5c789ef76fb79d4cb0e8d84d627ef1e36cdf27cf3cdbaebb7";
 
         let _ledger_db = init_ledger_db().await?;
+        let transaction = fixture("block_164460_tx.raw", TRANSACTION_HASH)?;
+
+        // Against a fresh state instead of preprod's, the transaction passes the time checks and
+        // fails the next stateful check: the contract it calls does not exist.
+        assert_eq!(
+            apply(
+                "preprod",
+                PROTOCOL_VERSION,
+                &[&transaction],
+                BLOCK_TIME,
+                PARENT_BLOCK_TIME,
+                should_bump_first_regular_tblock(BLOCK_HEIGHT, PROTOCOL_VERSION),
+            )?,
+            Err(Malformed::Other(format!(
+                "call to non-existant contract ContractAddress({CONTRACT_ADDRESS})"
+            )))
+        );
+
+        Ok(())
+    }
+
+    // Preview block 128537's first (and only) regular transaction, built by a 1.0 runtime (spec
+    // 1000000), replayed as if it had waited one block in the pool: parent 1784987076 (the
+    // original block's time), block 1784987082, intent TTL 1784987084.
+    //
+    // The adjusted `tblock` 1784987088 is past the TTL; the block time is not, on the block's
+    // runtime and on 1.0.300, the first that does not skew.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn preview_128537_transaction_with_its_ttl_between_the_tblocks_is_accepted_at_block_time()
+    -> Result<(), BoxError> {
+        const BLOCK_HEIGHT: u64 = 128_537;
+        const BLOCK_TIME: u64 = 1_784_987_082;
+        const PARENT_BLOCK_TIME: u64 = 1_784_987_076;
+        const TRANSACTION_HASH: &str =
+            "3864da188d7c1d85062c914f879e1e4c096d443abf139aa9717b5266945959e8";
+
+        let _ledger_db = init_ledger_db().await?;
+        let transaction = fixture("block_128537_tx.raw", TRANSACTION_HASH)?;
+
+        // Against a fresh state instead of preview's, the transaction passes the time checks and
+        // fails the next stateful check: its dust spend proof does not verify.
+        use ProtocolVersion::*;
+        for protocol_version in [V1_0(1_000_000), V1_0(1_000_300)] {
+            let result = apply(
+                "preview",
+                protocol_version,
+                &[&transaction],
+                BLOCK_TIME,
+                PARENT_BLOCK_TIME,
+                should_bump_first_regular_tblock(BLOCK_HEIGHT, protocol_version),
+            )?;
+            let Err(Malformed::Other(reason)) = result else {
+                panic!("{protocol_version:?}: a fresh state has no dust to spend: {result:?}");
+            };
+            assert!(
+                reason.starts_with("dust spend proof failed to verify"),
+                "{protocol_version:?}: {reason}"
+            );
+        }
+
+        Ok(())
+    }
+
+    // Reads a real ledger-8 transaction from `indexer-common/tests` and checks it is the one with
+    // the given hash.
+    fn fixture(file_name: &str, hash: &str) -> Result<SerializedTransaction, BoxError> {
         let raw: SerializedTransaction = fs::read(format!(
-            "{}/../indexer-common/tests/block_164460_tx.raw",
+            "{}/../indexer-common/tests/{file_name}",
             env!("CARGO_MANIFEST_DIR")
         ))?
         .into();
         let transaction = ledger::Transaction::deserialize(&raw, LedgerVersion::V8)?;
         assert_eq!(
             transaction.hash(),
-            TransactionHash::from_hex(TRANSACTION_HASH)?
-        );
-        let transaction = node::Transaction::Regular(node::RegularTransaction {
-            hash: transaction.hash(),
-            protocol_version: PROTOCOL_VERSION,
-            raw,
-            identifiers: transaction.identifiers()?,
-            contract_actions: vec![],
-        });
-
-        let mut ledger_state = LedgerState::new("preprod".try_into()?, LedgerVersion::V8)?;
-        let result = ledger_state.apply_transactions(
-            [transaction],
-            BlockHash::from([0; 32]),
-            BLOCK_TIMESTAMP,
-            PARENT_BLOCK_TIMESTAMP,
-            should_bump_first_regular_tblock(BLOCK_HEIGHT, PROTOCOL_VERSION),
+            TransactionHash::from_hex(hash)?,
+            "{file_name}"
         );
 
-        // Against a fresh state instead of preprod's, the transaction passes the time checks and
-        // fails the next stateful check: the contract it calls does not exist.
-        let Err(error) = result else {
-            panic!("a fresh state has no contract to call");
-        };
-        assert_eq!(
-            malformed(&error),
-            Some(Malformed::Other(format!(
-                "call to non-existant contract ContractAddress({CONTRACT_ADDRESS})"
-            ))),
-            "{error}"
-        );
-
-        Ok(())
+        Ok(raw)
     }
 
     // Returns a runtime on the given ledger version that skews the first regular transaction's
@@ -985,17 +944,19 @@ mod apply_transactions_tblock_tests {
         }
     }
 
-    // Applies `transactions` as one block at `NOW` to a fresh ledger state; the outer error is a
-    // test setup failure, the inner one the reason the ledger rejects a transaction. Times are in
-    // seconds.
+    // Applies `transactions` as one block to a fresh ledger state of `network_id`; the outer error
+    // is a test setup failure, the inner one the reason the ledger rejects a transaction. Times
+    // are in seconds.
     fn apply(
+        network_id: &str,
         protocol_version: ProtocolVersion,
         transactions: &[&SerializedTransaction],
+        block_time: u64,
         parent_block_time: u64,
         bump_first_regular_tblock: bool,
     ) -> Result<Result<Vec<TransactionResult>, Malformed>, BoxError> {
         let ledger_version = protocol_version.ledger_version();
-        let mut ledger_state = LedgerState::new(NETWORK_ID.try_into()?, ledger_version)?;
+        let mut ledger_state = LedgerState::new(network_id.try_into()?, ledger_version)?;
         let transactions = transactions
             .iter()
             .map(|&raw| {
@@ -1013,7 +974,7 @@ mod apply_transactions_tblock_tests {
         match ledger_state.apply_transactions(
             transactions,
             BlockHash::from([0; 32]),
-            NOW * 1_000,
+            block_time * 1_000,
             parent_block_time * 1_000,
             bump_first_regular_tblock,
         ) {
