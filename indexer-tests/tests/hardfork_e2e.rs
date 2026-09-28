@@ -53,28 +53,36 @@
 //! - `midnight-node:1.0.0` -- ledger-8 chain-spec source.
 //! - `midnight-node:2.1.0-rc.2` + matching toolkit -- the migration node.
 //!
-//! Ignored by default: it pulls/boots containers and takes a few minutes. Run it
-//! with
+//! Ignored by default: it pulls/boots containers and takes a few minutes. It runs
+//! the release build of `indexer-standalone`. Run it with
 //!
 //! ```text
+//! cargo build --release -p indexer-standalone --features standalone
 //! cargo nextest run -p indexer-tests --features standalone --run-ignored all hardfork
 //! ```
 
 #![cfg(feature = "standalone")]
 
 use anyhow::{Context, bail};
+use futures::StreamExt;
+use indexer_api::infra::api::v4::{AddressType, encode_address};
+use indexer_common::domain::NetworkId;
+use indexer_tests::graphql_ws_client;
 use serde_json::{Value, json};
 use std::{
     collections::BTreeMap,
-    env, fs,
+    env,
+    fmt::{self, Display, Formatter},
+    fs,
     net::TcpListener,
     path::Path,
+    pin::pin,
     process::{Child, Command, Stdio},
-    sync::Mutex,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use tempfile::TempDir;
-use tokio::time::sleep;
+use tokio::{task::JoinHandle, time::sleep};
 
 /// Ledger-8 node whose `dev` preset provides the fork-from chain-spec.
 const FROM_NODE_TAG: &str = "1.0.0";
@@ -82,10 +90,41 @@ const FROM_NODE_TAG: &str = "1.0.0";
 /// Genesis-funded dev wallet the test transacts from.
 const SOURCE_SEED: &str = "0000000000000000000000000000000000000000000000000000000000000001";
 
-/// Any `spec_version` at or above this is a ledger-9 runtime.
+/// Any `spec_version` at or above this is a ledger-9 runtime. Block protocol versions share the
+/// scale, so the same threshold separates the two ledger windows in progress updates.
 const LEDGER_9_SPEC_VERSION: u64 = 2_000_000;
 
+/// Progress update interval the indexer is started with, overriding the 30s production default.
+/// Compressing it keeps the run from idling for the minutes a production interval would need,
+/// while exercising the same detection path and the same backoff arithmetic.
+const PROGRESS_UPDATE_INTERVAL: Duration = Duration::from_secs(2);
+
+/// `indexer-api`'s idle backoff caps a quiet subscription at `IDLE_BACKOFF_MAX_MULTIPLE` (8)
+/// times the base interval, and jitters every interval by `JITTER_FRACTION` (±20%). Both live in
+/// `indexer-api/src/infra/api/v4/subscription/polling.rs`.
+const IDLE_BACKOFF_MAX_MULTIPLE: u32 = 8;
+
+/// Progress-only subscription for an address that never receives a transaction: the frames it
+/// yields carry nothing but `highestTransactionId` and the tip protocol version.
+const UNSHIELDED_PROGRESS_SUBSCRIPTION: &str = "
+    subscription UnshieldedProgress($address: UnshieldedAddress!) {
+        unshieldedTransactions(address: $address) {
+            __typename
+            ... on UnshieldedTransactionsProgress {
+                highestTransactionId
+                protocolVersion
+            }
+        }
+    }
+";
+
 const WS_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
+
+/// Fallback for the one secret `indexer-standalone` refuses to start without. CI supplies it
+/// (`.github/actions/init-env`) and so does `qa/scripts/test-hardfork-8to9.sh`; a developer
+/// running this test by hand usually has not, and without a default the omission surfaces as a
+/// readiness timeout rather than as the configuration error it is. An ambient value still wins.
+const FALLBACK_SECRET: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn image_registry() -> String {
     env::var("IMAGE_REGISTRY").unwrap_or_else(|_| "midnightntwrk".to_string())
@@ -236,6 +275,24 @@ impl Harness {
             .context("no specVersion in response")
     }
 
+    /// Height of the node's best block.
+    async fn node_height(&self) -> anyhow::Result<u64> {
+        let response = reqwest::Client::new()
+            .post(&self.node_rpc)
+            .json(&json!({"id": 1, "jsonrpc": "2.0", "method": "chain_getHeader"}))
+            .send()
+            .await
+            .context("chain_getHeader")?
+            .json::<Value>()
+            .await
+            .context("decode header")?;
+        let number = response["result"]["number"]
+            .as_str()
+            .context("no number in header")?;
+        u64::from_str_radix(number.trim_start_matches("0x"), 16)
+            .with_context(|| format!("parse block number {number}"))
+    }
+
     /// `dustGenerationEndIndex` at `height`, i.e. the ledger's dust generation
     /// tree `first_free` as the indexer reconstructed it.
     async fn generation_end_index(&self, height: u64) -> anyhow::Result<u64> {
@@ -340,6 +397,10 @@ impl Harness {
         Ok(found)
     }
 
+    fn ws_api_url(&self) -> String {
+        format!("{}/ws", self.api_url.replacen("http://", "ws://", 1))
+    }
+
     async fn indexed_height(&self) -> anyhow::Result<u64> {
         let data = self.graphql("{ block { height } }", json!({})).await?;
         data["block"]["height"]
@@ -361,6 +422,18 @@ impl Harness {
 
     fn indexer_log(&self) -> anyhow::Result<String> {
         fs::read_to_string(self.temp_dir.path().join("indexer.log")).context("read indexer log")
+    }
+
+    /// The last `lines` lines of the indexer's log, in order, or empty if it cannot be read.
+    ///
+    /// The log lives in the `TempDir`, which is dropped the moment this test returns `Err`, so
+    /// anything that fails has to carry the tail into its own error message or the only
+    /// explanation of the failure is deleted along with it.
+    fn indexer_log_tail(&self, lines: usize) -> String {
+        let log = self.indexer_log().unwrap_or_default();
+        let mut tail = log.lines().rev().take(lines).collect::<Vec<_>>();
+        tail.reverse();
+        tail.join("\n")
     }
 
     /// The indexer bails on a boundary failure rather than indexing on, so a
@@ -387,11 +460,144 @@ impl Harness {
         if let Some(indexer) = guard.as_mut()
             && let Some(status) = indexer.try_wait().context("poll indexer")?
         {
-            let tail = log.lines().rev().take(10).collect::<Vec<_>>().join("\n");
+            let tail = self.indexer_log_tail(10);
             bail!("indexer exited ({status}) at {stage}; last lines:\n{tail}");
         }
         Ok(())
     }
+}
+
+/// One progress frame, with the moment it arrived. The arrival times are what make the second
+/// half of midnight-indexer#1463 observable: the tip protocol version joins each stream's idle
+/// backoff change detection, so a subscription that slept through a fork returns to the base
+/// interval instead of staying backed off at the cap.
+#[derive(Debug, Clone, Copy)]
+struct ProgressFrame {
+    highest_transaction_id: u64,
+    protocol_version: u64,
+    at: Instant,
+}
+
+/// What the watcher task has seen so far.
+#[derive(Debug, Default)]
+struct ProgressState {
+    frames: Vec<ProgressFrame>,
+
+    /// The first stream error, if any. This test's premise is that the subscription is never
+    /// re-established across a live governance runtime upgrade, which makes a dropped socket its
+    /// likeliest failure and the one most in need of a legible message — so the error is kept
+    /// rather than discarded, and the wait below fails on it instead of timing out blind.
+    error: Option<String>,
+
+    /// Whether the stream ended, for any reason. Distinguishes "closed after N frames" from
+    /// "still open, N frames, no ledger-9 version yet".
+    closed: bool,
+}
+
+/// An unshielded progress subscription held open for the whole crossing, recording every frame
+/// it receives.
+///
+/// This is the wallet the field exists for: it owns an address that never transacts, so it
+/// receives nothing but progress updates and the protocol version they carry is the only thing
+/// about them that changes at a fork. The subscription is never re-established, which is what
+/// makes the observation meaningful — a reconnect would read the new version from a fresh query
+/// rather than from the stream.
+struct ProgressWatcher {
+    state: Arc<Mutex<ProgressState>>,
+    task: JoinHandle<()>,
+}
+
+impl Drop for ProgressWatcher {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+impl ProgressWatcher {
+    async fn start(ws_api_url: &str, address: &str) -> anyhow::Result<Self> {
+        let events = graphql_ws_client::subscribe_raw(
+            ws_api_url,
+            "UnshieldedProgress",
+            UNSHIELDED_PROGRESS_SUBSCRIPTION,
+            json!({ "address": address }),
+        )
+        .await
+        .context("subscribe to unshielded progress")?;
+
+        let state = Arc::new(Mutex::new(ProgressState::default()));
+        let sink = state.clone();
+
+        let task = tokio::spawn(async move {
+            let mut events = pin!(events);
+
+            loop {
+                match events.next().await {
+                    Some(Ok(event)) => {
+                        let progress = &event["unshieldedTransactions"];
+                        if let (Some(highest_transaction_id), Some(protocol_version)) = (
+                            progress["highestTransactionId"].as_u64(),
+                            progress["protocolVersion"].as_u64(),
+                        ) {
+                            sink.lock()
+                                .expect("progress state mutex poisoned")
+                                .frames
+                                .push(ProgressFrame {
+                                    highest_transaction_id,
+                                    protocol_version,
+                                    at: Instant::now(),
+                                });
+                        }
+                    }
+
+                    Some(Err(error)) => {
+                        let mut state = sink.lock().expect("progress state mutex poisoned");
+                        state.error = Some(format!("{error:#}"));
+                        state.closed = true;
+                        break;
+                    }
+
+                    None => {
+                        sink.lock().expect("progress state mutex poisoned").closed = true;
+                        break;
+                    }
+                }
+            }
+        });
+
+        Ok(Self { state, task })
+    }
+
+    /// The frames so far, plus the stream error and whether it ended.
+    fn snapshot(&self) -> (Vec<ProgressFrame>, Option<String>, bool) {
+        let state = self.state.lock().expect("progress state mutex poisoned");
+        (state.frames.clone(), state.error.clone(), state.closed)
+    }
+}
+
+// Describes what the subscription has done, for a failure message.
+impl Display for ProgressWatcher {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        let state = self.state.lock().expect("progress state mutex poisoned");
+        let versions = state
+            .frames
+            .iter()
+            .map(|frame| frame.protocol_version)
+            .collect::<Vec<_>>();
+        write!(formatter, "{} frame(s) {versions:?}, ", state.frames.len())?;
+        match (&state.error, state.closed) {
+            (Some(error), _) => write!(formatter, "stream failed: {error}"),
+            (None, true) => formatter.write_str("stream closed cleanly"),
+            (None, false) => formatter.write_str("stream still open"),
+        }
+    }
+}
+
+/// Gaps between consecutive frame arrivals, in order.
+fn frame_gaps(frames: &[ProgressFrame]) -> Vec<Duration> {
+    frames
+        .windows(2)
+        .map(|pair| pair[1].at.duration_since(pair[0].at))
+        .collect()
 }
 
 /// Poll `f` until it returns `Some`, or fail after `timeout`.
@@ -441,7 +647,12 @@ fn const_hex_decode(s: &str) -> anyhow::Result<Vec<u8>> {
         .collect()
 }
 
-#[tokio::test]
+// The docker and toolkit calls below are blocking `std::process::Command`s, and the runtime
+// upgrade one runs for minutes. They block the thread driving the test body, while the progress
+// watcher task runs on the runtime's workers and keeps polling. On a current-thread runtime the
+// watcher would share the blocked thread, and its frames would arrive as one burst with
+// meaningless arrival times.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "boots docker containers and drives a live runtime upgrade; run explicitly"]
 async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
     let registry = image_registry();
@@ -557,6 +768,17 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
     );
     println!("[3] node up on ledger-8 spec_version {pre_fork_spec}");
 
+    // spo-indexer reads block 1's timestamp on startup and exits if the block does not exist yet,
+    // which takes the whole `indexer-standalone` process down with it.
+    wait_for("node block 1", Duration::from_secs(60), || async {
+        Ok(harness
+            .node_height()
+            .await
+            .ok()
+            .filter(|height| *height >= 1))
+    })
+    .await?;
+
     // --- 4. Attach the indexer and let it index the pre-fork chain ----------
     let api_port = free_port()?;
     harness.api_url = format!("http://localhost:{api_port}/api/v4/graphql");
@@ -573,7 +795,13 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
             .unwrap_or(false);
         Ok(ready.then_some(()))
     })
-    .await?;
+    .await
+    .with_context(|| {
+        format!(
+            "indexer-standalone never became ready; its log said:\n{}",
+            harness.indexer_log_tail(15)
+        )
+    })?;
 
     // Index a few pre-fork blocks, then read the dust generation tree size the
     // indexer reconstructed. This is the assertion the whole test rests on: if
@@ -603,6 +831,16 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
          {pre_fork_generations}, NIGHT across {} reward addresses: {pre_fork_total}",
         pre_fork_balances.len()
     );
+
+    // --- 4a. Hold an idle progress subscription open across the fork --------
+    //
+    // Opened now, before the upgrade, so it spans the crossing rather than being established
+    // after it. Not gated on a probe: `protocolVersion` is served by the very tree this test
+    // compiles and runs, so its absence is a defect to fail on, not an environment to skip for.
+    let network_id = NetworkId::try_from("undeployed").expect("undeployed is a network id");
+    let unused_address = encode_address([0u8; 32], AddressType::Unshielded, &network_id);
+    let progress = ProgressWatcher::start(&harness.ws_api_url(), &unused_address).await?;
+    println!("[4a] watching progress updates for an address with no transactions");
 
     // --- 4b. Pre-fork `registeredForDustGeneration` baseline ----------------
     //
@@ -706,6 +944,103 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
     .await?;
     harness.assert_indexer_healthy("post-fork")?;
     println!("[6] indexer crossed the boundary, now at height {post_fork_height}");
+
+    // --- 6b. The idle wallet observed the crossing ---------------------------
+    //
+    // Everything above proves the indexer crossed. This proves a wallet can *tell*: without the
+    // protocol version on progress updates, an address with no transactions has no way to learn
+    // that the codec its stream is encoded at has changed.
+    //
+    // Waits for a *second* ledger-9 frame, because the gap between the two is what shows the
+    // idle backoff reset (the other half of the change) — the frame carrying the new version is
+    // emitted with the interval already back at base, so the sleep that follows it is the
+    // measurement.
+    let frames = wait_for(
+        "two ledger-9 protocol versions on the idle subscription",
+        Duration::from_secs(120),
+        || async {
+            harness.assert_indexer_healthy("progress observation")?;
+
+            let (frames, error, closed) = progress.snapshot();
+            if let Some(error) = error {
+                bail!(
+                    "the progress subscription failed after {} frame(s): {error}",
+                    frames.len()
+                );
+            }
+            if closed {
+                bail!(
+                    "the progress subscription closed after {} frame(s) without reporting a \
+                     ledger-9 protocol version",
+                    frames.len()
+                );
+            }
+
+            let crossed = frames
+                .iter()
+                .position(|frame| frame.protocol_version >= LEDGER_9_SPEC_VERSION);
+            Ok(crossed
+                .filter(|first| frames.len() > first + 1)
+                .map(|_| frames))
+        },
+    )
+    .await
+    .with_context(|| format!("idle progress subscription: {progress}"))?;
+
+    let first_ledger_9 = frames
+        .iter()
+        .position(|frame| frame.protocol_version >= LEDGER_9_SPEC_VERSION)
+        .expect("the wait above only returns once a ledger-9 frame exists");
+
+    assert!(
+        frames[..first_ledger_9]
+            .iter()
+            .any(|frame| frame.protocol_version < LEDGER_9_SPEC_VERSION),
+        "the subscription never reported a ledger-8 protocol version, so it cannot have \
+         observed a crossing: {progress}"
+    );
+    assert!(
+        frames.iter().all(|frame| frame.highest_transaction_id == 0),
+        "the watched address received a transaction, so any version it learned could have come \
+         from that instead of from the progress updates: {progress}"
+    );
+
+    // The protocol version also feeds idle-backoff change detection, so the fork must pull the
+    // interval back to base. Bounds are deliberately loose: the frame arrival times include
+    // request latency on top of the server's jittered sleep, so they bracket the two regimes
+    // (base 2s ±20%, cap 8x base = 16s ±20%) rather than pinning either.
+    let gaps = frame_gaps(&frames);
+    let backed_off = gaps[..first_ledger_9]
+        .iter()
+        .max()
+        .copied()
+        .unwrap_or_default();
+    let after_crossing = gaps[first_ledger_9];
+
+    assert!(
+        backed_off >= PROGRESS_UPDATE_INTERVAL * 2,
+        "the idle subscription never backed off before the fork (longest pre-fork gap \
+         {backed_off:?}, base {PROGRESS_UPDATE_INTERVAL:?}), so the reset it is meant to \
+         demonstrate would be vacuous: {progress}"
+    );
+    assert!(
+        after_crossing <= PROGRESS_UPDATE_INTERVAL * 2,
+        "the protocol version moved but the poll interval stayed backed off: the gap after the \
+         first ledger-9 frame was {after_crossing:?}, expected about the base interval \
+         {PROGRESS_UPDATE_INTERVAL:?} (the pre-fork gap had reached {backed_off:?}, cap is \
+         {IDLE_BACKOFF_MAX_MULTIPLE}x base): {progress}"
+    );
+
+    println!(
+        "[6b] idle subscription observed protocol version {} -> {} over {} frames, never \
+         receiving a transaction; poll gap {:?} before the crossing -> {:?} after it (base {:?})",
+        frames[0].protocol_version,
+        frames[frames.len() - 1].protocol_version,
+        frames.len(),
+        backed_off,
+        after_crossing,
+        PROGRESS_UPDATE_INTERVAL
+    );
 
     // --- 7. The node's cNIGHT dust replay actually restored something -------
     //
@@ -900,9 +1235,9 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
     // The registration funds itself from the retroactive DUST its
     // now-generationless NIGHT accrued -- the same path a real holder takes.
     //
-    // NOT a hard assertion, because it exercises the *toolkit*, not the indexer,
-    // and the toolkit is flaky here: replaying a wallet from genesis across the
-    // boundary panics in the ledger arena roughly half the time --
+    // The one tolerated failure is a toolkit panic: replaying a wallet from
+    // genesis across the boundary panics in the ledger arena roughly half the
+    // time --
     //
     //   thread 'main' panicked at storage-core/src/arena.rs:
     //   root should be in the arena (T=...MerklePatriciaTrie<(Sp<Utxo>, Sp<UtxoMeta>),
@@ -963,18 +1298,15 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
             println!("[9] post-fork ledger-9 transaction submitted");
             true
         }
-        Err(error) => {
-            let panicked = format!("{error:#}").contains("root should be in the arena");
+        Err(error) if format!("{error:#}").contains("root should be in the arena") => {
             println!(
-                "[9] WARNING: post-fork toolkit traffic failed{}; continuing. Cause:\n{error:#}",
-                if panicked {
-                    " (known toolkit cross-fork wallet-replay panic)"
-                } else {
-                    ""
-                }
+                "[9] WARNING: post-fork toolkit traffic hit the known toolkit cross-fork \
+                 wallet-replay panic; continuing. Cause:\n{error:#}"
             );
             false
         }
+
+        Err(error) => return Err(error.context("post-fork toolkit traffic")),
     };
 
     // Whatever the toolkit managed, give the indexer a few more blocks so step 10
@@ -1012,7 +1344,18 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
                  {post_fork_height}..={final_height}"
             );
         } else {
-            println!("[9b] post-fork unshielded outputs: {post_fork_created:?}");
+            println!("[9b] post-fork unshielded outputs:");
+            for (transaction_hash, outputs) in &post_fork_created {
+                let registered = outputs
+                    .iter()
+                    .filter(|output| output.registered_for_dust_generation)
+                    .count();
+                println!(
+                    "[9b]   {transaction_hash}: {} output(s), {registered} registered for DUST \
+                     generation",
+                    outputs.len()
+                );
+            }
         }
     } else {
         println!("[9b] no post-fork traffic landed, nothing to report");
@@ -1052,7 +1395,7 @@ fn start_indexer(dir: &Path, node_rpc_port: u16, api_port: u16) -> anyhow::Resul
     let log = fs::File::create(dir.join("indexer.log")).context("create indexer log")?;
     let errors = log.try_clone().context("clone indexer log handle")?;
 
-    Command::new(format!("{target_dir}/debug/indexer-standalone"))
+    Command::new(format!("{target_dir}/release/indexer-standalone"))
         .env(
             "RUST_LOG",
             "indexer_standalone=info,chain_indexer=info,indexer_api=info,error",
@@ -1062,6 +1405,16 @@ fn start_indexer(dir: &Path, node_rpc_port: u16, api_port: u16) -> anyhow::Resul
             format!("{WS_DIR}/indexer-standalone/config.yaml"),
         )
         .env("APP__INFRA__API__PORT", api_port.to_string())
+        // See PROGRESS_UPDATE_INTERVAL: production polls every 30s and backs a quiet
+        // subscription off to 8x that, which this test has no reason to sit through.
+        .env(
+            "APP__INFRA__API__SUBSCRIPTION__UNSHIELDED_TRANSACTIONS__PROGRESS_UPDATE_INTERVAL",
+            format!("{}s", PROGRESS_UPDATE_INTERVAL.as_secs()),
+        )
+        .env(
+            "APP__INFRA__API__SUBSCRIPTION__PROGRESS_CACHE__TIME_TO_LIVE",
+            "1s",
+        )
         .env(
             "APP__INFRA__NODE__URL",
             format!("ws://localhost:{node_rpc_port}"),
@@ -1074,6 +1427,10 @@ fn start_indexer(dir: &Path, node_rpc_port: u16, api_port: u16) -> anyhow::Resul
         )
         .env("APP__INFRA__SPO_NODE__BLOCKFROST_ID", "hardfork-e2e-dummy")
         .env(
+            "APP__INFRA__SECRET",
+            env::var("APP__INFRA__SECRET").unwrap_or_else(|_| FALLBACK_SECRET.to_string()),
+        )
+        .env(
             "APP__INFRA__STORAGE__CNN_URL",
             dir.join("indexer.sqlite").display().to_string(),
         )
@@ -1084,5 +1441,8 @@ fn start_indexer(dir: &Path, node_rpc_port: u16, api_port: u16) -> anyhow::Resul
         .stdout(Stdio::from(log))
         .stderr(Stdio::from(errors))
         .spawn()
-        .context("spawn indexer-standalone")
+        .context(
+            "spawn indexer-standalone; build it with `cargo build --release -p indexer-standalone \
+             --features standalone`",
+        )
 }

@@ -39,9 +39,44 @@ just update-node 1.0.2           # a named version, e.g. a middle line
 just update-node 1.0.2 1.0.0     # ... whose toolkit version differs
 ```
 
-Produces `.node/X/chain/` (snapshot) and `.node/X/metadata.scale`. Needs `subxt`
-at the version pinned in `Cargo.toml`: `cargo install subxt-cli --version
-<pinned>`.
+Produces `.node/X/chain/` (snapshot) and `.node/X/metadata.scale`. The
+snapshot includes a deployed `contracts/token-issuer` contract and an
+unshielded mint from it, so the chain carries a non-NIGHT unshielded token.
+
+Prerequisites:
+
+- `docker` - runs the node and toolkit images.
+- `subxt` at the version pinned in `Cargo.toml`: `cargo install subxt-cli
+  --version <pinned>`.
+- The `compact` CLI - compiles `contracts/token-issuer` on the host. See the
+  [Midnight docs](https://docs.midnight.network) for install instructions.
+- An authenticated `gh` (`gh auth login`, or `GH_TOKEN` exported) and `unzip` -
+  only when the chosen compactc version has no final release (e.g.
+  `0.33.0-rc.2`). `compact update` cannot install those, so the script
+  downloads the release asset from `LFDT-Minokawa/compact` into
+  `~/.compact/versions/`. Later runs reuse it.
+
+#### compactc version
+
+compactc must match the ledger line of the node: each compactc release pins one
+`compact-runtime` version, and the runtime demands an exact minor match. The
+script picks the default from the node version:
+
+| Node version  | Ledger | compactc      |
+| ------------- | ------ | ------------- |
+| `2.1.*`       | v9     | `0.33.0-rc.2` |
+| anything else | v8     | `0.30.0`      |
+
+Set `COMPACTC_VERSION` to override it, e.g. when adding a node line the table
+does not cover yet:
+
+```bash
+COMPACTC_VERSION=0.33.0-rc.2 just update-node 2.2.0
+```
+
+A wrong version fails at contract deploy (`Version mismatch: compiled code
+expects …, runtime is …`). When a new node line needs a different compactc,
+extend the `case` in `generate_node_data.sh` and the table above.
 
 A node release names the toolkit release it ships with, and the two carry
 independent version numbers: e.g. `node-1.0.2` ships `toolkit-1.0.0`. 
