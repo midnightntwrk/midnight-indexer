@@ -27,10 +27,13 @@ use std::{
 };
 use thiserror::Error;
 
-/// Amount, in milliseconds, by which the first regular transaction's dust-validity `tblock` is
-/// bumped ahead of block time. The node validates mempool transactions against a `tblock` bumped
-/// `slot_duration_secs + skipped_slots_margin` (one slot each, two slots by default) ahead of block
-/// time. Midnight slots are 6s, so the default bump is two slots. Block timestamps are milliseconds.
+/// Amount, in milliseconds, by which a block's first regular transaction's well-formed `tblock` is
+/// bumped ahead of block time. "First" here and below means the first regular transaction to
+/// apply, and any failed ones before it: a failed transaction leaves the ledger state unchanged,
+/// so the node's validity cache serves all of them from the parent block's state. The node
+/// validates mempool transactions against a `tblock` bumped `slot_duration_secs +
+/// skipped_slots_margin` (one slot each, two slots by default) ahead of block time. Midnight
+/// slots are 6s, so the default bump is two slots. Block timestamps are milliseconds.
 const MEMPOOL_TBLOCK_BUMP_MILLIS: u64 = 2 * 6_000;
 
 /// First node 1.0 runtime `spec_version` whose ledger-8 host functions no longer skew the first
@@ -704,11 +707,10 @@ mod apply_transactions_tblock_tests {
         expected: Result<Vec<TransactionResult>, Malformed>,
     }
 
-    // The first regular transaction of a block whose runtime skews it is accepted if well-formed
-    // at the block time or at the adjusted `tblock`; every other transaction only at the block
-    // time.
+    // On a runtime that skews, a regular transaction is accepted if well-formed at the block time
+    // or at the adjusted `tblock` until one applies; from then on only at the block time.
     #[tokio::test(flavor = "multi_thread")]
-    async fn first_regular_transaction_is_accepted_at_the_block_time_or_the_adjusted_tblock()
+    async fn regular_transactions_are_accepted_at_the_adjusted_tblock_until_one_applies()
     -> Result<(), BoxError> {
         use Malformed::{IntentTtlExpired, OutOfDustValidityWindow};
         use TransactionResult::{Failure, Success};
