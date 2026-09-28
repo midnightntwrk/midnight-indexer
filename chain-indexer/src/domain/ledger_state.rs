@@ -204,12 +204,10 @@ impl LedgerState {
                         parent_block_timestamp,
                         well_formed_timestamp,
                     )?;
-                    if let Transaction::Regular(transaction) = &transaction {
-                        no_regular_transaction_applied &=
-                            matches!(transaction.transaction_result, TransactionResult::Failure);
-                    }
+                    no_regular_transaction_applied &=
+                        matches!(transaction.transaction_result, TransactionResult::Failure);
 
-                    Ok(transaction)
+                    Ok(Transaction::Regular(transaction.into()))
                 }
 
                 node::Transaction::System(transaction) => {
@@ -310,7 +308,7 @@ impl LedgerState {
         Ok(captured.values().filter(|(key, _)| key.is_none()).count())
     }
 
-    // Applies one regular transaction and converts it into a domain transaction.
+    // Applies one regular transaction and converts it into a domain regular transaction.
     //
     // `well_formed_timestamp` is a second `tblock`, in milliseconds, to verify the transaction at
     // if it is malformed at `block_timestamp`. It is the adjusted `tblock` for a regular
@@ -328,7 +326,7 @@ impl LedgerState {
         block_timestamp: u64,
         parent_block_timestamp: u64,
         well_formed_timestamp: Option<u64>,
-    ) -> Result<Transaction, Error> {
+    ) -> Result<RegularTransaction, Error> {
         let mut transaction = RegularTransaction::from(transaction);
 
         // Apply transaction.
@@ -416,7 +414,7 @@ impl LedgerState {
             contract_action.zswap_state_key = Some(zswap_state_key);
         }
 
-        Ok(Transaction::Regular(transaction.into()))
+        Ok(transaction)
     }
 
     #[trace(properties = {
