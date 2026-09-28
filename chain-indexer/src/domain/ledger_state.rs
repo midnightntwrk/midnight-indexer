@@ -18,7 +18,7 @@ use indexer_common::domain::{
     ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, BlockHash, LedgerVersion,
     NetworkId, ProtocolVersion, SerializedContractAddress, SerializedLedgerStateKey,
     TransactionHash, TransactionResult,
-    ledger::{LedgerParameters, RootCountRepair},
+    ledger::{self, LedgerParameters, RootCountRepair},
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -41,21 +41,22 @@ const MEMPOOL_TBLOCK_BUMP_MILLIS: u64 = 2 * 6_000;
 /// See <https://github.com/midnightntwrk/midnight-node/issues/1924>.
 const FIRST_UNSKEWED_NODE_1_0_SPEC_VERSION: u32 = 1_000_300;
 
-/// Whether the node skewed the first regular transaction's well-formed `tblock` by
+/// Whether the node may have skewed the first regular transaction's well-formed `tblock` by
 /// `MEMPOOL_TBLOCK_BUMP_MILLIS` off the parent block time, for a block built by the runtime with the
 /// given protocol version; that is the runtime recorded in the block's MNSV digest, not the one in
 /// its state, which is newer at a runtime-upgrade enactment block.
 ///
 /// - 0.22, 1.0 before `FIRST_UNSKEWED_NODE_1_0_SPEC_VERSION` and 2.0 serve the first transaction's
 ///   validity from the strict cache warmed during mempool ingress, i.e. verify it at the bumped
-///   `tblock`.
+///   `tblock`, if the cache holds it for the parent block's ledger state. The block author may have
+///   validated it against an older state, in which case the node verifies it against the block's
+///   own time.
 /// - 1.0 from `FIRST_UNSKEWED_NODE_1_0_SPEC_VERSION` on (`Ledger8Bridge` version 2) and 2.1 (whose
 ///   ledger-8 and ledger-9 host functions never skew) verify it against the block's own time.
 ///
-/// Bumping where the node does not verifies the first regular transaction at a different time than
-/// the node, so a transaction the node accepted can fail `well_formed` here and halt indexing: with
-/// a block gap under 12s an intent TTL in `[block time, parent + 12s)` has expired, and with a gap
-/// over 12s a dust `ctime` in `(parent + 12s, block time]` lies outside the dust validity window.
+/// The block does not record whether the cache held the transaction. A skewing runtime's first
+/// regular transaction is therefore accepted if it is well-formed at the block time or at the
+/// bumped `tblock`.
 fn node_skews_first_regular_tblock(protocol_version: ProtocolVersion) -> bool {
     match protocol_version {
         ProtocolVersion::V0_22(_) | ProtocolVersion::V2_0(_) => true,
@@ -160,9 +161,8 @@ impl LedgerState {
     /// reproduced for the first regular transaction (see below). It must be `false` for the genesis
     /// block (height 0): the transactions embedded in genesis never transited the mempool, so the
     /// node never cached a bumped result for them and validated them against the real block time.
-    /// Bumping them would push the well-formed `tblock` past a bootstrap transaction's intent TTL
-    /// and wrongly reject it. It must also be `false` for blocks built by a runtime that no longer
-    /// skews; the caller decides this with `should_bump_first_regular_tblock`.
+    /// It must also be `false` for blocks built by a runtime that no longer skews; the caller
+    /// decides this with `should_bump_first_regular_tblock`.
     #[trace(properties = { "parent_block_hash": "{parent_block_hash}" })]
     pub fn apply_transactions(
         &mut self,
@@ -183,20 +183,19 @@ impl LedgerState {
         // current block overshoots by the inter-block gap and can push `tblock` past a
         // transaction's intent TTL, wrongly rejecting a tx the node accepted.
         //
-        // Reproduce that by bumping only the first regular transaction's well-formed `tblock` off
-        // the parent block time. `apply` always runs against the real block time, so the resulting
+        // The first regular transaction misses the cache if the block author validated it against
+        // an older ledger state than the parent block's, and the block does not record which. So
+        // verify it at the block time and, if malformed there, at the `tblock` bumped off the
+        // parent block time. `apply` always runs against the real block time, so the resulting
         // state matches the node.
         let mut first_regular_transaction = true;
         let transactions = transactions
             .into_iter()
             .map(|transaction| match transaction {
                 node::Transaction::Regular(transaction) => {
-                    let well_formed_timestamp =
-                        if first_regular_transaction && bump_first_regular_tblock {
-                            parent_block_timestamp + MEMPOOL_TBLOCK_BUMP_MILLIS
-                        } else {
-                            block_timestamp
-                        };
+                    let well_formed_timestamp = (first_regular_transaction
+                        && bump_first_regular_tblock)
+                        .then_some(parent_block_timestamp + MEMPOOL_TBLOCK_BUMP_MILLIS);
                     first_regular_transaction = false;
 
                     self.apply_regular_transaction(
@@ -306,10 +305,16 @@ impl LedgerState {
         Ok(captured.values().filter(|(key, _)| key.is_none()).count())
     }
 
+    // Applies one regular transaction and converts it into a domain transaction.
+    //
+    // `well_formed_timestamp` is a second `tblock`, in milliseconds, at which the transaction is
+    // accepted if it is malformed at `block_timestamp`. It is the adjusted `tblock` for the first
+    // regular transaction of a block whose runtime skews it, and `None` for every other
+    // transaction.
     #[trace(properties = {
         "parent_block_hash": "{parent_block_hash}",
         "block_timestamp": "{block_timestamp}",
-        "well_formed_timestamp": "{well_formed_timestamp}"
+        "well_formed_timestamp": "{well_formed_timestamp:?}"
     })]
     fn apply_regular_transaction(
         &mut self,
@@ -317,7 +322,7 @@ impl LedgerState {
         parent_block_hash: BlockHash,
         block_timestamp: u64,
         parent_block_timestamp: u64,
-        well_formed_timestamp: u64,
+        well_formed_timestamp: Option<u64>,
     ) -> Result<Transaction, Error> {
         let mut transaction = RegularTransaction::from(transaction);
 
@@ -325,6 +330,25 @@ impl LedgerState {
         let start_index = self.zswap_first_free();
         let dust_commitment_start_index = self.dust_commitments_first_free();
         let dust_generation_start_index = self.dust_generations_first_free();
+        let mut apply = |well_formed_timestamp| {
+            self.0.apply_regular_transaction(
+                &transaction.raw,
+                parent_block_hash,
+                block_timestamp,
+                parent_block_timestamp,
+                well_formed_timestamp,
+            )
+        };
+        // Verify at the block time and, if malformed there, at `well_formed_timestamp`.
+        let outcome = match (apply(block_timestamp), well_formed_timestamp) {
+            // A malformed transaction leaves the ledger state untouched, so the retry applies to
+            // the same state. `well_formed` returns the same `VerifiedTransaction` at either
+            // `tblock`; only its checks depend on it. The error reported is the one at block time.
+            (Err(error @ ledger::Error::MalformedTransaction(_)), Some(well_formed_timestamp)) => {
+                apply(well_formed_timestamp).map_err(|_| error)
+            }
+            (outcome, _) => outcome,
+        };
         let ApplyRegularTransactionOutcome {
             transaction_result,
             created_unshielded_utxos,
@@ -332,15 +356,7 @@ impl LedgerState {
             ledger_events,
             fees,
             bridge_claim,
-        } = self
-            .0
-            .apply_regular_transaction(
-                &transaction.raw,
-                parent_block_hash,
-                block_timestamp,
-                parent_block_timestamp,
-                well_formed_timestamp,
-            )
+        } = outcome
             .map_err(|error| Error::ApplyRegularTransaction(Some(transaction.hash), error))?;
 
         // Contract actions are owned by a physical intent segment, but Calls may also execute a
@@ -650,9 +666,9 @@ mod tblock_skew_tests {
     /// one block in the pool and been included on a node 1.0.300 runtime: parent 1784987076 (the
     /// original block's time), block 1784987082, intent TTL 1784987084.
     ///
-    /// Node 1.0.300 verifies it at the block's own time (1784987082 <= TTL) and accepts it. The
-    /// unconditional bump verifies it at parent + 12s (1784987088 > TTL) and halts indexing on a
-    /// block the node accepted. This is the regression for gating the bump on the runtime.
+    /// Node 1.0.300 verifies it at the block's own time (1784987082 <= TTL) and accepts it.
+    /// Verifying it only at parent + 12s (1784987088 > TTL) halts indexing on a block the node
+    /// accepted.
     #[cfg(feature = "standalone")]
     #[tokio::test]
     async fn first_tx_on_node_1_0_300_runtime_is_verified_at_block_time() {
@@ -713,21 +729,17 @@ mod tblock_skew_tests {
                 .map_err(|error| format!("{:#}", anyhow::Error::from(error)))
         };
 
-        // A skewing runtime: the bump rejects the transaction on the intent TTL.
-        let error = apply(ProtocolVersion::V1_0(1_000_000)).expect_err("bump must reject");
-        assert!(
-            error.contains(INTENT_TTL_EXPIRED) && error.contains("Timestamp(1784987088)"),
-            "unexpected error: {error}"
-        );
-
-        // A node 1.0.300 runtime: the intent TTL check passes. The transaction still fails later,
-        // against a fresh state instead of preview's, which is irrelevant to the `tblock`.
-        match apply(ProtocolVersion::V1_0(1_000_300)) {
-            Ok(()) => {}
-            Err(error) => assert!(
-                !error.contains(INTENT_TTL_EXPIRED),
-                "node 1.0.300 runtime must not reject on the intent TTL: {error}"
-            ),
+        // On a skewing and a node 1.0.300 runtime, the intent TTL check passes. The transaction
+        // still fails later, against a fresh state instead of preview's, which is irrelevant to the
+        // `tblock`.
+        use ProtocolVersion::*;
+        for protocol_version in [V1_0(1_000_000), V1_0(1_000_300)] {
+            if let Err(error) = apply(protocol_version) {
+                assert!(
+                    !error.contains(INTENT_TTL_EXPIRED),
+                    "{protocol_version:?} must not reject on the intent TTL: {error}"
+                );
+            }
         }
     }
 }
