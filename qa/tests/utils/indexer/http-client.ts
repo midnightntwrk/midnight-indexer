@@ -54,6 +54,12 @@ import type {
   ContractType,
   ContractActionTypeEnum,
   ContractResponse,
+  RegisteredTotals,
+  RegisteredTotalsSeriesResponse,
+  RegisteredStat,
+  RegisteredSpoSeriesResponse,
+  PresenceEvent,
+  RegisteredPresenceResponse,
 } from './indexer-types';
 import {
   GET_LATEST_BLOCK,
@@ -82,6 +88,11 @@ import {
   GET_BRIDGE_RESERVE_INFLOWS,
   GET_BRIDGE_TREASURY_INFLOWS,
 } from './graphql/bridge-pool-queries';
+import {
+  GET_REGISTERED_TOTALS_SERIES,
+  GET_REGISTERED_SPO_SERIES,
+  GET_REGISTERED_PRESENCE,
+} from './graphql/spo-queries';
 
 /**
  * Recognise operation-level GraphQL errors that look like *server* failures
@@ -666,6 +677,93 @@ export class IndexerHttpClient {
       query,
       variables,
     );
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  /**
+   * Retrieves the per-epoch registration totals series for an epoch range
+   * @param fromEpoch - First epoch of the range
+   * @param toEpoch - Last epoch of the range
+   * @param queryOverride - Optional custom GraphQL query
+   * @returns Promise resolving to the registered totals series response
+   */
+  async getRegisteredTotalsSeries(
+    fromEpoch: number,
+    toEpoch: number,
+    queryOverride?: string,
+  ): Promise<RegisteredTotalsSeriesResponse> {
+    log.debug(`Target URL endpoint ${this.getTargetUrl()}`);
+
+    const query = queryOverride || GET_REGISTERED_TOTALS_SERIES;
+    const variables = { FROM_EPOCH: fromEpoch, TO_EPOCH: toEpoch };
+
+    log.debug(`Using query\n${query}`);
+    log.debug(`Using variables\n${JSON.stringify(variables, null, 2)}`);
+
+    const response = await this.rawRequestWithRetry<{
+      registeredTotalsSeries: RegisteredTotals[];
+    }>(query, variables);
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  /**
+   * Retrieves the per-epoch SPO registration statistics series for an epoch range
+   * @param fromEpoch - First epoch of the range
+   * @param toEpoch - Last epoch of the range
+   * @param queryOverride - Optional custom GraphQL query
+   * @returns Promise resolving to the registered SPO series response
+   */
+  async getRegisteredSpoSeries(
+    fromEpoch: number,
+    toEpoch: number,
+    queryOverride?: string,
+  ): Promise<RegisteredSpoSeriesResponse> {
+    log.debug(`Target URL endpoint ${this.getTargetUrl()}`);
+
+    const query = queryOverride || GET_REGISTERED_SPO_SERIES;
+    const variables = { FROM_EPOCH: fromEpoch, TO_EPOCH: toEpoch };
+
+    log.debug(`Using query\n${query}`);
+    log.debug(`Using variables\n${JSON.stringify(variables, null, 2)}`);
+
+    const response = await this.rawRequestWithRetry<{
+      registeredSpoSeries: RegisteredStat[];
+    }>(query, variables);
+
+    log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
+
+    return response;
+  }
+
+  /**
+   * Retrieves the raw SPO presence events for an epoch range
+   * @param fromEpoch - First epoch of the range
+   * @param toEpoch - Last epoch of the range
+   * @param queryOverride - Optional custom GraphQL query
+   * @returns Promise resolving to the registered presence response
+   */
+  async getRegisteredPresence(
+    fromEpoch: number,
+    toEpoch: number,
+    queryOverride?: string,
+  ): Promise<RegisteredPresenceResponse> {
+    log.debug(`Target URL endpoint ${this.getTargetUrl()}`);
+
+    const query = queryOverride || GET_REGISTERED_PRESENCE;
+    const variables = { FROM_EPOCH: fromEpoch, TO_EPOCH: toEpoch };
+
+    log.debug(`Using query\n${query}`);
+    log.debug(`Using variables\n${JSON.stringify(variables, null, 2)}`);
+
+    const response = await this.rawRequestWithRetry<{
+      registeredPresence: PresenceEvent[];
+    }>(query, variables);
 
     log.debug(`Raw indexer response\n${JSON.stringify(response, null, 2)}`);
 

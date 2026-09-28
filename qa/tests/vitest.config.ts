@@ -47,6 +47,7 @@ const maxWorkers = parseMaxWorkers(process.env.VITEST_MAX_WORKERS);
 // - smoke tests: quick health checks, no cache warmup
 // - e2e tests: includes global setup for toolkit cache warmup
 // - integration tests: runs without cache warmup
+// - unit tests: pure helpers, no environment, no Docker
 // Note: slowTestThreshold is set globally (3000ms) as per-project thresholds don't work in Vitest 3.2.4
 export default defineConfig({
   test: {
@@ -77,6 +78,8 @@ export default defineConfig({
       './vitest.config.smoke.ts',
       './vitest.config.e2e.ts',
       './vitest.config.integration.ts',
+      './vitest.config.sync.ts',
+      './vitest.config.unit.ts',
     ],
   },
 });
