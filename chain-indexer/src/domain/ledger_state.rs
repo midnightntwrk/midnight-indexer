@@ -744,6 +744,7 @@ mod apply_transactions_tblock_tests {
         error::BoxError,
         testing::{Malformed, NETWORK_ID, dust_registration, init_ledger_db, malformed},
     };
+    use std::fs;
 
     // Block time of every test block, in seconds. Each test sets its parent block time relative to
     // it, and the bumped `tblock` is `parent + 12s`.
@@ -899,6 +900,56 @@ mod apply_transactions_tblock_tests {
                 apply(false)?,
                 Ok(vec![TransactionResult::Success]),
                 "{ledger_version}: not bumped"
+            );
+        }
+
+        Ok(())
+    }
+
+    // Preprod block 164460's first (and only) regular transaction, built by a 0.22 runtime: parent
+    // 1775081610, block 1775081616, intent TTL 1775081620. The node accepted it, so it verified the
+    // transaction at the block time; the bumped `tblock` 1775081622 is past the TTL. The block
+    // author validated the transaction against an older state than the parent block's, so the
+    // cached validity result did not apply at inclusion.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn first_regular_transaction_of_a_skewing_runtime_block_accepted_by_the_node()
+    -> Result<(), BoxError> {
+        const BLOCK_HEIGHT: u64 = 164_460;
+        const BLOCK_TIMESTAMP: u64 = 1_775_081_616_000;
+        const PARENT_BLOCK_TIMESTAMP: u64 = 1_775_081_610_000;
+        const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::V0_22(22_000);
+
+        let _ledger_db = init_ledger_db().await?;
+        let raw: SerializedTransaction = fs::read(format!(
+            "{}/../indexer-common/tests/block_164460_tx.raw",
+            env!("CARGO_MANIFEST_DIR")
+        ))?
+        .into();
+        let transaction = ledger::Transaction::deserialize(&raw, LedgerVersion::V8)?;
+        let transaction = node::Transaction::Regular(node::RegularTransaction {
+            hash: transaction.hash(),
+            protocol_version: PROTOCOL_VERSION,
+            raw,
+            identifiers: transaction.identifiers()?,
+            contract_actions: vec![],
+        });
+
+        let mut ledger_state = LedgerState::new("preprod".try_into()?, LedgerVersion::V8)?;
+        let result = ledger_state.apply_transactions(
+            [transaction],
+            BlockHash::from([0; 32]),
+            BLOCK_TIMESTAMP,
+            PARENT_BLOCK_TIMESTAMP,
+            should_bump_first_regular_tblock(BLOCK_HEIGHT, PROTOCOL_VERSION),
+        );
+
+        // The transaction may still fail later, against a fresh state instead of preprod's, which
+        // is irrelevant to the `tblock`.
+        if let Err(error) = result {
+            assert_ne!(
+                malformed(&error),
+                Some(Malformed::IntentTtlExpired),
+                "{error:#}"
             );
         }
 
