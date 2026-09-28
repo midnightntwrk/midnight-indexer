@@ -508,11 +508,23 @@ impl LedgerState {
     ///
     /// `block_timestamp` drives the block context passed to `apply`, and thus the timestamps the
     /// ledger writes into its state (e.g. dust generation `dtime`), so it must always be the real
-    /// block time. `well_formed_timestamp` is the `tblock` used only for the dust-validity-window
-    /// check in `well_formed`; it normally equals `block_timestamp` but is bumped ahead for the
-    /// first regular transaction in a block to reproduce the node's cached mempool validity result
-    /// (see `chain-indexer`'s `apply_transactions`). Bumping it only affects whether the check
-    /// passes, not the resulting state, since `well_formed` merely validates.
+    /// block time. `well_formed_timestamp` is the `tblock` of the intent TTL and dust validity
+    /// window checks in `well_formed`; it normally equals `block_timestamp` but is bumped ahead for
+    /// the first regular transaction in a block to reproduce the node's cached mempool validity
+    /// result (see `chain-indexer`'s `apply_transactions`).
+    ///
+    /// The node validates a mempool transaction against a `tblock` ahead of the block time it is
+    /// later included at and caches the result keyed on `(tx_hash, ledger_state_key)`, so a
+    /// chain-accepted transaction can fail `well_formed` at `well_formed_timestamp`. The window of
+    /// `tblock`s the transaction is valid at, `[max(latest dust ctime, latest intent TTL -
+    /// global TTL), min(earliest intent TTL, earliest dust ctime + dust grace period)]`, can be
+    /// seconds wide at any offset from the block time, so no fixed tolerance covers it. A failed
+    /// check is therefore retried at the ends of that window: the latest valid instant first
+    /// (covers "TTL has expired"), then the earliest (covers "not valid yet"). A retry that passes
+    /// is logged as a warning; if none passes, the original error is returned.
+    ///
+    /// The `tblock` of `well_formed` only affects whether the check passes, not the resulting
+    /// state, since `well_formed` merely validates and `apply` runs at `block_timestamp`.
     #[trace]
     pub fn apply_regular_transaction(
         &mut self,
@@ -554,6 +566,54 @@ impl LedgerState {
                         *STRICTNESS_V8,
                         timestamp(well_formed_timestamp),
                     )
+                    .or_else(|error| {
+                        // Retry at the ends of the transaction's own validity window, see the doc
+                        // comment.
+                        let parameters = &ledger_state.parameters;
+                        let ttls = transaction
+                            .intents()
+                            .map(|(_, intent)| intent.ttl)
+                            .minmax()
+                            .into_option();
+                        let ctimes = transaction
+                            .intents()
+                            .filter_map(|(_, intent)| {
+                                intent.dust_actions.as_ref().map(|dust| dust.ctime)
+                            })
+                            .minmax()
+                            .into_option();
+                        let latest = [
+                            ttls.map(|(min_ttl, _)| min_ttl),
+                            ctimes.map(|(min_ctime, _)| {
+                                min_ctime + parameters.dust.dust_grace_period
+                            }),
+                        ]
+                        .into_iter()
+                        .flatten()
+                        .min();
+                        let earliest = [
+                            ctimes.map(|(_, max_ctime)| max_ctime),
+                            ttls.map(|(_, max_ttl)| max_ttl - parameters.global_ttl),
+                        ]
+                        .into_iter()
+                        .flatten()
+                        .max();
+                        [latest, earliest]
+                            .into_iter()
+                            .flatten()
+                            .find_map(|tblock| {
+                                let verified = transaction
+                                    .well_formed(&cx.ref_state, *STRICTNESS_V8, tblock)
+                                    .ok()?;
+                                warn!(
+                                    error:%, well_formed_timestamp, tblock:?;
+                                    "well-formed check failed at well_formed_timestamp, \
+                                     passed at a validity window end"
+                                );
+                                Some(verified)
+                            })
+                            .ok_or(error)
+                    })
                     .map_err(|error| Error::MalformedTransaction(error.into()))?;
                 let (ledger_state, transaction_result) =
                     ledger_state.apply(&verified_ledger_transaction, &cx);
@@ -655,6 +715,54 @@ impl LedgerState {
                         *STRICTNESS_V9,
                         timestamp(well_formed_timestamp),
                     )
+                    .or_else(|error| {
+                        // Retry at the ends of the transaction's own validity window, see the doc
+                        // comment.
+                        let parameters = &ledger_state.parameters;
+                        let ttls = transaction
+                            .intents()
+                            .map(|(_, intent)| intent.ttl)
+                            .minmax()
+                            .into_option();
+                        let ctimes = transaction
+                            .intents()
+                            .filter_map(|(_, intent)| {
+                                intent.dust_actions.as_ref().map(|dust| dust.ctime)
+                            })
+                            .minmax()
+                            .into_option();
+                        let latest = [
+                            ttls.map(|(min_ttl, _)| min_ttl),
+                            ctimes.map(|(min_ctime, _)| {
+                                min_ctime + parameters.dust.dust_grace_period
+                            }),
+                        ]
+                        .into_iter()
+                        .flatten()
+                        .min();
+                        let earliest = [
+                            ctimes.map(|(_, max_ctime)| max_ctime),
+                            ttls.map(|(_, max_ttl)| max_ttl - parameters.global_ttl),
+                        ]
+                        .into_iter()
+                        .flatten()
+                        .max();
+                        [latest, earliest]
+                            .into_iter()
+                            .flatten()
+                            .find_map(|tblock| {
+                                let verified = transaction
+                                    .well_formed(&cx.ref_state, *STRICTNESS_V9, tblock)
+                                    .ok()?;
+                                warn!(
+                                    error:%, well_formed_timestamp, tblock:?;
+                                    "well-formed check failed at well_formed_timestamp, \
+                                     passed at a validity window end"
+                                );
+                                Some(verified)
+                            })
+                            .ok_or(error)
+                    })
                     .map_err(|error| Error::MalformedTransaction(error.into()))?;
                 let (ledger_state, transaction_result) =
                     ledger_state.apply(&verified_ledger_transaction, &cx);
@@ -4448,9 +4556,13 @@ mod well_formed_timestamp_tests {
 
     // `well_formed_timestamp` is the `tblock` of both `well_formed` time checks: it must lie in
     // `[ttl - global_ttl, ttl]` for the intent TTL and in `[ctime, ctime + dust_grace_period]` for
-    // the dust actions, with inclusive bounds at whole-second granularity.
+    // the dust actions, with inclusive bounds at whole-second granularity. A `well_formed_timestamp`
+    // outside the window both admit is retried at that window's ends, so a transaction with a valid
+    // instant is applied wherever `well_formed_timestamp` lands. Only a transaction with no valid
+    // instant, e.g. a dust ctime past the intent TTL, is rejected, with the error `well_formed`
+    // reports at `well_formed_timestamp`.
     #[tokio::test(flavor = "multi_thread")]
-    async fn well_formed_timestamp_is_checked_against_intent_ttl_and_dust_window()
+    async fn well_formed_timestamp_outside_the_window_is_retried_at_the_window_ends()
     -> Result<(), BoxError> {
         let _ledger_db = init_ledger_db().await?;
         let ttl = NOW + TTL_OFFSET;
@@ -4460,54 +4572,80 @@ mod well_formed_timestamp_tests {
             let late_ttl = NOW + dust_grace_period + TTL_OFFSET;
             let far_ttl = NOW + global_ttl;
 
+            // Intent TTL and dust ctime in seconds, `well_formed_timestamp` in milliseconds.
             let cases = [
-                ("inside both windows", ttl, BLOCK_TIMESTAMP, Ok(())),
-                ("at the intent TTL", ttl, millis(ttl), Ok(())),
+                ("inside both windows", ttl, NOW, BLOCK_TIMESTAMP, Ok(())),
+                ("at the intent TTL", ttl, NOW, millis(ttl), Ok(())),
                 (
                     "sub-second past the intent TTL",
                     ttl,
+                    NOW,
                     millis(ttl) + 999,
                     Ok(()),
                 ),
                 (
                     "one second past the intent TTL",
                     ttl,
+                    NOW,
                     millis(ttl + 1),
-                    Err(Malformed::IntentTtlExpired),
+                    Ok(()),
                 ),
-                ("at the global TTL horizon", far_ttl, millis(NOW), Ok(())),
-                // `NOW - 1` also lies before the dust ctime; the ledger checks the intent TTL
-                // first, so the TTL error is the one reported.
+                (
+                    "at the global TTL horizon",
+                    far_ttl,
+                    NOW,
+                    millis(NOW),
+                    Ok(()),
+                ),
                 (
                     "one second before the global TTL horizon",
                     far_ttl,
+                    NOW,
                     millis(NOW - 1),
-                    Err(Malformed::IntentTtlTooFarInFuture),
+                    Ok(()),
                 ),
-                ("at the dust ctime", ttl, millis(NOW), Ok(())),
+                ("at the dust ctime", ttl, NOW, millis(NOW), Ok(())),
                 (
                     "one second before the dust ctime",
                     ttl,
+                    NOW,
                     millis(NOW - 1),
-                    Err(Malformed::OutOfDustValidityWindow),
+                    Ok(()),
                 ),
                 (
                     "at the end of the dust grace period",
                     late_ttl,
+                    NOW,
                     millis(NOW + dust_grace_period),
                     Ok(()),
                 ),
+                // The window is `[late_ttl - global_ttl, NOW + dust_grace_period]`, clipped by
+                // both parameters rather than by the intent TTL and the dust ctime.
                 (
                     "one second past the end of the dust grace period",
                     late_ttl,
+                    NOW,
                     millis(NOW + dust_grace_period + 1),
+                    Ok(()),
+                ),
+                (
+                    "dust ctime past the intent TTL",
+                    ttl,
+                    ttl + 1,
+                    BLOCK_TIMESTAMP,
                     Err(Malformed::OutOfDustValidityWindow),
+                ),
+                (
+                    "dust ctime past the intent TTL, checked past the intent TTL",
+                    ttl,
+                    ttl + 1,
+                    millis(ttl + 1),
+                    Err(Malformed::IntentTtlExpired),
                 ),
             ];
 
-            // Intent TTL in seconds, `well_formed_timestamp` in milliseconds.
-            for (name, ttl, well_formed_timestamp, expected) in cases {
-                let transaction = dust_registration(ledger_version, ttl, NOW).await?;
+            for (name, ttl, ctime, well_formed_timestamp, expected) in cases {
+                let transaction = dust_registration(ledger_version, ttl, ctime).await?;
                 let mut ledger_state = LedgerState::new(NETWORK_ID.try_into()?, ledger_version)?;
                 let actual = match ledger_state.apply_regular_transaction(
                     &transaction,
