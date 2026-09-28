@@ -38,6 +38,7 @@ indoc              = { workspace = true }
 itertools          = { workspace = true }
 log                = { workspace = true, features = [ "kv" ] }
 metrics            = { workspace = true }
+moka               = { workspace = true }
 parking_lot        = { workspace = true }
 secrecy            = { workspace = true }
 serde              = { workspace = true, features = [ "derive" ] }
