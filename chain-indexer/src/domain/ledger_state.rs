@@ -158,11 +158,11 @@ impl LedgerState {
     /// Apply the given node transactions to this ledger state and return domain transactions.
     ///
     /// `bump_first_regular_tblock` selects whether the node's mempool-cached validity result is
-    /// reproduced for the first regular transaction (see below). It must be `false` for the genesis
-    /// block (height 0): the transactions embedded in genesis never transited the mempool, so the
-    /// node never cached a bumped result for them and validated them against the real block time.
-    /// It must also be `false` for blocks built by a runtime that no longer skews; the caller
-    /// decides this with `should_bump_first_regular_tblock`.
+    /// reproduced for the first regular transaction (see below). Set, it accepts the transaction
+    /// at a `tblock` the node may have used besides the block time, so it is `false` where the
+    /// node never used one: the genesis block (height 0), whose transactions never transited the
+    /// mempool, and blocks built by a runtime that no longer skews. The caller decides this with
+    /// `should_bump_first_regular_tblock`.
     #[trace(properties = { "parent_block_hash": "{parent_block_hash}" })]
     pub fn apply_transactions(
         &mut self,
