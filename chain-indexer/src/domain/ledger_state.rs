@@ -750,8 +750,8 @@ mod apply_transactions_tblock_tests {
     use crate::domain::{LedgerState, Transaction, node};
     use indexer_common::{
         domain::{
-            BlockHash, LedgerVersion, ProtocolVersion, SerializedTransaction, TransactionResult,
-            ledger,
+            BlockHash, LedgerVersion, ProtocolVersion, SerializedTransaction, TransactionHash,
+            TransactionResult, ledger,
         },
         error::BoxError,
         testing::{Malformed, NETWORK_ID, dust_registration, init_ledger_db, malformed},
@@ -905,6 +905,10 @@ mod apply_transactions_tblock_tests {
         const BLOCK_TIMESTAMP: u64 = 1_775_081_616_000;
         const PARENT_BLOCK_TIMESTAMP: u64 = 1_775_081_610_000;
         const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::V0_22(22_000);
+        const TRANSACTION_HASH: &str =
+            "6a1005eecf695a8f950e8f8e74de0c6336daf55448326bf0db0b3b55c089ad0b";
+        const CONTRACT_ADDRESS: &str =
+            "18835f54e98cfbf5c789ef76fb79d4cb0e8d84d627ef1e36cdf27cf3cdbaebb7";
 
         let _ledger_db = init_ledger_db().await?;
         let raw: SerializedTransaction = fs::read(format!(
@@ -913,6 +917,10 @@ mod apply_transactions_tblock_tests {
         ))?
         .into();
         let transaction = ledger::Transaction::deserialize(&raw, LedgerVersion::V8)?;
+        assert_eq!(
+            transaction.hash(),
+            TransactionHash::from_hex(TRANSACTION_HASH)?
+        );
         let transaction = node::Transaction::Regular(node::RegularTransaction {
             hash: transaction.hash(),
             protocol_version: PROTOCOL_VERSION,
@@ -930,15 +938,18 @@ mod apply_transactions_tblock_tests {
             should_bump_first_regular_tblock(BLOCK_HEIGHT, PROTOCOL_VERSION),
         );
 
-        // The transaction may still fail later, against a fresh state instead of preprod's, which
-        // is irrelevant to the `tblock`.
-        if let Err(error) = result {
-            assert_ne!(
-                malformed(&error),
-                Some(Malformed::IntentTtlExpired),
-                "{error:#}"
-            );
-        }
+        // Against a fresh state instead of preprod's, the transaction passes the time checks and
+        // fails the next stateful check: the contract it calls does not exist.
+        let Err(error) = result else {
+            panic!("a fresh state has no contract to call");
+        };
+        assert_eq!(
+            malformed(&error),
+            Some(Malformed::Other(format!(
+                "call to non-existant contract ContractAddress({CONTRACT_ADDRESS})"
+            ))),
+            "{error}"
+        );
 
         Ok(())
     }
