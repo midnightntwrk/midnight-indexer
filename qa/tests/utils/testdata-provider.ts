@@ -152,6 +152,42 @@ class TestDataProvider {
   }
 
   /**
+   * Gets the seed that funds transfers submitted through `generateSingleTx`.
+   *
+   * Under the moth transaction backend a `_LIGHT` variant (e.g.
+   * FUNDING_SEED_PREVIEW_LIGHT) is preferred if it is set: a funded wallet with
+   * few transactions, so its state is small. moth restores a wallet's own state
+   * from disk, and that cost tracks the size of the wallet's state, not the
+   * length of the chain: on preprod a light wallet restores in under a minute
+   * where the shared funding wallet takes ~46. Otherwise this is
+   * `getFundingSeed()`.
+   *
+   * Only transfer callers use this. Suites that still build through the
+   * toolkit (contract actions, the toolkit suites) or that rely on the shared
+   * funding wallet's history (integration subscriptions) keep calling
+   * `getFundingSeed()`, so selecting moth does not change their wallet. The
+   * light seed is handed to the test rather than swapped inside the backend
+   * because tests derive the sender's address and viewing key from the seed
+   * they are handed — the generator and the assertions must be looking at the
+   * same wallet.
+   * @returns The transfer funding seed as a string.
+   */
+  getTransferFundingSeed() {
+    if (env.getTxBackend() === 'moth') {
+      const envNameUppercase = env
+        .getCurrentEnvironmentName()
+        .toUpperCase()
+        .replace(/-/g, '_')
+        .replace('.', '_');
+      const lightSeed = process.env[`FUNDING_SEED_${envNameUppercase}_LIGHT`];
+      if (lightSeed) {
+        return lightSeed;
+      }
+    }
+    return this.getFundingSeed();
+  }
+
+  /**
    * Retrieves an unshielded address from the test data by property name.
    * @param property - The property name of the unshielded address to retrieve.
    * @returns The unshielded address as a string.
