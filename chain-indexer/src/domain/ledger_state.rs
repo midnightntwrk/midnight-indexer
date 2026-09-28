@@ -173,39 +173,40 @@ impl LedgerState {
         parent_block_timestamp: u64,
         bump_first_regular_tblock: bool,
     ) -> Result<(Vec<Transaction>, LedgerParameters), Error> {
-        // The node validates a mempool transaction against a `tblock` bumped two slots ahead of the
-        // *parent* (last produced) block's time, then caches the well-formed result keyed on
-        // (tx_hash, ledger_state_key). At block inclusion only the first regular transaction still
-        // matches that key, so the node reuses the cached (bumped) validity result and skips
-        // re-checking it against the real block time; later transactions get a fresh check against
-        // block time. The bump base is the parent block time (`get_block_context().tblock` during
-        // pool validation still holds the last produced block's timestamp; see the node's
-        // `pallet-midnight` `validate_unsigned`), NOT the current block time — bumping from the
-        // current block overshoots by the inter-block gap and can push `tblock` past a
-        // transaction's intent TTL, wrongly rejecting a tx the node accepted.
+        // The node validates a pool transaction at the parent block time plus two slots (see its
+        // `pallet-midnight` `validate_unsigned`) and caches the result keyed on the ledger state.
+        // At inclusion the cache hits only while the state is still the parent's, i.e. before a
+        // regular transaction applies (a failed one leaves the state unchanged), so such a
+        // transaction is verified at that adjusted `tblock` and later ones at the block time. The
+        // base is the parent time, not the block time: adjusting from the block overshoots by the
+        // inter-block gap.
         //
-        // The first regular transaction misses the cache if the block author validated it against
-        // an older ledger state than the parent block's, and the block does not record which. So
-        // verify it at the block time and, if malformed there, at the `tblock` bumped off the
-        // parent block time. `apply` always runs against the real block time, so the resulting
-        // state matches the node.
-        let mut first_regular_transaction = true;
+        // The cache misses if the author validated the transaction against an older state, and
+        // the block does not record which. So verify at the block time and, if malformed there,
+        // at the adjusted `tblock`. `apply` always runs at the block time, so the state matches the
+        // node.
+        let mut no_regular_transaction_applied = true;
         let transactions = transactions
             .into_iter()
             .map(|transaction| match transaction {
                 node::Transaction::Regular(transaction) => {
-                    let well_formed_timestamp = (first_regular_transaction
+                    let well_formed_timestamp = (no_regular_transaction_applied
                         && bump_first_regular_tblock)
                         .then_some(parent_block_timestamp + MEMPOOL_TBLOCK_BUMP_MILLIS);
-                    first_regular_transaction = false;
 
-                    self.apply_regular_transaction(
+                    let transaction = self.apply_regular_transaction(
                         transaction,
                         parent_block_hash,
                         block_timestamp,
                         parent_block_timestamp,
                         well_formed_timestamp,
-                    )
+                    )?;
+                    if let Transaction::Regular(transaction) = &transaction {
+                        no_regular_transaction_applied &=
+                            matches!(transaction.transaction_result, TransactionResult::Failure);
+                    }
+
+                    Ok(transaction)
                 }
 
                 node::Transaction::System(transaction) => {
@@ -308,10 +309,10 @@ impl LedgerState {
 
     // Applies one regular transaction and converts it into a domain transaction.
     //
-    // `well_formed_timestamp` is a second `tblock`, in milliseconds, at which the transaction is
-    // accepted if it is malformed at `block_timestamp`. It is the adjusted `tblock` for the first
-    // regular transaction of a block whose runtime skews it, and `None` for every other
-    // transaction.
+    // `well_formed_timestamp` is a second `tblock`, in milliseconds, to verify the transaction at
+    // if it is malformed at `block_timestamp`. It is the adjusted `tblock` for a regular
+    // transaction before any applied one in a block whose runtime skews it, and `None` for every
+    // other transaction.
     #[trace(properties = {
         "parent_block_hash": "{parent_block_hash}",
         "block_timestamp": "{block_timestamp}",
@@ -877,6 +878,16 @@ mod apply_transactions_tblock_tests {
                     parent_block_time: NOW - 18,
                     bump_first_regular_tblock: true,
                     expected: Err(IntentTtlExpired),
+                },
+                // A failed regular transaction leaves the state unchanged, so the next one is
+                // still verified at the adjusted `tblock` `NOW - 6s`: an intent TTL of `NOW - 3s`
+                // passes `well_formed` there, and `apply` fails it at the block time as well.
+                Case {
+                    name: "ttl before block time, after a failed transaction",
+                    transactions: &[(NOW - 5, NOW - 18), (NOW - 3, NOW - 18)],
+                    parent_block_time: NOW - 18,
+                    bump_first_regular_tblock: true,
+                    expected: Ok(vec![Failure, Failure]),
                 },
             ];
 
