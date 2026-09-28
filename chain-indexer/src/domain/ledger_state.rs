@@ -20,6 +20,7 @@ use indexer_common::domain::{
     TransactionHash, TransactionResult,
     ledger::{self, LedgerParameters, RootCountRepair},
 };
+use log::warn;
 use std::{
     collections::{HashMap, HashSet},
     ops::DerefMut,
@@ -345,7 +346,17 @@ impl LedgerState {
             // the same state. `well_formed` returns the same `VerifiedTransaction` at either
             // `tblock`; only its checks depend on it. The error reported is the one at block time.
             (Err(error @ ledger::Error::MalformedTransaction(_)), Some(well_formed_timestamp)) => {
-                apply(well_formed_timestamp).map_err(|_| error)
+                apply(well_formed_timestamp).map_err(|retry_error| {
+                    warn!(
+                        transaction_hash:% = transaction.hash,
+                        parent_block_hash:%,
+                        block_timestamp,
+                        well_formed_timestamp,
+                        retry_error:%;
+                        "regular transaction malformed at the retried tblock as well"
+                    );
+                    error
+                })
             }
             (outcome, _) => outcome,
         };
