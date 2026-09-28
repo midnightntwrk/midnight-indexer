@@ -240,6 +240,32 @@ export class Environment {
     return this.envName === EnvironmentName.MAINNET;
   }
 
+  /**
+   * Which backend builds and submits transactions: the default `toolkit`
+   * (a `midnight-node-toolkit` container) or `moth` (moth-wallet's sync engine
+   * in-process). Unset means `toolkit`, so nothing changes for existing runs.
+   * See `utils/moth/moth-backend.ts` and
+   * `local_mds/wire-moth-wallet-in-indexer-qa-test.md`.
+   */
+  getTxBackend(): 'toolkit' | 'moth' {
+    // Only an unset or empty TX_BACKEND means the default; a whitespace-only
+    // value is a typo, not a choice, so it is rejected like any other.
+    const raw = process.env.TX_BACKEND;
+    if (raw === undefined || raw === '') return 'toolkit';
+    const backend = raw.trim().toLowerCase();
+    if (backend === 'toolkit' || backend === 'moth') return backend;
+    throw new Error(`Invalid TX_BACKEND="${raw}". Use "toolkit" or "moth".`);
+  }
+
+  /**
+   * Full indexer GraphQL endpoint (`…/api/<version>/graphql`), matching the
+   * convention used by the indexer HTTP and WebSocket clients.
+   */
+  getIndexerGraphqlHttpURL(): string {
+    const apiVersion = process.env.INDEXER_API_VERSION?.trim() || 'v4';
+    return `${this.getIndexerHttpBaseURL()}/api/${apiVersion}/graphql`;
+  }
+
   getCurrentEnvironmentName(): EnvironmentName {
     return this.envName;
   }
@@ -303,6 +329,17 @@ export class Environment {
 
   getNodeWebsocketBaseURL(): string {
     return `${this.wsProtocol}://${this.nodeHost}`;
+  }
+
+  /**
+   * HTTP base URL of the node's Substrate JSON-RPC endpoint.
+   *
+   * Substrate serves JSON-RPC over both WebSocket and HTTP on the same host, and
+   * one-shot calls (chain tip, block hash) are cheaper over HTTP than standing up
+   * a socket. Callers previously derived this by rewriting the ws:// URL inline.
+   */
+  getNodeHttpBaseURL(): string {
+    return `${this.httpProtocol}://${this.nodeHost}`;
   }
 
   getNodeVersion(): string {
