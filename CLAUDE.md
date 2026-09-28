@@ -8,7 +8,7 @@ All commands default to `feature=cloud`. Override with `just feature=standalone 
 
 ```bash
 just check          # cargo check all packages
-just fmt            # format with nightly rustfmt
+just fmt            # format with rustfmt
 just fmt-check      # check formatting (CI)
 just lint           # clippy with -D warnings across all packages
 just lint-fix       # clippy --fix
