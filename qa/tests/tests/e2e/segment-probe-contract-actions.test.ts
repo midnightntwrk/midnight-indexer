@@ -41,7 +41,12 @@ import log from '@utils/logging/logger';
 import dataProvider from '@utils/testdata-provider';
 import { env } from '../../environment/model';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
-import { callCircuitViaMoth, deployContractViaMoth } from '@utils/moth/moth-contracts';
+import { closeMothWallets } from '@utils/moth/moth-backend';
+import {
+  callCircuitViaMoth,
+  closeMothContractContexts,
+  deployContractViaMoth,
+} from '@utils/moth/moth-contracts';
 import {
   getBlockByHashWithRetry,
   getContractDeploymentHashes,
@@ -83,6 +88,12 @@ describe.skipIf(!isMoth).sequential('segment-split contract actions', () => {
   beforeAll(async () => {
     indexerHttpClient = new IndexerHttpClient();
     fundingSeed = dataProvider.getFundingSeed();
+  });
+
+  // No toolkit here, so nothing else releases the wallet this suite opened.
+  afterAll(async () => {
+    closeMothContractContexts();
+    await closeMothWallets();
   });
 
   describe('a transaction to deploy a segment-split smart contract', () => {
