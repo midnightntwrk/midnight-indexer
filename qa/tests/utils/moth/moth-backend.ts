@@ -75,15 +75,21 @@ export interface MothWallet {
 const openWallets = new Map<string, Promise<MothWallet>>();
 
 /**
- * A cache/wallet name derived from the seed by a one-way hash. The seed is
- * secret and must never appear in a path or a log; its SHA-256 prefix is not
- * the seed and is safe to use as a directory name. An explicit
- * `TX_BACKEND_MOTH_WALLET` overrides it (useful to keep a dedicated light
- * wallet warm — the restore cost is per-wallet).
+ * A one-way fingerprint of a seed, for use wherever a seed must identify a
+ * wallet without being stored or logged. The seed is secret; its SHA-256
+ * prefix is not the seed, and unlike a prefix of the seed itself it is
+ * distinct for seeds that share leading bytes (zero-padded seeds do).
+ */
+export const seedFingerprint = (seed: string): string =>
+  createHash('sha256').update(seed).digest('hex').slice(0, 12);
+
+/**
+ * A cache/wallet name derived from the seed fingerprint, safe to use as a
+ * directory name. An explicit `TX_BACKEND_MOTH_WALLET` overrides it (useful
+ * to keep a dedicated light wallet warm — the restore cost is per-wallet).
  */
 const cacheNameFor = (seed: string): string =>
-  process.env.TX_BACKEND_MOTH_WALLET?.trim() ||
-  `qa-${createHash('sha256').update(seed).digest('hex').slice(0, 12)}`;
+  process.env.TX_BACKEND_MOTH_WALLET?.trim() || `qa-${seedFingerprint(seed)}`;
 
 /**
  * Build moth's network config.

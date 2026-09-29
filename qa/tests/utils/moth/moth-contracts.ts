@@ -58,7 +58,7 @@ import * as Rx from 'rxjs';
 import log from '@utils/logging/logger';
 import { env } from '../../environment/model';
 import { ensureProofServer, proofServerMismatchHint } from './proof-server';
-import { openMothWallet } from './moth-backend';
+import { openMothWallet, seedFingerprint } from './moth-backend';
 
 /**
  * The compiled contract this suite deploys: `counter.compact`, whose single
@@ -120,9 +120,10 @@ const loadCompiledContract = async (artifactDir: string): Promise<any> => {
  * does not, and that is moth issue #119 (node error 192).
  */
 const openContractContext = (seed: string, artifactDir: string): Promise<ContractContext> => {
-  // The seed prefix, not the seed: two different seeds against one artifact
-  // must not share a context, but the key is never secret enough to hold more.
-  const key = `${artifactDir}::${seed.slice(0, 8)}`;
+  // The seed's hash, not the seed: the key must never hold the secret, and a
+  // raw prefix collides for zero-padded seeds, which would sign with the
+  // wrong wallet.
+  const key = `${artifactDir}::${seedFingerprint(seed)}`;
   const existing = contexts.get(key);
   if (existing) return existing;
 
