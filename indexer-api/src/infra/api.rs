@@ -12,6 +12,7 @@
 // limitations under the License.
 
 pub mod ledger_query_limit;
+pub mod progress_cache;
 pub mod quota;
 pub mod v4;
 
@@ -19,6 +20,7 @@ use crate::{
     domain::{Api, LedgerStateCache, storage::Storage},
     infra::api::{
         ledger_query_limit::LedgerQueryLimiter,
+        progress_cache::{ProgressCache, ProgressCacheConfig},
         quota::{PerConnectionCounter, QuotaConfig, SubscriptionQuotas},
         v4::dataloader::{
             BlockByHashLoader, ContractActionsByTransactionIdLoader, TransactionByIdLoader,
@@ -63,7 +65,7 @@ use tokio::{
     signal::unix::{SignalKind, signal},
 };
 use tower::ServiceBuilder;
-use tower_http::{cors::CorsLayer, limit::RequestBodyLimitLayer};
+use tower_http::{compression::CompressionLayer, cors::CorsLayer, limit::RequestBodyLimitLayer};
 
 /// Attention: This could change if the used libraries change!
 /// See https://docs.rs/http-body-util/0.1.2/src/http_body_util/limited.rs.html#93.
@@ -167,6 +169,7 @@ pub struct SubscriptionConfig {
     pub dust_generations: DustGenerationsSubscriptionConfig,
     dust_ledger_events: DustLedgerEventsSubscriptionConfig,
     pub dust_nullifier_transactions: DustNullifierTransactionsSubscriptionConfig,
+    progress_cache: ProgressCacheConfig,
     pub shielded_nullifier_transactions: ShieldedNullifierTransactionsSubscriptionConfig,
     shielded_transactions: ShieldedTransactionsSubscriptionConfig,
     unshielded_transactions: UnshieldedTransactionsSubscriptionConfig,
@@ -270,6 +273,7 @@ where
 {
     let ledger_state_cache = LedgerStateCache::default();
     let quotas = SubscriptionQuotas::new(quota_config);
+    let progress_cache = ProgressCache::new(subscription_config.progress_cache);
 
     let v4_app = v4::make_app(
         network_id,
@@ -281,6 +285,7 @@ where
         max_depth,
         subscription_config,
         quotas,
+        progress_cache,
     );
 
     // For some reason the FastraceLayer and RequestBodyLimitLayer cannot be put into a
@@ -299,6 +304,7 @@ where
                 .and_then(transform_lentgh_limit_exceeded),
         )
         .layer(CorsLayer::permissive())
+        .layer(CompressionLayer::new())
 }
 
 // Returns 200 when reachable. If the runtime is parked (e.g. storage-core deadlock during
@@ -413,6 +419,8 @@ trait ContextExt {
 
     fn get_subscription_quotas(&self) -> &SubscriptionQuotas;
 
+    fn get_progress_cache(&self) -> &ProgressCache;
+
     fn get_per_connection_counter(&self) -> &Arc<AtomicUsize>;
 
     fn get_ledger_query_limiter(&self) -> &LedgerQueryLimiter;
@@ -490,6 +498,11 @@ impl ContextExt for Context<'_> {
     fn get_subscription_quotas(&self) -> &SubscriptionQuotas {
         self.data::<SubscriptionQuotas>()
             .expect("SubscriptionQuotas is stored in Context")
+    }
+
+    fn get_progress_cache(&self) -> &ProgressCache {
+        self.data::<ProgressCache>()
+            .expect("ProgressCache is stored in Context")
     }
 
     fn get_per_connection_counter(&self) -> &Arc<AtomicUsize> {
