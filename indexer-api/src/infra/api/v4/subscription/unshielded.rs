@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::polling::{jittered, next_poll_interval};
+use super::polling::{jittered, latest_protocol_version, next_poll_interval};
 use crate::{
     domain::{self, storage::Storage},
     infra::api::{
@@ -66,6 +66,13 @@ where
 struct UnshieldedTransactionsProgress {
     /// The highest transaction ID of all currently known transactions for a subscribed address.
     highest_transaction_id: u64,
+
+    /// The protocol version at the tip of the chain, i.e. the one currently in effect, not the
+    /// one the transactions of this subscription were indexed at. Allows a wallet without any
+    /// transactions to observe a protocol upgrade, which it would otherwise only learn about
+    /// from the transactions it receives. A value of zero means that no block has been indexed
+    /// yet.
+    protocol_version: u32,
 }
 
 pub struct UnshieldedTransactionsSubscription<S, B> {
@@ -277,11 +284,12 @@ where
         .progress_update_interval;
 
     // Emit progress immediately, then re-poll after a jittered interval that
-    // backs off while the highest transaction ID is unchanged (idle) and resets
-    // when it moves. The cache lets concurrent subscribers for the same address
-    // share one query.
+    // backs off while neither the highest transaction ID nor the protocol version has changed
+    // (idle) and resets when either moves. A protocol upgrade counts as movement, so a
+    // subscription that was idle through a fork returns to the base interval instead of staying
+    // backed off. The cache lets concurrent subscribers for the same address share one query.
     let mut current_interval = base;
-    let mut last_highest_transaction_id = None;
+    let mut last_progress = None;
     try_stream! {
         loop {
             let highest_transaction_id = progress_cache
@@ -293,14 +301,14 @@ where
                 })
                 .await?
                 .unwrap_or(0);
-            current_interval = next_poll_interval(
-                current_interval,
-                base,
-                last_highest_transaction_id != Some(highest_transaction_id),
-            );
-            last_highest_transaction_id = Some(highest_transaction_id);
+            let protocol_version = latest_protocol_version::<S>(cx).await?;
+            let progress = (highest_transaction_id, protocol_version);
+            current_interval =
+                next_poll_interval(current_interval, base, last_progress != Some(progress));
+            last_progress = Some(progress);
             yield UnshieldedTransactionsProgress {
                 highest_transaction_id,
+                protocol_version,
             };
             sleep(jittered(current_interval)).await;
         }

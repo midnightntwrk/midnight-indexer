@@ -289,7 +289,7 @@ describe.skipIf(env.isUndeployedEnv())('bridge subscriptions', () => {
       const events = framesToEvents(frames);
       expect(events.length).toBeGreaterThan(0);
       for (const event of events) {
-        expect((event as { recipient?: string }).recipient).toBe(recipient);
+        expect('recipient' in event ? event.recipient : undefined).toBe(recipient);
       }
     }, 60_000);
 

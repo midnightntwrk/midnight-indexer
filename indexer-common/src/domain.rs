@@ -25,7 +25,7 @@ pub use protocol_version::*;
 pub use pub_sub::*;
 pub use viewing_key::*;
 
-use derive_more::{Deref, Display, Into};
+use derive_more::{AsRef, Deref, Display, From, Into};
 use serde::{Deserialize, Serialize};
 use sqlx::Type;
 use std::str::FromStr;
@@ -64,6 +64,58 @@ pub type SerializedLedgerEvent = ByteVec;
 pub type SerializedLedgerParameters = ByteVec;
 pub type SerializedTransaction = ByteVec;
 pub type SerializedZswapState = ByteVec;
+
+/// Tagged-serialized `TypedArenaKey` of a contract state node in the ledger arena, i.e. a
+/// reference to a contract state rather than the state itself.
+///
+/// A real newtype, not another `ByteVec` alias: a key and a state are both bytes, so aliases
+/// would let a blob and a reference to a blob be swapped for each other silently. The tag makes
+/// the key self-describing about its ledger version — `storage-key(contract-state[v6])` versus
+/// `storage-key(contract-state[v8])` — which matters because arena node payloads carry no version
+/// tag of their own and the two `ContractState` layouts are not compatible.
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    AsRef,
+    Deref,
+    Display,
+    From,
+    Into,
+    Serialize,
+    Deserialize,
+    Type,
+)]
+#[as_ref([u8])]
+#[from(ByteVec, Vec<u8>)]
+#[sqlx(transparent)]
+pub struct SerializedContractStateKey(pub ByteVec);
+
+/// Tagged-serialized `TypedArenaKey` of a contract's filtered zswap state node in the ledger
+/// arena. See [SerializedContractStateKey] for why this is a newtype.
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    AsRef,
+    Deref,
+    Display,
+    From,
+    Into,
+    Serialize,
+    Deserialize,
+    Type,
+)]
+#[as_ref([u8])]
+#[from(ByteVec, Vec<u8>)]
+#[sqlx(transparent)]
+pub struct SerializedZswapStateKey(pub ByteVec);
 
 /// Network identifier.
 #[derive(Debug, Display, Clone, PartialEq, Eq, Hash, Deref, Into, Deserialize)]
@@ -179,12 +231,28 @@ pub enum TransactionResult {
     /// All guaranteed and fallible coins succeeded.
     Success,
 
-    /// Not all fallible coins succeeded; the value maps segemt ID to success.
+    /// Not all fallible coins succeeded; the value maps segment ID to success.
     PartialSuccess(Vec<(u16, bool)>),
 
     /// Guaranteed coins failed.
     #[default]
     Failure,
+}
+
+impl TransactionResult {
+    /// Whether a logical segment was applied to the ledger state.
+    ///
+    /// A missing entry in a partial-success result is kept distinct from an explicit failure so
+    /// callers cannot silently discard data if the ledger's result shape changes.
+    pub fn segment_succeeded(&self, segment: u16) -> Option<bool> {
+        match self {
+            Self::Success => Some(true),
+            Self::PartialSuccess(segments) => segments
+                .iter()
+                .find_map(|&(id, succeeded)| (id == segment).then_some(succeeded)),
+            Self::Failure => Some(false),
+        }
+    }
 }
 
 /// The variant of a transaction: regular or system.
@@ -195,11 +263,24 @@ pub enum TransactionVariant {
     System,
 }
 
-/// A contract action.
+/// A contract action, as extracted from a ledger transaction. The contract state it refers to is
+/// captured separately, once per block, from the indexer's own ledger state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContractAction {
     pub address: SerializedContractAddress,
-    pub state: SerializedContractState,
+
+    /// The physical intent segment this action belongs to; used to drop actions from segments that
+    /// never applied.
+    pub segment: u16,
+
+    /// A Call with a guaranteed transcript also executes in logical segment 0, independently of
+    /// whether its physical/fallible segment succeeds. Always false for Deploy and Update.
+    pub has_guaranteed_transcript: bool,
+
+    /// Original Call entry-point bytes for event correlation, before display decoding.
+    /// None for Deploy and Update; not persisted in the action's JSON attributes.
+    pub raw_entry_point: Option<ByteVec>,
+
     pub attributes: ContractAttributes,
 }
 
@@ -979,5 +1060,26 @@ mod contract_event_tests {
             let decoded: LedgerEventAttributes = serde_json::from_str(&json).expect("deserialize");
             assert_eq!(original, decoded, "round-trip mismatch");
         }
+    }
+}
+
+#[cfg(test)]
+mod transaction_result_tests {
+    use super::*;
+
+    #[test]
+    fn test_segment_succeeded() {
+        assert_eq!(TransactionResult::Success.segment_succeeded(0), Some(true));
+        assert_eq!(
+            TransactionResult::Success.segment_succeeded(u16::MAX),
+            Some(true)
+        );
+        assert_eq!(TransactionResult::Failure.segment_succeeded(0), Some(false));
+
+        let result = TransactionResult::PartialSuccess(vec![(0, true), (7, false), (42, true)]);
+        assert_eq!(result.segment_succeeded(0), Some(true));
+        assert_eq!(result.segment_succeeded(7), Some(false));
+        assert_eq!(result.segment_succeeded(42), Some(true));
+        assert_eq!(result.segment_succeeded(99), None);
     }
 }

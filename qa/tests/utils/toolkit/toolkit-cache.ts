@@ -18,6 +18,7 @@ import { createServer } from 'net';
 import fs from 'fs';
 import path from 'path';
 import { promisify } from 'util';
+import { NodeRpcClient } from '@utils/node/rpc-client';
 
 const execFileAsync = promisify(execFile);
 
@@ -85,21 +86,49 @@ async function bootstrap(): Promise<ToolkitCacheConnection> {
 }
 
 async function ensureChainNamesTable(): Promise<void> {
-  await execFileAsync('docker', [
-    'exec',
-    CONTAINER_NAME,
-    'psql',
-    '-U',
-    POSTGRES_USER,
-    '-d',
-    POSTGRES_DB,
-    '-c',
-    `CREATE TABLE IF NOT EXISTS chain_names (
-       chain_id      BYTEA PRIMARY KEY,
-       env_name      TEXT NOT NULL,
-       registered_at TIMESTAMPTZ DEFAULT now()
-     );`,
-  ]);
+  const deadline = Date.now() + READY_TIMEOUT_MS;
+  for (;;) {
+    try {
+      await execFileAsync('docker', [
+        'exec',
+        CONTAINER_NAME,
+        'psql',
+        // TCP, not the unix socket: the entrypoint's first-run temporary
+        // server is socket-only, so the socket can reach a server that is
+        // about to be restarted.
+        '-h',
+        '127.0.0.1',
+        '-U',
+        POSTGRES_USER,
+        '-d',
+        POSTGRES_DB,
+        '-c',
+        `CREATE TABLE IF NOT EXISTS chain_names (
+           chain_id      BYTEA PRIMARY KEY,
+           env_name      TEXT NOT NULL,
+           registered_at TIMESTAMPTZ DEFAULT now()
+         );`,
+      ]);
+      return;
+    } catch (err) {
+      const message = errorMessage(err);
+      // IF NOT EXISTS is not concurrency-safe: two workers can both pass the
+      // existence check and race the catalog insert; the loser gets a
+      // duplicate-key error on a pg_* catalog index. The only statement here
+      // is this CREATE TABLE, so any duplicate-key error means the table
+      // already exists — which is all we need.
+      if (message.includes('duplicate key value violates unique constraint')) {
+        return;
+      }
+      const transient =
+        message.includes('the database system is starting up') ||
+        message.includes('connection to server');
+      if (!transient || Date.now() >= deadline) {
+        throw err;
+      }
+      await sleep(READY_POLL_INTERVAL_MS);
+    }
+  }
 }
 
 async function ensureContainer(): Promise<number> {
@@ -189,6 +218,12 @@ async function waitForReady(): Promise<void> {
         'exec',
         CONTAINER_NAME,
         'pg_isready',
+        // TCP, not the unix socket: on a fresh data dir the postgres image
+        // initializes via a temporary socket-only server before restarting
+        // for real, and pg_isready against the socket reports that temporary
+        // server as ready. Only the final server listens on TCP.
+        '-h',
+        '127.0.0.1',
         '-U',
         POSTGRES_USER,
         '-d',
@@ -297,24 +332,13 @@ export function startCacheProgressReporter(
   let currentChainIdHex: string | undefined;
   let registeredCurrent = false;
 
-  const rpc = async <T>(method: string, params: unknown[]): Promise<T | undefined> => {
-    if (!nodeRpcUrl) return undefined;
-    try {
-      const res = await fetch(nodeRpcUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: 1, jsonrpc: '2.0', method, params }),
-      });
-      const json = (await res.json()) as { result?: T };
-      return json?.result;
-    } catch {
-      return undefined; // Non-fatal — the reporter is best-effort.
-    }
-  };
+  // Errors are swallowed at each call site rather than inside the shared client:
+  // this reporter is best-effort and must never fail a warmup, while other callers
+  // need RPC failures to surface.
+  const node = nodeRpcUrl ? new NodeRpcClient(nodeRpcUrl) : undefined;
 
   const fetchChainTip = async (): Promise<void> => {
-    const header = await rpc<{ number?: string }>('chain_getHeader', []);
-    if (header?.number) chainTip = parseInt(header.number, 16);
+    chainTip = (await node?.getChainTip().catch(() => undefined)) ?? chainTip;
   };
 
   const fetchCurrentChainId = async (): Promise<void> => {
@@ -322,7 +346,7 @@ export function startCacheProgressReporter(
     // Block height 1 (not 0): see the currentChainIdHex comment. Returns null until the
     // node has authored block 1 — harmless, we just retry on the next tick. The 30s
     // genesis settle in the undeployed provisioner ensures block 1 exists well before.
-    const hash = await rpc<string>('chain_getBlockHash', [1]);
+    const hash = await node?.getBlockHash(1).catch(() => undefined);
     const hex = hash?.replace(/^0x/, '').toLowerCase();
     if (hex && /^[0-9a-f]+$/.test(hex)) currentChainIdHex = hex;
   };

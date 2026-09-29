@@ -5,7 +5,12 @@ application:
   blocks_buffer: 10
   caught_up_max_distance: 10
   caught_up_leeway: 5
+  # Budget for one gc pass per block it covers; the pass gets gc_bound * gc_interval.
   gc_bound: "200ms"
+  # Run gc every N blocks with N times the budget: same duty cycle, far fewer partial marks.
+  gc_interval: 25
+  # Sample the ledger DB node count every N blocks, or never if 0. Each sample is a full scan.
+  arena_metrics_interval: 0
   # Recent blocks whose ledger states stay loadable (gc roots). Must comfortably exceed
   # indexer-api's dust_generations max_snapshot_age.
   ledger_state_retention: 1000

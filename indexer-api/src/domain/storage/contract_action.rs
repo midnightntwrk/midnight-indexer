@@ -14,8 +14,7 @@
 use crate::domain::{ContractAction, ContractBalance, storage::NoopStorage};
 use futures::{Stream, stream};
 use indexer_common::domain::{
-    BlockHash, ProtocolVersion, SerializedContractAddress, SerializedTransactionIdentifier,
-    TransactionHash,
+    BlockHash, SerializedContractAddress, SerializedTransactionIdentifier, TransactionHash,
 };
 use std::num::NonZeroU32;
 
@@ -132,13 +131,6 @@ where
         &self,
         block_height: u32,
     ) -> Result<Option<u64>, sqlx::Error>;
-
-    /// Get the protocol version of the transaction with the given id. Used to pick the ledger
-    /// version when deserializing a contract's state (e.g. for the maintenance authority).
-    async fn get_protocol_version_by_transaction_id(
-        &self,
-        transaction_id: u64,
-    ) -> Result<Option<ProtocolVersion>, sqlx::Error>;
 }
 
 #[allow(unused_variables)]
@@ -256,13 +248,6 @@ impl ContractActionStorage for NoopStorage {
         &self,
         block_height: u32,
     ) -> Result<Option<u64>, sqlx::Error> {
-        unimplemented!()
-    }
-
-    async fn get_protocol_version_by_transaction_id(
-        &self,
-        transaction_id: u64,
-    ) -> Result<Option<ProtocolVersion>, sqlx::Error> {
         unimplemented!()
     }
 }

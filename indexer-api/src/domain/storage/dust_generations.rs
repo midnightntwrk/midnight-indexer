@@ -39,19 +39,25 @@ where
     /// index range. `start_index` and `end_index` are interpreted as positions
     /// in the dust generation Merkle tree (NOT the commitment tree). Entries
     /// inserted before the dust generation/commitment split was tracked
-    /// (legacy rows with NULL `generation_index`) are skipped.
+    /// (legacy rows with NULL `generation_index`) are skipped, as are entries
+    /// from a superseded dust epoch: a fork that wipes dust restarts the tree,
+    /// so those indices name leaves that no longer exist (see
+    /// `LedgerVersion::dust_epoch`).
     async fn get_dust_generation_entries(
         &self,
         dust_address: &[u8],
         start_index: u64,
         end_index: u64,
         batch_size: NonZeroU32,
+        ledger_version: LedgerVersion,
     ) -> impl Stream<Item = Result<DustGenerationEntry, sqlx::Error>> + Send;
 
     /// Get dust generation dtime update events for a dust address whose
     /// transaction's block_id is in `(cutoff_block_id, upper_block_id]` and
     /// whose ledger event id exceeds `after_event_id`. The stream is ordered
-    /// by ledger event id.
+    /// by ledger event id. Scoped to `ledger_version`'s dust epoch so the join
+    /// on `night_utxo_hash` cannot also match the same UTXO's row from an epoch
+    /// the fork wiped.
     async fn get_dust_generation_dtime_updates(
         &self,
         dust_address: &[u8],
@@ -59,6 +65,7 @@ where
         upper_block_id: u64,
         after_event_id: u64,
         batch_size: NonZeroU32,
+        ledger_version: LedgerVersion,
     ) -> impl Stream<Item = Result<DustGenerationDtimeUpdateEntry, sqlx::Error>> + Send;
 
     /// Get transactions containing dust nullifiers matching a prefix.
@@ -87,6 +94,7 @@ impl DustGenerationsStorage for NoopStorage {
         start_index: u64,
         end_index: u64,
         batch_size: NonZeroU32,
+        ledger_version: LedgerVersion,
     ) -> impl Stream<Item = Result<DustGenerationEntry, sqlx::Error>> + Send {
         stream::empty()
     }
@@ -98,6 +106,7 @@ impl DustGenerationsStorage for NoopStorage {
         upper_block_id: u64,
         after_event_id: u64,
         batch_size: NonZeroU32,
+        ledger_version: LedgerVersion,
     ) -> impl Stream<Item = Result<DustGenerationDtimeUpdateEntry, sqlx::Error>> + Send {
         stream::empty()
     }

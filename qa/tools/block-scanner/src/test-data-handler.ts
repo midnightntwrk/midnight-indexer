@@ -17,7 +17,7 @@ import fs from "fs";
 import path from "path";
 import * as commentJson from "comment-json";
 import { TARGET_ENV, INDEXER_HTTP_URL, INDEXER_API_VERSION } from "./env.js";
-import { Transaction } from "./indexer-types.js";
+import { Transaction, UnshieldedUtxo } from "./indexer-types.js";
 
 // ============================================================================
 // Type Definitions
@@ -98,11 +98,13 @@ interface BaseTransaction {
 }
 
 /**
- * Regular transaction with contract actions
+ * Regular transaction with contract actions and unshielded UTXOs
  */
 interface RegularTransaction extends BaseTransaction {
   __typename: "RegularTransaction";
   contractActions?: ContractAction[];
+  unshieldedCreatedOutputs?: UnshieldedUtxo[];
+  unshieldedSpentOutputs?: UnshieldedUtxo[];
 }
 
 /**
@@ -182,6 +184,46 @@ interface ContractWithEvents {
  * Structure for contract-events.jsonc file (array of contracts)
  */
 type ContractEventsDataFile = ContractWithEvents[];
+
+/**
+ * One owner's unspent holding of a single unshielded token type, as of scan time
+ */
+interface UnspentHolder {
+  owner: string;
+  "unspent-value": string;
+  "unspent-utxos": number;
+}
+
+/**
+ * A custom (non-NIGHT) unshielded token type with the owners holding it unspent
+ */
+interface CustomTokenType {
+  "token-type": string;
+  "unspent-holders": UnspentHolder[];
+}
+
+/**
+ * Structure for unshielded-token-types.jsonc file
+ */
+interface UnshieldedTokenTypesDataFile {
+  scan: {
+    "from-block": number;
+    "to-block": number;
+    "scanned-at": string;
+  };
+  night: {
+    "unspent-utxos": number;
+    "distinct-owners": number;
+  };
+  "custom-tokens": CustomTokenType[];
+}
+
+/**
+ * NIGHT, the chain's native unshielded token, is the all-zero token type. It is on
+ * every chain and dominates every scan, so it is summarised rather than listed as a
+ * candidate.
+ */
+const NIGHT_TOKEN_TYPE = "0".repeat(64);
 
 /**
  * Maps the concrete ContractEvent GraphQL typenames to the
@@ -283,6 +325,7 @@ export async function updateTestDataFiles(
     updateBlockDataFile(folderPath, sourceBlockData);
     updateTransactionDataFile(folderPath, sourceBlockData);
     updateContractDataFile(folderPath, sourceBlockData);
+    updateUnshieldedTokenTypesDataFile(folderPath, sourceBlockData);
     if (contractsWithEvents !== null) {
       writeContractEventsDataFile(folderPath, contractsWithEvents);
     }
@@ -750,6 +793,187 @@ function updateContractDataFile(
     }
     throw new TestDataHandlerError(
       "Failed to update contract actions data file",
+      { destinationPath, originalError: error },
+    );
+  }
+}
+
+/**
+ * Compares two decimal token amounts, highest first. The values are u128 on chain,
+ * so they are compared as BigInt rather than as Number.
+ */
+function compareAmountsDescending(a: string, b: string): number {
+  const left = BigInt(a);
+  const right = BigInt(b);
+  return left === right ? 0 : left > right ? -1 : 1;
+}
+
+/**
+ * Aggregates the unshielded UTXOs of the scanned blocks into the token-type
+ * candidates: every created output is grouped by token type and owner, keeping the
+ * ones still unspent, with the custom token types ordered by their largest single
+ * owner holding so the strongest candidate comes first.
+ *
+ * A UTXO counts as spent either because the indexer resolved its
+ * `spentAtTransaction` when the block was streamed, or because the scan itself saw
+ * it among a later transaction's spent outputs — the latter also covers the window
+ * in which the indexer has not yet linked the spend.
+ *
+ * @param sourceBlockData - The data containing the scanned blocks
+ * @returns The aggregated token types, ready to be written to the fixture
+ */
+function collectUnshieldedTokenTypes(
+  sourceBlockData: string,
+): UnshieldedTokenTypesDataFile {
+  const blocks: Block[] = parseBlockData(sourceBlockData);
+  validateNonEmptyArray(blocks, "Blocks array");
+
+  // (intentHash, outputIndex) identifies an unshielded UTXO
+  const utxoKey = (utxo: UnshieldedUtxo): string =>
+    `${utxo.intentHash}:${utxo.outputIndex}`;
+
+  const createdUtxos: Map<string, UnshieldedUtxo> = new Map();
+  const spentKeys: Set<string> = new Set();
+
+  for (const block of blocks) {
+    for (const transaction of block.transactions) {
+      if (transaction.__typename !== "RegularTransaction") {
+        continue;
+      }
+      for (const utxo of transaction.unshieldedCreatedOutputs ?? []) {
+        createdUtxos.set(utxoKey(utxo), utxo);
+        if (utxo.spentAtTransaction) {
+          spentKeys.add(utxoKey(utxo));
+        }
+      }
+      for (const utxo of transaction.unshieldedSpentOutputs ?? []) {
+        spentKeys.add(utxoKey(utxo));
+      }
+    }
+  }
+
+  const holdingsByToken: Map<
+    string,
+    Map<string, { value: bigint; utxos: number }>
+  > = new Map();
+  let nightUtxos = 0;
+  const nightOwners: Set<string> = new Set();
+
+  for (const [key, utxo] of createdUtxos) {
+    if (spentKeys.has(key)) {
+      continue;
+    }
+    if (utxo.tokenType === NIGHT_TOKEN_TYPE) {
+      nightUtxos++;
+      nightOwners.add(utxo.owner);
+      continue;
+    }
+
+    let holdings = holdingsByToken.get(utxo.tokenType);
+    if (!holdings) {
+      holdings = new Map();
+      holdingsByToken.set(utxo.tokenType, holdings);
+    }
+    const held = holdings.get(utxo.owner) ?? { value: 0n, utxos: 0 };
+    holdings.set(utxo.owner, {
+      value: held.value + BigInt(utxo.value),
+      utxos: held.utxos + 1,
+    });
+  }
+
+  const customTokens: CustomTokenType[] = [...holdingsByToken.entries()]
+    .map(([tokenType, holdings]) => ({
+      "token-type": tokenType,
+      "unspent-holders": [...holdings.entries()]
+        .map(([owner, held]) => ({
+          owner,
+          "unspent-value": held.value.toString(),
+          "unspent-utxos": held.utxos,
+        }))
+        .sort((a, b) =>
+          compareAmountsDescending(a["unspent-value"], b["unspent-value"]),
+        ),
+    }))
+    .sort((a, b) =>
+      compareAmountsDescending(
+        a["unspent-holders"][0]["unspent-value"],
+        b["unspent-holders"][0]["unspent-value"],
+      ),
+    );
+
+  // Reduced rather than spread into Math.min/max: a long scan holds more blocks
+  // than a call can take arguments.
+  const heights: number[] = blocks.map((block) => block.height);
+
+  return {
+    scan: {
+      "from-block": heights.reduce((min, height) => Math.min(min, height)),
+      "to-block": heights.reduce((max, height) => Math.max(max, height)),
+      "scanned-at": new Date().toISOString(),
+    },
+    night: {
+      "unspent-utxos": nightUtxos,
+      "distinct-owners": nightOwners.size,
+    },
+    "custom-tokens": customTokens,
+  };
+}
+
+/**
+ * Updates the unshielded token types data file, the fixture the custom unshielded
+ * token e2e suite picks a spendable token from.
+ *
+ * The data is aggregated from the scanned blocks alone, so an environment whose
+ * chain carries no custom unshielded token produces an empty candidate list and the
+ * suite that needs one skips cleanly.
+ *
+ * @param destinationPath - Path to the test data folder
+ * @param sourceBlockData - The data containing the scanned blocks
+ */
+function updateUnshieldedTokenTypesDataFile(
+  destinationPath: string,
+  sourceBlockData: string,
+): void {
+  try {
+    const tokenTypes = collectUnshieldedTokenTypes(sourceBlockData);
+
+    if (tokenTypes["custom-tokens"].length === 0) {
+      console.info(
+        "[INFO ] - No custom (non-NIGHT) unshielded token types found in the " +
+          "scanned blocks; writing an empty candidate list",
+      );
+    }
+
+    // Ensure the target directory exists
+    const targetDir: string = ensureTargetDirectory(destinationPath);
+
+    // Build file paths
+    const targetFileName = `unshielded-token-types.jsonc`;
+    const { targetFilePath, templateFilePath } = buildFilePaths(
+      targetDir,
+      targetFileName,
+    );
+
+    // Load template and populate with data to preserve comments
+    const dataObject: UnshieldedTokenTypesDataFile =
+      loadTemplateFile<UnshieldedTokenTypesDataFile>(templateFilePath);
+
+    dataObject.scan = tokenTypes.scan;
+    dataObject.night = tokenTypes.night;
+    dataObject["custom-tokens"] = tokenTypes["custom-tokens"];
+
+    // Write the data to the target folder
+    writeJsonFile<UnshieldedTokenTypesDataFile>(
+      targetFilePath,
+      dataObject,
+      `Unshielded token types data file updated: ${destinationPath}/${TARGET_ENV}/unshielded-token-types.jsonc`,
+    );
+  } catch (error) {
+    if (error instanceof TestDataHandlerError) {
+      throw error;
+    }
+    throw new TestDataHandlerError(
+      "Failed to update unshielded token types data file",
       { destinationPath, originalError: error },
     );
   }

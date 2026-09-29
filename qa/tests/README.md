@@ -112,8 +112,10 @@ The test suite is organized using **Vitest projects**, which allows running diff
 - **[Smoke Tests](tests/smoke/README.md)** - Quick health checks and API validation (~1 second runtime)
 - **[Integration Tests](tests/integration/README.md)** - Comprehensive GraphQL API testing with pre-seeded data
 - **[E2E Tests](tests/e2e/README.md)** - End-to-end validation using the Node Toolkit (includes cache warmup)
+- **[Unit Tests](tests/unit/README.md)** - Pure checks of the harness's own helpers (retry, websocket liveness); no environment, no Docker
+- **[Sync Tests](tests/sync/README.md)** - Runs a chosen indexer version against a deployed chain and watches it index from genesis, to prove that version can sync that chain
 
-Each project can be run independently or together. E2E tests include a cache warmup phase for the Node Toolkit, while smoke and integration tests start immediately.
+Each project can be run independently or together. E2E tests include a cache warmup phase for the Node Toolkit, while smoke and integration tests start immediately. Sync tests are deliberately excluded from the aggregate `test`, `test:coverage` and `test:ui` scripts, each of which names its projects explicitly: a sync run takes minutes at best, and days if its block budget is lifted.
 
 ## 🚀 Getting Started
 
@@ -138,7 +140,13 @@ source .envrc
 
 ### 4) Set versions
 
-By default, the node and indexer version to use will be determined based on the value in `NODE_VERSION` file and the SHA-1 of the commit where that file was updated (which indicates when a working indexer/node pair has been identified).
+When the `qa/scripts/startup-localenv-*.sh` scripts bring a local stack up, they derive
+the versions they were not given: `NODE_TAG` from the stable entry of
+[`NODE_VERSIONS`](../../NODE_VERSIONS) (the same entry the test framework picks, so node
+and toolkit agree), `NODE_TOOLKIT_TAG` paired with that node, and `INDEXER_TAG` from the
+newest published main build at or below the branch's base — main tags every push as
+`<version>-<sha8>`, and those per-commit tags live on GHCR, so `IMAGE_REGISTRY` is set to
+match the registry the image was found in.
 Alternatively, you can override versions before running tests, depending on the target environment.
 
 ### 4a) Toolkit fetch cache (Postgres)
@@ -276,6 +284,12 @@ Stack flavour by suite:
 
 > ℹ️ **`.node/<NODE_TAG>/` must exist** for the with-data flavour. Generate it
 > via `./generate_node_data.sh <NODE_TAG>` from the repo root if it isn't there.
+> The script needs `docker` and the `compact` CLI. For compactc versions with no
+> final release (e.g. `0.33.0-rc.2`, used for node `2.1.*`), it also needs an
+> authenticated `gh` and `unzip`. `COMPACTC_VERSION` overrides the compactc
+> version it picks. See
+> [Upgrading the node version](../../docs/updating-node-version.md#2-generate-data--metadata)
+> for details.
 
 ### Smoke and integration
 
@@ -402,6 +416,7 @@ There are a number of deployed environments that are used for testing components
 - qanet
 - preview
 - preprod
+- mainnet
 
 Endpoints are derived automatically from the `TARGET_ENV` name (e.g. `qanet.midnight.network`), so you do **not** need to configure URLs manually. (`testnet` is a Cardano network type, not a `TARGET_ENV` value.)
 
@@ -427,7 +442,7 @@ TARGET_ENV=preprod INDEXER_API_VERSION=v3 bun run test:integration
 
 | Variable              | Required                          | Default                | Description                                                                                          |
 | --------------------- | --------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------- |
-| `TARGET_ENV`          | Yes                               | —                      | Target environment: `undeployed`, `devnet`, `qanet`, `preview`, `preprod` (lower case). Required; unset or invalid throws. |
+| `TARGET_ENV`          | Yes                               | —                      | Target environment: `undeployed`, `devnet`, `qanet`, `preview`, `preprod`, `mainnet` (lower case). Required; unset or invalid throws. |
 | `NODE_TAG`            | Yes (undeployed only)             | —                      | Node image tag. **Must be a value listed in [`NODE_VERSIONS`](../../NODE_VERSIONS) (repo root).** No auto-derivation. Must NOT be set for deployed envs (fixed by the env). |
 | `INDEXER_TAG`         | Yes (undeployed only)             | —                      | Indexer image tag. **Must be compatible with the selected `NODE_TAG`.** Must NOT be set for deployed envs (fixed by the env). |
 | `NODE_TOOLKIT_TAG`    | No                                | `latest-main`          | Node Toolkit version used by e2e/integration tests.                                                  |
@@ -435,6 +450,21 @@ TARGET_ENV=preprod INDEXER_API_VERSION=v3 bun run test:integration
 | `VITEST_MAX_WORKERS`  | No                                | all available CPUs     | Cap the Vitest worker pool. Accepts a positive integer (`1`, `2`, …) or a percentage (`"50%"`).       |
 | `MN_FETCH_CACHE`      | No (managed by harness)           | auto                   | Postgres-backed toolkit fetch cache. The `toolkit-postgres` container is started automatically.       |
 | `INDEXER_INSTANCE`    | No                                | (primary)              | Blue/green indexer instance to target: `blue` / `green`. Unset → primary (bare `indexer.<env>`). Only meaningful on `qanet`/`preview`/`preprod`; ignored for `undeployed`. A `/ready` preflight fails fast if the colour isn't routed. |
+
+**Sync test project only** (`bun run test:sync`, see [tests/sync/README.md](tests/sync/README.md)):
+
+| Variable              | Required | Default         | Description                                                                                              |
+| --------------------- | -------- | --------------- | -------------------------------------------------------------------------------------------------------- |
+| `SYNC_INDEXER_TAG`    | Yes      | —               | Indexer image tag under test. Separate from `INDEXER_TAG`, which must not be set for deployed envs.       |
+| `SYNC_TOPOLOGY`       | No       | `cloud`         | `cloud` (the deployed shape) or `standalone` (single container; markedly slower, see the suite README).   |
+| `SYNC_IMAGE_REGISTRY` | No       | `midnightntwrk` | Image registry for the indexer images.                                                                   |
+| `MAX_BLOCKS`          | No       | `2000`          | Blocks to index before the run passes. **`0` means unbounded — sync to the chain tip**, not zero blocks.  |
+| `MAX_DURATION_MS`     | No       | `1800000`       | Wall-clock bound on a run; the only bound when `MAX_BLOCKS=0`.                                            |
+| `SYNC_PROGRESS`       | No       | auto            | Progress output mode: `live` or `plain`. Auto-detected from `CI` and whether stdout is a terminal.        |
+| `SYNC_API_PORT`       | No       | `8188`          | Host port for the local indexer API.                                                                     |
+| `SYNC_METRICS_PORT`   | No       | `9100`          | Host port for the Prometheus endpoint progress is read from.                                              |
+| `SYNC_POSTGRES_PORT`  | No       | `5433`          | Host port for the cloud profile's Postgres.                                                               |
+| `SYNC_NATS_PORT`      | No       | `4422`          | Host port for the cloud profile's NATS.                                                                   |
 
 **Runtime-upgrade test only** (`qa/scripts/test-runtime-upgrade.sh`):
 
@@ -459,6 +489,7 @@ TARGET_ENV=preprod INDEXER_API_VERSION=v3 bun run test:integration
 - **[Integration Tests](tests/integration/README.md)**: Fine-grained GraphQL query and subscription tests for blocks, transactions, and contract actions
 
 - **[E2E Tests](tests/e2e/README.md)**: Tests that use the Node Toolkit to perform actions on the blockchain and validate indexer results
+- **[Unit Tests](tests/unit/README.md)**: Hermetic checks of the harness's own helpers, run in CI on every change to `qa/`
 
 - **Smart Cache Management**: E2E tests include toolkit cache warmup; integration and smoke tests start immediately
 

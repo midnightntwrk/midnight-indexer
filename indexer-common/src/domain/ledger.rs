@@ -12,11 +12,14 @@
 // limitations under the License.
 
 mod contract_state;
+mod contract_zswap_state;
 mod ledger_state;
 mod secret_key;
+mod state_translation_v8_to_v9;
 mod transaction;
 
 pub use contract_state::*;
+pub use contract_zswap_state::*;
 pub use ledger_state::*;
 pub use secret_key::*;
 pub use transaction::*;
@@ -24,7 +27,8 @@ pub use transaction::*;
 use crate::{
     domain::{
         ByteArrayLenError, ByteVec, LedgerVersion, SerializedContractAddress,
-        SerializedLedgerStateKey, dust::DustParameters,
+        SerializedContractStateKey, SerializedLedgerStateKey, SerializedZswapStateKey,
+        dust::DustParameters,
     },
     error::BoxError,
 };
@@ -41,7 +45,7 @@ use midnight_ledger_v9::{
 use midnight_serialize_v1::{Serializable, Tagged, tagged_serialize};
 use midnight_transient_crypto_v2::commitment::PureGeneratorPedersen;
 use midnight_transient_crypto_v3::commitment::PureGeneratorPedersen as PureGeneratorPedersenV9;
-use std::{io, string::FromUtf8Error};
+use std::io;
 use thiserror::Error;
 
 type TransactionV8<D> =
@@ -66,14 +70,20 @@ pub enum Error {
     #[error("cannot load ledger state for key {}", const_hex::encode(.0))]
     LoadLedgerState(SerializedLedgerStateKey, #[source] io::Error),
 
+    #[error("cannot load contract state for key {0}")]
+    LoadContractState(SerializedContractStateKey, #[source] io::Error),
+
+    #[error("cannot load contract zswap state for key {0}")]
+    LoadContractZswapState(SerializedZswapStateKey, #[source] io::Error),
+
+    #[error("contract state key {0} carries no known contract state tag")]
+    UnknownContractStateKeyTag(SerializedContractStateKey),
+
     #[error("cannot serialize {0}")]
     Serialize(&'static str, #[source] io::Error),
 
     #[error("cannot deserialize {0}")]
     Deserialize(&'static str, #[source] io::Error),
-
-    #[error("cannot convert {0} to UTF-8 string")]
-    FromUtf8(&'static str, #[source] FromUtf8Error),
 
     #[error("cannot get contract state from node for address {0}")]
     GetContractState(SerializedContractAddress, #[source] BoxError),

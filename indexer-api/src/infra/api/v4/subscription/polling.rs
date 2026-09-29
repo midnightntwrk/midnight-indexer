@@ -16,6 +16,11 @@
 //! synchronise their database hits) and idle backoff (so an unchanging
 //! subscription polls less often).
 
+use crate::{
+    domain::storage::Storage,
+    infra::api::{ApiResult, ContextExt, ResultExt},
+};
+use async_graphql::Context;
 use chacha20poly1305::aead::{OsRng, rand_core::RngCore};
 use futures::{Stream, stream};
 use std::time::Duration;
@@ -61,6 +66,27 @@ pub(super) fn next_poll_interval(
     } else {
         (current_interval * 2).min(base * IDLE_BACKOFF_MAX_MULTIPLE)
     }
+}
+
+/// The protocol version at the tip of the chain, i.e. the one currently in effect. Progress
+/// events carry it so that a wallet without any transactions still observes a protocol upgrade;
+/// it is served from the shared progress cache, so all progress streams together cause at most
+/// one query per cache time-to-live. Zero if no block has been indexed yet.
+pub(super) async fn latest_protocol_version<S>(cx: &Context<'_>) -> ApiResult<u32>
+where
+    S: Storage,
+{
+    let protocol_version = cx
+        .get_progress_cache()
+        .protocol_version(async {
+            cx.get_storage::<S>()
+                .get_latest_protocol_version()
+                .await
+                .map_err_into_server_error(|| "get latest protocol version")
+        })
+        .await?;
+
+    Ok(protocol_version.map(u32::from).unwrap_or_default())
 }
 
 #[cfg(test)]

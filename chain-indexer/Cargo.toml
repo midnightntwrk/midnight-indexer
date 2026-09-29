@@ -44,6 +44,7 @@ const-hex = { workspace = true }
 criterion = { workspace = true }
 fake      = { workspace = true }
 fs_extra  = { workspace = true }
+indexer-common = { path = "../indexer-common", features = [ "testing" ] }
 reqwest   = { workspace = true, features = [ "json", "rustls" ] }
 serde     = { workspace = true, features = [ "derive" ] }
 serde_json = { workspace = true }
@@ -51,6 +52,16 @@ tempfile  = { workspace = true }
 testcontainers = { workspace = true }
 testcontainers-modules = { workspace = true, features = [ "postgres" ] }
 walkdir   = { workspace = true }
+# SPIKE — REMOVE BEFORE MERGE, together with tests/contract_state_arena.rs: the spike reaches
+# into the ledger arena directly, which production chain-indexer code does not.
+midnight-coin-structure_v2  = { workspace = true }
+midnight-coin-structure_v3  = { workspace = true }
+midnight-onchain-runtime_v3 = { workspace = true }
+midnight-onchain-runtime_v4 = { workspace = true }
+midnight-serialize_v1       = { workspace = true }
+midnight-storage-core_v1    = { workspace = true, features = [ "layout-v2", "gc-v1" ] }
+midnight-zswap_v8           = { workspace = true }
+midnight-zswap_v9           = { workspace = true }
 
 [[bench]]
 name              = "ledger_state"
@@ -68,8 +79,10 @@ harness           = false
 required-features = [ "standalone" ]
 
 [build-dependencies]
-anyhow    = { workspace = true }
-itertools = { workspace = true }
+anyhow             = { workspace = true }
+itertools          = { workspace = true }
+parity-scale-codec = { workspace = true }
+subxt              = { workspace = true }
 
 [features]
 cloud      = [ "indexer-common/cloud" ]

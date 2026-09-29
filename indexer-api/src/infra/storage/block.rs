@@ -18,7 +18,10 @@ use crate::{
 use async_stream::try_stream;
 use fastrace::trace;
 use futures::Stream;
-use indexer_common::{domain::BlockHash, stream::flatten_chunks};
+use indexer_common::{
+    domain::{BlockHash, ProtocolVersion},
+    stream::flatten_chunks,
+};
 use indoc::indoc;
 use std::num::NonZeroU32;
 
@@ -47,6 +50,25 @@ impl BlockStorage for Storage {
         "};
 
         sqlx::query_as(query).fetch_optional(&*self.pool).await
+    }
+
+    #[trace]
+    async fn get_latest_protocol_version(&self) -> Result<Option<ProtocolVersion>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT protocol_version
+            FROM blocks
+            ORDER BY height DESC
+            LIMIT 1
+        "};
+
+        sqlx::query_as::<_, (i64,)>(query)
+            .fetch_optional(&*self.pool)
+            .await?
+            .map(|(protocol_version,)| {
+                ProtocolVersion::try_from(protocol_version)
+                    .map_err(|error| sqlx::Error::Decode(error.into()))
+            })
+            .transpose()
     }
 
     async fn get_blocks_by_hashes(&self, hashes: &[BlockHash]) -> Result<Vec<Block>, sqlx::Error> {

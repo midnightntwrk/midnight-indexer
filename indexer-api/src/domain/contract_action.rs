@@ -12,11 +12,19 @@
 // limitations under the License.
 
 use indexer_common::domain::{
-    ContractAttributes, SerializedContractAddress, SerializedContractState, SerializedZswapState,
+    ContractAttributes, SerializedContractAddress, SerializedContractStateKey,
+    SerializedZswapStateKey,
 };
 use sqlx::FromRow;
 
 /// A contract action.
+///
+/// The states are ledger-arena keys, resolved to bytes on demand: a row is tens of bytes rather
+/// than the ~860 KB the state blob used to cost, which matters most for the queries that return up
+/// to 500 rows or drive `Transaction.contractActions` through the loader.
+///
+/// Both keys are nullable. A failed action has no contract state, which is represented today as an
+/// empty `state` blob, so the API resolves a missing key to the empty string.
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 pub struct ContractAction {
     #[sqlx(try_from = "i64")]
@@ -24,12 +32,12 @@ pub struct ContractAction {
 
     pub address: SerializedContractAddress,
 
-    pub state: SerializedContractState,
+    pub state_key: Option<SerializedContractStateKey>,
 
     #[sqlx(json)]
     pub attributes: ContractAttributes,
 
-    pub zswap_state: SerializedZswapState,
+    pub zswap_state_key: Option<SerializedZswapStateKey>,
 
     #[sqlx(try_from = "i64")]
     pub transaction_id: u64,

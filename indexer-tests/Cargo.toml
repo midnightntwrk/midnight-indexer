@@ -27,6 +27,7 @@ tokio-stream      = { workspace = true }
 tokio-tungstenite = { workspace = true, features = [ "rustls-tls-webpki-roots" ] }
 
 [dev-dependencies]
+bech32                 = { workspace = true }
 fs_extra               = { workspace = true }
 nix                    = { workspace = true, features = [ "signal" ] }
 tempfile               = { workspace = true }

@@ -47,12 +47,13 @@ Review the prepended section before committing.
 3. **Images publish automatically.** A `v*` tag triggers
    `.github/workflows/build-indexer-images.yaml`, which builds every component
    (`chain-indexer`, `wallet-indexer`, `indexer-api`, `spo-indexer`,
-   `indexer-standalone`) with the `release` profile and pushes semver-tagged
-   images to `ghcr.io/midnight-ntwrk/<component>` (always) and
-   `docker.io/midnightntwrk/<component>` (tag builds only). The same workflow also runs on
-   **main pushes** and **manual dispatch**, tagging those images `<cargo-version>-<short-sha>`
-   with the `dev` profile (GHCR only) - a pre-merge or feature image is identifiable by its
-   `-<sha>` suffix.
+   `indexer-standalone`) with the `release` profile and pushes semver-tagged images to three
+   targets: `ghcr.io/midnight-ntwrk/<component>` and `ghcr.io/midnightntwrk/<component>` on
+   every build, plus `docker.io/midnightntwrk/<component>` on tag builds only.
+   `midnight-ntwrk` is the legacy GitHub org, published alongside the current `midnightntwrk`
+   org until the legacy org is sunset. The same workflow also runs on **main pushes** and
+   **manual dispatch**, tagging those images `<cargo-version>-<short-sha>` with the `dev`
+   profile (GHCR only) - a pre-merge or feature image is identifiable by its `-<sha>` suffix.
 
 ## Scheduling & sign-off
 
@@ -80,8 +81,9 @@ v4.4.0-pre-alpha.14-l91r3-n2r3-bridge-and-events-epics-ca3e554
                   ledger  node                        commit
 ```
 
-These never reach Docker Hub - only semver-pattern tag builds get the
-`midnightntwrk/*` images and `latest`.
+These never reach Docker Hub. Only semver-pattern tag builds get the
+`docker.io/midnightntwrk/*` images. `latest` is narrower still: `latest=auto` skips
+pre-releases, so only a final `vX.Y.Z` carries it.
 
 ## See also
 

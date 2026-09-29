@@ -21,6 +21,7 @@ import { env } from '../../environment/model';
 import { GenericContainer, StartedTestContainer } from 'testcontainers';
 import { getContractDeploymentHashes, resolveBlockHash } from '../../tests/e2e/test-utils';
 import { ensureToolkitCachePostgres } from './toolkit-cache';
+import { closeMothWallets, generateSingleTxViaMoth } from '../moth/moth-backend';
 import { z } from 'zod';
 import {
   Coin,
@@ -46,9 +47,13 @@ export type ShowAddressOption =
 interface AddressInfo {
   shielded: string;
   unshielded: string;
+  // `show-address` has always returned this; it was simply not declared here.
+  // Verified against midnight-node-toolkit:1.0.0 on preview (2026-09-17).
+  dust: string;
   coinPublic: string;
   coinPublicTagged: string;
   unshieldedUserAddressUntagged: string;
+  userAddress: string;
 }
 
 interface ToolkitConfig {
@@ -402,6 +407,9 @@ class ToolkitWrapper {
   }
 
   async stop() {
+    // Release any moth wallet opened by the moth backend. Safe when unused —
+    // it clears an empty set.
+    await closeMothWallets();
     if (this.startedContainer) {
       // Make /out world-writable before stopping so the host process can delete root-owned
       // files that the container wrote there (e.g. transaction files).
@@ -756,6 +764,8 @@ class ToolkitWrapper {
    * @param addressType - The address type to use
    * @param destinationAddress - The destination address to use
    * @param amount - The amount to use
+   * @param tokenType - Optional 32-byte hex token type to transfer. Omit for the
+   *                    toolkit default, which is the all-zeros native token (NIGHT).
    *
    * @returns The transaction result
    */
@@ -764,7 +774,21 @@ class ToolkitWrapper {
     addressType: AddressType,
     destinationAddress: string,
     amount: number,
+    tokenType?: string,
   ): Promise<ToolkitTransactionResult> {
+    // When TX_BACKEND=moth, build and submit through moth's sync engine instead
+    // of the toolkit container. Transfers only; every other operation stays on
+    // the toolkit. The container need not be started for this path.
+    if (env.getTxBackend() === 'moth') {
+      return generateSingleTxViaMoth(
+        sourceSeed,
+        addressType,
+        destinationAddress,
+        amount,
+        tokenType,
+      );
+    }
+
     if (!this.startedContainer) {
       throw new Error('Container is not started. Call start() first.');
     }
@@ -783,6 +807,7 @@ class ToolkitWrapper {
       destinationAddress,
       `--${addressType}-amount`,
       amount.toString(),
+      ...(tokenType ? [`--${addressType}-token-type`, tokenType] : []),
     ]);
 
     log.debug(`Generate single transaction output:\n${result.output}`);

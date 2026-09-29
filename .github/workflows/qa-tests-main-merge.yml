@@ -12,6 +12,10 @@ name: Indexer QA Tests - main merge
 
 permissions:
   contents: read
+  # Required by the called base workflow's job (GHCR image pulls); a called
+  # job cannot escalate beyond the caller's grant, so omitting this fails
+  # run creation with startup_failure.
+  packages: read
 
 on:
   workflow_run:
@@ -119,6 +123,18 @@ jobs:
       node_tag: ${{ needs.derive-tags.outputs.node_tag }}
       indexer_tag: ${{ needs.derive-tags.outputs.indexer_tag }}
       node_toolkit_tag: ${{ needs.derive-tags.outputs.node_toolkit_tag }}
+      # Docker Hub (midnightntwrk, the public registry) only receives
+      # release-tag builds — it cannot serve the per-commit <version>-<sha8>
+      # images this workflow tests, and unreleased main builds may carry
+      # security fixes that must stay internal until released. Those images
+      # are published by build-indexer-images to GHCR, which also mirrors the
+      # release tags, so this registry works for workflow_dispatch runs too.
+      # NOTE: build-indexer-images dual-publishes to both GHCR orgs
+      # (midnight-ntwrk is the legacy one, midnightntwrk the current one),
+      # but per-commit tags built before dual-publishing landed exist in the
+      # legacy org only — keep this here so workflow_dispatch runs can still
+      # pull older SHAs. Switch to midnightntwrk once those are irrelevant.
+      image_registry: ghcr.io/midnight-ntwrk
     secrets:
       MIDNIGHTCI_PACKAGES_READ: ${{ secrets.MIDNIGHTCI_PACKAGES_READ }}
       APP__INFRA__SECRET: ${{ secrets.APP__INFRA__SECRET }}

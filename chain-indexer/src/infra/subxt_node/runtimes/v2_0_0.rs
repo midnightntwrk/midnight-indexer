@@ -14,14 +14,13 @@
 use crate::{
     domain::{DParameter, DustRegistrationEvent, TermsAndConditions},
     infra::subxt_node::{
-        OnlineClientAtBlock, SubxtNodeError,
+        ContentSource, OnlineClientAtBlock, SubxtNodeError,
         runtimes::{BlockDetails, Transaction},
     },
 };
 use futures::TryStreamExt;
 use indexer_common::domain::{
-    ByteVec, DustPublicKey, SerializedContractAddress, SerializedContractState,
-    TermsAndConditionsHash,
+    ByteVec, DustPublicKey, TermsAndConditionsHash,
     bridge::{BridgeEvent, BridgeRecipient},
 };
 use itertools::Itertools;
@@ -31,6 +30,7 @@ use subxt::error::RuntimeApiError;
 pub async fn make_block_details(
     authorities: &mut Option<Vec<[u8; 32]>>,
     block: &OnlineClientAtBlock,
+    content: Option<&ContentSource>,
 ) -> Result<BlockDetails, SubxtNodeError> {
     use super::runtime_2_0_0::{
         Call, Event,
@@ -46,11 +46,22 @@ pub async fn make_block_details(
         timestamp,
     };
 
-    let extrinsics = block
-        .extrinsics()
-        .fetch()
-        .await
-        .map_err(|error| SubxtNodeError::FetchExtrinsics(error.into()))?;
+    let extrinsics = match content {
+        // Enactment block: decode this block's raw extrinsic bytes against the parent
+        // (old-runtime) client. `from_bytes` is async but infallible.
+        Some(content) => {
+            content
+                .client
+                .extrinsics()
+                .from_bytes(content.extrinsic_bodies.clone())
+                .await
+        }
+        None => block
+            .extrinsics()
+            .fetch()
+            .await
+            .map_err(|error| SubxtNodeError::FetchExtrinsics(error.into()))?,
+    };
 
     let calls = extrinsics
         .iter()
@@ -93,11 +104,25 @@ pub async fn make_block_details(
     let mut system_transactions_from_events = vec![];
     let mut bridge_events = vec![];
 
-    let events = block
-        .events()
-        .fetch()
-        .await
-        .map_err(|error| SubxtNodeError::FetchEvents(error.into()))?;
+    let events = match content {
+        // Enactment block: raw event bytes are metadata-independent, so fetch them from this
+        // block and re-decode against the parent (old-runtime) client. `from_bytes` is sync.
+        Some(content) => {
+            let raw = block
+                .events()
+                .fetch()
+                .await
+                .map_err(|error| SubxtNodeError::FetchEvents(error.into()))?
+                .bytes()
+                .to_vec();
+            content.client.events().from_bytes(raw)
+        }
+        None => block
+            .events()
+            .fetch()
+            .await
+            .map_err(|error| SubxtNodeError::FetchEvents(error.into()))?,
+    };
 
     for event in events.iter() {
         let event = event
@@ -268,25 +293,6 @@ pub fn decode_slot(mut slot: &[u8]) -> Result<u64, SubxtNodeError> {
     let slot = super::runtime_2_0_0::runtime_types::sp_consensus_slots::Slot::decode(&mut slot)
         .map(|x| x.0)?;
     Ok(slot)
-}
-
-pub async fn get_contract_state(
-    address: SerializedContractAddress,
-    block: &OnlineClientAtBlock,
-) -> Result<SerializedContractState, SubxtNodeError> {
-    let get_state = super::runtime_2_0_0::runtime_apis()
-        .midnight_runtime_api()
-        .get_contract_state(address.as_slice().into());
-
-    let state = block
-        .runtime_apis()
-        .call(get_state)
-        .await
-        .map_err(|error| SubxtNodeError::GetContractState(address.clone(), error.into()))?
-        .map_err(|error| SubxtNodeError::GetContractState(address, format!("{error:?}").into()))?
-        .into();
-
-    Ok(state)
 }
 
 pub async fn get_zswap_merkle_tree_root(

@@ -11,15 +11,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{RegularTransaction, SystemTransaction, Transaction, node};
+use crate::domain::{ContractAction, RegularTransaction, SystemTransaction, Transaction, node};
 use derive_more::derive::{Deref, From};
 use fastrace::trace;
 use indexer_common::domain::{
     ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, BlockHash, LedgerVersion,
-    NetworkId, SerializedContractAddress, SerializedLedgerStateKey, TransactionHash,
-    ledger::{self, LedgerParameters, RootCountRepair},
+    NetworkId, ProtocolVersion, SerializedContractAddress, SerializedLedgerStateKey,
+    TransactionHash, TransactionResult,
+    ledger::{LedgerParameters, RootCountRepair},
 };
-use std::{collections::HashSet, ops::DerefMut};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::DerefMut,
+};
 use thiserror::Error;
 
 /// Amount, in milliseconds, by which the first regular transaction's dust-validity `tblock` is
@@ -27,6 +31,48 @@ use thiserror::Error;
 /// `slot_duration_secs + skipped_slots_margin` (one slot each, two slots by default) ahead of block
 /// time. Midnight slots are 6s, so the default bump is two slots. Block timestamps are milliseconds.
 const MEMPOOL_TBLOCK_BUMP_MILLIS: u64 = 2 * 6_000;
+
+/// First node 1.0 runtime `spec_version` whose ledger-8 host functions no longer skew the first
+/// regular transaction's well-formed `tblock`. Node 1.0.300 added version 2 of
+/// `Ledger8Bridge::apply_transaction`/`validate_guaranteed_execution`, which verify against the
+/// block's own time; runtimes before it import version 1, which keeps the skew. Which one ran is
+/// decided by the runtime that built the block, so blocks before the `set_code` still skew.
+///
+/// See <https://github.com/midnightntwrk/midnight-node/issues/1924>.
+const FIRST_UNSKEWED_NODE_1_0_SPEC_VERSION: u32 = 1_000_300;
+
+/// Whether the node skewed the first regular transaction's well-formed `tblock` by
+/// `MEMPOOL_TBLOCK_BUMP_MILLIS` off the parent block time, for a block built by the runtime with the
+/// given protocol version; that is the runtime recorded in the block's MNSV digest, not the one in
+/// its state, which is newer at a runtime-upgrade enactment block.
+///
+/// - 0.22, 1.0 before `FIRST_UNSKEWED_NODE_1_0_SPEC_VERSION` and 2.0 serve the first transaction's
+///   validity from the strict cache warmed during mempool ingress, i.e. verify it at the bumped
+///   `tblock`.
+/// - 1.0 from `FIRST_UNSKEWED_NODE_1_0_SPEC_VERSION` on (`Ledger8Bridge` version 2) and 2.1 (whose
+///   ledger-8 and ledger-9 host functions never skew) verify it against the block's own time.
+///
+/// Bumping where the node does not verifies the first regular transaction at a different time than
+/// the node, so a transaction the node accepted can fail `well_formed` here and halt indexing: with
+/// a block gap under 12s an intent TTL in `[block time, parent + 12s)` has expired, and with a gap
+/// over 12s a dust `ctime` in `(parent + 12s, block time]` lies outside the dust validity window.
+fn node_skews_first_regular_tblock(protocol_version: ProtocolVersion) -> bool {
+    match protocol_version {
+        ProtocolVersion::V0_22(_) | ProtocolVersion::V2_0(_) => true,
+        ProtocolVersion::V1_0(spec_version) => spec_version < FIRST_UNSKEWED_NODE_1_0_SPEC_VERSION,
+        ProtocolVersion::V2_1(_) => false,
+    }
+}
+
+/// Whether indexing a block at `height` must reproduce the node's skewed first regular
+/// transaction `tblock`. Genesis transactions never passed through the mempool, so they never use
+/// the cached validity result that caused the skew.
+pub(crate) fn should_bump_first_regular_tblock(
+    height: u64,
+    protocol_version: ProtocolVersion,
+) -> bool {
+    height > 0 && node_skews_first_regular_tblock(protocol_version)
+}
 
 /// New type for ledger state from indexer_common.
 #[derive(Debug, Clone, From, Deref)]
@@ -115,7 +161,8 @@ impl LedgerState {
     /// block (height 0): the transactions embedded in genesis never transited the mempool, so the
     /// node never cached a bumped result for them and validated them against the real block time.
     /// Bumping them would push the well-formed `tblock` past a bootstrap transaction's intent TTL
-    /// and wrongly reject it.
+    /// and wrongly reject it. It must also be `false` for blocks built by a runtime that no longer
+    /// skews; the caller decides this with `should_bump_first_regular_tblock`.
     #[trace(properties = { "parent_block_hash": "{parent_block_hash}" })]
     pub fn apply_transactions(
         &mut self,
@@ -179,6 +226,86 @@ impl LedgerState {
         (self.zswap_first_free() != 0).then(|| self.zswap_first_free() - 1)
     }
 
+    /// Capture the ledger-arena key and the token balances of the contract state of every contract
+    /// action in the given block's transactions, and assign them to those actions.
+    ///
+    /// This must run **once per block, after every transaction has been applied**, and not inside
+    /// `apply_regular_transaction`. The blob this replaces came from a node runtime API called *at
+    /// the block*, i.e. the contract's end-of-block state, so every action on one address within a
+    /// block reported identical bytes; capturing per transaction would change both the stored state
+    /// and the denormalized `contract_balances` for multi-action blocks. It must also run after the
+    /// genesis branch in `get_and_index_block`, which *replaces* the ledger state after applying:
+    /// a key captured before that would point into a state that is not the one persisted.
+    ///
+    /// Keys are looked up once per distinct address, since content addressing makes K actions on
+    /// one address in one block share one key and one root increment. An address whose contract is
+    /// absent from the ledger state — a failed action — is left with no key, which reads back as
+    /// the empty state it reads back as today.
+    ///
+    /// Returns the number of distinct addresses for which no contract state could be captured, for
+    /// the caller to report: a rising count means states are silently not being captured.
+    #[trace]
+    pub fn capture_contract_state_keys(
+        &self,
+        transactions: &mut [Transaction],
+    ) -> Result<usize, Error> {
+        let mut captured = HashMap::new();
+
+        for transaction in transactions.iter_mut() {
+            let Transaction::Regular(transaction) = transaction else {
+                continue;
+            };
+
+            for contract_action in transaction.contract_actions.iter_mut() {
+                let (key, balances) = match captured.get(&contract_action.address) {
+                    Some(captured) => captured,
+
+                    None => {
+                        let contract_state = self
+                            .0
+                            .contract_state(&contract_action.address)
+                            .map_err(|error| {
+                                Error::GetContractStateKey(
+                                    transaction.hash,
+                                    contract_action.address.clone(),
+                                    error,
+                                )
+                            })?;
+
+                        // The balances come off the state the accessor hands back, so this replaces
+                        // the ~860 KB deserialize per action the indexing path used to do with one
+                        // read per address off a pointer that is already in hand.
+                        let captured_state = match contract_state {
+                            Some((key, contract_state)) => {
+                                let balances = contract_state.balances().map_err(|error| {
+                                    Error::GetContractBalances(
+                                        transaction.hash,
+                                        contract_action.address.clone(),
+                                        error,
+                                    )
+                                })?;
+
+                                (Some(key), balances)
+                            }
+
+                            None => (None, vec![]),
+                        };
+
+                        captured
+                            .entry(contract_action.address.clone())
+                            .insert_entry(captured_state)
+                            .into_mut()
+                    }
+                };
+
+                contract_action.state_key = key.clone();
+                contract_action.extracted_balances = balances.clone();
+            }
+        }
+
+        Ok(captured.values().filter(|(key, _)| key.is_none()).count())
+    }
+
     #[trace(properties = {
         "parent_block_hash": "{parent_block_hash}",
         "block_timestamp": "{block_timestamp}",
@@ -216,6 +343,17 @@ impl LedgerState {
             )
             .map_err(|error| Error::ApplyRegularTransaction(Some(transaction.hash), error))?;
 
+        // Contract actions are owned by a physical intent segment, but Calls may also execute a
+        // guaranteed transcript in logical segment 0. Retain an action if either execution phase
+        // actually applied; Deploy and Update only execute in their physical segment. This runs
+        // before any state is captured below, so a rolled-back action neither gets a key nor
+        // reaches the API. A segment with no result is an error rather than "not applied": the
+        // ledger reports every intent segment, so a missing one means the result shape changed.
+        retain_applied_contract_actions(&mut transaction.contract_actions, &transaction_result)
+            .map_err(|segment| {
+                Error::MissingContractActionSegmentResult(transaction.hash, segment)
+            })?;
+
         // Update transaction.
         transaction.transaction_result = transaction_result;
         transaction.zswap_merkle_tree_root = self
@@ -235,35 +373,16 @@ impl LedgerState {
         transaction.estimated_fees = fees;
         transaction.bridge_claim = bridge_claim;
 
-        // Update contract actions.
+        // Update contract actions. The zswap state is captured here rather than in the block-level
+        // pass because it is per transaction: it is filtered out of the global commitment tree,
+        // which grows with every transaction, so this reproduces exactly what is stored today.
+        // The contract state key and the balances derived from it are captured once per block, see
+        // `capture_contract_state_keys`.
         for contract_action in transaction.contract_actions.iter_mut() {
-            let zswap_state = self
-                .extract_contract_zswap_state(&contract_action.address)
-                .map_err(|error| Error::ExtractContractZswapState(transaction.hash, error))?;
-            contract_action.zswap_state = zswap_state;
-
-            // TODO: Workaround until we filter failed contract actions (empty state means failed).
-            if !contract_action.state.is_empty() {
-                let contract_state = ledger::ContractState::deserialize(
-                    &contract_action.state,
-                    transaction.protocol_version.ledger_version(),
-                )
-                .map_err(|error| {
-                    Error::DeserializeContractState(
-                        transaction.hash,
-                        contract_action.address.clone(),
-                        error,
-                    )
-                })?;
-                let balances = contract_state.balances().map_err(|error| {
-                    Error::GetContractBalances(
-                        transaction.hash,
-                        contract_action.address.clone(),
-                        error,
-                    )
-                })?;
-                contract_action.extracted_balances = balances;
-            }
+            let zswap_state_key = self
+                .contract_zswap_state_key(&contract_action.address)
+                .map_err(|error| Error::GetContractZswapStateKey(transaction.hash, error))?;
+            contract_action.zswap_state_key = Some(zswap_state_key);
         }
 
         Ok(Transaction::Regular(transaction.into()))
@@ -331,18 +450,23 @@ pub enum Error {
         #[source] indexer_common::domain::ledger::Error,
     ),
 
-    #[error("cannot extract contract zswap state for transaction {0}")]
-    ExtractContractZswapState(
+    #[error("cannot capture contract zswap state key for transaction {0}")]
+    GetContractZswapStateKey(
         TransactionHash,
         #[source] indexer_common::domain::ledger::Error,
     ),
 
-    #[error("cannot deserialize contract state for transaction {0} and contract address {1}")]
-    DeserializeContractState(
+    #[error("cannot capture contract state key for transaction {0} and contract address {1}")]
+    GetContractStateKey(
         TransactionHash,
         SerializedContractAddress,
         #[source] indexer_common::domain::ledger::Error,
     ),
+
+    #[error(
+        "transaction {0} is missing a result for logical segment {1} required by a contract action"
+    )]
+    MissingContractActionSegmentResult(TransactionHash, u16),
 
     #[error("cannot get contract balances for transaction {0} and contract address {1}")]
     GetContractBalances(
@@ -355,4 +479,493 @@ pub enum Error {
 fn stringify_hash(hash: &Option<TransactionHash>) -> String {
     hash.map(|hash| hash.to_string())
         .unwrap_or_else(|| "<hash unavailable>".to_string())
+}
+
+/// Keep contract actions with at least one execution phase which applied to the ledger state.
+fn retain_applied_contract_actions(
+    contract_actions: &mut Vec<ContractAction>,
+    transaction_result: &TransactionResult,
+) -> Result<(), u16> {
+    // Validate before mutating so an inconsistent result never leaves a partially filtered list.
+    for action in contract_actions.iter() {
+        if transaction_result
+            .segment_succeeded(action.segment)
+            .is_none()
+        {
+            return Err(action.segment);
+        }
+        if action.has_guaranteed_transcript && transaction_result.segment_succeeded(0).is_none() {
+            return Err(0);
+        }
+    }
+
+    contract_actions.retain(|action| {
+        transaction_result
+            .segment_succeeded(action.segment)
+            .expect("segment result validated above")
+            || (action.has_guaranteed_transcript
+                && transaction_result
+                    .segment_succeeded(0)
+                    .expect("guaranteed-segment result validated above"))
+    });
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod contract_action_tests {
+    use super::retain_applied_contract_actions;
+    use crate::domain::ContractAction;
+    use indexer_common::domain::{ContractAttributes, TransactionResult};
+
+    #[test]
+    fn retains_only_contract_actions_with_an_applied_execution_phase() {
+        let actions = || {
+            vec![
+                action(7, ContractAttributes::Deploy, false),
+                action(8, call(), false),
+                action(9, call(), true),
+                action(u16::MAX, ContractAttributes::Update, false),
+            ]
+        };
+
+        let mut all_succeeded = actions();
+        retain_applied_contract_actions(&mut all_succeeded, &TransactionResult::Success).unwrap();
+        assert_eq!(segments(&all_succeeded), vec![7, 8, 9, u16::MAX]);
+
+        let mut all_failed = actions();
+        retain_applied_contract_actions(&mut all_failed, &TransactionResult::Failure).unwrap();
+        assert!(all_failed.is_empty());
+
+        let mut partial = actions();
+        retain_applied_contract_actions(
+            &mut partial,
+            &TransactionResult::PartialSuccess(vec![
+                (0, true),
+                (7, false),
+                (8, false),
+                (9, false),
+                (u16::MAX, true),
+            ]),
+        )
+        .unwrap();
+
+        // Regression assertion: 4.3.301 incorrectly removed segment 9 solely because its physical
+        // segment failed, despite its guaranteed transcript having executed in segment 0.
+        assert_eq!(segments(&partial), vec![9, u16::MAX]);
+
+        let mut inconsistent = vec![action(9, call(), true)];
+        let original = inconsistent.clone();
+        assert_eq!(
+            retain_applied_contract_actions(
+                &mut inconsistent,
+                &TransactionResult::PartialSuccess(vec![(0, true)]),
+            ),
+            Err(9)
+        );
+        assert_eq!(inconsistent, original);
+    }
+
+    fn call() -> ContractAttributes {
+        ContractAttributes::Call {
+            entry_point: "entry-point".to_owned(),
+        }
+    }
+
+    fn action(
+        segment: u16,
+        attributes: ContractAttributes,
+        has_guaranteed_transcript: bool,
+    ) -> ContractAction {
+        ContractAction {
+            address: Default::default(),
+            segment,
+            has_guaranteed_transcript,
+            raw_entry_point: match &attributes {
+                ContractAttributes::Call { entry_point } => {
+                    Some(entry_point.as_bytes().to_vec().into())
+                }
+                _ => None,
+            },
+            state_key: Default::default(),
+            zswap_state_key: Default::default(),
+            extracted_balances: Default::default(),
+            attributes,
+        }
+    }
+
+    fn segments(actions: &[ContractAction]) -> Vec<u16> {
+        actions.iter().map(|action| action.segment).collect()
+    }
+}
+
+#[cfg(test)]
+mod tblock_skew_tests {
+    use super::{node_skews_first_regular_tblock, should_bump_first_regular_tblock};
+    use indexer_common::domain::ProtocolVersion;
+
+    #[test]
+    fn skews_only_for_runtimes_importing_the_skewing_host_functions() {
+        let skews = |spec_version: u32| {
+            node_skews_first_regular_tblock(
+                ProtocolVersion::try_from(spec_version).expect("supported protocol version"),
+            )
+        };
+
+        assert!(skews(22_000));
+        assert!(skews(1_000_000));
+        assert!(skews(1_000_002));
+        assert!(skews(1_000_299));
+        assert!(!skews(1_000_300));
+        assert!(!skews(1_000_999));
+        assert!(skews(2_000_000));
+        assert!(!skews(2_001_000));
+    }
+
+    #[test]
+    fn bumps_only_non_genesis_blocks_built_by_skewing_runtimes() {
+        assert!(!should_bump_first_regular_tblock(
+            0,
+            ProtocolVersion::V0_22(22_000),
+        ));
+        assert!(should_bump_first_regular_tblock(
+            1,
+            ProtocolVersion::V1_0(1_000_299),
+        ));
+        assert!(!should_bump_first_regular_tblock(
+            1,
+            ProtocolVersion::V1_0(1_000_300),
+        ));
+        assert!(should_bump_first_regular_tblock(
+            1,
+            ProtocolVersion::V2_0(2_000_000),
+        ));
+        assert!(!should_bump_first_regular_tblock(
+            1,
+            ProtocolVersion::V2_1(2_001_000),
+        ));
+    }
+
+    /// Preview block 128537's first (and only) regular transaction, replayed as if it had waited
+    /// one block in the pool and been included on a node 1.0.300 runtime: parent 1784987076 (the
+    /// original block's time), block 1784987082, intent TTL 1784987084.
+    ///
+    /// Node 1.0.300 verifies it at the block's own time (1784987082 <= TTL) and accepts it. The
+    /// unconditional bump verifies it at parent + 12s (1784987088 > TTL) and halts indexing on a
+    /// block the node accepted. This is the regression for gating the bump on the runtime.
+    #[cfg(feature = "standalone")]
+    #[tokio::test]
+    async fn first_tx_on_node_1_0_300_runtime_is_verified_at_block_time() {
+        use crate::domain::{LedgerState, node};
+        use indexer_common::{
+            domain::{BlockHash, ByteVec, LedgerVersion, NetworkId, ledger},
+            infra::ledger_db,
+        };
+
+        const PARENT_BLOCK_TIMESTAMP: u64 = 1_784_987_076_000;
+        const BLOCK_TIMESTAMP: u64 = 1_784_987_082_000;
+        const INTENT_TTL_EXPIRED: &str = "Intent TTL has expired";
+
+        let temp_dir = tempfile::tempdir().expect("create tempdir");
+        ledger_db::init(ledger_db::Config {
+            cache_max_nodes: 1_024,
+            cnn_url: temp_dir
+                .path()
+                .join("ledger-db.sqlite")
+                .display()
+                .to_string(),
+            create_if_missing: true,
+        })
+        .await
+        .expect("init ledger DB");
+
+        let raw: ByteVec = std::fs::read(format!(
+            "{}/../indexer-common/tests/block_128537_tx.raw",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .expect("read block_128537_tx.raw")
+        .into();
+        let transaction = ledger::Transaction::deserialize(&raw, LedgerVersion::V8)
+            .expect("deserialize fixture transaction");
+        let hash = transaction.hash();
+        let identifiers = transaction.identifiers().expect("identifiers");
+
+        let apply = |protocol_version: ProtocolVersion| {
+            let network_id: NetworkId = "preview".try_into().expect("network id");
+            let mut ledger_state =
+                LedgerState::new(network_id, LedgerVersion::V8).expect("create ledger state");
+            let transaction = node::Transaction::Regular(node::RegularTransaction {
+                hash,
+                protocol_version,
+                raw: raw.clone(),
+                identifiers: identifiers.clone(),
+                contract_actions: vec![],
+            });
+
+            ledger_state
+                .apply_transactions(
+                    [transaction],
+                    BlockHash::from([0; 32]),
+                    BLOCK_TIMESTAMP,
+                    PARENT_BLOCK_TIMESTAMP,
+                    node_skews_first_regular_tblock(protocol_version),
+                )
+                .map(|_| ())
+                .map_err(|error| format!("{:#}", anyhow::Error::from(error)))
+        };
+
+        // A skewing runtime: the bump rejects the transaction on the intent TTL.
+        let error = apply(ProtocolVersion::V1_0(1_000_000)).expect_err("bump must reject");
+        assert!(
+            error.contains(INTENT_TTL_EXPIRED) && error.contains("Timestamp(1784987088)"),
+            "unexpected error: {error}"
+        );
+
+        // A node 1.0.300 runtime: the intent TTL check passes. The transaction still fails later,
+        // against a fresh state instead of preview's, which is irrelevant to the `tblock`.
+        match apply(ProtocolVersion::V1_0(1_000_300)) {
+            Ok(()) => {}
+            Err(error) => assert!(
+                !error.contains(INTENT_TTL_EXPIRED),
+                "node 1.0.300 runtime must not reject on the intent TTL: {error}"
+            ),
+        }
+    }
+}
+
+#[cfg(all(test, any(feature = "cloud", feature = "standalone")))]
+mod apply_transactions_tblock_tests {
+    use super::should_bump_first_regular_tblock;
+    use crate::domain::{LedgerState, Transaction, node};
+    use indexer_common::{
+        domain::{
+            BlockHash, LedgerVersion, ProtocolVersion, SerializedTransaction, TransactionResult,
+            ledger,
+        },
+        error::BoxError,
+        testing::{Malformed, NETWORK_ID, dust_registration, init_ledger_db, malformed},
+    };
+
+    // Block time of every test block, in seconds. Each test sets its parent block time relative to
+    // it, and the bumped `tblock` is `parent + 12s`.
+    const NOW: u64 = 1_800_000_000;
+
+    // Only the first regular transaction is verified at the bumped `tblock`: with the parent block
+    // in the previous 6s slot that is `NOW + 6s`, so a dust `ctime` of `NOW + 4s` passes as the
+    // first transaction and fails as the second.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn only_the_first_regular_transaction_is_verified_at_the_bumped_tblock()
+    -> Result<(), BoxError> {
+        let _ledger_db = init_ledger_db().await?;
+        let parent_block_time = NOW - 6;
+
+        for ledger_version in [LedgerVersion::V8, LedgerVersion::V9] {
+            let protocol_version = skewing_protocol_version(ledger_version);
+            let dust_ahead = dust_registration(ledger_version, NOW + 60, NOW + 4).await?;
+            let dust_current = dust_registration(ledger_version, NOW + 60, NOW).await?;
+
+            let apply = |transactions: &[&SerializedTransaction], bump_first_regular_tblock| {
+                apply(
+                    protocol_version,
+                    transactions,
+                    parent_block_time,
+                    bump_first_regular_tblock,
+                )
+            };
+
+            assert_eq!(
+                apply(&[&dust_ahead], true)?,
+                Ok(vec![TransactionResult::Success]),
+                "{ledger_version}: first, bumped"
+            );
+            assert_eq!(
+                apply(&[&dust_ahead], false)?,
+                Err(Malformed::OutOfDustValidityWindow),
+                "{ledger_version}: first, not bumped"
+            );
+            assert_eq!(
+                apply(&[&dust_current, &dust_ahead], true)?,
+                Err(Malformed::OutOfDustValidityWindow),
+                "{ledger_version}: second, bumped"
+            );
+        }
+
+        Ok(())
+    }
+
+    // A skewing runtime verifies the first regular transaction at the bumped `tblock`, `NOW + 6s`
+    // with the parent block in the previous 6s slot, and an unskewed one at the block time: an
+    // intent TTL of `NOW + 2s` passes only on the latter.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn unskewed_runtime_verifies_the_first_regular_transaction_at_the_block_time()
+    -> Result<(), BoxError> {
+        let _ledger_db = init_ledger_db().await?;
+        let parent_block_time = NOW - 6;
+
+        for ledger_version in [LedgerVersion::V8, LedgerVersion::V9] {
+            let skewing = skewing_protocol_version(ledger_version);
+            let unskewed = unskewed_protocol_version(ledger_version);
+            let transaction = dust_registration(ledger_version, NOW + 2, NOW).await?;
+
+            let apply = |protocol_version| {
+                apply(
+                    protocol_version,
+                    &[&transaction],
+                    parent_block_time,
+                    should_bump_first_regular_tblock(1, protocol_version),
+                )
+            };
+
+            assert_eq!(
+                apply(skewing)?,
+                Err(Malformed::IntentTtlExpired),
+                "{ledger_version}: {skewing:?}"
+            );
+            assert_eq!(
+                apply(unskewed)?,
+                Ok(vec![TransactionResult::Success]),
+                "{ledger_version}: {unskewed:?}"
+            );
+        }
+
+        Ok(())
+    }
+
+    // The bumped `tblock` is `parent + 12s`, not `block + 12s`: when the two 6s slots before the
+    // block are skipped, the parent block is 18s earlier and the bumped `tblock` is `NOW - 6s`, so
+    // an intent TTL of `NOW - 5s` passes `well_formed` when bumped although it lies before the
+    // block time. `apply` checks the TTL against the block time and records the transaction as
+    // failed.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn bumped_tblock_is_based_on_the_parent_block_time() -> Result<(), BoxError> {
+        let _ledger_db = init_ledger_db().await?;
+        let parent_block_time = NOW - 18;
+
+        for ledger_version in [LedgerVersion::V8, LedgerVersion::V9] {
+            let protocol_version = skewing_protocol_version(ledger_version);
+            let transaction = dust_registration(ledger_version, NOW - 5, parent_block_time).await?;
+
+            let apply = |bump_first_regular_tblock| {
+                apply(
+                    protocol_version,
+                    &[&transaction],
+                    parent_block_time,
+                    bump_first_regular_tblock,
+                )
+            };
+
+            assert_eq!(
+                apply(true)?,
+                Ok(vec![TransactionResult::Failure]),
+                "{ledger_version}: bumped"
+            );
+            assert_eq!(
+                apply(false)?,
+                Err(Malformed::IntentTtlExpired),
+                "{ledger_version}: not bumped"
+            );
+        }
+
+        Ok(())
+    }
+
+    // When the two 6s slots before the block are skipped, the parent block is 18s earlier and the
+    // bumped `tblock` `NOW - 6s` lies before the block time: a dust `ctime` of `NOW - 5s` passes at
+    // the block time but fails when bumped.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn bumped_tblock_before_the_block_time_rejects_a_later_dust_ctime() -> Result<(), BoxError>
+    {
+        let _ledger_db = init_ledger_db().await?;
+        let parent_block_time = NOW - 18;
+
+        for ledger_version in [LedgerVersion::V8, LedgerVersion::V9] {
+            let protocol_version = skewing_protocol_version(ledger_version);
+            let transaction = dust_registration(ledger_version, NOW + 40, NOW - 5).await?;
+
+            let apply = |bump_first_regular_tblock| {
+                apply(
+                    protocol_version,
+                    &[&transaction],
+                    parent_block_time,
+                    bump_first_regular_tblock,
+                )
+            };
+
+            assert_eq!(
+                apply(true)?,
+                Err(Malformed::OutOfDustValidityWindow),
+                "{ledger_version}: bumped"
+            );
+            assert_eq!(
+                apply(false)?,
+                Ok(vec![TransactionResult::Success]),
+                "{ledger_version}: not bumped"
+            );
+        }
+
+        Ok(())
+    }
+
+    // Returns a runtime on the given ledger version that skews the first regular transaction's
+    // `tblock`.
+    fn skewing_protocol_version(ledger_version: LedgerVersion) -> ProtocolVersion {
+        match ledger_version {
+            LedgerVersion::V8 => ProtocolVersion::V1_0(1_000_000),
+            LedgerVersion::V9 => ProtocolVersion::V2_0(2_000_000),
+        }
+    }
+
+    // Returns a runtime on the given ledger version that does not skew the first regular
+    // transaction's `tblock`.
+    fn unskewed_protocol_version(ledger_version: LedgerVersion) -> ProtocolVersion {
+        match ledger_version {
+            LedgerVersion::V8 => ProtocolVersion::V1_0(1_000_300),
+            LedgerVersion::V9 => ProtocolVersion::V2_1(2_001_000),
+        }
+    }
+
+    // Applies `transactions` as one block at `NOW` to a fresh ledger state; the outer error is a
+    // test setup failure, the inner one the reason the ledger rejects a transaction. Times are in
+    // seconds.
+    fn apply(
+        protocol_version: ProtocolVersion,
+        transactions: &[&SerializedTransaction],
+        parent_block_time: u64,
+        bump_first_regular_tblock: bool,
+    ) -> Result<Result<Vec<TransactionResult>, Malformed>, BoxError> {
+        let ledger_version = protocol_version.ledger_version();
+        let mut ledger_state = LedgerState::new(NETWORK_ID.try_into()?, ledger_version)?;
+        let transactions = transactions
+            .iter()
+            .map(|&raw| {
+                let transaction = ledger::Transaction::deserialize(raw, ledger_version)?;
+                Ok(node::Transaction::Regular(node::RegularTransaction {
+                    hash: transaction.hash(),
+                    protocol_version,
+                    raw: raw.clone(),
+                    identifiers: transaction.identifiers()?,
+                    contract_actions: vec![],
+                }))
+            })
+            .collect::<Result<Vec<_>, BoxError>>()?;
+
+        match ledger_state.apply_transactions(
+            transactions,
+            BlockHash::from([0; 32]),
+            NOW * 1_000,
+            parent_block_time * 1_000,
+            bump_first_regular_tblock,
+        ) {
+            Ok((transactions, _)) => Ok(Ok(transactions
+                .into_iter()
+                .filter_map(|transaction| match transaction {
+                    Transaction::Regular(transaction) => Some(transaction.transaction_result),
+                    Transaction::System(_) => None,
+                })
+                .collect())),
+            Err(error) => malformed(&error)
+                .map(Err)
+                .ok_or_else(|| format!("unexpected error: {error:#}").into()),
+        }
+    }
 }

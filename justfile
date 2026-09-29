@@ -129,13 +129,15 @@ run-indexer-standalone node="ws://localhost:9944" network_id="undeployed":
         APP__INFRA__LEDGER_DB__CNN_URL=target/data/ledger-db.sqlite \
         cargo run -p indexer-standalone --features standalone
 
-update-node: generate-node-data get-node-metadata
+# generate-node-data wipes `.node/<node_version>`, so it has to run before
+# get-node-metadata writes metadata.scale there.
+update-node node_version=latest_node_version toolkit_version=node_version: (generate-node-data node_version toolkit_version) (get-node-metadata node_version)
 
-generate-node-data:
-    ./generate_node_data.sh {{latest_node_version}}
+generate-node-data node_version=latest_node_version toolkit_version=node_version:
+    ./generate_node_data.sh {{node_version}} {{toolkit_version}}
 
-get-node-metadata:
-    ./get_node_metadata.sh {{latest_node_version}}
+get-node-metadata node_version=latest_node_version:
+    ./get_node_metadata.sh {{node_version}}
 
 generate-txs:
     ./generate_txs.sh {{latest_node_version}}

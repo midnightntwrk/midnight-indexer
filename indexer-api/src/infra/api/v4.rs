@@ -39,6 +39,8 @@ use crate::{
     },
     infra::api::{
         ApiResult, ContextExt, Metrics, OptionExt, ResultExt, SubscriptionConfig,
+        contract_state_cache::ContractStateCache,
+        ledger_query_limit::LedgerQueryLimiter,
         progress_cache::ProgressCache,
         quota::{PerConnectionCounter, SubscriptionQuotas},
         v4::{
@@ -375,11 +377,13 @@ pub fn make_app<S, B>(
     ledger_state_cache: LedgerStateCache,
     storage: S,
     subscriber: B,
+    ledger_query_limiter: LedgerQueryLimiter,
     max_complexity: usize,
     max_depth: usize,
     subscription_config: SubscriptionConfig,
     quotas: SubscriptionQuotas,
     progress_cache: ProgressCache,
+    contract_state_cache: ContractStateCache,
 ) -> Router<Arc<AtomicBool>>
 where
     S: Storage,
@@ -390,6 +394,7 @@ where
     let schema = schema_builder::<S, B>()
         .data(network_id)
         .data(ledger_state_cache)
+        .data(ledger_query_limiter)
         .data(DataLoader::new(
             BlockByHashLoader::new(storage.clone()),
             tokio::spawn,
@@ -416,6 +421,7 @@ where
         .data(subscription_config)
         .data(quotas)
         .data(progress_cache)
+        .data(contract_state_cache)
         .limit_complexity(max_complexity)
         .limit_depth(max_depth)
         .limit_recursive_depth(max_depth)

@@ -207,6 +207,21 @@ impl domain::storage::Storage for Storage {
     }
 
     #[trace]
+    async fn contract_actions_without_state_keys_exist(&self) -> Result<bool, sqlx::Error> {
+        let query = indoc! {"
+            SELECT 1
+            FROM contract_actions
+            WHERE state_key IS NULL AND zswap_state_key IS NULL
+            LIMIT 1
+        "};
+
+        sqlx::query(query)
+            .fetch_optional(&*self.pool)
+            .await
+            .map(|row| row.is_some())
+    }
+
+    #[trace]
     async fn get_latest_d_parameter(&self) -> Result<Option<DParameter>, sqlx::Error> {
         let query = indoc! {"
             SELECT num_permissioned_candidates, num_registered_candidates
@@ -523,7 +538,13 @@ async fn save_regular_transaction(
     )
     .await?;
 
-    save_dust_generation_info(&transaction.ledger_events, transaction_id, tx).await?;
+    save_dust_generation_info(
+        &transaction.ledger_events,
+        transaction.protocol_version.ledger_version().dust_epoch(),
+        transaction_id,
+        tx,
+    )
+    .await?;
 
     save_dust_nullifiers(&transaction.ledger_events, transaction_id, block_id, tx).await?;
 
@@ -549,7 +570,13 @@ async fn save_system_transaction(
 
     save_ledger_events(&transaction.ledger_events, &[], &[], transaction_id, tx).await?;
 
-    save_dust_generation_info(&transaction.ledger_events, transaction_id, tx).await
+    save_dust_generation_info(
+        &transaction.ledger_events,
+        transaction.protocol_version.ledger_version().dust_epoch(),
+        transaction_id,
+        tx,
+    )
+    .await
 }
 
 /// Save the contract actions and their balances, returning the freshly
@@ -570,8 +597,8 @@ async fn save_contract_actions(
             transaction_id,
             variant,
             address,
-            state,
-            zswap_state,
+            state_key,
+            zswap_state_key,
             attributes
         )
     "};
@@ -581,8 +608,8 @@ async fn save_contract_actions(
             q.push_bind(transaction_id)
                 .push_bind(ContractActionVariant::from(&action.attributes))
                 .push_bind(&action.address)
-                .push_bind(&action.state)
-                .push_bind(&action.zswap_state)
+                .push_bind(action.state_key.as_ref())
+                .push_bind(action.zswap_state_key.as_ref())
                 .push_bind(Json(&action.attributes));
         })
         .push(" RETURNING id")
@@ -876,7 +903,7 @@ async fn save_contract_event_indexed_fields<I: IntoIterator<Item = i64>>(
 }
 
 /// Pair each ledger event with the id of the emitting `ContractCall` by
-/// matching `(contract_address, entry_point)` against the contract actions of
+/// matching `(contract_address, raw_entry_point)` against the contract actions of
 /// the same transaction (ticket #1162). Only an unambiguous match is
 /// attributed: if several calls in the same transaction share address and
 /// entry point, the events stay unattributed (`NULL`) rather than risking
@@ -898,11 +925,9 @@ fn correlate_contract_action_ids(
                     .iter()
                     .zip(contract_action_ids)
                     .filter(|(action, _)| {
-                        matches!(
-                            &action.attributes,
-                            ContractAttributes::Call { entry_point: action_entry_point }
-                                if action_entry_point.as_bytes() == entry_point.as_ref()
-                        ) && action.address == *contract_address
+                        matches!(&action.attributes, ContractAttributes::Call { .. })
+                            && action.raw_entry_point.as_ref() == Some(entry_point)
+                            && action.address == *contract_address
                     });
 
             let (_, &contract_action_id) = matches.next()?;
@@ -911,9 +936,18 @@ fn correlate_contract_action_ids(
         .collect()
 }
 
+/// `dust_epoch` is the incarnation of the DUST generation tree these events
+/// belong to, taken from the ledger version the transaction was applied against
+/// (see `LedgerVersion::dust_epoch`). A hard fork that wipes dust starts the
+/// tree over, and rows from the previous epoch stay behind un-retired -- the
+/// wipe happens inside the state translation, so no `DustGenerationDtimeUpdate`
+/// ever fires for them. Stamping the epoch is what lets readers ignore them
+/// instead of double-counting balances and serving indices into a tree that no
+/// longer exists.
 #[trace(properties = { "transaction_id": "{transaction_id}" })]
 async fn save_dust_generation_info(
     ledger_events: &[LedgerEvent],
+    dust_epoch: i64,
     transaction_id: i64,
     tx: &mut SqlxTransaction,
 ) -> Result<(), sqlx::Error> {
@@ -940,9 +974,10 @@ async fn save_dust_generation_info(
                         backing_night,
                         initial_value,
                         dtime,
-                        transaction_id
+                        transaction_id,
+                        dust_epoch
                     )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                 "};
 
                 let dtime = if generation_info.dtime == u64::MAX {
@@ -963,6 +998,7 @@ async fn save_dust_generation_info(
                     .bind(U128BeBytes::from(&output.initial_value))
                     .bind(dtime)
                     .bind(transaction_id)
+                    .bind(dust_epoch)
                     .execute(&mut **tx)
                     .await?;
             }
@@ -974,11 +1010,13 @@ async fn save_dust_generation_info(
                     UPDATE dust_generation_info
                     SET dtime = $1
                     WHERE night_utxo_hash = $2
+                    AND dust_epoch = $3
                 "};
 
                 sqlx::query(query)
                     .bind(generation_info.dtime as i64)
                     .bind(generation_info.night_utxo_hash.as_ref())
+                    .bind(dust_epoch)
                     .execute(&mut **tx)
                     .await?;
             }
@@ -1539,8 +1577,11 @@ mod contract_event_correlation_tests {
     fn call_action(address: &[u8], entry_point: &str) -> ContractAction {
         ContractAction {
             address: bv(address),
-            state: bv(b""),
-            zswap_state: bv(b""),
+            segment: 0,
+            has_guaranteed_transcript: false,
+            raw_entry_point: Some(bv(entry_point.as_bytes())),
+            state_key: None,
+            zswap_state_key: None,
             extracted_balances: vec![],
             attributes: ContractAttributes::Call {
                 entry_point: entry_point.to_string(),
@@ -1551,8 +1592,11 @@ mod contract_event_correlation_tests {
     fn deploy_action(address: &[u8]) -> ContractAction {
         ContractAction {
             address: bv(address),
-            state: bv(b""),
-            zswap_state: bv(b""),
+            segment: 0,
+            has_guaranteed_transcript: false,
+            raw_entry_point: None,
+            state_key: None,
+            zswap_state_key: None,
             extracted_balances: vec![],
             attributes: ContractAttributes::Deploy,
         }
@@ -1584,6 +1628,56 @@ mod contract_event_correlation_tests {
 
         let correlated = correlate_contract_action_ids(&events, &actions, &[10, 20]);
         assert_eq!(correlated, vec![Some(10), Some(20)]);
+    }
+
+    fn raw_call_action(entry_point: &[u8], display_entry_point: &str) -> ContractAction {
+        indexer_common::domain::ContractAction {
+            address: bv(&[0x01; 32]),
+            segment: 1,
+            has_guaranteed_transcript: false,
+            raw_entry_point: Some(bv(entry_point)),
+            attributes: ContractAttributes::Call {
+                entry_point: display_entry_point.to_owned(),
+            },
+        }
+        .into()
+    }
+
+    #[test]
+    fn correlates_invalid_utf8_and_nul_entry_points() {
+        for raw in [b"tick\xff".as_slice(), b"tick\0"] {
+            let actions = vec![raw_call_action(raw, "tick\u{fffd}")];
+            let events = vec![contract_event(&[0x01; 32], raw)];
+
+            assert_eq!(
+                correlate_contract_action_ids(&events, &actions, &[10]),
+                vec![Some(10)]
+            );
+        }
+    }
+
+    #[test]
+    fn distinguishes_entry_points_with_identical_display_strings() {
+        let entry_points = [
+            b"tick\xff".as_slice(),
+            b"tick\xfe",
+            b"tick\0",
+            "tick\u{fffd}".as_bytes(),
+        ];
+        let actions = entry_points
+            .iter()
+            .map(|raw| raw_call_action(raw, "tick\u{fffd}"))
+            .collect::<Vec<_>>();
+        let events = entry_points
+            .iter()
+            .rev()
+            .map(|raw| contract_event(&[0x01; 32], raw))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            correlate_contract_action_ids(&events, &actions, &[10, 20, 30, 40]),
+            vec![Some(40), Some(30), Some(20), Some(10)]
+        );
     }
 
     #[test]

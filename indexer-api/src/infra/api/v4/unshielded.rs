@@ -60,6 +60,11 @@ where
     initial_nonce: HexEncoded,
 
     /// Whether this UTXO is registered for DUST generation.
+    ///
+    /// Reported against the chain's current DUST epoch, so a fork that wipes DUST
+    /// state (ledger 8 -> 9) turns this to `false` for every UTXO it strands,
+    /// matching the ledger rather than the value recorded when the UTXO was
+    /// created.
     registered_for_dust_generation: bool,
 
     #[graphql(skip)]

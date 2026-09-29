@@ -42,6 +42,7 @@ impl DustGenerationsStorage for Storage {
         cardano_reward_addresses: &[CardanoRewardAddress],
         ledger_version: LedgerVersion,
     ) -> Result<Vec<DustGenerations>, sqlx::Error> {
+        let dust_epoch = ledger_version.dust_epoch();
         let dust_params = ledger::dust_parameters(ledger_version)
             .expect("DUST parameters should be available for supported protocol version");
         let generation_decay_rate = dust_params.generation_decay_rate as u128;
@@ -80,15 +81,23 @@ impl DustGenerationsStorage for Storage {
             let mut registration_data = Vec::with_capacity(registrations.len());
 
             for (dust_address, valid, utxo_tx_hash, utxo_output_index) in registrations {
+                // Scoped to the live dust epoch: a hard fork that wipes dust
+                // leaves the previous epoch's rows behind with `dtime IS NULL`
+                // (nothing retires them -- the wipe is inside the state
+                // translation, not a transaction), so summing across epochs
+                // reports a holder's NIGHT balance and generation rate as the
+                // sum of the wiped entries and the replayed ones.
                 let generations_query = indoc! {"
                     SELECT value, ctime
                     FROM dust_generation_info
                     WHERE owner = $1
                     AND dtime IS NULL
+                    AND dust_epoch = $2
                 "};
 
                 let generations = sqlx::query_as::<_, (U128BeBytes, i64)>(generations_query)
                     .bind(dust_address.as_ref())
+                    .bind(dust_epoch)
                     .fetch_all(&*self.pool)
                     .await?;
 
@@ -144,9 +153,11 @@ impl DustGenerationsStorage for Storage {
         mut start_index: u64,
         end_index: u64,
         batch_size: NonZeroU32,
+        ledger_version: LedgerVersion,
     ) -> impl Stream<Item = Result<DustGenerationEntry, sqlx::Error>> + Send {
         let pool = self.pool.clone();
         let dust_address = dust_address.to_vec();
+        let dust_epoch = ledger_version.dust_epoch();
 
         try_stream! {
             loop {
@@ -171,6 +182,7 @@ impl DustGenerationsStorage for Storage {
                     WHERE dust_generation_info.owner = $1
                     AND dust_generation_info.generation_index >= $2
                     AND dust_generation_info.generation_index <= $3
+                    AND dust_generation_info.dust_epoch = $5
                     ORDER BY dust_generation_info.generation_index
                     LIMIT $4
                 "};
@@ -180,6 +192,7 @@ impl DustGenerationsStorage for Storage {
                     .bind(start_index as i64)
                     .bind(end_index as i64)
                     .bind(batch_size.get() as i64)
+                    .bind(dust_epoch)
                     .fetch_all(&*pool)
                     .await?;
 
@@ -206,9 +219,11 @@ impl DustGenerationsStorage for Storage {
         upper_block_id: u64,
         mut after_event_id: u64,
         batch_size: NonZeroU32,
+        ledger_version: LedgerVersion,
     ) -> impl Stream<Item = Result<DustGenerationDtimeUpdateEntry, sqlx::Error>> + Send {
         let pool = self.pool.clone();
         let dust_address = dust_address.to_vec();
+        let dust_epoch = ledger_version.dust_epoch();
 
         try_stream! {
             loop {
@@ -250,6 +265,7 @@ impl DustGenerationsStorage for Storage {
                     AND t.block_id > $1
                     AND t.block_id <= $5
                     AND dgi.owner = $2
+                    AND dgi.dust_epoch = $6
                     AND le.id > $3
                     ORDER BY le.id
                     LIMIT $4
@@ -287,6 +303,7 @@ impl DustGenerationsStorage for Storage {
                     WHERE t.block_id > $1
                     AND t.block_id <= $5
                     AND dgi.owner = $2
+                    AND dgi.dust_epoch = $6
                     ORDER BY e.ledger_event_id
                     LIMIT $4
                 "};
@@ -297,6 +314,7 @@ impl DustGenerationsStorage for Storage {
                     .bind(after_event_id as i64)
                     .bind(batch_size.get() as i64)
                     .bind(upper_block_id as i64)
+                    .bind(dust_epoch)
                     .fetch_all(&*pool)
                     .await?;
 

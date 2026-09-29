@@ -56,7 +56,9 @@ function safeUnsubscribe(unsubscribe: () => void): void {
   }
 }
 
-describe.skipIf(env.isUndeployedEnv())('bridge pool subscription', () => {
+// NIGHT not yet available on Midnight mainnet: skip there too until mainnet
+// has known NIGHT flows through the bridge pool to observe.
+describe.skipIf(env.isUndeployedEnv() || env.isMainnetEnv())('bridge pool subscription', () => {
   let wsClient: IndexerWsClient;
 
   beforeAll(async () => {

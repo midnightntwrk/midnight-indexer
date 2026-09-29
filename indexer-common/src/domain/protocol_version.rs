@@ -121,6 +121,33 @@ impl LedgerVersion {
     // stagenet under the node 2.0 rollout). Deriving the version per chain
     // rather than from this constant is the tracked follow-up.
     pub const LATEST: Self = Self::V9;
+
+    /// Which incarnation of the DUST generation tree this ledger version writes
+    /// into.
+    ///
+    /// A hard fork whose state translation *wipes* dust state starts the tree
+    /// over: `first_free` returns to zero, and generation/commitment tree
+    /// indices are reused for entirely different leaves. Rows recorded before
+    /// such a wipe are dead - the ledger no longer holds those entries - and
+    /// their indices name leaves that no longer exist, so mixing epochs
+    /// double-counts NIGHT balances and hands out Merkle indices into a tree
+    /// that is gone. Every read of `dust_generation_info` therefore scopes to
+    /// one epoch (see `indexer-api`'s dust storage).
+    ///
+    /// The mapping is deliberately explicit rather than derived from the
+    /// version number: a future ledger major that does *not* wipe dust must
+    /// keep the same epoch, or it would hide entries that are still live.
+    ///
+    /// - V8 -> 0
+    /// - V9 -> 1, because the 8 -> 9 translation replaces dust state with
+    ///   `DustState::default()` (midnight-node #2012, backported as #2057) and
+    ///   the node then replays only cNIGHT's slice of the generating set.
+    pub const fn dust_epoch(self) -> i64 {
+        match self {
+            Self::V8 => 0,
+            Self::V9 => 1,
+        }
+    }
 }
 
 #[derive(Debug, Display, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

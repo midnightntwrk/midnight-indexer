@@ -4,9 +4,152 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [unreleased]
+## [4.4.0-rc.5] - 2026-09-04
+
+Release candidate on top of `4.4.0-rc.4`, carrying one wallet-facing API fix found while testing
+that RC.
+
+**Drop-in over `4.4.0-rc.4`**: no new migrations and no re-index — the fix is read-time only. The
+re-index rc.4 requires still applies to anything upgrading from an earlier line.
 
 ### 🐛 Bug Fixes
+
+- *(indexer-api)* Scope registeredForDustGeneration to the current DUST epoch (#1476)
+
+  `unshielded_utxos.registered_for_dust_generation` is computed once, when the UTXO is created, and
+  nothing updates it afterwards. That is sound for the normal life of a chain — the ledger's
+  `night_indices` is append-only — but not across a dust-wiping fork: the 8→9 translation replaces
+  dust state wholesale, stranding every nonce in it, and because the wipe happens inside the state
+  translation rather than via a transaction, no event fires to retire the stored `true`. The API
+  answered `true` where the ledger said `false`, telling holders they need not re-register when in
+  fact they must before they can pay a fee.
+
+  The flag is now scoped at read time to the chain's current DUST epoch, the same mechanism
+  `dust_epoch` already gives `dust_generation_info` (migration `008_dust_generation_epoch`). Read-time
+  scoping rather than a migration backfill, so re-indexing cannot rewrite the stale values and
+  deployments that already crossed the boundary on an older build are corrected without one.
+
+  `registeredForDustGeneration`'s schema description now states the epoch semantics.
+
+## [4.4.0-rc.4] - 2026-09-02
+
+Release candidate for the ledger-v9 / node-2.x line, cut on top of `4.4.0-rc.3`.
+
+**This is not a drop-in image bump.** It carries the ledger 8→9 hard-fork crossing with the DUST
+reset, and contract state moves out of the database into the ledger arena — which **requires a
+re-index from genesis**, both stores wiped together. Two new migrations per database (Postgres 8→10,
+SQLite 9→11). See [docs/re-indexing.md](docs/re-indexing.md) before deploying.
+
+### 🚀 Features
+
+- *(chain-indexer)* Follow the node through the ledger 8→9 hard fork, including the DUST reset (#1444)
+
+  Ledger crates move to 9.1.0 and `NODE_VERSIONS` to 2.1.0-beta.1, matching midnight-node
+  2.1.0-beta.1 crate-for-crate at the fork boundary. The v8→v9 state translation now depends on
+  the ledger team's upstream `v8-to-v9-state-translation` crate directly instead of the re-ported
+  copy of its `StateTranslationTable`, which is the arrangement the node already ships for its own
+  consensus-critical migration.
+
+  The translation **wipes dust state** (midnight-node #2012, backported as #2057): `first_free`
+  returns to zero and the node replays only cNIGHT's slice of the generating set. Because the wipe
+  happens inside the state translation rather than via a transaction, no `DustGenerationDtimeUpdate`
+  event fires to retire the pre-fork rows — left mixed with the replayed rows they double-count
+  NIGHT balances and carry generation/commitment tree indices that now name different leaves. A new
+  `dust_epoch` column scopes `dust_generation_info` rows to the incarnation of the generation tree
+  they belong to, bumped only by a fork that actually wipes dust, so it stays stable across ledger
+  majors that leave dust alone.
+
+  Existing rows are backfilled from the protocol version of the transaction that produced them
+  rather than all defaulting to the pre-fork epoch, so a deployment that already crossed the
+  boundary on an older build returns correct answers straight after the upgrade instead of needing
+  a re-index for this change alone.
+
+  Covered end to end by `indexer-tests/tests/hardfork_e2e.rs` and `qa/scripts/test-hardfork-8to9.sh`.
+
+- *(chain-indexer)* [**breaking**] Store contract state as ledger-arena keys instead of blobs (#1386)
+
+  `contract_actions.state` and `contract_actions.zswap_state` are replaced by
+  `state_key` and `zswap_state_key`, references into the content-addressed ledger arena that
+  already holds the same states, deduplicated and structurally shared. Every action stored a
+  full copy of its contract's state, so the two columns grew with the number of actions per
+  contract even when the state itself was unchanged — and quadratically for contracts whose
+  state grows as it is called. On preprod they reached 301 GB of a 292 GB database.
+
+  Measured against stagenet: 14 actions on one contract stored 257,530 bytes of
+  byte-identical blobs, which the arena holds as 18,956 bytes in 15 nodes — 13.6x smaller,
+  one new node per action, and no new rows in `ledger_db_roots`. Re-serializing state out of
+  the arena was byte-identical to the node's blob for all 25 contracts compared, which is why
+  `state` still renders exactly the same bytes as before.
+
+  **This requires a re-index from genesis.** The old blobs cannot be converted: the arena
+  nodes they would have to point at were garbage collected long ago, and no migration can
+  replay the chain to recreate them. Both stores — the indexer database and the ledger DB —
+  must be wiped **together**, since each holds references into the other. chain-indexer
+  refuses to start against a database whose contract actions have no keys rather than serving
+  empty states. See [docs/re-indexing.md](docs/re-indexing.md) for the procedure.
+
+  The GraphQL schema is unchanged apart from a field reordering within `ContractCall`:
+  `state` and `zswapState` still render as `HexEncoded!`, are still tagged-serialized, and
+  still resolve to the empty string for a failed action. They are now resolved on demand, so
+  a query that does not select them no longer pays for them.
+
+  Operators get two new knobs, both under `application:` in chain-indexer's config:
+  `gc_interval` (run gc every N blocks with N times the budget; defaults to 25) and
+  `arena_metrics_interval` (sample the ledger DB node count every N blocks; disabled by
+  default because each sample is a full scan). indexer-api gains a `contract_state_cache`
+  section under `api:`.
+
+- *(indexer-api)* Expose `protocolVersion` on all progress updates (#1463)
+
+  `protocolVersion` is added to the wallet, unshielded-UTXO and DUST-generation progress updates,
+  letting a wallet with no relevant transactions or generations observe a protocol upgrade, which
+  it would otherwise only learn about from the items it receives. On snapshot-shaped updates it is
+  the protocol version at the snapshot's block; on tip-shaped updates it is the version currently
+  in effect, and zero means no block has been indexed yet.
+
+### 🐛 Bug Fixes
+
+- *(indexer-api)* Reject unbounded epoch range queries in the SPO series resolvers
+  (`registeredTotalsSeries`, `registeredSpoSeries`, `registeredPresence`) (#1455). A single
+  unauthenticated request with an unbounded `toEpoch` could pin a database connection for
+  minutes-to-hours and drive `indexer-api` toward OOM. Spans wider than 10,000 epochs are now
+  rejected as client errors (GHSA-6746-qxvv-3hwg). Also shipped in `4.3.800-rc.1` on the
+  ledger-v8 line.
+- *(indexer-common)* Renumber the colliding contract-state-keys migration (#1468)
+- *(indexer-api)* Bound concurrent ledger-DB queries to prevent worker starvation (#1440)
+
+### ⚙️ Dependencies
+
+- Bump `h2` to 0.4.17 for RUSTSEC-2026-0258 (#1449)
+
+## [4.4.0-rc.3] - 2026-08-24
+
+### 🚀 Features
+
+- *(indexer-common)* Source secrets from files via `APP__*_FILE` environment variables (#1074).
+
+### 🐛 Bug Fixes
+
+- *(indexer-common)* Use the node-identical stateless cost for `block_fullness` accumulation (#1443).
+- *(indexer-standalone)* Fix SQLite deadlocks and socket bloat in standalone mode (#1094).
+
+### ⚙️ Miscellaneous Tasks
+
+- Add standard issue templates and label-automation dispatchers (#1438).
+
+## [4.4.0-rc.2] - 2026-08-06
+
+### 🚀 Features
+
+- *(indexer)* Index the ledger 8→9 hard-fork crossing (#1395).
+- *(chain-indexer)* Derive block authors from BABE pre-runtime digests (#1321).
+- *(chain-indexer)* Gate BABE author derivation on the presence of `pallet-consensus-engine` (#1377).
+
+### 🐛 Bug Fixes
+
+- Dispatch runtime API and storage calls by the state runtime version at upgrade enactment blocks (#1346).
+- *(indexer-common)* Read the stored count in `ledger-db` `get_root_count` (#1378).
+- Publish multi-architecture manifests for indexer images (#1391).
 
 - *(indexer-common)* [**breaking**] Rename the ledger DB's `cache_size` to `cache_max_nodes`, make it a plain node count and raise it to 100000
 
@@ -15,6 +158,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   should be. Operators must rename the key in their config and replace any byte-unit string with a
   plain integer; the `APP__INFRA__LEDGER_DB__CACHE_SIZE` environment variable becomes
   `APP__INFRA__LEDGER_DB__CACHE_MAX_NODES`. `0` means unbounded.
+
+### ⚙️ Miscellaneous Tasks
+
+- Add `pallet_session` support for the 2.1.0 runtime upgrade (#1333).
+- Pin `cargo-audit` (#1387).
 
 ## [4.3.5] - 2026-07-25
 

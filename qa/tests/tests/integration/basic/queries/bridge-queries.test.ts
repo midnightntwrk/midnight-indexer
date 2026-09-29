@@ -34,7 +34,7 @@ import { env } from 'environment/model';
 import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
-import type { BridgeUserTransfer } from '@utils/indexer/indexer-types';
+import type { BridgeEvent, BridgeUserTransfer } from '@utils/indexer/indexer-types';
 
 const httpClient = new IndexerHttpClient();
 
@@ -73,10 +73,11 @@ query BridgeEventsAll($RECIPIENT: HexEncoded, $VARIANT: BridgeEventVariant, $BLO
 const MALFORMED_RECIPIENT_ODD_LENGTH = 'abc';
 const MALFORMED_RECIPIENT_NON_HEX = 'zz'.repeat(32);
 
-// Reads the `id` from any variant (typed as optional on non-UserTransfer).
-const bridgeEventId = (e: { id?: number }): number => Number(e.id);
-// Reads the `recipient` from a recipient-bearing variant.
-const bridgeEventRecipient = (e: { recipient?: string }): string | undefined => e.recipient;
+// Reads the `id` every variant carries (optional only on BridgeEventOther).
+const bridgeEventId = (e: BridgeEvent): number => Number(e.id);
+// Reads `recipient` from the variants that carry one; undefined for the rest.
+const bridgeEventRecipient = (e: BridgeEvent): string | undefined =>
+  'recipient' in e ? e.recipient : undefined;
 
 // Probed once against the target environment: whether the bridge surface exists,
 // a real UserTransfer to assert shape against, and a fully-claimed address (a

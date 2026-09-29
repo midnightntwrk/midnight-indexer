@@ -317,11 +317,22 @@ impl domain::storage::Storage for Storage {
                     AND last_active < $2
                 "};
 
-                sqlx::query(query)
+                // Housekeeping: if the shared writer is starved past busy_timeout, skip this
+                // wallet instead of failing the poll (which would take down the whole
+                // standalone process); the next poll retries.
+                let result = sqlx::query(query)
                     .bind(id)
                     .bind(min_last_active)
                     .execute(&*self.pool)
-                    .await?;
+                    .await;
+                match result {
+                    Err(error) if indexer_common::infra::pool::sqlite::is_busy_error(&error) => {
+                        log::warn!("skipping wallet session cleanup, sqlite writer is busy");
+                    }
+                    other => {
+                        other?;
+                    }
+                }
             }
         }
 
