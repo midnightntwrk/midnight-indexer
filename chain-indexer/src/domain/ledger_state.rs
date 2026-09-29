@@ -875,6 +875,44 @@ mod apply_transactions_tblock_tests {
         Ok(())
     }
 
+    // Mainnet block 1788980's first (and only) regular transaction, built by a 1.0 runtime (spec
+    // 1000000): parent 1784643552, block 1784643558, intent TTL 1784643562. The node accepted it at
+    // the block time; the adjusted `tblock` 1784643564 is past the TTL. This is the block a fresh
+    // mainnet sync on node 1.0.300 halts at (midnight-node #2216).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn mainnet_1788980_transaction_with_its_ttl_between_the_tblocks_is_accepted_at_block_time()
+    -> Result<(), BoxError> {
+        const BLOCK_HEIGHT: u64 = 1_788_980;
+        const BLOCK_TIME: u64 = 1_784_643_558;
+        const PARENT_BLOCK_TIME: u64 = 1_784_643_552;
+        const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::V1_0(1_000_000);
+        const TRANSACTION_HASH: &str =
+            "e769b82781bbfd1e29d602a17916abe6e967ef023eb94d23a4aa8b88a6e35c0a";
+        const CONTRACT_ADDRESS: &str =
+            "4fd31443997bd04bbf0b94e2ef3d5b0ff05479c4fb80bcac0dc74b2c763282e5";
+
+        let _ledger_db = init_ledger_db().await?;
+        let transaction = fixture("block_1788980_tx.raw", TRANSACTION_HASH)?;
+
+        // Against a fresh state instead of mainnet's, the transaction passes the time checks and
+        // fails the next stateful check: the contract it calls does not exist.
+        assert_eq!(
+            apply(
+                "mainnet",
+                PROTOCOL_VERSION,
+                &[&transaction],
+                BLOCK_TIME,
+                PARENT_BLOCK_TIME,
+                should_bump_first_regular_tblock(BLOCK_HEIGHT, PROTOCOL_VERSION),
+            )?,
+            Err(Malformed::Other(format!(
+                "call to non-existant contract ContractAddress({CONTRACT_ADDRESS})"
+            )))
+        );
+
+        Ok(())
+    }
+
     // Preview block 128537's first (and only) regular transaction, built by a 1.0 runtime (spec
     // 1000000), replayed as if it had waited one block in the pool: parent 1784987076 (the
     // original block's time), block 1784987082, intent TTL 1784987084.
