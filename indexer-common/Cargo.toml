@@ -23,6 +23,7 @@ midnight-serialize_v1        = { workspace = true }
 midnight-storage-core_v1     = { workspace = true, features = [ "layout-v2" ] }
 midnight-transient-crypto_v2 = { workspace = true }
 midnight-zswap_v8            = { workspace = true }
+anyhow                       = { workspace = true, optional = true }
 async-nats                   = { workspace = true, optional = true }
 chacha20poly1305             = { workspace = true, features = [ "std" ] }
 const-hex                    = { workspace = true, features = [ "serde" ] }
@@ -42,12 +43,17 @@ opentelemetry                = { workspace = true }
 opentelemetry_sdk            = { workspace = true }
 opentelemetry-otlp           = { workspace = true, features = [ "grpc-tonic" ] }
 parity-scale-codec           = { workspace = true }
+# midnight-ledger's `Rng`/`CryptoRng` bounds require rand 0.8.
+rand                         = { version = "0.8", optional = true }
 secrecy                      = { workspace = true, features = [ "serde" ] }
 serde                        = { workspace = true, features = [ "derive" ] }
 serde_json                   = { workspace = true }
 serde_with                   = { workspace = true, optional = true }
 sha2                         = { workspace = true }
 sqlx                         = { workspace = true, features = [ "runtime-tokio", "uuid" ] }
+tempfile                     = { workspace = true, optional = true }
+testcontainers               = { workspace = true, optional = true }
+testcontainers-modules       = { workspace = true, optional = true, features = [ "postgres" ] }
 thiserror                    = { workspace = true }
 tokio                        = { workspace = true, features = [ "time" ] }
 tracing                      = { workspace = true }
@@ -61,6 +67,7 @@ anyhow                 = { workspace = true }
 assert_matches         = { workspace = true }
 bip32                  = { workspace = true }
 criterion              = { workspace = true }
+rand                   = { version = "0.8" }
 reqwest                = { workspace = true }
 tempfile               = { workspace = true }
 testcontainers         = { workspace = true }
@@ -71,6 +78,7 @@ tokio                  = { workspace = true, features = [ "macros", "rt-multi-th
 [features]
 cloud      = [ "async-nats", "serde_with", "sqlx/postgres", "sqlx/tls-rustls" ]
 standalone = [ "sqlx/sqlite" ]
+testing    = [ "anyhow", "rand", "tempfile", "testcontainers", "testcontainers-modules" ]
 
 [[bench]]
 name              = "ledger_transaction"
