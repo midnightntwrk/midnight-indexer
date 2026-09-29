@@ -729,11 +729,13 @@ function updateTransactionDataFile(
 /**
  * Updates the contract data file
  *
- * This file has a strong requirement: it contains exactly one contract (the
- * first found in scan order) that has all 3 action types - ContractDeploy,
- * ContractCall, ContractUpdate - with only the first instance of each type.
+ * This file contains exactly one contract, with only the first instance of
+ * each action type it has: the first in scan order with all 3 action types -
+ * ContractDeploy, ContractCall, ContractUpdate - or, when no contract on the
+ * chain has been updated, the first with a deploy and a call. The suites that
+ * need a ContractUpdate skip themselves when the file has none.
  *
- * If no such contract exists, the file will contain an empty array
+ * If no contract has a deploy and a call, the file will contain an empty array
  *
  * @param destinationPath - Path to the test data folder
  * @param sourceBlockData - Path to the data file containing blocks
@@ -775,43 +777,65 @@ function updateContractDataFile(
       }
     }
 
-    // Keep only the first contract (in scan order) that has all 3 action
-    // types, and for it only the first instance of each type.
-    const requiredActionTypes: string[] = [
-      "ContractDeploy",
-      "ContractCall",
-      "ContractUpdate",
-    ];
-    const qualifyingContract = Object.entries(contractActionsMap).find(
-      ([, actions]: [string, ContractActionEntry[]]) => {
-        const actionTypes: Set<string> = new Set(
-          actions.map((action: ContractActionEntry) => action["action-type"]),
-        );
-        return requiredActionTypes.every((type: string) =>
-          actionTypes.has(type),
-        );
-      },
-    );
+    // Prefer the first contract (in scan order) with all 3 action types; a
+    // chain with no updated contract yet (devnet, stagenet) falls back to the
+    // first with a deploy and a call, so those environments still get data.
+    const requiredActionTypes: string[] = ["ContractDeploy", "ContractCall"];
+    const optionalActionTypes: string[] = ["ContractUpdate"];
+    const hasActionTypes = (
+      actions: ContractActionEntry[],
+      types: string[],
+    ): boolean => {
+      const actionTypes: Set<string> = new Set(
+        actions.map((action: ContractActionEntry) => action["action-type"]),
+      );
+      return types.every((type: string) => actionTypes.has(type));
+    };
 
+    const contracts = Object.entries(contractActionsMap);
+    const qualifyingContract =
+      contracts.find(([, actions]: [string, ContractActionEntry[]]) =>
+        hasActionTypes(actions, [
+          ...requiredActionTypes,
+          ...optionalActionTypes,
+        ]),
+      ) ??
+      contracts.find(([, actions]: [string, ContractActionEntry[]]) =>
+        hasActionTypes(actions, requiredActionTypes),
+      );
+
+    // Only the first instance of each action type the contract has, in a
+    // fixed order, so the file shape does not depend on the scan.
     const filteredContracts: ContractWithActions[] = qualifyingContract
       ? [
           {
             "contract-address": qualifyingContract[0],
-            "contract-actions": requiredActionTypes.map(
-              (type: string) =>
+            "contract-actions": [...requiredActionTypes, ...optionalActionTypes]
+              .map((type: string) =>
                 qualifyingContract[1].find(
                   (action: ContractActionEntry) =>
                     action["action-type"] === type,
-                )!,
-            ),
+                ),
+              )
+              .filter(
+                (action): action is ContractActionEntry => action !== undefined,
+              ),
           },
         ]
       : [];
 
-    // Log if no contracts match the criteria
     if (filteredContracts.length === 0) {
       console.info(
-        "[INFO ] - No contracts found with all required action types (ContractDeploy, ContractCall, ContractUpdate)",
+        "[INFO ] - No contracts found with the required action types (ContractDeploy, ContractCall)",
+      );
+    } else if (
+      !hasActionTypes(
+        filteredContracts[0]["contract-actions"],
+        optionalActionTypes,
+      )
+    ) {
+      console.info(
+        "[INFO ] - No contract with a ContractUpdate found; recording the first with a deploy and a call",
       );
     }
 
