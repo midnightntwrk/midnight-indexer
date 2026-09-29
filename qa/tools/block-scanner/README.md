@@ -101,9 +101,9 @@ The scanner creates:
   - `totalScanDurationSeconds` — Cumulative scan duration in seconds
   - `lastUpdated` — ISO timestamp of last update
 - `*.jsonc` — A number of jsonc files created from the templates which are needed as Indexer test data (when a test data folder path is provided):
-  - `blocks.jsonc` — genesis/latest and up to 100 recent block hashes
-  - `transactions.jsonc` — regular and system transaction hashes/identifiers
-  - `contract-actions.jsonc` — contracts having both a deploy and a call, with per-action block references
+  - `blocks.jsonc` — genesis/latest and up to 100 recent block hashes (generation currently switched off in `test-data-handler.ts`, the suites do not consume it)
+  - `transactions.jsonc` — regular and system transaction hashes/identifiers (generation currently switched off, as above)
+  - `contract-actions.jsonc` — exactly one contract, the first in scan order having a deploy, a call and an update, with the first instance of each action type and its block reference
   - `contract-events.jsonc` — contracts that emitted public contract events (MIP-0002), with the distinct event types each emitted. The contract addresses discovered in the scan are enriched via the indexer's `contractEvents` query; a schema probe decides support, so on environments whose indexer predates that query the file is left untouched (a curated fixture is not destroyed), while transient query failures are retried and then fail the run rather than being mistaken for missing support. Because contract addresses do not survive a chain reset, re-running `bun run generate:data` after a reset refreshes this file (and the others) to the live chain.
   - `unshielded-token-types.jsonc` — the unshielded token types the scanned range holds, so the custom unshielded token e2e suite can pick a token the funding wallet is able to spend. Every unshielded UTXO of the scan is grouped by token type and owner and kept when still unspent; NIGHT (the all-zero token type) is summarised only, since it is on every chain and dominates every scan. The entries are **candidates, not guarantees**: "unspent" is point-in-time, so a recorded UTXO can be spent right after the scan and holdings created outside the scanned range are not seen — consumers probe the live balance and skip when it is gone, and several candidates are recorded so a single spend does not disable a suite.
 
