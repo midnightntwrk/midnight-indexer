@@ -218,8 +218,10 @@ describe('unshielded transaction subscriptions', async () => {
       // `makeCaughtUpPredicate` stop condition lets us stop deterministically
       // when the indexer's progress message and our collected events line up,
       // rather than relying on a wall-clock cutoff that would truncate mid-stream
-      // for busy addresses. The 60s timeout is a safety ceiling — under healthy
-      // conditions the indexer delivers progress within seconds.
+      // for busy addresses. The 60s timeout is a safety ceiling — a fresh
+      // subscription emits its first progress message immediately, and (since
+      // indexer 4.4.0's idle backoff) a follow-up progress after a change is at
+      // most one jittered base interval (~36s) away, so 60s stays adequate.
       messages = await subscribeToUnshieldedTransactionEvents(
         { address: unshieldedAddress },
         makeCaughtUpPredicate(),

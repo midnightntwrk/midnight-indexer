@@ -52,6 +52,14 @@ export const UNSHIELDED_TRANSFER_TIMEOUT = 200_000;
 /** NIGHT is the chain's native unshielded token: its token type is all zeros. */
 export const NIGHT_TOKEN_TYPE = '0'.repeat(64);
 
+/**
+ * The progress subscription backs off while idle (since indexer 4.4.0: 30s doubling
+ * up to 240s, ±20% jitter), so a subscription opened well before the transaction may
+ * only report the change after the full backed-off gap — about five minutes worst
+ * case. Hence the wide window on the two progress tests.
+ */
+const PROGRESS_TIMEOUT = 400_000;
+
 /** Identifies a shared test, so a suite can attach its Xray key to the right one. */
 export type UnshieldedTransferTestId =
   | 'blockQueryByHash'
@@ -373,17 +381,17 @@ async function expectProgressUpdate(
       try {
         return findProgressUpdateEvent(events, highestTransactionIdBefore, addressLabel);
       } catch (error) {
-        // This poll makes 10 attempts, 3s apart. Without the liveness check a
-        // socket dropped early costs the whole retry budget and still only
-        // reports that the event was not found. Checked only after the
-        // search, so an event received before the drop still counts.
+        // This is the longest poll in the suite (60 attempts, 5s apart). Without
+        // the liveness check a socket dropped early costs the full five minutes
+        // and still only reports that the event was not found. Checked only
+        // after the search, so an event received before the drop still counts.
         wsClient.assertSocketAlive();
         throw error;
       }
     },
     {
-      maxRetries: 10,
-      delayMs: 3000,
+      maxRetries: 60,
+      delayMs: 5000,
       retryLabel: `find ${addressLabel} address progress update event`,
     },
   );
@@ -635,16 +643,24 @@ export function defineUnshieldedTransferTests(scenario: UnshieldedTransferScenar
      * @then a progress update event is received
      * @and its highest transaction ID is greater than the one seen before the transaction
      */
-    test('should be reported by the indexer through a progress update event for the source address', async (ctx: TestContext) => {
-      startTest(scenario, ctx, 'sourceProgressUpdate', ['Subscription', 'Transaction', 'Progress']);
+    test(
+      'should be reported by the indexer through a progress update event for the source address',
+      { timeout: PROGRESS_TIMEOUT },
+      async (ctx: TestContext) => {
+        startTest(scenario, ctx, 'sourceProgressUpdate', [
+          'Subscription',
+          'Transaction',
+          'Progress',
+        ]);
 
-      await expectProgressUpdate(
-        scenario.wsClient,
-        scenario.wallet.source.events,
-        scenario.wallet.source.historicalEvents,
-        'source',
-      );
-    });
+        await expectProgressUpdate(
+          scenario.wsClient,
+          scenario.wallet.source.events,
+          scenario.wallet.source.historicalEvents,
+          'source',
+        );
+      },
+    );
 
     /**
      * Once an unshielded transaction has been submitted to node and confirmed, the indexer should
@@ -655,19 +671,23 @@ export function defineUnshieldedTransferTests(scenario: UnshieldedTransferScenar
      * @then a progress update event is received
      * @and its highest transaction ID is greater than the one seen before the transaction
      */
-    test('should be reported by the indexer through a progress update event for the destination address', async (ctx: TestContext) => {
-      startTest(scenario, ctx, 'destinationProgressUpdate', [
-        'Subscription',
-        'Transaction',
-        'Progress',
-      ]);
+    test(
+      'should be reported by the indexer through a progress update event for the destination address',
+      { timeout: PROGRESS_TIMEOUT },
+      async (ctx: TestContext) => {
+        startTest(scenario, ctx, 'destinationProgressUpdate', [
+          'Subscription',
+          'Transaction',
+          'Progress',
+        ]);
 
-      await expectProgressUpdate(
-        scenario.wsClient,
-        scenario.wallet.destinations[0].events,
-        scenario.wallet.destinations[0].historicalDestinationEvents,
-        'destination',
-      );
-    });
+        await expectProgressUpdate(
+          scenario.wsClient,
+          scenario.wallet.destinations[0].events,
+          scenario.wallet.destinations[0].historicalDestinationEvents,
+          'destination',
+        );
+      },
+    );
   });
 }

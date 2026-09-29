@@ -310,7 +310,9 @@ describe('shielded transaction subscriptions', () => {
 
       const sessionId: string = await indexerWsClient.openWalletSession(viewingKey);
 
-      // Collect events until we get a ShieldedTransactionsProgress
+      // Collect events until we get a ShieldedTransactionsProgress. The 15s ceiling
+      // relies on the first progress update being emitted immediately on subscribe,
+      // which still holds under the idle backoff introduced in indexer 4.4.0.
       const highestZswapEndIndex = await new Promise<number>((resolve, reject) => {
         const timeout = setTimeout(() => {
           reject(new Error('Timed out waiting for ShieldedTransactionsProgress event'));
