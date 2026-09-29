@@ -4420,3 +4420,213 @@ mod merkle_collapsed_update_tests {
         );
     }
 }
+
+#[cfg(all(test, any(feature = "cloud", feature = "standalone")))]
+mod well_formed_timestamp_tests {
+    use crate::{
+        domain::{LedgerVersion, TransactionResult, ledger::LedgerState},
+        error::BoxError,
+        testing::{Malformed, NETWORK_ID, dust_registration, init_ledger_db, malformed},
+    };
+    use midnight_ledger_v8::structure::INITIAL_PARAMETERS as INITIAL_PARAMETERS_V8;
+    use midnight_ledger_v9::structure::INITIAL_PARAMETERS as INITIAL_PARAMETERS_V9;
+
+    // Arbitrary reference time of every test, in seconds, and the dust `ctime` of every test
+    // transaction. Any value of at least 1 works, so that `NOW - 1` does not underflow.
+    const NOW: u64 = 1_800_000_000;
+
+    // Intent TTL, in seconds after `NOW`, of transactions whose window the intent TTL bounds
+    // from above. It must lie in `[2, global_ttl - 1]` and be at most `dust_grace_period`: the
+    // block timestamp sits at its midpoint, the case one second before `NOW` must pass the TTL
+    // check to reach the dust check, and the case at the intent TTL must pass the dust check.
+    const TTL_OFFSET: u64 = 60;
+
+    // Block and parent block timestamps of every test block, in milliseconds. The block timestamp
+    // lies strictly inside `[NOW, NOW + TTL_OFFSET]`, so it differs from both ends of the window.
+    const BLOCK_TIMESTAMP: u64 = millis(NOW + TTL_OFFSET / 2);
+    const PARENT_BLOCK_TIMESTAMP: u64 = BLOCK_TIMESTAMP - 6_000;
+
+    // `well_formed_timestamp` is the `tblock` of both `well_formed` time checks: it must lie in
+    // `[ttl - global_ttl, ttl]` for the intent TTL and in `[ctime, ctime + dust_grace_period]` for
+    // the dust actions, with inclusive bounds at whole-second granularity.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn well_formed_timestamp_is_checked_against_intent_ttl_and_dust_window()
+    -> Result<(), BoxError> {
+        let _ledger_db = init_ledger_db().await?;
+        let ttl = NOW + TTL_OFFSET;
+
+        for ledger_version in [LedgerVersion::V8, LedgerVersion::V9] {
+            let (global_ttl, dust_grace_period) = time_parameters(ledger_version)?;
+            let late_ttl = NOW + dust_grace_period + TTL_OFFSET;
+            let far_ttl = NOW + global_ttl;
+
+            let cases = [
+                ("inside both windows", ttl, BLOCK_TIMESTAMP, Ok(())),
+                ("at the intent TTL", ttl, millis(ttl), Ok(())),
+                (
+                    "sub-second past the intent TTL",
+                    ttl,
+                    millis(ttl) + 999,
+                    Ok(()),
+                ),
+                (
+                    "one second past the intent TTL",
+                    ttl,
+                    millis(ttl + 1),
+                    Err(Malformed::IntentTtlExpired),
+                ),
+                ("at the global TTL horizon", far_ttl, millis(NOW), Ok(())),
+                // `NOW - 1` also lies before the dust ctime; the ledger checks the intent TTL
+                // first, so the TTL error is the one reported.
+                (
+                    "one second before the global TTL horizon",
+                    far_ttl,
+                    millis(NOW - 1),
+                    Err(Malformed::IntentTtlTooFarInFuture),
+                ),
+                ("at the dust ctime", ttl, millis(NOW), Ok(())),
+                (
+                    "one second before the dust ctime",
+                    ttl,
+                    millis(NOW - 1),
+                    Err(Malformed::OutOfDustValidityWindow),
+                ),
+                (
+                    "at the end of the dust grace period",
+                    late_ttl,
+                    millis(NOW + dust_grace_period),
+                    Ok(()),
+                ),
+                (
+                    "one second past the end of the dust grace period",
+                    late_ttl,
+                    millis(NOW + dust_grace_period + 1),
+                    Err(Malformed::OutOfDustValidityWindow),
+                ),
+            ];
+
+            // Intent TTL in seconds, `well_formed_timestamp` in milliseconds.
+            for (name, ttl, well_formed_timestamp, expected) in cases {
+                let transaction = dust_registration(ledger_version, ttl, NOW).await?;
+                let mut ledger_state = LedgerState::new(NETWORK_ID.try_into()?, ledger_version)?;
+                let actual = match ledger_state.apply_regular_transaction(
+                    &transaction,
+                    Default::default(),
+                    BLOCK_TIMESTAMP,
+                    PARENT_BLOCK_TIMESTAMP,
+                    well_formed_timestamp,
+                ) {
+                    Ok(_) => Ok(()),
+                    Err(error) => Err(malformed(&error)
+                        .ok_or_else(|| format!("{name}: unexpected error: {error:#}"))?),
+                };
+
+                assert_eq!(actual, expected, "{ledger_version}: {name}");
+            }
+        }
+
+        Ok(())
+    }
+
+    // `well_formed_timestamp` only decides whether `well_formed` passes: a transaction verified at
+    // either end of the window it admits produces the same ledger state as one verified at the
+    // block timestamp.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn well_formed_timestamp_does_not_change_the_applied_state() -> Result<(), BoxError> {
+        let _ledger_db = init_ledger_db().await?;
+        let ttl = NOW + TTL_OFFSET;
+
+        // The dust ctime and the intent TTL bound the window both time checks admit.
+        let min_well_formed_timestamp = millis(NOW);
+        let max_well_formed_timestamp = millis(ttl);
+
+        for ledger_version in [LedgerVersion::V8, LedgerVersion::V9] {
+            let transaction = dust_registration(ledger_version, ttl, NOW).await?;
+
+            let [min, at_block_timestamp, max] = [
+                min_well_formed_timestamp,
+                BLOCK_TIMESTAMP,
+                max_well_formed_timestamp,
+            ]
+            .map(|well_formed_timestamp| {
+                let mut ledger_state = LedgerState::new(NETWORK_ID.try_into()?, ledger_version)?;
+                let outcome = ledger_state.apply_regular_transaction(
+                    &transaction,
+                    Default::default(),
+                    BLOCK_TIMESTAMP,
+                    PARENT_BLOCK_TIMESTAMP,
+                    well_formed_timestamp,
+                )?;
+                Ok::<_, BoxError>((outcome.transaction_result, ledger_state.root()?))
+            });
+
+            let at_block_timestamp = at_block_timestamp?;
+            assert_eq!(
+                at_block_timestamp.0,
+                TransactionResult::Success,
+                "{ledger_version}"
+            );
+            assert_eq!(min?, at_block_timestamp, "{ledger_version}: min");
+            assert_eq!(max?, at_block_timestamp, "{ledger_version}: max");
+        }
+
+        Ok(())
+    }
+
+    // `apply` checks the intent TTL against the block timestamp: a transaction whose
+    // `well_formed_timestamp` lies inside its window but whose block timestamp lies past its TTL
+    // applies as a failure.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn block_timestamp_past_the_intent_ttl_fails_the_transaction() -> Result<(), BoxError> {
+        let _ledger_db = init_ledger_db().await?;
+        let ttl = NOW + TTL_OFFSET;
+
+        for ledger_version in [LedgerVersion::V8, LedgerVersion::V9] {
+            let transaction = dust_registration(ledger_version, ttl, NOW).await?;
+
+            for (block_timestamp, expected) in [
+                (millis(ttl), TransactionResult::Success),
+                (millis(ttl + 1), TransactionResult::Failure),
+            ] {
+                let mut ledger_state = LedgerState::new(NETWORK_ID.try_into()?, ledger_version)?;
+                let outcome = ledger_state.apply_regular_transaction(
+                    &transaction,
+                    Default::default(),
+                    block_timestamp,
+                    block_timestamp - 6_000,
+                    millis(ttl),
+                )?;
+
+                assert_eq!(
+                    outcome.transaction_result, expected,
+                    "{ledger_version}: block timestamp {block_timestamp}"
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    // Returns the global TTL and the dust grace period `LedgerState::new` starts from, in seconds.
+    fn time_parameters(ledger_version: LedgerVersion) -> Result<(u64, u64), BoxError> {
+        let (global_ttl, dust_grace_period) = match ledger_version {
+            LedgerVersion::V8 => (
+                INITIAL_PARAMETERS_V8.global_ttl,
+                INITIAL_PARAMETERS_V8.dust.dust_grace_period,
+            ),
+            LedgerVersion::V9 => (
+                INITIAL_PARAMETERS_V9.global_ttl,
+                INITIAL_PARAMETERS_V9.dust.dust_grace_period,
+            ),
+        };
+
+        Ok((
+            global_ttl.as_seconds().try_into()?,
+            dust_grace_period.as_seconds().try_into()?,
+        ))
+    }
+
+    const fn millis(seconds: u64) -> u64 {
+        seconds * 1_000
+    }
+}

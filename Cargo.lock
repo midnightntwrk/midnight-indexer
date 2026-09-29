@@ -3481,6 +3481,7 @@ dependencies = [
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "parity-scale-codec",
+ "rand 0.8.6",
  "reqwest 0.13.4",
  "secrecy",
  "serde",
