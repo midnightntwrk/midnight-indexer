@@ -674,6 +674,7 @@ mod tblock_skew_tests {
                 .join("ledger-db.sqlite")
                 .display()
                 .to_string(),
+            create_if_missing: true,
         })
         .await
         .expect("init ledger DB");
