@@ -20,10 +20,10 @@ use crate::{
     error::BoxError,
     infra::ledger_db::v1_1::LedgerDb,
 };
-use midnight_base_crypto_v1::{
-    signatures::{Signature as SignatureV8, SigningKey as SchnorrSigningKey},
-    time::Timestamp,
-};
+#[cfg(feature = "legacy-ledgers")]
+use midnight_base_crypto_v1::signatures::Signature as SignatureV8;
+use midnight_base_crypto_v1::{signatures::SigningKey as SchnorrSigningKey, time::Timestamp};
+#[cfg(feature = "legacy-ledgers")]
 use midnight_ledger_v8::{
     dust::{
         DustActions as DustActionsV8, DustPublicKey as DustPublicKeyV8,
@@ -38,6 +38,7 @@ use midnight_ledger_v8::{
         Transaction as TransactionV8,
     },
 };
+#[cfg(feature = "legacy-ledgers")]
 use midnight_ledger_v9::{
     dust::{
         DustActions as DustActionsV9, DustPublicKey as DustPublicKeyV9,
@@ -52,9 +53,27 @@ use midnight_ledger_v9::{
         SigningKey as SigningKeyV9, Transaction as TransactionV9,
     },
 };
+use midnight_ledger_v10::{
+    dust::{
+        DustActions as DustActionsV10, DustPublicKey as DustPublicKeyV10,
+        DustRegistration as DustRegistrationV10, DustSecretKey as DustSecretKeyV10,
+    },
+    error::{
+        MalformedTransaction as MalformedTransactionV10,
+        TransactionApplicationError as TransactionApplicationErrorV10,
+    },
+    structure::{
+        Intent as IntentV10, ProofPreimageMarker as ProofPreimageMarkerV10,
+        Signature as SignatureV10, SigningKey as SigningKeyV10, Transaction as TransactionV10,
+    },
+};
+#[cfg(feature = "legacy-ledgers")]
 use midnight_onchain_runtime_v3::cost_model::INITIAL_COST_MODEL as INITIAL_COST_MODEL_V8;
+#[cfg(feature = "legacy-ledgers")]
 use midnight_onchain_runtime_v4::cost_model::INITIAL_COST_MODEL as INITIAL_COST_MODEL_V9;
+use midnight_onchain_runtime_v10::cost_model::INITIAL_COST_MODEL as INITIAL_COST_MODEL_V10;
 use midnight_storage_core_v1::arena::Sp;
+#[cfg(feature = "legacy-ledgers")]
 use midnight_transient_crypto_v2::{
     commitment::PedersenRandomness as PedersenRandomnessV8,
     curve::Fr as FrV8,
@@ -62,6 +81,7 @@ use midnight_transient_crypto_v2::{
         Proof as ProofV8, ProofPreimage as ProofPreimageV8, ProvingProvider as ProvingProviderV8,
     },
 };
+#[cfg(feature = "legacy-ledgers")]
 use midnight_transient_crypto_v3::{
     commitment::PedersenRandomness as PedersenRandomnessV9,
     curve::Fr as FrV9,
@@ -69,6 +89,15 @@ use midnight_transient_crypto_v3::{
         KeyLocation as KeyLocationV9, Proof as ProofV9, ProofPreimage as ProofPreimageV9,
         ProvingKeyMaterial as ProvingKeyMaterialV9, ProvingProvider as ProvingProviderV9,
         Resolver as ResolverV9,
+    },
+};
+use midnight_transient_crypto_v10::{
+    commitment::PedersenRandomness as PedersenRandomnessV10,
+    curve::Fr as FrV10,
+    proofs::{
+        KeyLocation as KeyLocationV10, Proof as ProofV10, ProofPreimage as ProofPreimageV10,
+        ProvingKeyMaterial as ProvingKeyMaterialV10, ProvingProvider as ProvingProviderV10,
+        Resolver as ResolverV10,
     },
 };
 use rand::{SeedableRng, rngs::StdRng};
@@ -103,26 +132,16 @@ pub enum Malformed {
 /// Returns why the ledger rejected a transaction as malformed, if `error` or any of its sources reports it.
 pub fn malformed(error: &(dyn StdError + 'static)) -> Option<Malformed> {
     iter::successors(Some(error), |&error| error.source()).find_map(|error| {
-        if let Some(malformed) = error.downcast_ref::<MalformedTransactionV8<LedgerDb>>() {
-            use MalformedTransactionV8::*;
+        if let Some(malformed) = malformed_legacy(error) {
+            Some(malformed)
+        } else if let Some(malformed) = error.downcast_ref::<MalformedTransactionV10<LedgerDb>>() {
+            use MalformedTransactionV10::*;
             match malformed {
-                TransactionApplicationError(TransactionApplicationErrorV8::IntentTtlExpired(
+                TransactionApplicationError(TransactionApplicationErrorV10::IntentTtlExpired(
                     ..,
                 )) => Some(Malformed::IntentTtlExpired),
                 TransactionApplicationError(
-                    TransactionApplicationErrorV8::IntentTtlTooFarInFuture(..),
-                ) => Some(Malformed::IntentTtlTooFarInFuture),
-                OutOfDustValidityWindow { .. } => Some(Malformed::OutOfDustValidityWindow),
-                other => Some(Malformed::Other(other.to_string())),
-            }
-        } else if let Some(malformed) = error.downcast_ref::<MalformedTransactionV9<LedgerDb>>() {
-            use MalformedTransactionV9::*;
-            match malformed {
-                TransactionApplicationError(TransactionApplicationErrorV9::IntentTtlExpired(
-                    ..,
-                )) => Some(Malformed::IntentTtlExpired),
-                TransactionApplicationError(
-                    TransactionApplicationErrorV9::IntentTtlTooFarInFuture(..),
+                    TransactionApplicationErrorV10::IntentTtlTooFarInFuture(..),
                 ) => Some(Malformed::IntentTtlTooFarInFuture),
                 OutOfDustValidityWindow { .. } => Some(Malformed::OutOfDustValidityWindow),
                 other => Some(Malformed::Other(other.to_string())),
@@ -131,6 +150,42 @@ pub fn malformed(error: &(dyn StdError + 'static)) -> Option<Malformed> {
             None
         }
     })
+}
+
+#[cfg(feature = "legacy-ledgers")]
+fn malformed_legacy(error: &(dyn StdError + 'static)) -> Option<Malformed> {
+    if let Some(malformed) = error.downcast_ref::<MalformedTransactionV8<LedgerDb>>() {
+        use MalformedTransactionV8::*;
+        match malformed {
+            TransactionApplicationError(TransactionApplicationErrorV8::IntentTtlExpired(..)) => {
+                Some(Malformed::IntentTtlExpired)
+            }
+            TransactionApplicationError(
+                TransactionApplicationErrorV8::IntentTtlTooFarInFuture(..),
+            ) => Some(Malformed::IntentTtlTooFarInFuture),
+            OutOfDustValidityWindow { .. } => Some(Malformed::OutOfDustValidityWindow),
+            other => Some(Malformed::Other(other.to_string())),
+        }
+    } else if let Some(malformed) = error.downcast_ref::<MalformedTransactionV9<LedgerDb>>() {
+        use MalformedTransactionV9::*;
+        match malformed {
+            TransactionApplicationError(TransactionApplicationErrorV9::IntentTtlExpired(..)) => {
+                Some(Malformed::IntentTtlExpired)
+            }
+            TransactionApplicationError(
+                TransactionApplicationErrorV9::IntentTtlTooFarInFuture(..),
+            ) => Some(Malformed::IntentTtlTooFarInFuture),
+            OutOfDustValidityWindow { .. } => Some(Malformed::OutOfDustValidityWindow),
+            other => Some(Malformed::Other(other.to_string())),
+        }
+    } else {
+        None
+    }
+}
+
+#[cfg(not(feature = "legacy-ledgers"))]
+fn malformed_legacy(_error: &(dyn StdError + 'static)) -> Option<Malformed> {
+    None
 }
 
 /// Builds a serialized transaction whose single intent carries only a signed dust registration.
@@ -150,6 +205,7 @@ pub async fn dust_registration(
     let dust_ctime = Timestamp::from_secs(dust_ctime);
 
     let transaction = match ledger_version {
+        #[cfg(feature = "legacy-ledgers")]
         LedgerVersion::V8 => {
             let night_key = SchnorrSigningKey::sample(&mut rng);
             let registration = DustRegistrationV8 {
@@ -186,6 +242,7 @@ pub async fn dust_registration(
                 .tagged_serialize()?
         }
 
+        #[cfg(feature = "legacy-ledgers")]
         LedgerVersion::V9 => {
             let night_key = SigningKeyV9::Schnorr(SchnorrSigningKey::sample(&mut rng));
             let registration = DustRegistrationV9 {
@@ -220,6 +277,48 @@ pub async fn dust_registration(
                 .map_err(|error| format!("prove: {error}"))?
                 .seal(rng)
                 .tagged_serialize()?
+        }
+        LedgerVersion::V10 => {
+            let night_key = SigningKeyV10::Schnorr(SchnorrSigningKey::sample(&mut rng));
+            let registration = DustRegistrationV10 {
+                night_key: night_key.verifying_key(),
+                dust_address: Some(Sp::new(DustPublicKeyV10::from(DustSecretKeyV10::sample(
+                    &mut rng,
+                )))),
+                allow_fee_payment: 0,
+                signature: None,
+            };
+            let dust_actions = DustActionsV10::<SignatureV10, ProofPreimageMarkerV10, LedgerDb> {
+                spends: vec![].into(),
+                registrations: vec![registration].into(),
+                ctime: dust_ctime,
+            };
+            let intent = IntentV10::<_, _, PedersenRandomnessV10, _>::new(
+                &mut rng,
+                None,
+                None,
+                vec![],
+                vec![],
+                vec![],
+                Some(dust_actions),
+                ttl,
+            )
+            .sign(&mut rng, 1, &[], &[], &[night_key])
+            .map_err(|error| format!("sign intent: {error}"))?;
+
+            TransactionV10::from_intents(NETWORK_ID, [(1, intent)].into_iter().collect())
+                .prove(NoProofs, &INITIAL_COST_MODEL_V10)
+                .await
+                .map_err(|error| format!("prove: {error}"))?
+                .seal(rng)
+                .tagged_serialize()?
+        }
+        #[cfg(not(feature = "legacy-ledgers"))]
+        ledger_version => {
+            return Err(format!(
+                "ledger version {ledger_version} needs the `legacy-ledgers` feature"
+            )
+            .into());
         }
     };
 
@@ -289,6 +388,7 @@ pub async fn init_ledger_db() -> Result<impl Sized, BoxError> {
 // A proving provider for transactions without proofs; `prove` only ever calls `split` on it.
 struct NoProofs;
 
+#[cfg(feature = "legacy-ledgers")]
 impl ProvingProviderV8 for NoProofs {
     async fn check(&self, _preimage: &ProofPreimageV8) -> anyhow::Result<Vec<Option<usize>>> {
         unreachable!("test transactions carry no proofs")
@@ -307,12 +407,14 @@ impl ProvingProviderV8 for NoProofs {
     }
 }
 
+#[cfg(feature = "legacy-ledgers")]
 impl ResolverV9 for NoProofs {
     async fn resolve_key(&self, _key: KeyLocationV9) -> io::Result<Option<ProvingKeyMaterialV9>> {
         unreachable!("test transactions carry no proofs")
     }
 }
 
+#[cfg(feature = "legacy-ledgers")]
 impl ProvingProviderV9 for NoProofs {
     async fn check(&self, _preimage: &ProofPreimageV9) -> anyhow::Result<Vec<Option<usize>>> {
         unreachable!("test transactions carry no proofs")
@@ -331,6 +433,34 @@ impl ProvingProviderV9 for NoProofs {
     }
 
     fn resolver(&self) -> &impl ResolverV9 {
+        self
+    }
+}
+
+impl ResolverV10 for NoProofs {
+    async fn resolve_key(&self, _key: KeyLocationV10) -> io::Result<Option<ProvingKeyMaterialV10>> {
+        unreachable!("test transactions carry no proofs")
+    }
+}
+
+impl ProvingProviderV10 for NoProofs {
+    async fn check(&self, _preimage: &ProofPreimageV10) -> anyhow::Result<Vec<Option<usize>>> {
+        unreachable!("test transactions carry no proofs")
+    }
+
+    async fn prove(
+        self,
+        _preimage: &ProofPreimageV10,
+        _overwrite_binding_input: Option<FrV10>,
+    ) -> anyhow::Result<ProofV10> {
+        unreachable!("test transactions carry no proofs")
+    }
+
+    fn split(&mut self) -> Self {
+        NoProofs
+    }
+
+    fn resolver(&self) -> &impl ResolverV10 {
         self
     }
 }

@@ -54,14 +54,25 @@ testcontainers-modules = { workspace = true, features = [ "postgres" ] }
 walkdir   = { workspace = true }
 # SPIKE — REMOVE BEFORE MERGE, together with tests/contract_state_arena.rs: the spike reaches
 # into the ledger arena directly, which production chain-indexer code does not.
-midnight-coin-structure_v2  = { workspace = true }
-midnight-coin-structure_v3  = { workspace = true }
-midnight-onchain-runtime_v3 = { workspace = true }
-midnight-onchain-runtime_v4 = { workspace = true }
-midnight-serialize_v1       = { workspace = true }
-midnight-storage-core_v1    = { workspace = true, features = [ "layout-v2", "gc-v1" ] }
-midnight-zswap_v8           = { workspace = true }
-midnight-zswap_v9           = { workspace = true }
+midnight-serialize_v1        = { workspace = true }
+midnight-storage-core_v1     = { workspace = true, features = [ "layout-v2", "gc-v1" ] }
+# --- legacy-ledgers (ledger 8 and 9), disabled --------------------------------
+# midnight-coin-structure_v2  = { workspace = true }
+# midnight-coin-structure_v3  = { workspace = true }
+# midnight-onchain-runtime_v3 = { workspace = true }
+# midnight-onchain-runtime_v4 = { workspace = true }
+# midnight-zswap_v8           = { workspace = true }
+# midnight-zswap_v9           = { workspace = true }
+
+# Replays stagenet chain data, which is ledger-8/9 history.
+[[test]]
+name              = "contract_state_arena"
+required-features = [ "legacy-ledgers", "standalone" ]
+
+# Ingests node 1.0 chain data, which is a ledger-8 chain.
+[[test]]
+name              = "mainnet_runtime"
+required-features = [ "legacy-ledgers" ]
 
 [[bench]]
 name              = "ledger_state"
@@ -71,12 +82,12 @@ required-features = [ "standalone" ]
 [[bench]]
 name              = "apply_transaction"
 harness           = false
-required-features = [ "standalone" ]
+required-features = [ "legacy-ledgers", "standalone" ]
 
 [[bench]]
 name              = "preprod_genesis"
 harness           = false
-required-features = [ "standalone" ]
+required-features = [ "legacy-ledgers", "standalone" ]
 
 [build-dependencies]
 anyhow             = { workspace = true }
@@ -87,3 +98,8 @@ subxt              = { workspace = true }
 [features]
 cloud      = [ "indexer-common/cloud" ]
 standalone = [ "indexer-common/standalone" ]
+# Ledger 8 and 9 support. Cannot currently be enabled: their rc.5 crates and the
+# ledger-10 alpha's path-dep tree cannot coexist in one graph (see the workspace
+# Cargo.toml). Kept as the cfg the gated code is written against, so re-enabling
+# is a Cargo.toml change, not a rewrite.
+legacy-ledgers = [ "indexer-common/legacy-ledgers" ]

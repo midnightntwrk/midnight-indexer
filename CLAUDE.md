@@ -60,6 +60,8 @@ Two mutually exclusive Cargo features control the entire deployment topology at 
 | `cloud` | PostgreSQL | NATS | Separate microservice containers |
 | `standalone` | SQLite | In-memory broadcast channels | Single binary |
 
+A third feature, `legacy-ledgers`, guards ledger 8 and 9 support. It cannot currently be enabled — see `docs/upgrading-ledger.md`. Targets that need ledger-8/9 chain data declare it in `required-features`.
+
 Always pass `--features cloud` or `--features standalone` — there is no default feature.
 
 ### Domain / Application / Infra Layers

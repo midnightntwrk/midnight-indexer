@@ -49,8 +49,9 @@ const FIRST_UNSKEWED_NODE_1_0_SPEC_VERSION: u32 = 1_000_300;
 /// - 0.22, 1.0 before `FIRST_UNSKEWED_NODE_1_0_SPEC_VERSION` and 2.0 serve the first transaction's
 ///   validity from the strict cache warmed during mempool ingress, i.e. verify it at the bumped
 ///   `tblock`.
-/// - 1.0 from `FIRST_UNSKEWED_NODE_1_0_SPEC_VERSION` on (`Ledger8Bridge` version 2) and 2.1 (whose
-///   ledger-8 and ledger-9 host functions never skew) verify it against the block's own time.
+/// - 1.0 from `FIRST_UNSKEWED_NODE_1_0_SPEC_VERSION` on (`Ledger8Bridge` version 2), 2.1 (whose
+///   ledger-8 and ledger-9 host functions never skew) and 3.0 verify it against the block's own
+///   time.
 ///
 /// Bumping where the node does not verifies the first regular transaction at a different time than
 /// the node, so a transaction the node accepted can fail `well_formed` here and halt indexing: with
@@ -60,7 +61,7 @@ fn node_skews_first_regular_tblock(protocol_version: ProtocolVersion) -> bool {
     match protocol_version {
         ProtocolVersion::V0_22(_) | ProtocolVersion::V2_0(_) => true,
         ProtocolVersion::V1_0(spec_version) => spec_version < FIRST_UNSKEWED_NODE_1_0_SPEC_VERSION,
-        ProtocolVersion::V2_1(_) => false,
+        ProtocolVersion::V2_1(_) | ProtocolVersion::V3_0(_) => false,
     }
 }
 
@@ -620,6 +621,7 @@ mod tblock_skew_tests {
         assert!(!skews(1_000_999));
         assert!(skews(2_000_000));
         assert!(!skews(2_001_000));
+        assert!(!skews(3_000_000));
     }
 
     #[test]
@@ -644,6 +646,10 @@ mod tblock_skew_tests {
             1,
             ProtocolVersion::V2_1(2_001_000),
         ));
+        assert!(!should_bump_first_regular_tblock(
+            1,
+            ProtocolVersion::V3_0(3_000_000),
+        ));
     }
 
     /// Preview block 128537's first (and only) regular transaction, replayed as if it had waited
@@ -653,7 +659,7 @@ mod tblock_skew_tests {
     /// Node 1.0.300 verifies it at the block's own time (1784987082 <= TTL) and accepts it. The
     /// unconditional bump verifies it at parent + 12s (1784987088 > TTL) and halts indexing on a
     /// block the node accepted. This is the regression for gating the bump on the runtime.
-    #[cfg(feature = "standalone")]
+    #[cfg(all(feature = "standalone", feature = "legacy-ledgers"))]
     #[tokio::test]
     async fn first_tx_on_node_1_0_300_runtime_is_verified_at_block_time() {
         use crate::domain::{LedgerState, node};
@@ -732,7 +738,14 @@ mod tblock_skew_tests {
     }
 }
 
-#[cfg(all(test, any(feature = "cloud", feature = "standalone")))]
+// The mempool `tblock` skew is a ledger-8/9 runtime behaviour: every runtime on ledger 10
+// verifies the first regular transaction at the block's own time, so these cases need a skewing
+// runtime to drive.
+#[cfg(all(
+    test,
+    feature = "legacy-ledgers",
+    any(feature = "cloud", feature = "standalone")
+))]
 mod apply_transactions_tblock_tests {
     use super::should_bump_first_regular_tblock;
     use crate::domain::{LedgerState, Transaction, node};

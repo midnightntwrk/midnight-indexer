@@ -30,12 +30,15 @@ use crate::{
     infra::ledger_db::v1_1,
 };
 use fastrace::trace;
+#[cfg(feature = "legacy-ledgers")]
 use midnight_coin_structure_v2::coin::TokenType as MidnightTokenType;
-use midnight_coin_structure_v3::coin::TokenType as MidnightTokenTypeV9;
+use midnight_coin_structure_v10::coin::TokenType as MidnightTokenTypeV4;
+#[cfg(feature = "legacy-ledgers")]
 use midnight_onchain_runtime_v3::state::ContractState as ContractStateV3;
-// v8's maintenance authority committee is `Vec<VerifyingKey>` (Schnorr only). v9 generalised it to
-// a `ContractMaintenanceVerifyingKey` enum (Schnorr | ECDSA), re-exported by the v9 runtime.
-use midnight_onchain_runtime_v4::state::{
+// v8's maintenance authority committee is `Vec<VerifyingKey>` (Schnorr only). Onchain-state v4
+// generalised it to a `ContractMaintenanceVerifyingKey` enum (Schnorr | ECDSA), re-exported by
+// the runtime.
+use midnight_onchain_runtime_v10::state::{
     ContractMaintenanceVerifyingKey as ContractMaintenanceVerifyingKeyV4,
     ContractState as ContractStateV4,
 };
@@ -72,6 +75,7 @@ pub type LedgerDbContractState = ContractState<v1_1::LedgerDb>;
 /// The type parameter is not defaulted away in expression position, so use the
 /// [DefaultContractState] and [LedgerDbContractState] aliases at call sites.
 pub enum ContractState<D: DB = DefaultDB> {
+    #[cfg(feature = "legacy-ledgers")]
     V3(Sp<ContractStateV3<D>, D>),
     V4(Sp<ContractStateV4<D>, D>),
 }
@@ -83,6 +87,7 @@ impl<D: DB> Debug for ContractState<D> {
     /// fault in its whole DAG.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let (variant, hash) = match self {
+            #[cfg(feature = "legacy-ledgers")]
             Self::V3(state) => ("V3", state.hash()),
             Self::V4(state) => ("V4", state.hash()),
         };
@@ -98,6 +103,7 @@ impl<D: DB> Debug for ContractState<D> {
 impl<D: DB> Clone for ContractState<D> {
     fn clone(&self) -> Self {
         match self {
+            #[cfg(feature = "legacy-ledgers")]
             Self::V3(state) => Self::V3(state.clone()),
             Self::V4(state) => Self::V4(state.clone()),
         }
@@ -111,6 +117,7 @@ impl<D: DB> ContractState<D> {
     #[trace]
     pub fn serialize(&self) -> Result<SerializedContractState, Error> {
         match self {
+            #[cfg(feature = "legacy-ledgers")]
             Self::V3(state) => state
                 .tagged_serialize()
                 .map_err(|error| Error::Serialize("ContractStateV8", error)),
@@ -123,6 +130,7 @@ impl<D: DB> ContractState<D> {
     /// Get the token balances for this contract.
     pub fn balances(&self) -> Result<Vec<ContractBalance>, Error> {
         match self {
+            #[cfg(feature = "legacy-ledgers")]
             Self::V3(contract_state) => {
                 contract_state
                     .balance
@@ -174,7 +182,7 @@ impl<D: DB> ContractState<D> {
                     .map(|(token_type, amount)| {
                         match token_type {
                             // For unshielded tokens extract the type directly.
-                            MidnightTokenTypeV9::Unshielded(unshielded) => Ok(ContractBalance {
+                            MidnightTokenTypeV4::Unshielded(unshielded) => Ok(ContractBalance {
                                 token_type: unshielded.0.0.into(),
                                 amount,
                             }),
@@ -203,6 +211,7 @@ impl<D: DB> ContractState<D> {
     /// lazily loaded state this forces the root node alone.
     pub fn maintenance_authority(&self) -> Result<ContractMaintenanceAuthority, Error> {
         match self {
+            #[cfg(feature = "legacy-ledgers")]
             Self::V3(contract_state) => {
                 let authority = &contract_state.maintenance_authority;
                 // v8 committee keys are all Schnorr (`Vec<VerifyingKey>`, no scheme tag).
@@ -265,16 +274,25 @@ impl DefaultContractState {
         ledger_version: LedgerVersion,
     ) -> Result<Self, Error> {
         let contract_state = match ledger_version {
+            #[cfg(feature = "legacy-ledgers")]
             LedgerVersion::V8 => {
                 let contract_state = tagged_deserialize(&mut contract_state.as_ref())
                     .map_err(|error| Error::Deserialize("ContractStateV8", error))?;
                 Self::V3(contract_state)
             }
+            #[cfg(feature = "legacy-ledgers")]
             LedgerVersion::V9 => {
                 let contract_state = tagged_deserialize(&mut contract_state.as_ref())
                     .map_err(|error| Error::Deserialize("ContractStateV9", error))?;
                 Self::V4(contract_state)
             }
+            LedgerVersion::V10 => {
+                let contract_state = tagged_deserialize(&mut contract_state.as_ref())
+                    .map_err(|error| Error::Deserialize("ContractStateV10", error))?;
+                Self::V4(contract_state)
+            }
+            #[cfg(not(feature = "legacy-ledgers"))]
+            ledger_version => return Err(Error::LegacyLedgerDisabled(ledger_version)),
         };
 
         Ok(contract_state)
@@ -309,6 +327,7 @@ impl LedgerDbContractState {
         let storage = default_storage::<v1_1::LedgerDb>();
 
         match ContractStateArenaKey::deserialize(key)? {
+            #[cfg(feature = "legacy-ledgers")]
             ContractStateArenaKey::V3(arena_key) => {
                 if prefetch {
                     storage.with_backend(|b| b.pre_fetch(arena_key.key.hash(), None, true));
@@ -343,20 +362,18 @@ impl LedgerDbContractState {
 /// from `Vec<VerifyingKey>` to `Vec<ContractMaintenanceVerifyingKey>`, an enum with a discriminant
 /// byte.
 pub(super) enum ContractStateArenaKey {
+    #[cfg(feature = "legacy-ledgers")]
     V3(TypedArenaKey<ContractStateV3<v1_1::LedgerDb>, Hasher>),
     V4(TypedArenaKey<ContractStateV4<v1_1::LedgerDb>, Hasher>),
 }
 
 impl ContractStateArenaKey {
     pub(super) fn deserialize(key: &SerializedContractStateKey) -> Result<Self, Error> {
-        if key.starts_with(V3_TAG.as_bytes()) {
-            let arena_key = tagged_deserialize(&mut key.as_ref())
-                .map_err(|error| Error::Deserialize("ContractStateKeyV8", error))?;
-
-            Ok(Self::V3(arena_key))
+        if let Some(arena_key) = Self::deserialize_v3(key)? {
+            Ok(arena_key)
         } else if key.starts_with(V4_TAG.as_bytes()) {
             let arena_key = tagged_deserialize(&mut key.as_ref())
-                .map_err(|error| Error::Deserialize("ContractStateKeyV9", error))?;
+                .map_err(|error| Error::Deserialize("ContractStateKeyV4", error))?;
 
             Ok(Self::V4(arena_key))
         } else {
@@ -364,19 +381,38 @@ impl ContractStateArenaKey {
         }
     }
 
+    #[cfg(feature = "legacy-ledgers")]
+    fn deserialize_v3(key: &SerializedContractStateKey) -> Result<Option<Self>, Error> {
+        if key.starts_with(V3_TAG.as_bytes()) {
+            let arena_key = tagged_deserialize(&mut key.as_ref())
+                .map_err(|error| Error::Deserialize("ContractStateKeyV3", error))?;
+
+            Ok(Some(Self::V3(arena_key)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    #[cfg(not(feature = "legacy-ledgers"))]
+    fn deserialize_v3(_key: &SerializedContractStateKey) -> Result<Option<Self>, Error> {
+        Ok(None)
+    }
+
     pub(super) fn hash(&self) -> &ArenaHash<Hasher> {
         match self {
+            #[cfg(feature = "legacy-ledgers")]
             Self::V3(arena_key) => arena_key.key.hash(),
             Self::V4(arena_key) => arena_key.key.hash(),
         }
     }
 }
 
-/// The tag prefix `tagged_serialize` writes ahead of a V8 contract state key.
+/// The tag prefix `tagged_serialize` writes ahead of an onchain-state v3 contract state key.
+#[cfg(feature = "legacy-ledgers")]
 static V3_TAG: LazyLock<String> =
     LazyLock::new(tag_prefix::<TypedArenaKey<ContractStateV3<v1_1::LedgerDb>, Hasher>>);
 
-/// The tag prefix `tagged_serialize` writes ahead of a V9 contract state key.
+/// The tag prefix `tagged_serialize` writes ahead of an onchain-state v4 contract state key.
 static V4_TAG: LazyLock<String> =
     LazyLock::new(tag_prefix::<TypedArenaKey<ContractStateV4<v1_1::LedgerDb>, Hasher>>);
 
@@ -396,26 +432,24 @@ mod tests {
         },
     };
     use midnight_base_crypto_v1::hash::HashOutput;
-    use midnight_coin_structure_v2::coin::{TokenType as MidnightTokenType, UnshieldedTokenType};
-    use midnight_coin_structure_v3::coin::{
-        TokenType as MidnightTokenTypeV9, UnshieldedTokenType as UnshieldedTokenTypeV9,
+    use midnight_coin_structure_v10::coin::{
+        TokenType as MidnightTokenTypeV4, UnshieldedTokenType as UnshieldedTokenTypeV4,
     };
-    use midnight_onchain_runtime_v3::state::ContractState as ContractStateV3;
-    use midnight_onchain_runtime_v4::state::ContractState as ContractStateV4;
+    use midnight_onchain_runtime_v10::state::ContractState as ContractStateV4;
     use midnight_storage_core_v1::DefaultDB;
 
     #[test]
-    fn test_balances_v8() {
-        let mut contract_state = ContractStateV3::<DefaultDB>::default();
+    fn test_balances_v10() {
+        let mut contract_state = ContractStateV4::<DefaultDB>::default();
         contract_state.balance = contract_state.balance.insert(
-            MidnightTokenType::Unshielded(UnshieldedTokenType(HashOutput(TOKEN_TYPE.0))),
+            MidnightTokenTypeV4::Unshielded(UnshieldedTokenTypeV4(HashOutput(TOKEN_TYPE.0))),
             AMOUNT,
         );
         let contract_state = contract_state
             .tagged_serialize()
             .expect("contract state can be serialized");
 
-        let balances = DefaultContractState::deserialize(contract_state, LedgerVersion::V8)
+        let balances = DefaultContractState::deserialize(contract_state, LedgerVersion::V10)
             .expect("contract state can be deserialized")
             .balances()
             .expect("balances can be extracted");
@@ -426,59 +460,17 @@ mod tests {
     }
 
     #[test]
-    fn test_balances_v9() {
+    fn serialize_round_trips_v10() {
         let mut contract_state = ContractStateV4::<DefaultDB>::default();
         contract_state.balance = contract_state.balance.insert(
-            MidnightTokenTypeV9::Unshielded(UnshieldedTokenTypeV9(HashOutput(TOKEN_TYPE.0))),
-            AMOUNT,
-        );
-        let contract_state = contract_state
-            .tagged_serialize()
-            .expect("contract state can be serialized");
-
-        let balances = DefaultContractState::deserialize(contract_state, LedgerVersion::V9)
-            .expect("contract state can be deserialized")
-            .balances()
-            .expect("balances can be extracted");
-
-        assert_eq!(balances.len(), 1);
-        assert_eq!(balances[0].token_type, TOKEN_TYPE);
-        assert_eq!(balances[0].amount, AMOUNT);
-    }
-
-    /// Round-tripping a state through the in-memory arena must reproduce the exact input bytes;
-    /// this is the property the whole key-instead-of-blob change rests on, minus the persistence.
-    #[test]
-    fn serialize_round_trips_v8() {
-        let mut contract_state = ContractStateV3::<DefaultDB>::default();
-        contract_state.balance = contract_state.balance.insert(
-            MidnightTokenType::Unshielded(UnshieldedTokenType(HashOutput(TOKEN_TYPE.0))),
+            MidnightTokenTypeV4::Unshielded(UnshieldedTokenTypeV4(HashOutput(TOKEN_TYPE.0))),
             AMOUNT,
         );
         let expected = contract_state
             .tagged_serialize()
             .expect("contract state can be serialized");
 
-        let serialized = DefaultContractState::deserialize(&expected, LedgerVersion::V8)
-            .expect("contract state can be deserialized")
-            .serialize()
-            .expect("contract state can be serialized");
-
-        assert_eq!(serialized, expected);
-    }
-
-    #[test]
-    fn serialize_round_trips_v9() {
-        let mut contract_state = ContractStateV4::<DefaultDB>::default();
-        contract_state.balance = contract_state.balance.insert(
-            MidnightTokenTypeV9::Unshielded(UnshieldedTokenTypeV9(HashOutput(TOKEN_TYPE.0))),
-            AMOUNT,
-        );
-        let expected = contract_state
-            .tagged_serialize()
-            .expect("contract state can be serialized");
-
-        let serialized = DefaultContractState::deserialize(&expected, LedgerVersion::V9)
+        let serialized = DefaultContractState::deserialize(&expected, LedgerVersion::V10)
             .expect("contract state can be deserialized")
             .serialize()
             .expect("contract state can be serialized");
@@ -488,6 +480,7 @@ mod tests {
 
     /// The two contract state versions must be distinguishable from their keys alone, because the
     /// arena node payloads they point at carry no version tag.
+    #[cfg(feature = "legacy-ledgers")]
     #[test]
     fn contract_state_key_tags_are_distinct() {
         let v3 = super::tag_prefix::<
