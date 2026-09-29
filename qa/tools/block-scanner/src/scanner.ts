@@ -205,6 +205,10 @@ let notifyShutdownRequested: (() => void) | undefined;
 let forceSyncCheckpoint: (() => void) | undefined;
 let forcedExitStarted = false;
 
+// Aborted by forceExit() so a graceful finalization still awaiting the
+// indexer does not write files after the forced path already has.
+const gracefulFinalization = new AbortController();
+
 function requestShutdown(signal: string): void {
   if (shutdownSignal) {
     forceExit(signal);
@@ -220,13 +224,19 @@ function requestShutdown(signal: string): void {
 /**
  * Forced exit (second signal): the graceful wait is abandoned, but the test
  * data files are still written from everything persisted so far, so a forced
- * Ctrl+C never silently discards a long scan. The checkpoint is synchronous
- * because nothing else runs after it; the test data refresh is awaited and
- * the process exits as soon as it settles.
+ * Ctrl+C never silently discards a long scan.
+ *
+ * Only the local files are written. The graceful path may be stuck in the
+ * contract-events harvest against the indexer, and repeating that harvest
+ * here would stall the same way; the forced path never touches the network,
+ * so it always completes. The checkpoint is synchronous because nothing else
+ * runs after it; the local write is awaited and the process exits with
+ * status 1 as soon as it settles, whatever the graceful path was doing.
  */
 function forceExit(signal: string): void {
   if (forcedExitStarted) process.exit(1);
   forcedExitStarted = true;
+  gracefulFinalization.abort();
   console.info(
     `\n[INFO ] - Received ${signal} again, forcing exit after a final test data write...`,
   );
@@ -237,7 +247,7 @@ function forceExit(signal: string): void {
       `[ERROR] - Failed to persist buffered blocks during forced exit: ${(error as Error).message}`,
     );
   }
-  finalizeTestData().finally(() => process.exit(1));
+  finalizeTestData({ localOnly: true }).finally(() => process.exit(1));
 }
 
 process.on("SIGINT", () => requestShutdown("SIGINT"));
@@ -587,8 +597,12 @@ function parseStartBlockHeight(): number | undefined {
  * must never throw itself: a failure here should be logged, not allowed to
  * mask the scan's own outcome. (It still can't run after an unstoppable
  * `kill -9`, since no JS runs at all in that case.)
+ *
+ * With `localOnly` the contract-events harvest (the only remote step) is
+ * skipped and that file is left untouched; without it the run is tied to
+ * `gracefulFinalization` so a forced exit can supersede it.
  */
-async function finalizeTestData(): Promise<void> {
+async function finalizeTestData({ localOnly = false } = {}): Promise<void> {
   if (!testDataFolder) return;
 
   const sourceBlockDataFile = getBlocksFilePath();
@@ -608,7 +622,11 @@ async function finalizeTestData(): Promise<void> {
       `[INFO ] - Updating test data files in: ${testDataFolder}/${TARGET_ENV}`,
     );
 
-    await updateTestDataFiles(testDataFolder, sourceBlockDataFile);
+    await updateTestDataFiles(
+      testDataFolder,
+      sourceBlockDataFile,
+      localOnly ? { localOnly } : { signal: gracefulFinalization.signal },
+    );
   } catch (error) {
     console.error(
       `[ERROR] - Failed to update test data files for ${TARGET_ENV}: ${(error as Error).message}`,
@@ -1022,6 +1040,8 @@ async function main(): Promise<boolean> {
 
 await main()
   .then((success) => {
+    // A forced exit owns the exit status even if the graceful run got here.
+    if (forcedExitStarted) process.exit(1);
     if (success) {
       console.info("[INFO ] - Process completed successfully");
       process.exit(0);

@@ -292,14 +292,24 @@ function validateNonEmptyArray<T>(array: T[], arrayName: string): void {
   }
 }
 
+/** Options controlling how a test data refresh runs. */
+export interface UpdateTestDataOptions {
+  /** Skip the contract-events harvest (the only remote step) and leave that file untouched. */
+  readonly localOnly?: boolean;
+  /** Aborted when another refresh has taken over; nothing is written once it fires. */
+  readonly signal?: AbortSignal;
+}
+
 /**
  * Updates test data files in the specified folder
  * @param folderPath - Path to the test data folder
- * @param dataFile - Path to the data file containing blocks
+ * @param sourceBlockDataFile - Path to the data file containing blocks
+ * @param options - See {@link UpdateTestDataOptions}
  */
 export async function updateTestDataFiles(
   folderPath: string,
   sourceBlockDataFile: string,
+  { localOnly = false, signal }: UpdateTestDataOptions = {},
 ): Promise<void> {
   try {
     // Validate input parameters
@@ -331,7 +341,24 @@ export async function updateTestDataFiles(
     // BEFORE any file is written: a probe or query failure then aborts the
     // refresh with the previous snapshot fully intact, instead of leaving a
     // mix of refreshed and stale files behind.
-    const contractsWithEvents = await harvestContractEvents(sourceBlockData);
+    let contractsWithEvents: ContractWithEvents[] | null = null;
+    if (localOnly) {
+      console.info(
+        "[INFO ] - Skipping the contract events harvest (remote); " +
+          "leaving any existing contract events data file untouched",
+      );
+    } else {
+      contractsWithEvents = await harvestContractEvents(sourceBlockData);
+    }
+
+    // The forced-exit refresh wrote the files while this one was waiting on
+    // the indexer; writing again now would race its exit.
+    if (signal?.aborted) {
+      console.info(
+        "[INFO ] - Skipping the test data write: superseded by a forced exit",
+      );
+      return;
+    }
 
     // Block and transaction data files are currently not consumed by the test
     // suites; generation is kept behind this switch instead of being removed
