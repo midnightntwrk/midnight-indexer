@@ -342,9 +342,10 @@ export const updateContractViaMoth = async (
 };
 
 /**
- * Drop the cached provider sets. The moth wallets behind them are owned by
- * `moth-backend`, which closes them in its own teardown — releasing them here
- * would pull a wallet out from under the transfer path.
+ * Drop the cached provider sets so no caller can reuse one that wraps a
+ * stopped facade. Call it right before `closeMothWallets()`, as
+ * `ToolkitWrapper.stop()` and the moth-only suites do; the wallets themselves
+ * stay owned by `moth-backend`, which is why this does not stop them.
  */
 export const closeMothContractContexts = (): void => {
   contexts.clear();

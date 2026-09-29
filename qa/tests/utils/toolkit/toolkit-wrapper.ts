@@ -24,6 +24,7 @@ import { ensureToolkitCachePostgres } from './toolkit-cache';
 import { closeMothWallets, generateSingleTxViaMoth } from '../moth/moth-backend';
 import {
   callCircuitViaMoth,
+  closeMothContractContexts,
   deployContractViaMoth,
   updateContractViaMoth,
 } from '../moth/moth-contracts';
@@ -412,8 +413,9 @@ class ToolkitWrapper {
   }
 
   async stop() {
-    // Release any moth wallet opened by the moth backend. Safe when unused —
-    // it clears an empty set.
+    // Drop the midnight-js providers first: they wrap the wallet facades that
+    // closeMothWallets() is about to stop. Both are safe when unused.
+    closeMothContractContexts();
     await closeMothWallets();
     if (this.startedContainer) {
       // Make /out world-writable before stopping so the host process can delete root-owned
