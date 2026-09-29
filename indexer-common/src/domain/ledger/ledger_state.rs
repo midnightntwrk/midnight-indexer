@@ -212,11 +212,11 @@ impl LedgerState {
     ///
     /// `block_timestamp` drives the block context passed to `apply`, and thus the timestamps the
     /// ledger writes into its state (e.g. dust generation `dtime`), so it must always be the real
-    /// block time. `well_formed_timestamp` is the `tblock` used only for the dust-validity-window
-    /// check in `well_formed`; it normally equals `block_timestamp` but is bumped ahead for the
-    /// first regular transaction in a block to reproduce the node's cached mempool validity result
-    /// (see `chain-indexer`'s `apply_transactions`). Bumping it only affects whether the check
-    /// passes, not the resulting state, since `well_formed` merely validates.
+    /// block time. `well_formed_timestamp` is the `tblock` of the intent TTL and dust validity
+    /// window checks in `well_formed`. It normally equals `block_timestamp`; the caller may pass
+    /// the `tblock` the node verified the transaction at instead (see `chain-indexer`'s
+    /// `apply_transactions`). It only affects whether the check passes, not the resulting state,
+    /// since `well_formed` merely validates.
     #[trace]
     pub fn apply_regular_transaction(
         &mut self,
