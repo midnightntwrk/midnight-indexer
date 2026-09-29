@@ -730,8 +730,8 @@ async function main(): Promise<boolean> {
     let contractActionsFound = 0;
 
     // Blocks with transactions, serialized but not yet written to disk. Flushed
-    // to blocksFile every CHECKPOINT_INTERVAL_MS by checkpoint() below, instead
-    // of one disk write per block.
+    // to the blocks file every CHECKPOINT_INTERVAL_MS by checkpoint() below,
+    // instead of one disk write per block.
     let pendingLines: string[] = [];
 
     // Spinner for progress indication
@@ -818,9 +818,9 @@ async function main(): Promise<boolean> {
     const isResume =
       startBlockHeightEnv === undefined && previousStats !== null;
     const blocksFilePath = getBlocksFilePath();
-    const blocksFile = fs.createWriteStream(blocksFilePath, {
-      flags: isResume ? "a" : "w",
-    });
+    // Written synchronously: a signal handler can then never find a flush
+    // half-way through, so the forced exit appends without losing a block.
+    const blocksFd = fs.openSync(blocksFilePath, isResume ? "a" : "w");
 
     /**
      * Builds the stats snapshot for the current progress (used both by the
@@ -874,28 +874,19 @@ async function main(): Promise<boolean> {
      * On a write failure, the buffered lines are put back so the next
      * checkpoint retries them, and the stats file is left untouched.
      */
-    let flushInFlight = false;
-
     async function checkpoint(): Promise<void> {
       const linesToFlush = pendingLines;
       pendingLines = [];
 
       if (linesToFlush.length > 0) {
-        flushInFlight = true;
         try {
-          await new Promise<void>((resolve, reject) => {
-            blocksFile.write(linesToFlush.join(""), (err) =>
-              err ? reject(err) : resolve(),
-            );
-          });
+          fs.writeSync(blocksFd, linesToFlush.join(""));
         } catch (error) {
           pendingLines = [...linesToFlush, ...pendingLines];
           console.error(
             `[ERROR] - Failed to flush buffered blocks to ${blocksFilePath}: ${(error as Error).message}`,
           );
           return;
-        } finally {
-          flushInFlight = false;
         }
       }
 
@@ -903,14 +894,11 @@ async function main(): Promise<boolean> {
       writeStats(buildMergedStats(elapsedSeconds));
     }
 
-    // Synchronous checkpoint for the forced-exit path, where no async write
-    // can complete before the process exits. It must not touch the file while
-    // an async flush is mid-write, as appending then would interleave with the
-    // in-flight chunk; in that case those lines are sacrificed.
+    // The forced-exit checkpoint: the same write as above, on the same file
+    // descriptor, so whatever is buffered lands after what is already flushed.
     forceSyncCheckpoint = () => {
-      if (flushInFlight) return;
       if (pendingLines.length > 0) {
-        fs.appendFileSync(blocksFilePath, pendingLines.join(""));
+        fs.writeSync(blocksFd, pendingLines.join(""));
         pendingLines = [];
       }
       writeStats(buildMergedStats(Math.round((Date.now() - startTime) / 1000)));
@@ -990,6 +978,8 @@ async function main(): Promise<boolean> {
       // instead of discarding it.
       stopCheckpointLoop();
       await checkpoint().catch(() => {});
+      forceSyncCheckpoint = undefined;
+      fs.closeSync(blocksFd);
 
       // Clean up and exit without throwing
       await cleanupResources(indexerWs, handlersMap);
@@ -1017,7 +1007,8 @@ async function main(): Promise<boolean> {
     // printed below and the persisted stats agree.
     stopCheckpointLoop();
     await checkpoint();
-    blocksFile.end();
+    forceSyncCheckpoint = undefined;
+    fs.closeSync(blocksFd);
 
     const scanDurationSeconds = Math.round((Date.now() - startTime) / 1000);
 
