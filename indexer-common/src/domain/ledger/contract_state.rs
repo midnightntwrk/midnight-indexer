@@ -12,39 +12,21 @@
 // limitations under the License.
 
 use crate::domain::{
-    ContractBalance, LedgerVersion, TokenType,
+    ContractBalance, TokenType,
     ledger::{Error, TaggedSerializableExt},
 };
-use fastrace::trace;
 use midnight_coin_structure_v2::coin::TokenType as MidnightTokenType;
 use midnight_onchain_runtime_v3::state::ContractState as ContractStateV3;
-use midnight_serialize_v1::tagged_deserialize;
-use midnight_storage_core_v1::DefaultDB;
+use midnight_storage_core_v1::{arena::Sp, db::DB};
 
 /// Facade for `ContractState` from `midnight_ledger` across supported (protocol) versions.
-#[derive(Debug, Clone)]
-pub enum ContractState {
-    V3(ContractStateV3<DefaultDB>),
+///
+/// Holds the arena pointer, so field reads force only the nodes they touch.
+pub enum ContractState<D: DB> {
+    V3(Sp<ContractStateV3<D>, D>),
 }
 
-impl ContractState {
-    /// Deserialize the given serialized contract state using the given protocol version.
-    #[trace(properties = { "ledger_version": "{ledger_version}" })]
-    pub fn deserialize(
-        contract_state: impl AsRef<[u8]>,
-        ledger_version: LedgerVersion,
-    ) -> Result<Self, Error> {
-        let contract_state = match ledger_version {
-            LedgerVersion::V8 => {
-                let contract_state = tagged_deserialize(&mut contract_state.as_ref())
-                    .map_err(|error| Error::Deserialize("ContractStateV8", error))?;
-                Self::V3(contract_state)
-            }
-        };
-
-        Ok(contract_state)
-    }
-
+impl<D: DB> ContractState<D> {
     /// Get the token balances for this contract.
     pub fn balances(&self) -> Result<Vec<ContractBalance>, Error> {
         match self {
@@ -90,13 +72,14 @@ impl ContractState {
 #[cfg(test)]
 mod tests {
     use crate::domain::{
-        ByteArray, LedgerVersion, TokenType,
+        ByteArray, TokenType,
         ledger::{ContractState, TaggedSerializableExt},
     };
     use midnight_base_crypto_v1::hash::HashOutput;
     use midnight_coin_structure_v2::coin::{TokenType as MidnightTokenType, UnshieldedTokenType};
     use midnight_onchain_runtime_v3::state::ContractState as ContractStateV3;
-    use midnight_storage_core_v1::DefaultDB;
+    use midnight_serialize_v1::tagged_deserialize;
+    use midnight_storage_core_v1::{DefaultDB, arena::Sp};
 
     #[test]
     fn test_balances_v8() {
@@ -109,8 +92,10 @@ mod tests {
             .tagged_serialize()
             .expect("contract state can be serialized");
 
-        let balances = ContractState::deserialize(contract_state, LedgerVersion::V8)
-            .expect("contract state can be deserialized")
+        let contract_state =
+            tagged_deserialize::<ContractStateV3<DefaultDB>>(&mut contract_state.as_ref())
+                .expect("contract state can be deserialized");
+        let balances = ContractState::V3(Sp::new(contract_state))
             .balances()
             .expect("balances can be extracted");
 

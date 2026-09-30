@@ -21,7 +21,7 @@ use indexer_common::domain::{
     ledger::{self, LedgerParameters},
 };
 use log::warn;
-use std::ops::DerefMut;
+use std::{collections::HashMap, ops::DerefMut};
 use thiserror::Error;
 
 /// Amount, in milliseconds, by which a block's first regular transaction's well-formed `tblock` is
@@ -181,6 +181,80 @@ impl LedgerState {
         Ok((transactions, ledger_parameters))
     }
 
+    /// Capture the token balances of the contract state of every contract action in the given
+    /// block's transactions, and assign them to those actions.
+    ///
+    /// This must run once per block, after every transaction has been applied, and not inside
+    /// `apply_regular_transaction`. Each action's stored state comes from a node runtime API called
+    /// at the block, i.e. the contract's end-of-block state, so every action on one address within
+    /// a block reports identical bytes. Capturing per transaction would make the balances of
+    /// multi-action blocks disagree with that state. It must also run after the genesis branch in
+    /// `index_block`, which replaces the ledger state after applying.
+    ///
+    /// Balances are looked up once per distinct address.
+    ///
+    /// # Errors
+    ///
+    /// Returns `MissingContractState` if an address's contract is absent from the ledger state, and
+    /// an error if its contract state or balances cannot be read.
+    pub(crate) fn capture_contract_state(
+        &self,
+        transactions: &mut [Transaction],
+    ) -> Result<(), Error> {
+        let mut captured = HashMap::new();
+
+        let regular_transactions =
+            transactions
+                .iter_mut()
+                .filter_map(|transaction| match transaction {
+                    Transaction::Regular(transaction) => Some(transaction),
+                    Transaction::System(_) => None,
+                });
+
+        for transaction in regular_transactions {
+            for contract_action in transaction.contract_actions.iter_mut() {
+                let balances = match captured.get(&contract_action.address) {
+                    Some(captured) => captured,
+
+                    None => {
+                        let contract_state = self
+                            .contract_state(&contract_action.address)
+                            .map_err(|error| {
+                                Error::GetContractState(
+                                    transaction.hash,
+                                    contract_action.address.clone(),
+                                    error,
+                                )
+                            })?
+                            .ok_or_else(|| {
+                                Error::MissingContractState(
+                                    transaction.hash,
+                                    contract_action.address.clone(),
+                                )
+                            })?;
+
+                        let balances = contract_state.balances().map_err(|error| {
+                            Error::GetContractBalances(
+                                transaction.hash,
+                                contract_action.address.clone(),
+                                error,
+                            )
+                        })?;
+
+                        captured
+                            .entry(contract_action.address.clone())
+                            .insert_entry(balances)
+                            .into_mut()
+                    }
+                };
+
+                contract_action.extracted_balances = balances.clone();
+            }
+        }
+
+        Ok(())
+    }
+
     /// The highest used zswap state index or none.
     pub fn highest_zswap_state_index(&self) -> Option<u64> {
         (self.zswap_first_free() != 0).then(|| self.zswap_first_free() - 1)
@@ -291,22 +365,6 @@ impl LedgerState {
                     contract_action.address.clone(),
                 ));
             }
-
-            let contract_state = ledger::ContractState::deserialize(
-                &contract_action.state,
-                transaction.protocol_version.ledger_version(),
-            )
-            .map_err(|error| {
-                Error::DeserializeContractState(
-                    transaction.hash,
-                    contract_action.address.clone(),
-                    error,
-                )
-            })?;
-            let balances = contract_state.balances().map_err(|error| {
-                Error::GetContractBalances(transaction.hash, contract_action.address.clone(), error)
-            })?;
-            contract_action.extracted_balances = balances;
         }
 
         Ok(transaction)
@@ -377,8 +435,8 @@ pub enum Error {
         #[source] indexer_common::domain::ledger::Error,
     ),
 
-    #[error("cannot deserialize contract state for transaction {0} and contract address {1}")]
-    DeserializeContractState(
+    #[error("cannot capture contract state for transaction {0} and contract address {1}")]
+    GetContractState(
         TransactionHash,
         SerializedContractAddress,
         #[source] indexer_common::domain::ledger::Error,

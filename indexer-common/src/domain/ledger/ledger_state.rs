@@ -19,7 +19,9 @@ use crate::{
         SerializedZswapMerkleTreeRoot, SerializedZswapState, TokenType, TransactionResult,
         UnshieldedUtxo,
         dust::{self},
-        ledger::{Error, IntentV8, SerializableExt, TaggedSerializableExt, TransactionV8},
+        ledger::{
+            ContractState, Error, IntentV8, SerializableExt, TaggedSerializableExt, TransactionV8,
+        },
     },
     infra::ledger_db::v1_1,
 };
@@ -415,6 +417,32 @@ impl LedgerState {
                 .expect("dust generation merkle tree root should exist")
                 .serialize()
                 .map_err(|error| Error::Serialize("DustGenerationMerkleTreeRoot", error)),
+        }
+    }
+
+    /// Returns the contract state for the given contract address, or `None` if this ledger state
+    /// has no contract at that address.
+    ///
+    /// Reads the state from the ledger arena in place and runs no storage invariant checks.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the address cannot be deserialized.
+    #[trace(properties = { "address": "{address}" })]
+    pub fn contract_state(
+        &self,
+        address: &SerializedContractAddress,
+    ) -> Result<Option<ContractState<v1_1::LedgerDb>>, Error> {
+        match self {
+            Self::V8 { ledger_state, .. } => {
+                let address = ContractAddressV8::deserialize(&mut address.as_ref(), 0)
+                    .map_err(|error| Error::Deserialize("ContractAddressV8", error))?;
+
+                Ok(ledger_state
+                    .contract
+                    .lookup_sp(&address)
+                    .map(ContractState::V3))
+            }
         }
     }
 
