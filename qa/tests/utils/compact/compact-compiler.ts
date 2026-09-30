@@ -130,6 +130,10 @@ export async function compileCompactContract(options: CompileCompactOptions): Pr
     return outputDir;
   }
 
+  // The image comes first because handing a partial run's root-owned output
+  // back to the host runs inside it, and it may have been pruned since.
+  await ensureToolchainImage();
+
   // A directory without the marker is a partial run (interrupted, or a failed
   // compile). Its contents are root-owned, so hand ownership back first.
   if (fs.existsSync(outputDir)) {
@@ -141,8 +145,6 @@ export async function compileCompactContract(options: CompileCompactOptions): Pr
   for (const input of inputs) {
     fs.copyFileSync(path.join(sourceDir, input), path.join(outputDir, input));
   }
-
-  await ensureToolchainImage();
 
   log.info(`Compiling Compact fixture ${name} with compactc ${COMPACT_COMPILER_VERSION}`);
   await dockerRun(
