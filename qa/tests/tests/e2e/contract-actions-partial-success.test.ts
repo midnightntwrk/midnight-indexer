@@ -108,8 +108,10 @@ describe
       }
     }, SETUP_TIMEOUT);
 
+    // The toolkit only exists once the image build and the compile succeeded;
+    // stopping an unassigned one here would bury the failure that stopped setup.
     afterAll(async () => {
-      await toolkit.stop();
+      await toolkit?.stop();
     });
 
     /**
