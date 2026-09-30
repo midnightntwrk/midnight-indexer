@@ -48,9 +48,11 @@ Only two files are committed: `segment-split.compact` and its toolkit-js
 keys, close to a megabyte of binary nobody can review in a diff — is **not** in
 the repository. The test builds it on the fly:
 
-1. `utils/compact/compact-compiler.ts` builds `compact-toolchain:<version>`
+1. `utils/compact/compact-compiler.ts` builds `compact-toolchain:<version>-<digest>`
    from `utils/compact/compact-toolchain.Dockerfile` (first use only; a Docker
-   image cache hit afterwards), which installs the pinned compactc release.
+   image cache hit afterwards), which installs the pinned compactc release. The
+   digest covers the Dockerfile and the toolchain-manager pin, so editing either
+   builds a fresh image rather than reusing one cached under the same version.
 2. It copies both committed files into
    `.tmp/compact/segment-split-<digest>/` and runs `compact compile` there.
    The digest covers the compiler pin and the bytes of both inputs, so editing

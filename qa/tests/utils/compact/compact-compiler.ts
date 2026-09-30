@@ -47,12 +47,27 @@ export const COMPACT_COMPILER_VERSION = process.env.COMPACT_COMPILER_VERSION ?? 
 const COMPACT_MANAGER_VERSION = process.env.COMPACT_MANAGER_VERSION ?? '0.5.1';
 
 /**
+ * Digest of the inputs, other than the compiler pin, that shape the toolchain
+ * image: the Dockerfile itself and the toolchain-manager pin. Folded into the
+ * image tag so that changing either builds a fresh image instead of reusing
+ * one cached under the same compiler version.
+ */
+const toolchainDigest = (): string =>
+  createHash('sha256')
+    .update(`${COMPACT_MANAGER_VERSION}\0`)
+    .update(fs.readFileSync(DOCKERFILE))
+    .digest('hex')
+    .slice(0, 12);
+
+/**
  * Built from {@link DOCKERFILE} on first use and reused from the local Docker
- * image cache afterwards. Set `COMPACT_TOOLCHAIN_IMAGE` to use a pre-built
- * image instead (it must already be present locally; nothing is built).
+ * image cache afterwards, keyed on the compiler pin and {@link toolchainDigest}.
+ * Set `COMPACT_TOOLCHAIN_IMAGE` to use a pre-built image instead (it must
+ * already be present locally; nothing is built).
  */
 const TOOLCHAIN_IMAGE =
-  process.env.COMPACT_TOOLCHAIN_IMAGE ?? `compact-toolchain:${COMPACT_COMPILER_VERSION}`;
+  process.env.COMPACT_TOOLCHAIN_IMAGE ??
+  `compact-toolchain:${COMPACT_COMPILER_VERSION}-${toolchainDigest()}`;
 
 /** The toolchain image build downloads a Debian base plus the compiler. */
 const IMAGE_BUILD_TIMEOUT_MS = 600_000;
