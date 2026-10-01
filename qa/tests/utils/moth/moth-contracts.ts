@@ -193,12 +193,13 @@ const openContractContext = (seed: string, artifactDir: string): Promise<Contrac
  */
 const inMemoryPrivateStateProvider = () => {
   const states = new Map<string, unknown>();
-  // Signing keys are keyed by contract address, contract addresses by private
-  // state key. Separate maps, because the two key spaces are unrelated and a
-  // shared one would let a private state key shadow a contract address.
+  // Signing keys are keyed by contract address and private states by their own
+  // id, so the two live in separate maps rather than one shared key space.
   const signingKeys = new Map<string, string>();
-  const contractAddresses = new Map<string, string>();
   return {
+    // The 4.1.1 interface scopes private state to one contract at a time; with
+    // no private state to scope, the address only needs to be accepted.
+    setContractAddress: (_address: string): void => {},
     set: async (key: string, state: unknown) => void states.set(key, state),
     get: async (key: string) => states.get(key) ?? null,
     remove: async (key: string) => void states.delete(key),
@@ -208,9 +209,6 @@ const inMemoryPrivateStateProvider = () => {
     getSigningKey: async (address: string) => signingKeys.get(address) ?? null,
     removeSigningKey: async (address: string) => void signingKeys.delete(address),
     clearSigningKeys: async () => void signingKeys.clear(),
-    setContractAddress: async (key: string, address: string) =>
-      void contractAddresses.set(key, address),
-    getContractAddress: async (key: string) => contractAddresses.get(key) ?? null,
   };
 };
 
