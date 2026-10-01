@@ -29,7 +29,7 @@ on:
         # Keep in step with the job-level fallback below.
         description: Node tag (must be 2.x for the 4.4 line)
         required: false
-        default: "2.1.0-rc.2"
+        default: "2.1.0-rc.4"
       indexer_tag:
         type: string
         description: Indexer tag (empty resolves the newest published main build)
@@ -57,7 +57,7 @@ jobs:
       TARGET_ENV: undeployed
       LOG_LEVEL: DEBUG
       # Keep in step with the dispatch input default above.
-      NODE_TAG: ${{ inputs.node_tag || '2.1.0-rc.2' }}
+      NODE_TAG: ${{ inputs.node_tag || '2.1.0-rc.4' }}
       IMAGE_REGISTRY: ${{ inputs.image_registry || 'ghcr.io/midnight-ntwrk' }}
       # INDEXER_TAG is deliberately NOT set here: a job-level value would shadow the resolved
       # one published to $GITHUB_ENV by the startup step, and on a schedule event `inputs` is
