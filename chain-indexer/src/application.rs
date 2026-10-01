@@ -359,7 +359,7 @@ where
     };
 
     // Apply transactions to ledger state with special handling for genesis block.
-    let (transactions, ledger_parameters) = if block.height == 0 {
+    let (mut transactions, ledger_parameters) = if block.height == 0 {
         // At genesis compare ledger state roots of genesis and block from node to detect whether
         // genesis already includes transactions (post-block-0) or not (pre-block-0).
 
@@ -428,6 +428,14 @@ where
             block.height
         );
     }
+
+    // Capture the balances of each contract action's contract state. This happens once per block,
+    // deliberately after the root validations above and after the genesis branch (which replaces
+    // `ledger_state`).
+    ledger_state
+        .capture_contract_state(&mut transactions)
+        .context("capture contract state")?;
+    let transactions = transactions;
 
     // Determine whether caught up, also allowing to fall back a little in that state.
     // Use saturating subtraction to handle the case where streams are temporarily out of order.
