@@ -18,6 +18,7 @@ import '@utils/logging/test-logging-hooks';
 import log from '@utils/logging/logger';
 import dataProvider from '@utils/testdata-provider';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
+import { env } from '../../environment/model';
 import { getBlockByHashWithRetry, getTransactionByHashWithRetry } from './test-utils';
 import {
   ToolkitWrapper,
@@ -54,7 +55,11 @@ describe.sequential('contract actions', () => {
     indexerHttpClient = new IndexerHttpClient();
     fundingSeed = dataProvider.getFundingSeed();
     toolkit = new ToolkitWrapper({});
-    await toolkit.start();
+    // Under TX_BACKEND=moth every contract action goes through midnight-js, so
+    // the toolkit container would run for the whole suite and do no work.
+    if (env.getTxBackend() === 'toolkit') {
+      await toolkit.start();
+    }
   }, TOOLKIT_WRAPPER_TIMEOUT);
 
   afterAll(async () => {
