@@ -943,6 +943,10 @@ class ToolkitWrapper {
    * Run contract maintenance (update): change contract authority and submit in one toolkit command.
    * Uses execToolkit and parseTransactionOutput; maintenance does not use a separate generate-then-send step.
    *
+   * Under TX_BACKEND=moth the update must use the same funding seed as the
+   * deploy: the contract's signing key lives in that seed's in-process private
+   * state provider, and a different seed has no key to sign the update with.
+   *
    * @param deploymentResult - From deployContract; provides contract-address-untagged.
    * @param fundingSeed - Optional funding seed. When provided, uses --funding-seed (required on preprod/qanet).
    * @param newAuthoritySeed - Seed for the new authority. Defaults to DEFAULT_NEW_AUTHORITY_SEED.
