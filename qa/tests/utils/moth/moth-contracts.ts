@@ -22,8 +22,8 @@
 // (moth issue #119, surfacing as node error 192). The fix is merged but
 // unreleased. moth's *transfer* path does not do this — it goes
 // balance -> signRecipe -> finalize, the same order a real wallet uses. This
-// module builds a midnight-js `walletProvider` in that same order, so the
-// contract path does not depend on moth's release train at all.
+// module's midnight-js `walletProvider` delegates to that transfer-path
+// balancer, so the contract path does not depend on moth's release train.
 //
 // This is the shape proven on preprod on 2026-09-14 by the segment-probe
 // investigation (`segment-probe/src/moth-wallet.ts`), ported here.
@@ -40,7 +40,6 @@
 // `overrides` block in package.json pins both; do not remove it.
 
 import { dirname, resolve } from 'path';
-import { createKeystore } from '@midnightntwrk/wallet-sdk/unshielded';
 import {
   createContractMaintenanceTxInterface,
   createUnprovenCallTxFromInitialStates,
@@ -59,6 +58,7 @@ import * as Rx from 'rxjs';
 import log from '@utils/logging/logger';
 import { env } from '../../environment/model';
 import { ensureProofServer, proofServerMismatchHint } from './proof-server';
+import { balanceTransaction } from '@shieldedtech/moth-wallet/sync/operations';
 import { openMothWallet, seedFingerprint } from './moth-backend';
 
 /**
@@ -116,9 +116,9 @@ const loadCompiledContract = async (artifactDir: string): Promise<any> => {
 /**
  * Build the midnight-js provider set on top of moth's synced facade.
  *
- * `balanceTx` deliberately runs balance -> signRecipe -> finalize. That is the
- * order moth's transfer path and testkit both use; moth's own contract path
- * does not, and that is moth issue #119 (node error 192).
+ * `balanceTx` hands the unbound transaction to moth's `balanceTransaction`,
+ * the balance -> signRecipe -> finalize sequence its transfer path uses. moth's
+ * own contract path does not, and that is moth issue #119 (node error 192).
  */
 const openContractContext = (seed: string, artifactDir: string): Promise<ContractContext> => {
   // The seed's hash, not the seed: the key must never hold the secret, and a
@@ -139,24 +139,13 @@ const openContractContext = (seed: string, artifactDir: string): Promise<Contrac
     const coinPublicKey = state.shielded.coinPublicKey.toHexString() as string;
     const encryptionPublicKey = state.shielded.encryptionPublicKey.toHexString() as string;
 
-    const keystore = createKeystore((wallet.keys as any).nightExternalKey, networkId);
     const walletProvider = {
       getCoinPublicKey: () => coinPublicKey,
       getEncryptionPublicKey: () => encryptionPublicKey,
-      async balanceTx(tx: any, ttl?: Date) {
-        const recipe = await facade.balanceUnboundTransaction(
-          tx,
-          {
-            shieldedSecretKeys: (wallet.keys as any).shieldedSecretKeys,
-            dustSecretKey: (wallet.keys as any).dustSecretKey,
-          },
-          { ttl: ttl ?? new Date(Date.now() + 60 * 60_000) },
-        );
-        const signed = await facade.signRecipe(recipe, (payload: Uint8Array) =>
-          keystore.signData(payload),
-        );
-        return facade.finalizeRecipe(signed);
-      },
+      // moth takes the serialized bytes and picks the TTL itself, so the one
+      // midnight-js offers is not forwarded.
+      balanceTx: (tx: any) =>
+        balanceTransaction(facade, wallet.keys, networkId, tx.serialize(), false),
       submitTx: (tx: any) => facade.submitTransaction(tx),
     };
 
