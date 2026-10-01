@@ -17,7 +17,10 @@ import fs from "fs";
 import path from "path";
 import { TARGET_ENV, INDEXER_WS_URL, INDEXER_HTTP_URL } from "./env.js";
 import { Block, RegularTransaction } from "./indexer-types.js";
-import { updateTestDataFiles } from "./test-data-handler.js";
+import {
+  completeLinesLength,
+  updateTestDataFiles,
+} from "./test-data-handler.js";
 
 // Configuration constants
 const CONFIG = {
@@ -106,14 +109,11 @@ function repairTruncatedBlocksFile(filePath: string): void {
     const tailBuffer = Buffer.alloc(tailSize);
     fs.readSync(fd, tailBuffer, 0, tailSize, size - tailSize);
 
-    if (tailBuffer[tailSize - 1] === 0x0a /* "\n" */) return; // last write completed
+    const completeTail = completeLinesLength(tailBuffer);
+    if (completeTail === tailSize) return; // last write completed
 
-    const lastNewlineInTail = tailBuffer.lastIndexOf(0x0a);
-    const truncateAt =
-      lastNewlineInTail === -1
-        ? size - tailSize // no newline in the tail at all; drop the whole tail
-        : size - tailSize + lastNewlineInTail + 1;
-
+    // No newline in the tail at all drops the whole tail.
+    const truncateAt = size - tailSize + completeTail;
     fs.ftruncateSync(fd, truncateAt);
     console.warn(
       `[WARN ] - Repaired ${filePath}: dropped a truncated trailing line from a previous abrupt exit (${size - truncateAt} bytes)`,

@@ -301,6 +301,17 @@ export interface UpdateTestDataOptions {
 }
 
 /**
+ * Length of the leading part of a blocks.jsonl payload made of complete lines.
+ * Every line the scanner writes ends in a newline, so anything after the last
+ * one is a line cut short by an abrupt exit and is not safe to parse.
+ */
+export function completeLinesLength(data: string | Buffer): number {
+  const lastNewline =
+    typeof data === "string" ? data.lastIndexOf("\n") : data.lastIndexOf(0x0a);
+  return lastNewline + 1;
+}
+
+/**
  * Updates test data files in the specified folder
  * @param folderPath - Path to the test data folder
  * @param sourceBlockDataFile - Path to the data file containing blocks
@@ -326,16 +337,13 @@ export async function updateTestDataFiles(
       );
     }
 
-    // Read the source block data file. A process killed mid-write can leave a
-    // truncated trailing line; complete lines always end with a newline, so
-    // anything after the last newline is dropped instead of failing the parse.
-    let sourceBlockData = readFileContent(sourceBlockDataFile);
-    if (!sourceBlockData.endsWith("\n")) {
-      sourceBlockData = sourceBlockData.slice(
-        0,
-        sourceBlockData.lastIndexOf("\n") + 1,
-      );
-    }
+    // A process killed mid-write can leave a truncated trailing line; it is
+    // dropped here rather than allowed to fail the parse.
+    const rawBlockData = readFileContent(sourceBlockDataFile);
+    const sourceBlockData = rawBlockData.slice(
+      0,
+      completeLinesLength(rawBlockData),
+    );
 
     // Harvest the contract-events data (the only step with remote I/O)
     // BEFORE any file is written: a probe or query failure then aborts the
