@@ -54,6 +54,7 @@ import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-p
 import { httpClientProofProvider } from '@midnight-ntwrk/midnight-js-http-client-proof-provider';
 import { NodeZkConfigProvider } from '@midnight-ntwrk/midnight-js-node-zk-config-provider';
 import { setNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
+import { SucceedEntirely, type FinalizedTxData } from '@midnight-ntwrk/midnight-js-types';
 import * as Rx from 'rxjs';
 import log from '@utils/logging/logger';
 import { env } from '../../environment/model';
@@ -233,6 +234,21 @@ const asBackendFailure = (what: string, err: unknown): Error => {
 };
 
 /**
+ * midnight-js resolves a submit once the transaction is in a block, whether or
+ * not it applied, so a rejected transaction still comes back with a hash. The
+ * suite must not go on to assert the indexer against one of those.
+ */
+const ensureApplied = (what: string, finalized: FinalizedTxData): string => {
+  if (finalized.status !== SucceedEntirely) {
+    throw new Error(`${what} landed with status ${finalized.status}`);
+  }
+  if (!finalized.txHash) {
+    throw new Error(`${what} reported no transaction hash`);
+  }
+  return finalized.txHash;
+};
+
+/**
  * Deploy a compiled contract and return its address and deploy transaction hash.
  *
  * @param seed - Funding seed for the deploying wallet. Never logged.
@@ -251,8 +267,9 @@ export const deployContractViaMoth = async (
       initialPrivateState: undefined,
     } as any);
     const contractAddress = deployed.deployTxData.public.contractAddress as string;
+    const txHash = ensureApplied('the deploy', deployed.deployTxData.public);
     log.info(`moth/midnight-js deployed contract ${contractAddress}`);
-    return { contractAddress, txHash: deployed.deployTxData.public.txHash as string };
+    return { contractAddress, txHash };
   } catch (err) {
     throw asBackendFailure('deploy the contract', err);
   }
@@ -297,8 +314,9 @@ export const callCircuitViaMoth = async (
       unprovenTx: call.private.unprovenTx,
       circuitId,
     });
+    const txHash = ensureApplied(`the ${circuitId} call`, submitted);
     log.info(`moth/midnight-js called ${circuitId} on ${contractAddress}`);
-    return submitted.txHash as string;
+    return txHash;
   } catch (err) {
     throw asBackendFailure(`call circuit ${circuitId}`, err);
   }
@@ -335,8 +353,9 @@ export const updateContractViaMoth = async (
       contractAddress as any,
     );
     const finalized = await maintenance.replaceAuthority(newAuthority);
+    const txHash = ensureApplied('the authority update', finalized);
     log.info(`moth/midnight-js replaced the authority on ${contractAddress}`);
-    return finalized.txHash as string;
+    return txHash;
   } catch (err) {
     throw asBackendFailure('replace the contract maintenance authority', err);
   }
