@@ -81,10 +81,6 @@ export class UndeployedEnvironmentManager {
   }
 
   /**
-   * Ensure the undeployed stack is up. If a stack is already running, do not
-   * re-provision and remember not to tear down on exit.
-   */
-  /**
    * Delete moth's cached wallet state for the undeployed network.
    *
    * moth keys its cache by wallet name only — nothing about the chain — so a
@@ -113,6 +109,10 @@ export class UndeployedEnvironmentManager {
     }
   }
 
+  /**
+   * Ensure the undeployed stack is up. If a stack is already running, do not
+   * re-provision and remember not to tear down on exit.
+   */
   async ensureRunning(): Promise<void> {
     if (await this.isIndexerReady()) {
       console.log(
