@@ -23,8 +23,7 @@
 use crate::{
     domain::{
         ContractBalance, ContractMaintenanceAuthority, ContractMaintenanceVerifyingKey,
-        LedgerVersion, SerializedContractState, SerializedContractStateKey, TokenType,
-        VerifyingKeyKind,
+        LedgerVersion, SerializedContractState, SerializedContractStateKey, VerifyingKeyKind,
         ledger::{Error, TaggedSerializableExt},
     },
     infra::ledger_db::v1_1,
@@ -120,81 +119,59 @@ impl<D: DB> ContractState<D> {
         }
     }
 
-    /// Get the token balances for this contract.
+    /// Get the unshielded token balances for this contract.
+    ///
+    /// Shielded and DUST keys can also appear in the balance map, but they are not unshielded
+    /// balances and their tagged encodings do not fit [TokenType](crate::domain::TokenType), so they are skipped rather than
+    /// failing the whole block.
     pub fn balances(&self) -> Result<Vec<ContractBalance>, Error> {
-        match self {
-            Self::V3(contract_state) => {
-                contract_state
-                    .balance
-                    .iter()
-                    .filter_map(|entry| {
-                        // Read via deref: `Sp::into_inner` returns `None` for lazy or shared
-                        // entries, silently dropping all balances.
-                        let (token_type, amount) = &*entry;
-                        let (token_type, amount) = (**token_type, **amount);
+        let balances = match self {
+            Self::V3(contract_state) => contract_state
+                .balance
+                .iter()
+                .filter_map(|entry| {
+                    // Read via deref: `Sp::into_inner` returns `None` for lazy or shared entries,
+                    // silently dropping all balances.
+                    let (token_type, amount) = &*entry;
+                    let (token_type, amount) = (**token_type, **amount);
 
-                        (amount > 0).then_some((token_type, amount))
-                    })
-                    .map(|(token_type, amount)| {
-                        match token_type {
-                            // For unshielded tokens extract the type directly.
-                            MidnightTokenType::Unshielded(unshielded) => Ok(ContractBalance {
+                    match token_type {
+                        MidnightTokenType::Unshielded(unshielded) if amount > 0 => {
+                            Some(ContractBalance {
                                 token_type: unshielded.0.0.into(),
                                 amount,
-                            }),
-
-                            // For other tokens we serialize the type.
-                            _ => {
-                                let token_type = token_type
-                                    .tagged_serialize()
-                                    .map_err(|error| Error::Serialize("TokenTypeV8", error))?;
-
-                                let token_type = TokenType::try_from(token_type.as_ref())
-                                    .map_err(Error::ByteArrayLen)?;
-
-                                Ok(ContractBalance { token_type, amount })
-                            }
+                            })
                         }
-                    })
-                    .collect()
-            }
 
-            Self::V4(contract_state) => {
-                contract_state
-                    .balance
-                    .iter()
-                    .filter_map(|entry| {
-                        // Read via deref: `Sp::into_inner` returns `None` for lazy or shared
-                        // entries, silently dropping all balances.
-                        let (token_type, amount) = &*entry;
-                        let (token_type, amount) = (**token_type, **amount);
+                        _ => None,
+                    }
+                })
+                .collect(),
 
-                        (amount > 0).then_some((token_type, amount))
-                    })
-                    .map(|(token_type, amount)| {
-                        match token_type {
-                            // For unshielded tokens extract the type directly.
-                            MidnightTokenTypeV9::Unshielded(unshielded) => Ok(ContractBalance {
+            Self::V4(contract_state) => contract_state
+                .balance
+                .iter()
+                .filter_map(|entry| {
+                    // Read via deref: `Sp::into_inner` returns `None` for lazy or shared entries,
+                    // silently dropping all balances.
+                    let (token_type, amount) = &*entry;
+                    let (token_type, amount) = (**token_type, **amount);
+
+                    match token_type {
+                        MidnightTokenTypeV9::Unshielded(unshielded) if amount > 0 => {
+                            Some(ContractBalance {
                                 token_type: unshielded.0.0.into(),
                                 amount,
-                            }),
-
-                            // For other tokens we serialize the type.
-                            _ => {
-                                let token_type = token_type
-                                    .tagged_serialize()
-                                    .map_err(|error| Error::Serialize("TokenTypeV9", error))?;
-
-                                let token_type = TokenType::try_from(token_type.as_ref())
-                                    .map_err(Error::ByteArrayLen)?;
-
-                                Ok(ContractBalance { token_type, amount })
-                            }
+                            })
                         }
-                    })
-                    .collect()
-            }
-        }
+
+                        _ => None,
+                    }
+                })
+                .collect(),
+        };
+
+        Ok(balances)
     }
 
     /// Get the maintenance authority for this contract.
@@ -396,9 +373,12 @@ mod tests {
         },
     };
     use midnight_base_crypto_v1::hash::HashOutput;
-    use midnight_coin_structure_v2::coin::{TokenType as MidnightTokenType, UnshieldedTokenType};
+    use midnight_coin_structure_v2::coin::{
+        ShieldedTokenType, TokenType as MidnightTokenType, UnshieldedTokenType,
+    };
     use midnight_coin_structure_v3::coin::{
-        TokenType as MidnightTokenTypeV9, UnshieldedTokenType as UnshieldedTokenTypeV9,
+        ShieldedTokenType as ShieldedTokenTypeV9, TokenType as MidnightTokenTypeV9,
+        UnshieldedTokenType as UnshieldedTokenTypeV9,
     };
     use midnight_onchain_runtime_v3::state::ContractState as ContractStateV3;
     use midnight_onchain_runtime_v4::state::ContractState as ContractStateV4;
@@ -432,6 +412,62 @@ mod tests {
             MidnightTokenTypeV9::Unshielded(UnshieldedTokenTypeV9(HashOutput(TOKEN_TYPE.0))),
             AMOUNT,
         );
+        let contract_state = contract_state
+            .tagged_serialize()
+            .expect("contract state can be serialized");
+
+        let balances = DefaultContractState::deserialize(contract_state, LedgerVersion::V9)
+            .expect("contract state can be deserialized")
+            .balances()
+            .expect("balances can be extracted");
+
+        assert_eq!(balances.len(), 1);
+        assert_eq!(balances[0].token_type, TOKEN_TYPE);
+        assert_eq!(balances[0].amount, AMOUNT);
+    }
+
+    #[test]
+    fn test_balances_skip_shielded_and_dust_v8() {
+        let mut contract_state = ContractStateV3::<DefaultDB>::default();
+        contract_state.balance = contract_state
+            .balance
+            .insert(
+                MidnightTokenType::Unshielded(UnshieldedTokenType(HashOutput(TOKEN_TYPE.0))),
+                AMOUNT,
+            )
+            .insert(
+                MidnightTokenType::Shielded(ShieldedTokenType(HashOutput([8; 32]))),
+                AMOUNT,
+            )
+            .insert(MidnightTokenType::Dust, AMOUNT);
+        let contract_state = contract_state
+            .tagged_serialize()
+            .expect("contract state can be serialized");
+
+        let balances = DefaultContractState::deserialize(contract_state, LedgerVersion::V8)
+            .expect("contract state can be deserialized")
+            .balances()
+            .expect("balances can be extracted");
+
+        assert_eq!(balances.len(), 1);
+        assert_eq!(balances[0].token_type, TOKEN_TYPE);
+        assert_eq!(balances[0].amount, AMOUNT);
+    }
+
+    #[test]
+    fn test_balances_skip_shielded_and_dust_v9() {
+        let mut contract_state = ContractStateV4::<DefaultDB>::default();
+        contract_state.balance = contract_state
+            .balance
+            .insert(
+                MidnightTokenTypeV9::Unshielded(UnshieldedTokenTypeV9(HashOutput(TOKEN_TYPE.0))),
+                AMOUNT,
+            )
+            .insert(
+                MidnightTokenTypeV9::Shielded(ShieldedTokenTypeV9(HashOutput([8; 32]))),
+                AMOUNT,
+            )
+            .insert(MidnightTokenTypeV9::Dust, AMOUNT);
         let contract_state = contract_state
             .tagged_serialize()
             .expect("contract state can be serialized");
