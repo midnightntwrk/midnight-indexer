@@ -123,6 +123,24 @@ function repairTruncatedBlocksFile(filePath: string): void {
   }
 }
 
+/**
+ * `fs.writeSync` may write fewer bytes than asked, so a single call can leave
+ * a partial line behind; this loops until every byte is on disk or throws.
+ */
+function writeAllSync(fd: number, text: string): void {
+  const bytes = Buffer.from(text);
+  let offset = 0;
+  while (offset < bytes.length) {
+    const written = fs.writeSync(fd, bytes, offset, bytes.length - offset);
+    if (written === 0) {
+      throw new Error(
+        `short write: ${bytes.length - offset} of ${bytes.length} bytes left unwritten`,
+      );
+    }
+    offset += written;
+  }
+}
+
 function ensureStatsDir(): void {
   if (!fs.existsSync(CONFIG.STATS_DIR)) fs.mkdirSync(CONFIG.STATS_DIR);
 }
@@ -880,7 +898,7 @@ async function main(): Promise<boolean> {
 
       if (linesToFlush.length > 0) {
         try {
-          fs.writeSync(blocksFd, linesToFlush.join(""));
+          writeAllSync(blocksFd, linesToFlush.join(""));
         } catch (error) {
           pendingLines = [...linesToFlush, ...pendingLines];
           console.error(
@@ -898,7 +916,7 @@ async function main(): Promise<boolean> {
     // descriptor, so whatever is buffered lands after what is already flushed.
     forceSyncCheckpoint = () => {
       if (pendingLines.length > 0) {
-        fs.writeSync(blocksFd, pendingLines.join(""));
+        writeAllSync(blocksFd, pendingLines.join(""));
         pendingLines = [];
       }
       writeStats(buildMergedStats(Math.round((Date.now() - startTime) / 1000)));
