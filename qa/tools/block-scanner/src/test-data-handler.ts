@@ -19,6 +19,9 @@ import * as commentJson from "comment-json";
 import { TARGET_ENV, INDEXER_HTTP_URL, INDEXER_API_VERSION } from "./env.js";
 import { Transaction, UnshieldedUtxo } from "./indexer-types.js";
 
+// Switch for blocks.jsonc/transactions.jsonc generation, currently disabled.
+const GENERATE_BLOCK_AND_TRANSACTION_DATA: boolean = false;
+
 // ============================================================================
 // Type Definitions
 // ============================================================================
@@ -289,14 +292,35 @@ function validateNonEmptyArray<T>(array: T[], arrayName: string): void {
   }
 }
 
+/** Options controlling how a test data refresh runs. */
+export interface UpdateTestDataOptions {
+  /** Skip the contract-events harvest (the only remote step) and leave that file untouched. */
+  readonly localOnly?: boolean;
+  /** Aborted when another refresh has taken over; nothing is written once it fires. */
+  readonly signal?: AbortSignal;
+}
+
+/**
+ * Length of the leading part of a blocks.jsonl payload made of complete lines.
+ * Every line the scanner writes ends in a newline, so anything after the last
+ * one is a line cut short by an abrupt exit and is not safe to parse.
+ */
+export function completeLinesLength(data: string | Buffer): number {
+  const lastNewline =
+    typeof data === "string" ? data.lastIndexOf("\n") : data.lastIndexOf(0x0a);
+  return lastNewline + 1;
+}
+
 /**
  * Updates test data files in the specified folder
  * @param folderPath - Path to the test data folder
- * @param dataFile - Path to the data file containing blocks
+ * @param sourceBlockDataFile - Path to the data file containing blocks
+ * @param options - See {@link UpdateTestDataOptions}
  */
 export async function updateTestDataFiles(
   folderPath: string,
   sourceBlockDataFile: string,
+  { localOnly = false, signal }: UpdateTestDataOptions = {},
 ): Promise<void> {
   try {
     // Validate input parameters
@@ -313,17 +337,44 @@ export async function updateTestDataFiles(
       );
     }
 
-    // Read source block data file
-    const sourceBlockData = readFileContent(sourceBlockDataFile);
+    // A process killed mid-write can leave a truncated trailing line; it is
+    // dropped here rather than allowed to fail the parse.
+    const rawBlockData = readFileContent(sourceBlockDataFile);
+    const sourceBlockData = rawBlockData.slice(
+      0,
+      completeLinesLength(rawBlockData),
+    );
 
     // Harvest the contract-events data (the only step with remote I/O)
     // BEFORE any file is written: a probe or query failure then aborts the
     // refresh with the previous snapshot fully intact, instead of leaving a
     // mix of refreshed and stale files behind.
-    const contractsWithEvents = await harvestContractEvents(sourceBlockData);
+    let contractsWithEvents: ContractWithEvents[] | null = null;
+    if (localOnly) {
+      console.info(
+        "[INFO ] - Skipping the contract events harvest (remote); " +
+          "leaving any existing contract events data file untouched",
+      );
+    } else {
+      contractsWithEvents = await harvestContractEvents(sourceBlockData);
+    }
 
-    updateBlockDataFile(folderPath, sourceBlockData);
-    updateTransactionDataFile(folderPath, sourceBlockData);
+    // The forced-exit refresh wrote the files while this one was waiting on
+    // the indexer; writing again now would race its exit.
+    if (signal?.aborted) {
+      console.info(
+        "[INFO ] - Skipping the test data write: superseded by a forced exit",
+      );
+      return;
+    }
+
+    // Block and transaction data files are currently not consumed by the test
+    // suites; generation is kept behind this switch instead of being removed
+    // so it can be re-enabled if they become needed again.
+    if (GENERATE_BLOCK_AND_TRANSACTION_DATA) {
+      updateBlockDataFile(folderPath, sourceBlockData);
+      updateTransactionDataFile(folderPath, sourceBlockData);
+    }
     updateContractDataFile(folderPath, sourceBlockData);
     updateUnshieldedTokenTypesDataFile(folderPath, sourceBlockData);
     if (contractsWithEvents !== null) {
@@ -686,10 +737,13 @@ function updateTransactionDataFile(
 /**
  * Updates the contract data file
  *
- * This file has a strong requirement, it will contain only contracts that have
- * all 3 action types: ContractDeploy, ContractCall, ContractUpdate
+ * This file contains exactly one contract, with only the first instance of
+ * each action type it has: the first in scan order with all 3 action types -
+ * ContractDeploy, ContractCall, ContractUpdate - or, when no contract on the
+ * chain has been updated, the first with a deploy and a call. The suites that
+ * need a ContractUpdate skip themselves when the file has none.
  *
- * If not such contracts exist, the file will contain an empty array
+ * If no contract has a deploy and a call, the file will contain an empty array
  *
  * @param destinationPath - Path to the test data folder
  * @param sourceBlockData - Path to the data file containing blocks
@@ -731,33 +785,65 @@ function updateContractDataFile(
       }
     }
 
-    // Filter to only keep addresses that have all 3 action types
+    // Prefer the first contract (in scan order) with all 3 action types; a
+    // chain with no updated contract yet (devnet, stagenet) falls back to the
+    // first with a deploy and a call, so those environments still get data.
     const requiredActionTypes: string[] = ["ContractDeploy", "ContractCall"];
-    const filteredContracts: ContractWithActions[] = Object.entries(
-      contractActionsMap,
-    )
-      .filter(([address, actions]: [string, ContractActionEntry[]]) => {
-        const actionTypes: Set<string> = new Set(
-          actions.map((action: ContractActionEntry) => action["action-type"]),
-        );
-        return requiredActionTypes.every((type: string) =>
-          actionTypes.has(type),
-        );
-      })
-      .map(
-        ([address, actions]: [
-          string,
-          ContractActionEntry[],
-        ]): ContractWithActions => ({
-          "contract-address": address,
-          "contract-actions": actions,
-        }),
+    const optionalActionTypes: string[] = ["ContractUpdate"];
+    const hasActionTypes = (
+      actions: ContractActionEntry[],
+      types: string[],
+    ): boolean => {
+      const actionTypes: Set<string> = new Set(
+        actions.map((action: ContractActionEntry) => action["action-type"]),
+      );
+      return types.every((type: string) => actionTypes.has(type));
+    };
+
+    const contracts = Object.entries(contractActionsMap);
+    const qualifyingContract =
+      contracts.find(([, actions]: [string, ContractActionEntry[]]) =>
+        hasActionTypes(actions, [
+          ...requiredActionTypes,
+          ...optionalActionTypes,
+        ]),
+      ) ??
+      contracts.find(([, actions]: [string, ContractActionEntry[]]) =>
+        hasActionTypes(actions, requiredActionTypes),
       );
 
-    // Log if no contracts match the criteria
+    // Only the first instance of each action type the contract has, in a
+    // fixed order, so the file shape does not depend on the scan.
+    const filteredContracts: ContractWithActions[] = qualifyingContract
+      ? [
+          {
+            "contract-address": qualifyingContract[0],
+            "contract-actions": [...requiredActionTypes, ...optionalActionTypes]
+              .map((type: string) =>
+                qualifyingContract[1].find(
+                  (action: ContractActionEntry) =>
+                    action["action-type"] === type,
+                ),
+              )
+              .filter(
+                (action): action is ContractActionEntry => action !== undefined,
+              ),
+          },
+        ]
+      : [];
+
     if (filteredContracts.length === 0) {
       console.info(
-        "[INFO ] - No contracts found with all required action types (ContractDeploy, ContractCall)",
+        "[INFO ] - No contracts found with the required action types (ContractDeploy, ContractCall)",
+      );
+    } else if (
+      !hasActionTypes(
+        filteredContracts[0]["contract-actions"],
+        optionalActionTypes,
+      )
+    ) {
+      console.info(
+        "[INFO ] - No contract with a ContractUpdate found; recording the first with a deploy and a call",
       );
     }
 
