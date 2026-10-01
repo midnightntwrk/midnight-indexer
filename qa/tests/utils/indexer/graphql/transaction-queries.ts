@@ -98,3 +98,20 @@ export const GET_TRANSACTION_BY_OFFSET = `query GetTransactionByOffset($OFFSET: 
     ${TRANSACTION_BODY_FRAGMENT}
   }
 }`;
+
+// TRANSACTION_BODY_FRAGMENT asks contract actions only for their shared fields, so a Deploy
+// cannot be told apart from a Call or an Update. This variant asks for the concrete type and
+// nothing else, which also keeps it usable against older indexer deployments.
+export const GET_TRANSACTION_CONTRACT_ACTIONS_BY_OFFSET = `query GetTransactionByOffset($OFFSET: TransactionOffset!) {
+  transactions(offset: $OFFSET) {
+    hash
+    block {
+      hash
+      height
+    }
+    contractActions {
+      __typename
+      address
+    }
+  }
+}`;
