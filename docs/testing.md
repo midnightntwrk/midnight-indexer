@@ -37,7 +37,7 @@ that the zswap/state-root match guards each block.
   wallet-indexer / indexer-api binaries (cloud) or `indexer-standalone` + SQLite (standalone).
   It SIGTERMs and restarts chain-indexer once to exercise reconnect.
 - `indexer-tests/src/e2e.rs` then runs the assertions. It **collects the blocks subscription
-  (heights 0..=32) as the source of truth**, validating structural invariants as it goes: heights
+  (heights 0..=40) as the source of truth**, validating structural invariants as it goes: heights
   increment by one, parent-hash linkage, transactions reference their block and share its protocol
   version, segment results match the transaction status, fees parse, a contract call shares its
   deploy's address, unshielded balances have a valid token type + amount, and zswap/dust ledger
