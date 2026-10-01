@@ -188,6 +188,10 @@ pub enum InvalidReasons {
         #[serde(rename = "StakeError")]
         stake_error: String,
     },
+
+    /// Any other reason the node reports, e.g. `InvalidRegistrationData`. Kept opaque so that a
+    /// reason this type does not model cannot fail decoding of the whole registrations response.
+    Other(serde_json::Value),
 }
 
 impl Display for InvalidReasons {
@@ -196,6 +200,8 @@ impl Display for InvalidReasons {
             InvalidReasons::StakeError { stake_error } => {
                 write!(f, "Stake Error: {}", stake_error)
             }
+
+            InvalidReasons::Other(reason) => write!(f, "{reason}"),
         }
     }
 }
@@ -268,4 +274,59 @@ pub enum BodyItem {
 pub struct TimestampExtrinsic {
     #[serde(rename = "Timestamp")]
     pub timestamp_ms: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::domain::rpc::{CandidateRegistration, InvalidReasons};
+    use serde_json::json;
+
+    fn registration(invalid_reasons: serde_json::Value) -> serde_json::Value {
+        json!({
+            "sidechainPubKey": "0x01",
+            "sidechainAccountId": "account",
+            "mainchainPubKey": "0x02",
+            "crossChainPubKey": "0x03",
+            "keys": { "gran": "0x04", "aura": "0x05" },
+            "sidechainSignature": "0x06",
+            "mainchainSignature": "0x07",
+            "crossChainSignature": "0x08",
+            "utxo": {
+                "utxoId": "utxo#0",
+                "epochNumber": 1,
+                "blockNumber": 2,
+                "slotNumber": 3,
+                "txIndexWithinBlock": 0
+            },
+            "isValid": false,
+            "invalidReasons": invalid_reasons
+        })
+    }
+
+    #[test]
+    fn test_invalid_reasons_stake_error() {
+        let registration = serde_json::from_value::<CandidateRegistration>(registration(
+            json!({ "StakeError": "insufficient stake" }),
+        ))
+        .expect("registration can be deserialized");
+
+        assert!(matches!(
+            registration.invalid_reasons,
+            Some(InvalidReasons::StakeError { stake_error }) if stake_error == "insufficient stake"
+        ));
+    }
+
+    #[test]
+    fn test_invalid_reasons_unmodeled() {
+        let reason = json!({ "InvalidRegistrationData": "invalid mainchain signature" });
+
+        let registration =
+            serde_json::from_value::<CandidateRegistration>(registration(reason.clone()))
+                .expect("registration can be deserialized");
+
+        assert!(matches!(
+            registration.invalid_reasons,
+            Some(InvalidReasons::Other(other)) if other == reason
+        ));
+    }
 }
