@@ -12,7 +12,8 @@
 // limitations under the License.
 
 use crate::domain::storage::NoopStorage;
-use indexer_common::domain::{SessionId, ViewingKey};
+use indexer_common::domain::{ByteVec, ViewingKey};
+use std::time::Duration;
 use uuid::Uuid;
 
 #[trait_variant::make(Send)]
@@ -20,19 +21,31 @@ pub trait WalletStorage
 where
     Self: Clone + Send + Sync + 'static,
 {
-    /// Connect a wallet, i.e. add it to the active ones, and return a random session ID.
-    /// If `start_index` is provided, transactions before that index are skipped.
+    /// Connect a wallet, i.e. add it to the active ones, and return its wallet ID along with a
+    /// sealed session token. If `start_index` is provided, transactions before that index are
+    /// skipped.
     async fn connect_wallet(
         &self,
         viewing_key: &ViewingKey,
         start_index: Option<u64>,
-    ) -> Result<SessionId, sqlx::Error>;
+    ) -> Result<(Uuid, ByteVec), sqlx::Error>;
 
-    /// Disconnect a wallet, i.e. remove it from the active ones.
-    async fn disconnect_wallet(&self, session_id: SessionId) -> Result<(), sqlx::Error>;
+    /// Disconnect a wallet session and return whether it was valid. A legacy session ID is
+    /// removed; a sealed session token cannot be revoked on other instances, so it is not revoked
+    /// here either — the wallet drops out of the active set once the inactivity TTL lapses.
+    async fn disconnect_wallet(
+        &self,
+        session: &[u8],
+        token_ttl: Duration,
+    ) -> Result<bool, sqlx::Error>;
 
-    /// Resolve a session ID to the corresponding wallet ID.
-    async fn resolve_session_id(&self, session_id: SessionId) -> Result<Option<Uuid>, sqlx::Error>;
+    /// Resolve a sealed session token or a legacy session ID to the corresponding wallet ID. A
+    /// valid token upserts the wallet, so any instance sharing the cipher key can serve it.
+    async fn resolve_session(
+        &self,
+        session: &[u8],
+        token_ttl: Duration,
+    ) -> Result<Option<Uuid>, sqlx::Error>;
 
     /// Refresh the wallet's last active timestamp to avoid timing out.
     async fn keep_wallet_active(&self, wallet_id: Uuid) -> Result<(), sqlx::Error>;
@@ -44,15 +57,23 @@ impl WalletStorage for NoopStorage {
         &self,
         viewing_key: &ViewingKey,
         start_index: Option<u64>,
-    ) -> Result<SessionId, sqlx::Error> {
+    ) -> Result<(Uuid, ByteVec), sqlx::Error> {
         unimplemented!()
     }
 
-    async fn disconnect_wallet(&self, session_id: SessionId) -> Result<(), sqlx::Error> {
+    async fn disconnect_wallet(
+        &self,
+        session: &[u8],
+        token_ttl: Duration,
+    ) -> Result<bool, sqlx::Error> {
         unimplemented!()
     }
 
-    async fn resolve_session_id(&self, session_id: SessionId) -> Result<Option<Uuid>, sqlx::Error> {
+    async fn resolve_session(
+        &self,
+        session: &[u8],
+        token_ttl: Duration,
+    ) -> Result<Option<Uuid>, sqlx::Error> {
         unimplemented!()
     }
 
