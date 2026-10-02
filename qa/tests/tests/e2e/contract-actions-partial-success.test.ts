@@ -41,12 +41,14 @@ const TEST_TIMEOUT = 60_000; // 1 minute
 
 /**
  * Compact fixture source; see its README for why the contract is shaped the way
- * it is. Only the `.compact` source and its toolkit-js config are committed —
- * the compiled output is produced on the fly by {@link compileCompactContract}.
+ * it is. This suite compiles the `.compact` source on the fly with
+ * {@link compileCompactContract}, because the toolkit's compactc differs from the
+ * one whose output is committed under `managed/` for the midnight-js path. One
+ * source, two toolchains — not two copies of the contract.
  */
 const SEGMENT_SPLIT_DIR = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  '../../data/contracts/segment-split',
+  '../../contracts/segment-split',
 );
 const SEGMENT_SPLIT_SOURCE = 'segment-split.compact';
 const SEGMENT_SPLIT: CustomContractSpec = { configFile: 'segment-split.config.ts' };
