@@ -293,6 +293,7 @@ impl SubxtNode {
 
         let BlockDetails {
             timestamp,
+            system_parameters_updated,
             transactions,
             mut dust_registration_events,
             bridge_events,
@@ -336,6 +337,7 @@ impl SubxtNode {
             transactions,
             dust_registration_events,
             bridge_events,
+            system_parameters_updated,
         };
 
         debug!(
