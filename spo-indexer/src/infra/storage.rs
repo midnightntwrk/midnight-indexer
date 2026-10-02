@@ -385,7 +385,7 @@ impl domain::storage::Storage for Storage {
              ON CONFLICT (id) DO UPDATE SET last_pool_id = EXCLUDED.last_pool_id, updated_at = CURRENT_TIMESTAMP"
         })
         .bind(pool_id)
-        .execute(&*self.pool)
+        .execute(self.pool.writer())
         .await?;
         Ok(())
     }

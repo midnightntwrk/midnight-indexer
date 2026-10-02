@@ -22,7 +22,7 @@ const CONTRACT_STATE_KEYS_VERSION: i64 = 11;
 /// Run the database migrations for SQLite.
 pub async fn run(pool: &SqlitePool) -> Result<(), Error> {
     refuse_unconvertible_contract_states(pool).await?;
-    sqlx::migrate!("migrations/sqlite").run(&**pool).await?;
+    sqlx::migrate!("migrations/sqlite").run(pool.writer()).await?;
     Ok(())
 }
 
@@ -32,7 +32,7 @@ pub async fn run(pool: &SqlitePool) -> Result<(), Error> {
 /// contract actions in it.
 pub async fn run_for_ledger_db(pool: &SqlitePool) -> Result<(), Error> {
     sqlx::migrate!("migrations/sqlite-ledger-db")
-        .run(&**pool)
+        .run(pool.writer())
         .await?;
     Ok(())
 }
@@ -160,10 +160,10 @@ mod tests {
 
         // A pre-key `contract_actions` carrying one row, as a version that stored blobs left it.
         sqlx::query("CREATE TABLE contract_actions (id INTEGER PRIMARY KEY, state BLOB)")
-            .execute(&*pool)
+            .execute(pool.writer())
             .await?;
         sqlx::query("INSERT INTO contract_actions (id, state) VALUES (1, x'0102')")
-            .execute(&*pool)
+            .execute(pool.writer())
             .await?;
 
         let error = run(&pool).await.expect_err("migration is refused");
@@ -185,7 +185,7 @@ mod tests {
         let pool = new_pool(&temp_dir).await?;
 
         sqlx::query("CREATE TABLE contract_actions (id INTEGER PRIMARY KEY, state BLOB)")
-            .execute(&*pool)
+            .execute(pool.writer())
             .await?;
 
         let result = refuse_unconvertible_contract_states(&pool).await;

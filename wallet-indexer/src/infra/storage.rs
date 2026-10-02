@@ -300,7 +300,7 @@ impl domain::storage::Storage for Storage {
                 sqlx::query(query)
                     .bind(outdated_ids)
                     .bind(min_last_active)
-                    .execute(&*self.pool)
+                    .execute(self.pool.writer())
                     .await
                     .map(|_| ())
                     .or_else(|error| ignore_deadlock_detected(error, || ()))?;
@@ -317,16 +317,17 @@ impl domain::storage::Storage for Storage {
                     AND last_active < $2
                 "};
 
-                // Housekeeping: if the shared writer is starved past busy_timeout, skip this
-                // wallet instead of failing the poll (which would take down the whole
-                // standalone process); the next poll retries.
+                // Housekeeping: if the single writer connection is held so long that the
+                // fair-queue wait times out, skip this wallet instead of failing the poll
+                // (which would take down the whole standalone process); the next poll
+                // retries.
                 let result = sqlx::query(query)
                     .bind(id)
                     .bind(min_last_active)
-                    .execute(&*self.pool)
+                    .execute(self.pool.writer())
                     .await;
                 match result {
-                    Err(error) if indexer_common::infra::pool::sqlite::is_busy_error(&error) => {
+                    Err(sqlx::Error::PoolTimedOut) => {
                         log::warn!("skipping wallet session cleanup, sqlite writer is busy");
                     }
                     other => {
@@ -409,7 +410,7 @@ mod tests {
             )
             VALUES (1, X'00', 0, 1000000, X'00', NULL, 0, X'00', X'00', X'00')
         "};
-        sqlx::query(query).execute(&**pool).await?;
+        sqlx::query(query).execute(pool.writer()).await?;
         Ok(1)
     }
 
@@ -427,7 +428,7 @@ mod tests {
             .bind(id)
             .bind(block_id)
             .bind(variant)
-            .execute(&**pool)
+            .execute(pool.writer())
             .await?;
         Ok(())
     }
@@ -451,7 +452,7 @@ mod tests {
             .bind(wanted_start)
             .bind(first_indexed)
             .bind(OffsetDateTime::now_utc())
-            .execute(&**pool)
+            .execute(pool.writer())
             .await?;
         Ok(())
     }
