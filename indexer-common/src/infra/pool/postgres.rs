@@ -16,9 +16,37 @@ use log::debug;
 use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
-use sqlx::postgres::{PgConnectOptions, PgPoolOptions, PgSslMode};
-use std::{ops::Deref, time::Duration};
+use sqlx::{
+    Postgres, Transaction,
+    postgres::{PgConnectOptions, PgPoolOptions, PgSslMode},
+};
+use std::{
+    ops::Deref,
+    sync::atomic::{AtomicBool, Ordering},
+    time::Duration,
+};
 use thiserror::Error;
+
+static ASYNC_COMMIT: AtomicBool = AtomicBool::new(false);
+
+/// Let transactions begun with [begin_write] commit without waiting for their WAL flush. A Postgres
+/// or OS crash then loses the most recent commits, always a suffix in commit order, never corrupts.
+pub fn set_async_commit(enabled: bool) {
+    ASYNC_COMMIT.store(enabled, Ordering::Relaxed);
+}
+
+/// Begin a write transaction, committing asynchronously while [set_async_commit] is enabled.
+pub async fn begin_write(
+    pool: &sqlx::PgPool,
+) -> Result<Transaction<'static, Postgres>, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    if ASYNC_COMMIT.load(Ordering::Relaxed) {
+        sqlx::query("SET LOCAL synchronous_commit = off")
+            .execute(&mut *tx)
+            .await?;
+    }
+    Ok(tx)
+}
 
 /// New type for `sqlx::PgPool`, allowing for some custom extensions as well as security.
 ///
@@ -104,7 +132,7 @@ pub struct Config {
 
 #[cfg(test)]
 mod tests {
-    use crate::infra::pool::postgres::{Config, PostgresPool};
+    use crate::infra::pool::postgres::{Config, PostgresPool, begin_write, set_async_commit};
     use anyhow::Context;
     use sqlx::postgres::PgSslMode;
     use std::{error::Error as StdError, time::Duration};
@@ -146,6 +174,25 @@ mod tests {
             .execute(&*pool)
             .await;
         assert!(result.is_ok());
+
+        // `SET LOCAL` scopes the setting to the write transaction, never the pooled connection.
+        for (enabled, expected) in [(true, "off"), (false, "on")] {
+            set_async_commit(enabled);
+            let mut tx = begin_write(&pool).await?;
+            let setting = sqlx::query_scalar::<_, String>("SHOW synchronous_commit")
+                .fetch_one(&mut *tx)
+                .await?;
+            assert_eq!(setting, expected, "async commit {enabled}");
+            tx.commit().await?;
+
+            let setting = sqlx::query_scalar::<_, String>("SHOW synchronous_commit")
+                .fetch_one(&*pool)
+                .await?;
+            assert_eq!(
+                setting, "on",
+                "after a write transaction, async commit {enabled}"
+            );
+        }
 
         Ok(())
     }

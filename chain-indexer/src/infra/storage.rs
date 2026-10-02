@@ -63,6 +63,14 @@ impl Storage {
 }
 
 impl domain::storage::Storage for Storage {
+    #[cfg(feature = "cloud")]
+    fn set_async_commit(&self, enabled: bool) {
+        indexer_common::infra::pool::postgres::set_async_commit(enabled);
+    }
+
+    #[cfg(feature = "standalone")]
+    fn set_async_commit(&self, _enabled: bool) {}
+
     #[trace]
     async fn save_block(
         &mut self,
@@ -72,6 +80,9 @@ impl domain::storage::Storage for Storage {
         ledger_state_key: &SerializedLedgerStateKey,
         system_parameters_change: Option<&SystemParametersChange>,
     ) -> Result<Option<u64>, sqlx::Error> {
+        #[cfg(feature = "cloud")]
+        let mut tx = indexer_common::infra::pool::postgres::begin_write(&self.pool).await?;
+        #[cfg(feature = "standalone")]
         let mut tx = self.pool.begin().await?;
 
         let max_transaction_id = save_block(
