@@ -9,6 +9,9 @@ application:
   gc_bound: "200ms"
   # Run gc every N blocks with N times the budget: same duty cycle, far fewer partial marks.
   gc_interval: 25
+  # gc_interval while catching up: passes cost about the same regardless of interval, so sync
+  # runs far fewer of them.
+  gc_catch_up_interval: 500
   # Sample the ledger DB node count every N blocks, or never if 0. Each sample is a full scan.
   arena_metrics_interval: 0
   # Recent blocks whose ledger states stay loadable (gc roots). Must comfortably exceed
