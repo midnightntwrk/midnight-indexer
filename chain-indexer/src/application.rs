@@ -28,7 +28,7 @@ use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
 use futures::{Stream, StreamExt, TryStreamExt, future::ok};
 use indexer_common::{
     domain::{
-        BlockIndexed, BridgeEventIndexed, LedgerVersion, NetworkId, Publisher,
+        BlockIndexed, BridgeEventIndexed, LedgerVersion, NetworkId, ProtocolVersion, Publisher,
         SerializedLedgerStateKey, UnshieldedUtxoIndexed,
     },
     infra::ledger_db,
@@ -262,6 +262,7 @@ pub async fn run(
             let mut blocks = pin!(blocks);
             let mut caught_up = false;
             let mut parent_block_timestamp = initial_parent_block_timestamp;
+            let mut last_protocol_version = None;
             let mut blocks_since_gc = 0;
             let mut blocks_since_arena_metrics = 0;
 
@@ -275,6 +276,7 @@ pub async fn run(
                     &highest_block_on_node,
                     &mut caught_up,
                     &mut parent_block_timestamp,
+                    &mut last_protocol_version,
                     &mut storage,
                     &publisher,
                     &metrics,
@@ -423,6 +425,7 @@ async fn get_and_index_block<E, N>(
     highest_block_on_node: &Arc<RwLock<Option<BlockRef>>>,
     caught_up: &mut bool,
     parent_block_timestamp: &mut u64,
+    last_protocol_version: &mut Option<ProtocolVersion>,
     storage: &mut impl Storage,
     publisher: &impl Publisher,
     metrics: &Metrics,
@@ -443,6 +446,7 @@ where
         highest_block_on_node,
         caught_up,
         parent_block_timestamp,
+        last_protocol_version,
         storage,
         publisher,
         metrics,
@@ -478,6 +482,7 @@ async fn index_block<N>(
     highest_block_on_node: &Arc<RwLock<Option<BlockRef>>>,
     caught_up: &mut bool,
     parent_block_timestamp: &mut u64,
+    last_protocol_version: &mut Option<ProtocolVersion>,
     storage: &mut impl Storage,
     publisher: &impl Publisher,
     metrics: &Metrics,
@@ -489,6 +494,7 @@ where
     // Capture the node's zswap merkle tree root (domain type) before `try_into` serializes it, to
     // compare against the zswap merkle tree root in the ledger state below.
     let zswap_merkle_tree_root = block.zswap_merkle_tree_root;
+    let system_parameters_updated = block.system_parameters_updated;
 
     let (mut block, transactions) = block.try_into().context("convert node block into domain")?;
 
@@ -673,10 +679,18 @@ where
         ledger_state.0.persist().context("persist ledger state")?;
     ledger_state = new_ledger_state.into();
 
-    // Determine system parameters change if any.
-    let system_parameters_change = determine_system_parameters_change(&block, storage, node)
-        .await
-        .context("determine system parameters change")?;
+    let system_parameters_change = if system_parameters_may_have_changed(
+        system_parameters_updated,
+        *last_protocol_version,
+        block.protocol_version,
+    ) {
+        determine_system_parameters_change(&block, storage, node)
+            .await
+            .context("determine system parameters change")?
+    } else {
+        None
+    };
+    *last_protocol_version = Some(block.protocol_version);
 
     // Save the block with its related data and system parameters atomically.
     let max_transaction_id = storage
@@ -747,6 +761,17 @@ where
     );
 
     Ok((ledger_state, ledger_state_key))
+}
+
+/// Fetching system parameters costs two runtime calls per block, so only do it when they can have
+/// changed: on a SystemParameters event, on the first block of a run (genesis values emit no
+/// event), and on a protocol version change (a runtime upgrade migration would emit none either).
+fn system_parameters_may_have_changed(
+    event_emitted: bool,
+    last_protocol_version: Option<ProtocolVersion>,
+    protocol_version: ProtocolVersion,
+) -> bool {
+    event_emitted || last_protocol_version != Some(protocol_version)
 }
 
 /// Fetch system parameters from the node and determine if they changed.
@@ -830,7 +855,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{
-        application::node_blocks,
+        application::{node_blocks, system_parameters_may_have_changed},
         domain::{
             BlockRef, SystemParametersChange,
             node::{self, Node},
@@ -850,6 +875,17 @@ mod tests {
         sync::{Arc, LazyLock, Mutex},
     };
     use thiserror::Error;
+
+    #[test]
+    fn test_system_parameters_may_have_changed() {
+        let v1 = ProtocolVersion::V1_0(1_000_000);
+        let v2 = ProtocolVersion::V1_0(1_000_300);
+
+        assert!(system_parameters_may_have_changed(false, None, v1));
+        assert!(!system_parameters_may_have_changed(false, Some(v1), v1));
+        assert!(system_parameters_may_have_changed(true, Some(v1), v1));
+        assert!(system_parameters_may_have_changed(false, Some(v1), v2));
+    }
 
     #[tokio::test]
     async fn test_blocks() -> Result<(), BoxError> {
@@ -945,6 +981,7 @@ mod tests {
         transactions: Default::default(),
         dust_registration_events: Default::default(),
         bridge_events: Default::default(),
+        system_parameters_updated: false,
     });
 
     static BLOCK_1: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -959,6 +996,7 @@ mod tests {
         transactions: Default::default(),
         dust_registration_events: Default::default(),
         bridge_events: Default::default(),
+        system_parameters_updated: false,
     });
 
     static BLOCK_2: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -973,6 +1011,7 @@ mod tests {
         transactions: Default::default(),
         dust_registration_events: Default::default(),
         bridge_events: Default::default(),
+        system_parameters_updated: false,
     });
 
     static BLOCK_3: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -987,6 +1026,7 @@ mod tests {
         transactions: Default::default(),
         dust_registration_events: Default::default(),
         bridge_events: Default::default(),
+        system_parameters_updated: false,
     });
 
     const ZERO_HASH: BlockHash = ByteArray([0; 32]);

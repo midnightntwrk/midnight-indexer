@@ -70,6 +70,8 @@ pub struct Block {
     pub transactions: Vec<Transaction>,
     pub dust_registration_events: Vec<DustRegistrationEvent>,
     pub bridge_events: Vec<indexer_common::domain::bridge::BridgeEvent>,
+    /// Whether a SystemParameters event (D-Parameter or T&C update) was emitted.
+    pub system_parameters_updated: bool,
 }
 
 impl TryFrom<Block> for (domain::Block, Vec<Transaction>) {

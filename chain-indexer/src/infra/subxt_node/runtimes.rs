@@ -28,6 +28,8 @@ use indexer_common::domain::{ByteVec, NodeVersion};
 /// Runtime specific block details.
 pub struct BlockDetails {
     pub timestamp: Option<u64>,
+    /// Whether a SystemParameters event (D-Parameter or T&C update) was emitted.
+    pub system_parameters_updated: bool,
     pub transactions: Vec<Transaction>,
     pub dust_registration_events: Vec<DustRegistrationEvent>,
     /// c2m-bridge events. Only populated for node 2.0+, where the
