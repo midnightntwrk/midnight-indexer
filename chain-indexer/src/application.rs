@@ -25,7 +25,7 @@ use crate::{
 use anyhow::{Context, bail};
 use async_stream::stream;
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
-use futures::{Stream, StreamExt, TryStreamExt, future::ok};
+use futures::{SinkExt, Stream, StreamExt, TryStreamExt, channel::mpsc, future::ok};
 use indexer_common::{
     domain::{
         BlockIndexed, BridgeEventIndexed, LedgerVersion, NetworkId, Publisher,
@@ -39,13 +39,13 @@ use serde::Deserialize;
 use std::{
     collections::{HashSet, VecDeque},
     error::Error as StdError,
-    future::ready,
     num::{NonZeroU32, NonZeroUsize},
     pin::pin,
     sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::{
+    runtime::Handle,
     select,
     signal::unix::Signal,
     task::{self},
@@ -256,9 +256,22 @@ pub async fn run(
         let node = node.clone();
 
         async move {
-            let blocks = node_blocks(highest_block_ref, node.clone())
-                .map(ready)
-                .buffered(blocks_buffer);
+            // Prefetch on a blocking thread, ending when `blocks` is dropped. Making blocks takes the
+            // arena lock that gc holds across blocking DB calls; awaiting it on a worker can deadlock.
+            let (mut blocks_tx, blocks) = mpsc::channel(blocks_buffer);
+            task::spawn_blocking({
+                let node = node.clone();
+                move || {
+                    Handle::current().block_on(async move {
+                        let mut node_blocks = pin!(node_blocks(highest_block_ref, node));
+                        while let Some(block) = node_blocks.next().await {
+                            if blocks_tx.send(block).await.is_err() {
+                                break;
+                            }
+                        }
+                    })
+                }
+            });
             let mut blocks = pin!(blocks);
             let mut caught_up = false;
             let mut parent_block_timestamp = initial_parent_block_timestamp;
