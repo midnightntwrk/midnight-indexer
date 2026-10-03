@@ -782,6 +782,9 @@ pub enum SubxtNodeError {
     #[error("cannot get ledger state root")]
     GetLedgerStateRoot(#[source] BoxError),
 
+    #[error("cannot decode storage")]
+    DecodeStorage(#[source] BoxError),
+
     #[error("cannot fetch system properties")]
     FetchSystemProperties(#[source] subxt::rpcs::Error),
 

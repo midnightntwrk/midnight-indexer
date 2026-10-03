@@ -15,7 +15,9 @@ use crate::{
     domain::{DParameter, DustRegistrationEvent, TermsAndConditions},
     infra::subxt_node::{
         ContentSource, OnlineClientAtBlock, SubxtNodeError,
-        runtimes::{BlockDetails, Transaction},
+        runtimes::{
+            BlockDetails, Transaction, decode_call_result, decode_storage_key, decode_storage_value,
+        },
     },
 };
 use futures::TryStreamExt;
@@ -25,26 +27,18 @@ use indexer_common::domain::{
 };
 use itertools::Itertools;
 use parity_scale_codec::Decode;
-use subxt::error::RuntimeApiError;
+use subxt::{
+    SubstrateConfig,
+    client::{ClientAtBlock, OfflineClientAtBlockT},
+    error::RuntimeApiError,
+    events::Events,
+    extrinsics::Extrinsics,
+};
 
 pub async fn make_block_details(
     block: &OnlineClientAtBlock,
     content: Option<&ContentSource>,
 ) -> Result<BlockDetails, SubxtNodeError> {
-    use super::runtime_2_0_0::{
-        Call, Event,
-        runtime_types::{
-            pallet_c2m_bridge::pallet::Event as C2MBridgeEvent,
-            pallet_cnight_observation::pallet::Event as CnightObservationEvent,
-            pallet_midnight::pallet::Call::send_mn_transaction,
-            pallet_midnight_system::pallet::{
-                Call::send_mn_system_transaction, Event::SystemTransactionApplied,
-            },
-            pallet_partner_chains_session::pallet::Event::NewSession,
-        },
-        timestamp,
-    };
-
     let extrinsics = match content {
         // Enactment block: decode this block's raw extrinsic bytes against the parent
         // (old-runtime) client. `from_bytes` is async but infallible.
@@ -60,6 +54,65 @@ pub async fn make_block_details(
             .fetch()
             .await
             .map_err(|error| SubxtNodeError::FetchExtrinsics(error.into()))?,
+    };
+
+    let events = match content {
+        // Enactment block: raw event bytes are metadata-independent, so fetch them from this
+        // block and re-decode against the parent (old-runtime) client. `from_bytes` is sync.
+        Some(content) => {
+            let raw = block
+                .events()
+                .fetch()
+                .await
+                .map_err(|error| SubxtNodeError::FetchEvents(error.into()))?
+                .bytes()
+                .to_vec();
+            content.client.events().from_bytes(raw)
+        }
+        None => block
+            .events()
+            .fetch()
+            .await
+            .map_err(|error| SubxtNodeError::FetchEvents(error.into()))?,
+    };
+
+    block_details(&extrinsics, &events)
+}
+
+/// Decode block details from a block's serialized extrinsics and its serialized `System.Events`
+/// value, against the given client's metadata.
+pub async fn decode_block_details<C>(
+    client: &ClientAtBlock<SubstrateConfig, C>,
+    extrinsics: Vec<Vec<u8>>,
+    events: Vec<u8>,
+) -> Result<BlockDetails, SubxtNodeError>
+where
+    C: OfflineClientAtBlockT<SubstrateConfig>,
+{
+    let extrinsics = client.extrinsics().from_bytes(extrinsics).await;
+    let events = client.events().from_bytes(events);
+    block_details(&extrinsics, &events)
+}
+
+fn block_details<C>(
+    extrinsics: &Extrinsics<'_, SubstrateConfig, C>,
+    events: &Events<SubstrateConfig>,
+) -> Result<BlockDetails, SubxtNodeError>
+where
+    C: OfflineClientAtBlockT<SubstrateConfig>,
+{
+    use super::runtime_2_0_0::{
+        Call, Event,
+        runtime_types::{
+            pallet_c2m_bridge::pallet::Event as C2MBridgeEvent,
+            pallet_cnight_observation::pallet::Event as CnightObservationEvent,
+            pallet_midnight::pallet::Call::send_mn_transaction,
+            pallet_midnight_system::pallet::{
+                Call::send_mn_system_transaction, Event::SystemTransactionApplied,
+            },
+            pallet_partner_chains_session::pallet::Event::NewSession,
+        },
+        timestamp,
     };
 
     let calls = extrinsics
@@ -103,26 +156,6 @@ pub async fn make_block_details(
     let mut dust_registration_events = vec![];
     let mut system_transactions_from_events = vec![];
     let mut bridge_events = vec![];
-
-    let events = match content {
-        // Enactment block: raw event bytes are metadata-independent, so fetch them from this
-        // block and re-decode against the parent (old-runtime) client. `from_bytes` is sync.
-        Some(content) => {
-            let raw = block
-                .events()
-                .fetch()
-                .await
-                .map_err(|error| SubxtNodeError::FetchEvents(error.into()))?
-                .bytes()
-                .to_vec();
-            content.client.events().from_bytes(raw)
-        }
-        None => block
-            .events()
-            .fetch()
-            .await
-            .map_err(|error| SubxtNodeError::FetchEvents(error.into()))?,
-    };
 
     for event in events.iter() {
         let event = event
@@ -433,4 +466,117 @@ pub async fn get_terms_and_conditions(
         let url = String::from_utf8_lossy(&response.url).to_string();
         TermsAndConditions { hash, url }
     }))
+}
+
+pub fn decode_zswap_merkle_tree_root<C>(
+    client: &ClientAtBlock<SubstrateConfig, C>,
+    result: &[u8],
+) -> Result<Vec<u8>, SubxtNodeError>
+where
+    C: OfflineClientAtBlockT<SubstrateConfig>,
+{
+    let get_zswap_state_root = super::runtime_2_0_0::runtime_apis()
+        .midnight_runtime_api()
+        .get_zswap_state_root();
+
+    decode_call_result(client, &get_zswap_state_root, result)
+        .map_err(SubxtNodeError::GetZswapStateRoot)?
+        .map_err(|error| SubxtNodeError::GetZswapStateRoot(format!("{error:?}").into()))
+}
+
+pub fn decode_ledger_state_root<C>(
+    client: &ClientAtBlock<SubstrateConfig, C>,
+    result: &[u8],
+) -> Result<Option<Vec<u8>>, SubxtNodeError>
+where
+    C: OfflineClientAtBlockT<SubstrateConfig>,
+{
+    let get_ledger_state_root = super::runtime_2_0_0::runtime_apis()
+        .midnight_runtime_api()
+        .get_ledger_state_root();
+
+    let root = decode_call_result(client, &get_ledger_state_root, result)
+        .map_err(SubxtNodeError::GetLedgerStateRoot)?
+        .map_err(|error| SubxtNodeError::GetLedgerStateRoot(format!("{error:?}").into()))?;
+
+    Ok(Some(root))
+}
+
+pub fn decode_d_parameter<C>(
+    client: &ClientAtBlock<SubstrateConfig, C>,
+    result: &[u8],
+) -> Result<DParameter, SubxtNodeError>
+where
+    C: OfflineClientAtBlockT<SubstrateConfig>,
+{
+    let get_d_param = super::runtime_2_0_0::runtime_apis()
+        .system_parameters_api()
+        .get_d_parameter();
+
+    let d_parameter =
+        decode_call_result(client, &get_d_param, result).map_err(SubxtNodeError::GetDParameter)?;
+
+    Ok(DParameter {
+        num_permissioned_candidates: d_parameter.num_permissioned_candidates,
+        num_registered_candidates: d_parameter.num_registered_candidates,
+    })
+}
+
+pub fn decode_terms_and_conditions<C>(
+    client: &ClientAtBlock<SubstrateConfig, C>,
+    result: &[u8],
+) -> Result<Option<TermsAndConditions>, SubxtNodeError>
+where
+    C: OfflineClientAtBlockT<SubstrateConfig>,
+{
+    let get_tc = super::runtime_2_0_0::runtime_apis()
+        .system_parameters_api()
+        .get_terms_and_conditions();
+
+    let tc = decode_call_result(client, &get_tc, result)
+        .map_err(SubxtNodeError::GetTermsAndConditions)?;
+
+    Ok(tc.map(|response| {
+        let hash = TermsAndConditionsHash::from(response.hash.0);
+        let url = String::from_utf8_lossy(&response.url).to_string();
+        TermsAndConditions { hash, url }
+    }))
+}
+
+pub fn decode_genesis_cnight_registrations<C>(
+    client: &ClientAtBlock<SubstrateConfig, C>,
+    mappings: &[(Vec<u8>, Vec<u8>)],
+) -> Result<Vec<DustRegistrationEvent>, SubxtNodeError>
+where
+    C: OfflineClientAtBlockT<SubstrateConfig>,
+{
+    let address = super::runtime_2_0_0::storage()
+        .c_night_observation()
+        .mapping();
+    mappings
+        .iter()
+        .try_fold(vec![], |mut events, (key, value)| {
+            let (cardano_reward_address, utxo_id) =
+                decode_storage_key(client, &address, key).map_err(SubxtNodeError::DecodeStorage)?;
+            let dust_public_key = decode_storage_value(client, &address, value)
+                .map_err(SubxtNodeError::DecodeStorage)?;
+
+            let cardano_stake_key = cardano_reward_address.0.into();
+            let dust_address = DustPublicKey::from(dust_public_key.0.0);
+            let utxo_index = utxo_id.index.0.into();
+            let utxo_id = utxo_id.tx_hash.0.as_ref().into();
+
+            events.push(DustRegistrationEvent::Registration {
+                cardano_stake_key,
+                dust_address: dust_address.clone(),
+            });
+            events.push(DustRegistrationEvent::MappingAdded {
+                cardano_stake_key,
+                dust_address,
+                utxo_id,
+                utxo_index,
+            });
+
+            Ok(events)
+        })
 }
