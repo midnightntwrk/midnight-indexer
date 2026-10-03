@@ -102,7 +102,6 @@ pub enum TransportError {
     /// The connection to the node is lost.
     #[error("node connection lost")]
     Disconnected(#[source] BoxError),
-
     /// Any other failure, e.g. a request or response the node or a proxy refuses.
     #[error(transparent)]
     Other(BoxError),
@@ -110,10 +109,7 @@ pub enum TransportError {
 
 /// JSON-RPC transport to a node.
 #[trait_variant::make(Send)]
-pub trait Transport
-where
-    Self: Send + Sync + 'static,
-{
+pub trait Transport: Send + Sync + 'static {
     /// Send the calls as one JSON-RPC batch; one [CallResult] per call, in order.
     async fn batch(&self, calls: Vec<Call>) -> Result<Vec<CallResult>, TransportError>;
 
@@ -404,33 +400,28 @@ pub enum Error {
         #[source]
         source: TransportError,
     },
-
     #[error("cannot reach the node after {attempts} reconnect attempts")]
     Unreachable {
         attempts: usize,
         #[source]
         source: TransportError,
     },
-
     #[error(
         "node lacks the required RPC methods {missing:?}; it must run with --state-pruning archive"
     )]
     MissingMethods { missing: Vec<&'static str> },
-
     #[error("cannot subscribe with {method}")]
     Subscribe {
         method: &'static str,
         #[source]
         source: TransportError,
     },
-
     #[error("{method} failed")]
     Call {
         method: &'static str,
         #[source]
         source: CallError,
     },
-
     #[error("cannot decode the {method} response")]
     Decode {
         method: &'static str,
@@ -471,10 +462,7 @@ impl<T> Clone for NodeRpc<T> {
     }
 }
 
-impl<T> NodeRpc<T>
-where
-    T: Transport,
-{
+impl<T: Transport> NodeRpc<T> {
     pub fn new(
         transport: T,
         batch_size: NonZeroUsize,
@@ -514,10 +502,7 @@ where
     }
 
     /// Send a single call and deserialize its result.
-    pub async fn call<R>(&self, call: Call) -> Result<R, Error>
-    where
-        R: serde::de::DeserializeOwned,
-    {
+    pub async fn call<R: serde::de::DeserializeOwned>(&self, call: Call) -> Result<R, Error> {
         let method = call.method;
         let result = self
             .send(vec![call])

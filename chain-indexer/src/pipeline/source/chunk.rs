@@ -26,10 +26,8 @@ pub const FINALIZATION_SAFETY_MARGIN: u64 = 400;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChunkSpec {
     pub heights: RangeInclusive<u64>,
-
     /// Whether the chunk lies within [FINALIZATION_SAFETY_MARGIN] of the finalized tip.
     pub near: bool,
-
     /// The hashes at these heights, if the [Finalized] window covers all of them.
     pub hashes: Option<Vec<BlockHash>>,
 }

@@ -48,7 +48,6 @@ const BABE_NEXT_EPOCH_DATA: u8 = 1;
 pub enum Error {
     #[error(transparent)]
     Source(#[from] source::Error),
-
     #[error("cannot decode block {hash} at height {height}")]
     Decode {
         hash: BlockHash,
@@ -56,13 +55,10 @@ pub enum Error {
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
-
     #[error("block {0} has no protocol version header")]
     MissingProtocolVersion(BlockHash),
-
     #[error("unsupported protocol version in block {0}")]
     ProtocolVersion(BlockHash, #[source] ProtocolVersionError),
-
     #[error(
         "block {hash} is authored by {engine}, but the metadata of its runtime {spec_version} has \
          no {pallet}.{entry} storage"
@@ -74,7 +70,6 @@ pub enum Error {
         pallet: &'static str,
         entry: &'static str,
     },
-
     #[error("the decode pool is gone")]
     PoolGone,
 }
@@ -104,14 +99,11 @@ pub fn chunks_in_decode(threads: usize, chunk_size: usize) -> usize {
 
 /// The decode stage: each chunk is one job on the pool, its blocks decoded in parallel; blocks come
 /// out in height order.
-pub fn decode<S>(
+pub fn decode<S: Stream<Item = Result<source::Chunk, source::Error>>>(
     chunks: S,
     pool: Arc<CpuPool>,
     chunk_size: NonZeroUsize,
-) -> impl Stream<Item = Result<node::Block, Error>>
-where
-    S: Stream<Item = Result<source::Chunk, source::Error>>,
-{
+) -> impl Stream<Item = Result<node::Block, Error>> {
     let in_decode = chunks_in_decode(pool.threads(), chunk_size.get());
 
     chunks
@@ -416,7 +408,6 @@ enum AuthoritySetError {
         engine: &'static str,
         item: StorageItem,
     },
-
     Decode(SubxtNodeError),
 }
 

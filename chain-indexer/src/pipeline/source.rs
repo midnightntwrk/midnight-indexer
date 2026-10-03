@@ -66,23 +66,19 @@ pub const AUTHORITY_SET_ITEMS: [(&str, &str); 3] = [
     ("Babe", "Authorities"),
     ("Babe", "NextAuthorities"),
 ];
-
 /// The storage item holding a block's events.
 pub const SYSTEM_EVENTS_ITEM: (&str, &str) = ("System", "Events");
-
 /// Storage items holding the D-Parameter and the terms and conditions.
 pub const SYSTEM_PARAMETERS_ITEMS: [(&str, &str); 2] = [
     ("SystemParameters", "DParameterStorage"),
     ("SystemParameters", "TermsAndConditionsStorage"),
 ];
-
 /// Storage maps holding the genesis cNight registrations: `Mappings` up to node 1.0, `Mapping`
 /// from node 2.0.
 pub const CNIGHT_MAPPINGS_ITEMS: [(&str, &str); 2] = [
     ("CNightObservation", "Mappings"),
     ("CNightObservation", "Mapping"),
 ];
-
 const ZSWAP_STATE_ROOT_FUNCTION: &str = "MidnightRuntimeApi_get_zswap_state_root";
 const LEDGER_STATE_ROOT_FUNCTION: &str = "MidnightRuntimeApi_get_ledger_state_root";
 const D_PARAMETER_FUNCTION: &str = "SystemParametersApi_get_d_parameter";
@@ -116,7 +112,6 @@ pub enum Block {
         /// The serialized `System.Events` value.
         events: ByteVec,
     },
-
     Block {
         hash: BlockHash,
         height: u64,
@@ -154,7 +149,6 @@ impl Block {
 #[derive(Debug)]
 pub struct Parent {
     pub hash: BlockHash,
-
     /// The [AUTHORITY_SET_ITEMS] present in the parent's state, as storage key and value.
     pub authority_set: Vec<(ByteVec, ByteVec)>,
 }
@@ -172,41 +166,31 @@ pub struct Finalized {
 pub enum Error {
     #[error(transparent)]
     Rpc(#[from] rpc::Error),
-
     #[error("cannot decode a chainHead_v1_follow event")]
     FollowEvent(#[source] serde_json::Error),
-
     #[error("cannot decode hash {0}")]
     Hash(String),
-
     #[error("node has no header for block {0}")]
     MissingHeader(BlockHash),
-
     #[error("cannot decode the header of block {0}")]
     Header(
         BlockHash,
         #[source] Box<dyn std::error::Error + Send + Sync>,
     ),
-
     #[error("block {0} has no protocol version header")]
     MissingProtocolVersion(BlockHash),
-
     #[error("unsupported protocol version in block {0}")]
     ProtocolVersion(BlockHash, #[source] ProtocolVersionError),
-
     #[error("node has no body for block {0}")]
     MissingBody(BlockHash),
-
     #[error("runtime call {function} at block {hash} failed: {error}")]
     RuntimeCall {
         function: &'static str,
         hash: BlockHash,
         error: String,
     },
-
     #[error("storage query at block {hash} failed: {error}")]
     Storage { hash: BlockHash, error: String },
-
     #[error("cannot decode the {what} of block {hash}")]
     Decode {
         what: &'static str,
@@ -214,17 +198,14 @@ pub enum Error {
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
-
     #[error("no genesis ledger state in the chain spec's properties")]
     MissingGenesisLedgerState,
-
     #[error("block {hash} is at height {header_height}, not {height}")]
     HeightMismatch {
         hash: BlockHash,
         height: u64,
         header_height: u64,
     },
-
     #[error(
         "no metadata of runtime {spec_version} for block {hash}; the parent's and the block's \
          state declare {found:?}"
@@ -234,19 +215,14 @@ pub enum Error {
         spec_version: u32,
         found: Vec<Option<u32>>,
     },
-
     #[error("no single block at height {0}")]
     Unresolved(u64),
-
     #[error("blocks from height {0} do not link to the finalized chain")]
     Unlinked(u64),
-
     #[error("cannot connect to the node")]
     Connect(#[source] TransportError),
-
     #[error("following finalized blocks failed")]
     Follow(#[source] Box<Error>),
-
     #[error("following finalized blocks ended")]
     FinalizedEnded,
 }
@@ -256,14 +232,11 @@ pub enum Error {
 /// is reported; nothing else is fetched except one header per subscription, for the tip's height.
 /// The subscription is renewed on `stop`, when it ends, and when no event arrives within
 /// `recovery_timeout`. Returns once `finalized` has no receivers.
-pub async fn follow_finalized<T>(
+pub async fn follow_finalized<T: Transport>(
     rpc: &NodeRpc<T>,
     recovery_timeout: Duration,
     finalized: &watch::Sender<Option<Finalized>>,
-) -> Result<(), Error>
-where
-    T: Transport,
-{
+) -> Result<(), Error> {
     while !finalized.is_closed() {
         let Subscription {
             id,
@@ -371,10 +344,7 @@ fn publish(finalized: &watch::Sender<Option<Finalized>>, hashes: Vec<BlockHash>,
 }
 
 /// Unpin the given blocks; a failure only means the node has dropped them already.
-async fn unpin<T>(rpc: &NodeRpc<T>, subscription: &Value, hashes: &[BlockHash])
-where
-    T: Transport,
-{
+async fn unpin<T: Transport>(rpc: &NodeRpc<T>, subscription: &Value, hashes: &[BlockHash]) {
     let mut batch = Batch::default();
     batch.unpin(subscription.to_owned(), hashes);
 
@@ -387,10 +357,7 @@ where
 }
 
 /// The height of the given block, from its header.
-async fn header_height<T>(rpc: &NodeRpc<T>, hash: BlockHash) -> Result<u64, Error>
-where
-    T: Transport,
-{
+async fn header_height<T: Transport>(rpc: &NodeRpc<T>, hash: BlockHash) -> Result<u64, Error> {
     let mut batch = Batch::default();
     batch.header(hash);
     let header = rpc.batch(batch).await?.pop().expect("one result per call");
@@ -428,13 +395,10 @@ fn block_hash_of(hash: String) -> Result<BlockHash, Error> {
 
 /// The Resolve stage: the hash of the block at each height, `None` where the node reports no block
 /// or several.
-pub async fn resolve<T>(
+pub async fn resolve<T: Transport>(
     rpc: &NodeRpc<T>,
     heights: RangeInclusive<u64>,
-) -> Result<Vec<Option<BlockHash>>, Error>
-where
-    T: Transport,
-{
+) -> Result<Vec<Option<BlockHash>>, Error> {
     let _timer = Timer::start(metric::RESOLVE_DURATION);
     let batch = heights.fold(Batch::default(), |mut batch, height| {
         batch.hash_by_height(height);
@@ -476,17 +440,14 @@ where
 /// All calls for all blocks go out together: one set of batches with each block's header, body and
 /// state roots, one storage query per block, and one for the parent. Only system parameters, where
 /// due, and the metadata of a runtime not seen before take a second round.
-pub async fn source<T>(
+pub async fn source<T: Transport>(
     rpc: &NodeRpc<T>,
     metadata: &MetadataCache,
     start: u64,
     hashes: &[BlockHash],
     parent: Option<BlockHash>,
     first_of_run: bool,
-) -> Result<Chunk, Error>
-where
-    T: Transport,
-{
+) -> Result<Chunk, Error> {
     let _timer = Timer::start(metric::SOURCE_DURATION);
     let batch = hashes.iter().fold(Batch::default(), |mut batch, &hash| {
         batch
@@ -660,13 +621,10 @@ impl Sourced {
 }
 
 /// The system parameters of every block they are due for, by block hash.
-async fn system_parameters<T>(
+async fn system_parameters<T: Transport>(
     rpc: &NodeRpc<T>,
     sourced: &[Sourced],
-) -> Result<HashMap<BlockHash, (ByteVec, ByteVec)>, Error>
-where
-    T: Transport,
-{
+) -> Result<HashMap<BlockHash, (ByteVec, ByteVec)>, Error> {
     let due = sourced
         .iter()
         .filter(|block| block.system_parameters_due)
@@ -702,10 +660,7 @@ where
 }
 
 /// The genesis ledger state from the chain spec, and the cNight mappings at genesis.
-async fn genesis<T>(rpc: &NodeRpc<T>, hash: BlockHash) -> Result<Genesis, Error>
-where
-    T: Transport,
-{
+async fn genesis<T: Transport>(rpc: &NodeRpc<T>, hash: BlockHash) -> Result<Genesis, Error> {
     let properties = async {
         let mut batch = Batch::default();
         batch.chain_spec_properties();
@@ -773,14 +728,11 @@ enum StorageEvent {
 }
 
 /// Run an `archive_v1_storage` query at the given block and collect its results.
-async fn query_storage<T>(
+async fn query_storage<T: Transport>(
     rpc: &NodeRpc<T>,
     hash: BlockHash,
     items: Vec<Value>,
-) -> Result<Vec<StorageItem>, Error>
-where
-    T: Transport,
-{
+) -> Result<Vec<StorageItem>, Error> {
     let Subscription {
         mut notifications, ..
     } = rpc
@@ -1049,10 +1001,7 @@ pub fn metadata_spec_version(metadata: &Metadata) -> Option<u32> {
 
 /// Fetch metadata as subxt does: the highest stable version `Metadata_metadata_versions` offers,
 /// falling back to `Metadata_metadata`.
-async fn fetch_metadata<T>(rpc: &NodeRpc<T>, at: BlockHash) -> Result<Metadata, Error>
-where
-    T: Transport,
-{
+async fn fetch_metadata<T: Transport>(rpc: &NodeRpc<T>, at: BlockHash) -> Result<Metadata, Error> {
     let call = |function: &'static str, parameters: Vec<u8>| async move {
         let mut batch = Batch::default();
         batch.call(at, function, &parameters);
@@ -1097,19 +1046,14 @@ where
 pub struct Config {
     /// The most heights per chunk.
     pub chunk_size: NonZeroUsize,
-
     /// The most chunks in progress, and the most chunks sourced but not yet received.
     pub chunks_ahead: NonZeroUsize,
-
     /// The most calls per JSON-RPC batch.
     pub rpc_batch_size: NonZeroUsize,
-
     /// The most JSON-RPC batches in flight.
     pub rpc_batches_in_flight: NonZeroUsize,
-
     /// How long the finalized-block subscription may stay silent before it is renewed.
     pub recovery_timeout: Duration,
-
     pub reconnect_policy: ReconnectPolicy,
 }
 
@@ -1140,10 +1084,7 @@ impl Source<WsTransport> {
     }
 }
 
-impl<T> Source<T>
-where
-    T: Transport,
-{
+impl<T: Transport> Source<T> {
     pub fn new(transport: T, config: Config) -> Self {
         let rpc = NodeRpc::new(
             transport,
@@ -1273,10 +1214,7 @@ impl Emission {
     }
 }
 
-impl<T> Producer<T>
-where
-    T: Transport,
-{
+impl<T: Transport> Producer<T> {
     async fn produce(mut self, mut follow_error: oneshot::Receiver<Error>) {
         let mut emission = Emission {
             emitted: self.start,
@@ -1849,7 +1787,6 @@ mod source_tests {
     /// Spec versions of the 1.0.300 and 2.1 runtimes.
     const SPEC_VERSION_1_0: u32 = 1_000_300;
     const SPEC_VERSION: u32 = 2_001_000;
-
     /// Marks a fork sibling's hash.
     const FORK: u8 = 0xff;
 

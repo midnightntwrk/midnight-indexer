@@ -164,15 +164,12 @@ pub async fn get_terms_and_conditions(
 
 /// Decode block details from a block's serialized extrinsics and its serialized `System.Events`
 /// value, against the given client's metadata.
-pub async fn decode_block_details<C>(
+pub async fn decode_block_details<C: OfflineClientAtBlockT<SubstrateConfig>>(
     node_version: NodeVersion,
     client: &ClientAtBlock<SubstrateConfig, C>,
     extrinsics: Vec<Vec<u8>>,
     events: Vec<u8>,
-) -> Result<BlockDetails, SubxtNodeError>
-where
-    C: OfflineClientAtBlockT<SubstrateConfig>,
-{
+) -> Result<BlockDetails, SubxtNodeError> {
     match node_version {
         NodeVersion::V0_22 => v0_22_0::decode_block_details(client, extrinsics, events).await,
         NodeVersion::V1_0 => v1_0_300::decode_block_details(client, extrinsics, events).await,
@@ -188,14 +185,11 @@ pub fn decode_authorities(mut authorities: &[u8]) -> Result<Vec<[u8; 32]>, Subxt
 }
 
 /// Decode the serialized result of the `get_zswap_state_root` runtime API call.
-pub fn decode_zswap_merkle_tree_root<C>(
+pub fn decode_zswap_merkle_tree_root<C: OfflineClientAtBlockT<SubstrateConfig>>(
     node_version: NodeVersion,
     client: &ClientAtBlock<SubstrateConfig, C>,
     result: &[u8],
-) -> Result<Vec<u8>, SubxtNodeError>
-where
-    C: OfflineClientAtBlockT<SubstrateConfig>,
-{
+) -> Result<Vec<u8>, SubxtNodeError> {
     match node_version {
         NodeVersion::V0_22 => v0_22_0::decode_zswap_merkle_tree_root(client, result),
         NodeVersion::V1_0 => v1_0_300::decode_zswap_merkle_tree_root(client, result),
@@ -205,14 +199,11 @@ where
 }
 
 /// Decode the serialized result of the `get_ledger_state_root` runtime API call.
-pub fn decode_ledger_state_root<C>(
+pub fn decode_ledger_state_root<C: OfflineClientAtBlockT<SubstrateConfig>>(
     node_version: NodeVersion,
     client: &ClientAtBlock<SubstrateConfig, C>,
     result: &[u8],
-) -> Result<Option<Vec<u8>>, SubxtNodeError>
-where
-    C: OfflineClientAtBlockT<SubstrateConfig>,
-{
+) -> Result<Option<Vec<u8>>, SubxtNodeError> {
     match node_version {
         NodeVersion::V0_22 => v0_22_0::decode_ledger_state_root(client, result),
         NodeVersion::V1_0 => v1_0_300::decode_ledger_state_root(client, result),
@@ -222,14 +213,11 @@ where
 }
 
 /// Decode the serialized result of the `get_d_parameter` runtime API call.
-pub fn decode_d_parameter<C>(
+pub fn decode_d_parameter<C: OfflineClientAtBlockT<SubstrateConfig>>(
     node_version: NodeVersion,
     client: &ClientAtBlock<SubstrateConfig, C>,
     result: &[u8],
-) -> Result<DParameter, SubxtNodeError>
-where
-    C: OfflineClientAtBlockT<SubstrateConfig>,
-{
+) -> Result<DParameter, SubxtNodeError> {
     match node_version {
         NodeVersion::V0_22 => v0_22_0::decode_d_parameter(client, result),
         NodeVersion::V1_0 => v1_0_300::decode_d_parameter(client, result),
@@ -239,14 +227,11 @@ where
 }
 
 /// Decode the serialized result of the `get_terms_and_conditions` runtime API call.
-pub fn decode_terms_and_conditions<C>(
+pub fn decode_terms_and_conditions<C: OfflineClientAtBlockT<SubstrateConfig>>(
     node_version: NodeVersion,
     client: &ClientAtBlock<SubstrateConfig, C>,
     result: &[u8],
-) -> Result<Option<TermsAndConditions>, SubxtNodeError>
-where
-    C: OfflineClientAtBlockT<SubstrateConfig>,
-{
+) -> Result<Option<TermsAndConditions>, SubxtNodeError> {
     match node_version {
         NodeVersion::V0_22 => v0_22_0::decode_terms_and_conditions(client, result),
         NodeVersion::V1_0 => v1_0_300::decode_terms_and_conditions(client, result),
@@ -257,14 +242,11 @@ where
 
 /// Decode genesis cNight registrations from the serialized key-value pairs of the cNight
 /// observation pallet's mapping storage.
-pub fn decode_genesis_cnight_registrations<C>(
+pub fn decode_genesis_cnight_registrations<C: OfflineClientAtBlockT<SubstrateConfig>>(
     node_version: NodeVersion,
     client: &ClientAtBlock<SubstrateConfig, C>,
     mappings: &[(Vec<u8>, Vec<u8>)],
-) -> Result<Vec<DustRegistrationEvent>, SubxtNodeError>
-where
-    C: OfflineClientAtBlockT<SubstrateConfig>,
-{
+) -> Result<Vec<DustRegistrationEvent>, SubxtNodeError> {
     match node_version {
         NodeVersion::V0_22 => v0_22_0::decode_genesis_cnight_registrations(client, mappings),
         NodeVersion::V1_0 => v1_0_300::decode_genesis_cnight_registrations(client, mappings),
@@ -274,15 +256,11 @@ where
 }
 
 /// Decode a runtime API call's serialized result against the client's metadata.
-fn decode_call_result<P, C>(
+fn decode_call_result<P: Payload, C: OfflineClientAtBlockT<SubstrateConfig>>(
     client: &ClientAtBlock<SubstrateConfig, C>,
     payload: &P,
     mut result: &[u8],
-) -> Result<P::ReturnType, BoxError>
-where
-    P: Payload,
-    C: OfflineClientAtBlockT<SubstrateConfig>,
-{
+) -> Result<P::ReturnType, BoxError> {
     let metadata = client.metadata_ref();
     let value = frame_decode::runtime_apis::decode_runtime_api_response(
         payload.trait_name(),
@@ -298,15 +276,11 @@ where
 }
 
 /// Decode a serialized storage value of the given storage entry against the client's metadata.
-fn decode_storage_value<A, C>(
+fn decode_storage_value<A: Address, C: OfflineClientAtBlockT<SubstrateConfig>>(
     client: &ClientAtBlock<SubstrateConfig, C>,
     address: &A,
     mut value: &[u8],
-) -> Result<A::Value, BoxError>
-where
-    A: Address,
-    C: OfflineClientAtBlockT<SubstrateConfig>,
-{
+) -> Result<A::Value, BoxError> {
     let metadata = client.metadata_ref();
     let value = frame_decode::storage::decode_storage_value(
         address.pallet_name(),
@@ -323,15 +297,11 @@ where
 
 /// Decode the key parts of a serialized storage key of the given storage entry against the
 /// client's metadata.
-fn decode_storage_key<A, C>(
+fn decode_storage_key<A: Address, C: OfflineClientAtBlockT<SubstrateConfig>>(
     client: &ClientAtBlock<SubstrateConfig, C>,
     address: &A,
     key: &[u8],
-) -> Result<A::KeyParts, BoxError>
-where
-    A: Address,
-    C: OfflineClientAtBlockT<SubstrateConfig>,
-{
+) -> Result<A::KeyParts, BoxError> {
     let metadata = client.metadata_ref();
     let decoded_key = frame_decode::storage::decode_storage_key(
         address.pallet_name(),

@@ -81,26 +81,20 @@ pub async fn make_block_details(
 
 /// Decode block details from a block's serialized extrinsics and its serialized `System.Events`
 /// value, against the given client's metadata.
-pub async fn decode_block_details<C>(
+pub async fn decode_block_details<C: OfflineClientAtBlockT<SubstrateConfig>>(
     client: &ClientAtBlock<SubstrateConfig, C>,
     extrinsics: Vec<Vec<u8>>,
     events: Vec<u8>,
-) -> Result<BlockDetails, SubxtNodeError>
-where
-    C: OfflineClientAtBlockT<SubstrateConfig>,
-{
+) -> Result<BlockDetails, SubxtNodeError> {
     let extrinsics = client.extrinsics().from_bytes(extrinsics).await;
     let events = client.events().from_bytes(events);
     block_details(&extrinsics, &events)
 }
 
-fn block_details<C>(
+fn block_details<C: OfflineClientAtBlockT<SubstrateConfig>>(
     extrinsics: &Extrinsics<'_, SubstrateConfig, C>,
     events: &Events<SubstrateConfig>,
-) -> Result<BlockDetails, SubxtNodeError>
-where
-    C: OfflineClientAtBlockT<SubstrateConfig>,
-{
+) -> Result<BlockDetails, SubxtNodeError> {
     use super::runtime_2_0_0::{
         Call, Event,
         runtime_types::{
@@ -468,13 +462,10 @@ pub async fn get_terms_and_conditions(
     }))
 }
 
-pub fn decode_zswap_merkle_tree_root<C>(
+pub fn decode_zswap_merkle_tree_root<C: OfflineClientAtBlockT<SubstrateConfig>>(
     client: &ClientAtBlock<SubstrateConfig, C>,
     result: &[u8],
-) -> Result<Vec<u8>, SubxtNodeError>
-where
-    C: OfflineClientAtBlockT<SubstrateConfig>,
-{
+) -> Result<Vec<u8>, SubxtNodeError> {
     let get_zswap_state_root = super::runtime_2_0_0::runtime_apis()
         .midnight_runtime_api()
         .get_zswap_state_root();
@@ -484,13 +475,10 @@ where
         .map_err(|error| SubxtNodeError::GetZswapStateRoot(format!("{error:?}").into()))
 }
 
-pub fn decode_ledger_state_root<C>(
+pub fn decode_ledger_state_root<C: OfflineClientAtBlockT<SubstrateConfig>>(
     client: &ClientAtBlock<SubstrateConfig, C>,
     result: &[u8],
-) -> Result<Option<Vec<u8>>, SubxtNodeError>
-where
-    C: OfflineClientAtBlockT<SubstrateConfig>,
-{
+) -> Result<Option<Vec<u8>>, SubxtNodeError> {
     let get_ledger_state_root = super::runtime_2_0_0::runtime_apis()
         .midnight_runtime_api()
         .get_ledger_state_root();
@@ -502,13 +490,10 @@ where
     Ok(Some(root))
 }
 
-pub fn decode_d_parameter<C>(
+pub fn decode_d_parameter<C: OfflineClientAtBlockT<SubstrateConfig>>(
     client: &ClientAtBlock<SubstrateConfig, C>,
     result: &[u8],
-) -> Result<DParameter, SubxtNodeError>
-where
-    C: OfflineClientAtBlockT<SubstrateConfig>,
-{
+) -> Result<DParameter, SubxtNodeError> {
     let get_d_param = super::runtime_2_0_0::runtime_apis()
         .system_parameters_api()
         .get_d_parameter();
@@ -522,13 +507,10 @@ where
     })
 }
 
-pub fn decode_terms_and_conditions<C>(
+pub fn decode_terms_and_conditions<C: OfflineClientAtBlockT<SubstrateConfig>>(
     client: &ClientAtBlock<SubstrateConfig, C>,
     result: &[u8],
-) -> Result<Option<TermsAndConditions>, SubxtNodeError>
-where
-    C: OfflineClientAtBlockT<SubstrateConfig>,
-{
+) -> Result<Option<TermsAndConditions>, SubxtNodeError> {
     let get_tc = super::runtime_2_0_0::runtime_apis()
         .system_parameters_api()
         .get_terms_and_conditions();
@@ -543,13 +525,10 @@ where
     }))
 }
 
-pub fn decode_genesis_cnight_registrations<C>(
+pub fn decode_genesis_cnight_registrations<C: OfflineClientAtBlockT<SubstrateConfig>>(
     client: &ClientAtBlock<SubstrateConfig, C>,
     mappings: &[(Vec<u8>, Vec<u8>)],
-) -> Result<Vec<DustRegistrationEvent>, SubxtNodeError>
-where
-    C: OfflineClientAtBlockT<SubstrateConfig>,
-{
+) -> Result<Vec<DustRegistrationEvent>, SubxtNodeError> {
     let address = super::runtime_2_0_0::storage()
         .c_night_observation()
         .mapping();
