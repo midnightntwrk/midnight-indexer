@@ -28,6 +28,7 @@ use std::{
 use tokio::time::sleep;
 
 type Respond = dyn Fn(&Call) -> CallResult + Send + Sync;
+type RespondSubscribe = dyn Fn(&'static str, &[Value]) -> Option<Vec<Value>> + Send + Sync;
 
 /// An in-memory node; clones share their state.
 #[derive(Clone)]
@@ -35,6 +36,7 @@ pub struct FakeNode(Arc<Inner>);
 
 struct Inner {
     respond: Box<Respond>,
+    respond_subscribe: Option<Box<RespondSubscribe>>,
     delay: Duration,
     max_batch_size: Option<usize>,
     disconnects: AtomicUsize,
@@ -53,6 +55,7 @@ impl FakeNode {
     pub fn new(respond: impl Fn(&Call) -> CallResult + Send + Sync + 'static) -> Self {
         Self(Arc::new(Inner {
             respond: Box::new(respond),
+            respond_subscribe: None,
             delay: Duration::ZERO,
             max_batch_size: None,
             disconnects: AtomicUsize::new(0),
@@ -94,6 +97,15 @@ impl FakeNode {
     pub fn with_subscriptions(self, subscriptions: Vec<Vec<Value>>) -> Self {
         *self.0.subscriptions.lock() = subscriptions;
         self
+    }
+
+    /// Answer subscriptions with the notifications `respond` returns for their method and
+    /// parameters; scripted subscriptions answer where it returns `None`.
+    pub fn with_subscribe(
+        self,
+        respond: impl Fn(&'static str, &[Value]) -> Option<Vec<Value>> + Send + Sync + 'static,
+    ) -> Self {
+        self.map(|inner| inner.respond_subscribe = Some(Box::new(respond)))
     }
 
     /// Send subscription notifications at the given interval.
@@ -158,12 +170,19 @@ impl Transport for FakeNode {
 
     async fn subscribe(
         &self,
-        _method: &'static str,
-        _params: Vec<Value>,
+        method: &'static str,
+        params: Vec<Value>,
         _unsubscribe: &'static str,
     ) -> Result<Subscription, TransportError> {
         let n = self.0.subscribes.fetch_add(1, Ordering::SeqCst);
-        let notifications = {
+        let responded = self
+            .0
+            .respond_subscribe
+            .as_ref()
+            .and_then(|respond| respond(method, &params));
+        let notifications = if let Some(notifications) = responded {
+            notifications
+        } else {
             let mut subscriptions = self.0.subscriptions.lock();
             if subscriptions.is_empty() {
                 vec![]

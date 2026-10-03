@@ -13,7 +13,7 @@
 
 #[cfg(test)]
 pub(crate) mod fake_node;
-mod header;
+pub(crate) mod header;
 pub mod rpc;
 pub(crate) mod runtimes;
 

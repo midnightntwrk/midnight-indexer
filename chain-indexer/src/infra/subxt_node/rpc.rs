@@ -444,6 +444,7 @@ pub enum Error {
 pub struct NodeRpc<T> {
     transport: Arc<T>,
     batch_size: NonZeroUsize,
+    batches_in_flight: NonZeroUsize,
     in_flight: Arc<Semaphore>,
     reconnect_policy: ReconnectPolicy,
     counters: Arc<Counters>,
@@ -454,6 +455,7 @@ impl<T> Clone for NodeRpc<T> {
         Self {
             transport: self.transport.clone(),
             batch_size: self.batch_size,
+            batches_in_flight: self.batches_in_flight,
             in_flight: self.in_flight.clone(),
             reconnect_policy: self.reconnect_policy,
             counters: self.counters.clone(),
@@ -474,6 +476,7 @@ where
         Self {
             transport: Arc::new(transport),
             batch_size,
+            batches_in_flight,
             in_flight: Arc::new(Semaphore::new(batches_in_flight.get())),
             reconnect_policy,
             counters: Default::default(),
@@ -483,6 +486,11 @@ where
     /// The request and byte counts.
     pub fn counters(&self) -> &Counters {
         &self.counters
+    }
+
+    /// The most calls in flight at once: the batch size times the batches in flight.
+    pub fn max_calls_in_flight(&self) -> usize {
+        self.batch_size.get() * self.batches_in_flight.get()
     }
 
     /// Send the calls in batches of at most the batch size; one [CallResult] per call, in order.
