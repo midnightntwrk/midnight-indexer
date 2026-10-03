@@ -1,0 +1,171 @@
+// This file is part of midnight-indexer.
+// Copyright (C) Midnight Foundation
+// SPDX-License-Identifier: Apache-2.0
+// Licensed under the Apache License, Version 2.0 (the "License");
+// You may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// http://www.apache.org/licenses/LICENSE-2.0
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! An in-memory [Transport] answering calls with a given function, with switches for the failure
+//! modes of a real node: lost connections, refused batches and slow responses.
+
+use crate::infra::subxt_node::rpc::{Call, CallResult, Notifications, Transport, TransportError};
+use futures::{StreamExt, stream};
+use parking_lot::Mutex;
+use serde_json::Value;
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
+use tokio::time::sleep;
+
+type Respond = dyn Fn(&Call) -> CallResult + Send + Sync;
+
+/// An in-memory node; clones share their state.
+#[derive(Clone)]
+pub struct FakeNode(Arc<Inner>);
+
+struct Inner {
+    respond: Box<Respond>,
+    delay: Duration,
+    max_batch_size: Option<usize>,
+    disconnects: AtomicUsize,
+    failing_reconnects: AtomicBool,
+    reconnects: AtomicUsize,
+    batch_sizes: Mutex<Vec<usize>>,
+    in_flight: AtomicUsize,
+    max_in_flight: AtomicUsize,
+    subscriptions: Mutex<Vec<Vec<Value>>>,
+}
+
+impl FakeNode {
+    /// A node answering every call with `respond`.
+    pub fn new(respond: impl Fn(&Call) -> CallResult + Send + Sync + 'static) -> Self {
+        Self(Arc::new(Inner {
+            respond: Box::new(respond),
+            delay: Duration::ZERO,
+            max_batch_size: None,
+            disconnects: AtomicUsize::new(0),
+            failing_reconnects: AtomicBool::new(false),
+            reconnects: AtomicUsize::new(0),
+            batch_sizes: Mutex::default(),
+            in_flight: AtomicUsize::new(0),
+            max_in_flight: AtomicUsize::new(0),
+            subscriptions: Mutex::default(),
+        }))
+    }
+
+    /// Answer each batch after the given delay.
+    pub fn with_delay(self, delay: Duration) -> Self {
+        self.map(|inner| inner.delay = delay)
+    }
+
+    /// Refuse batches with more calls than the given size.
+    pub fn with_max_batch_size(self, max_batch_size: usize) -> Self {
+        self.map(|inner| inner.max_batch_size = Some(max_batch_size))
+    }
+
+    /// Lose the connection on the next `n` batches.
+    pub fn with_disconnects(self, n: usize) -> Self {
+        self.0.disconnects.store(n, Ordering::SeqCst);
+        self
+    }
+
+    /// Fail every reconnect.
+    pub fn with_failing_reconnects(self) -> Self {
+        self.0.failing_reconnects.store(true, Ordering::SeqCst);
+        self
+    }
+
+    /// Answer the next subscriptions with the given notifications, one list per subscription, then
+    /// end them.
+    pub fn with_subscriptions(self, subscriptions: Vec<Vec<Value>>) -> Self {
+        *self.0.subscriptions.lock() = subscriptions;
+        self
+    }
+
+    /// The size of every batch received, in order.
+    pub fn batch_sizes(&self) -> Vec<usize> {
+        self.0.batch_sizes.lock().clone()
+    }
+
+    /// The most batches answered at the same time.
+    pub fn max_in_flight(&self) -> usize {
+        self.0.max_in_flight.load(Ordering::SeqCst)
+    }
+
+    /// The number of reconnects.
+    pub fn reconnects(&self) -> usize {
+        self.0.reconnects.load(Ordering::SeqCst)
+    }
+
+    fn map(self, f: impl FnOnce(&mut Inner)) -> Self {
+        let mut inner = Arc::into_inner(self.0).expect("configured before being shared");
+        f(&mut inner);
+        Self(Arc::new(inner))
+    }
+}
+
+impl Transport for FakeNode {
+    async fn batch(&self, calls: Vec<Call>) -> Result<Vec<CallResult>, TransportError> {
+        let inner = &self.0;
+
+        let disconnect = inner
+            .disconnects
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+            .is_ok();
+        if disconnect {
+            return Err(TransportError::Disconnected("fake disconnect".into()));
+        }
+
+        if inner
+            .max_batch_size
+            .is_some_and(|max_batch_size| calls.len() > max_batch_size)
+        {
+            return Err(TransportError::Other("batch too large".into()));
+        }
+
+        inner.batch_sizes.lock().push(calls.len());
+        let in_flight = inner.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+        inner.max_in_flight.fetch_max(in_flight, Ordering::SeqCst);
+        sleep(inner.delay).await;
+        inner.in_flight.fetch_sub(1, Ordering::SeqCst);
+
+        Ok(calls.iter().map(|call| (inner.respond)(call)).collect())
+    }
+
+    async fn subscribe(
+        &self,
+        _method: &'static str,
+        _params: Vec<Value>,
+        _unsubscribe: &'static str,
+    ) -> Result<Notifications, TransportError> {
+        let mut subscriptions = self.0.subscriptions.lock();
+        let notifications = if subscriptions.is_empty() {
+            vec![]
+        } else {
+            subscriptions.remove(0)
+        };
+
+        Ok(stream::iter(notifications.into_iter().map(Ok)).boxed())
+    }
+
+    async fn reconnect(&self) -> Result<(), TransportError> {
+        self.0.reconnects.fetch_add(1, Ordering::SeqCst);
+        if self.0.failing_reconnects.load(Ordering::SeqCst) {
+            Err(TransportError::Disconnected(
+                "fake reconnect failure".into(),
+            ))
+        } else {
+            Ok(())
+        }
+    }
+}

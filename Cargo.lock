@@ -1217,6 +1217,7 @@ dependencies = [
  "indexer-common",
  "indoc",
  "itertools 0.15.0",
+ "jsonrpsee",
  "log",
  "metrics",
  "midnight-coin-structure 2.0.2",
