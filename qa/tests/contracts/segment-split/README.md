@@ -14,7 +14,7 @@ split by `kernel.checkpoint()`. Segment 0 is all-or-nothing; a fallible segment
 rolls back on its own. So a Call can legitimately have had a real effect on
 chain (its guaranteed transcript applied) while its own fallible segment failed.
 
-Two details are load-bearing, and both were established empirically:
+Three details are load-bearing, and all three were established empirically:
 
 1. **The failure must happen at ledger-apply time, not proof time.** A circuit
    that fails while being proved never reaches a block, so there is no
@@ -29,6 +29,25 @@ Two details are load-bearing, and both were established empirically:
    fits, everything lands in the guaranteed phase, and the node rejects the
    stale call from the mempool ("guaranteed execution would fail") instead of
    including it — so no partially successful transaction is produced.
+
+3. **The ballast keys are primed before the stale pair is built.** Each burn
+   circuit has a matching `prime*` circuit that inserts the same 48 ballast
+   keys, and the test applies it, against fresh state, before taking the
+   snapshot. Without it the first call of the pair *inserts* those keys and
+   grows the contract state between the snapshot the stale call is proven
+   against and the state it is applied to. A transcript's declared gas is its
+   cost × 1.2 measured at build time, **bytes written and deleted included**,
+   and ledger v9 charges a transcript for the state bytes it rewrites and
+   rejects it with `OutOfGas` above that bound
+   (`onchain-runtime/src/context.rs`, `query`). On the grown state the stale
+   call's three-op guaranteed transcript (`idxp`, `addi 1`, `insc 1`) runs out
+   of its declared gas, and the node rejects the whole transaction from the
+   mempool — `guaranteed execution would fail: ran out of gas budget`, surfaced
+   as `INVALID_TRANSACTION … custom error: 104` — before any partial success
+   can happen. With the keys primed, both calls overwrite existing entries, so
+   the guaranteed transcript costs the same against the snapshot and against
+   the state it applies to. Ledger v8 accepted the unprimed pair; priming is
+   harmless there.
 
 The two circuits differ only in where the expensive section sits:
 
@@ -109,19 +128,24 @@ require a runtime no stable compiler emits: toolkit 2.1.x wants compact-runtime
 
 ### Status on toolkit 2.1.x
 
-Not yet usable for the `burnWithGuaranteed` scenario, though it gets close:
+Usable with the pre-release compiler pin:
 
 ```bash
-NODE_TAG=2.1.0-beta.1 NODE_TOOLKIT_TAG=2.1.0-beta.1 \
+NODE_TAG=2.1.0-rc.2 NODE_TOOLKIT_TAG=2.1.0-rc.2 \
   COMPACT_COMPILER_VERSION=0.33.0-rc.2 TARGET_ENV=undeployed bun run test:e2e
 ```
 
-deploys the contract and runs the `burnWithoutGuaranteed` scenario green, but
-the node rejects the stale `burnWithGuaranteed` call from the mempool with
-`INVALID_TRANSACTION ... custom error: 104`. That is the ballast doing its job
-against the wrong ledger: the sizes above are tuned so the **ledger v8**
-partition leaves part of the circuit in the fallible phase, and ledger v9
-prices the circuit differently, so the whole thing lands in the guaranteed
-phase again and mempool validation refuses it — the exact failure mode the
-ballast exists to avoid. Retuning it for ledger v9 is separate work; until
-then run this suite on node and toolkit `1.0.0`.
+runs both scenarios green. The default pin (0.30.0) does not work there: it
+emits a ledger-v8 intent, and the 2.1.x toolkit refuses to read it
+(`expected header tag 'midnight:intent[v9](…)', got 'midnight:intent[v6](…)'`).
+
+Before the ballast was primed (detail 3 above), `burnWithGuaranteed` failed on
+2.1.x with `custom error: 104`. That was first put down to the ballast being
+tuned for the ledger-v8 guaranteed budget, but decoding the stale call on
+ledger v9 shows the split is as intended — only the increment is guaranteed —
+and the node's own log names the cause: the guaranteed transcript ran out of
+its declared gas on the state the first call had grown.
+
+The ballast size is still a hand-picked constant. Ledger v9 partitions it as
+intended today, but a future cost model may not; a calibration-aware fixture
+that derives the split at runtime instead is tracked separately.
