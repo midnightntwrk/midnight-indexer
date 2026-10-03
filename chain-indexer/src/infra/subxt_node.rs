@@ -99,9 +99,25 @@ async fn finish_block(
     } = raw_block;
 
     // Fetch authorities if `None`, either initially or because of a `NewSession` event in the
-    // previous block.
+    // previous block. Aura verifies a block's author against its parent's state, so read the set
+    // from there: at a session-change block the block's own state already holds the next
+    // session's set (#1508).
     if authorities.is_none() {
-        *authorities = Some(runtimes::fetch_authorities(state_node_version, &client).await?);
+        let fetched = if block.height == 0 {
+            runtimes::fetch_authorities(state_node_version, &client).await?
+        } else {
+            let parent = client
+                .online_client()
+                .at_block(header.parent_hash)
+                .await
+                .map_err(|error| {
+                    SubxtNodeError::GetOnlineClientAt(header.parent_hash, error.into())
+                })?;
+            let parent_node_version =
+                ProtocolVersion::try_from(parent.spec_version())?.node_version();
+            runtimes::fetch_authorities(parent_node_version, &parent).await?
+        };
+        *authorities = Some(fetched);
     }
     block.author = authorities
         .as_ref()
