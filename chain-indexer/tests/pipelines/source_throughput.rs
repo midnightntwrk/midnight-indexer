@@ -50,6 +50,8 @@ use std::{
 };
 use tokio::time::sleep;
 
+/// The time resolution of the recorded arrivals.
+const ARRIVAL_RESOLUTION: Duration = Duration::from_millis(10);
 /// How often the consumer prints its progress.
 const PROGRESS_INTERVAL: Duration = Duration::from_secs(10);
 /// Clock ticks per second of `/proc/self/stat`'s CPU times, `USER_HZ`, fixed on Linux.
@@ -117,13 +119,16 @@ async fn source_throughput() {
     let cpu_start = cpu_seconds();
     let started = Instant::now();
     let (chunks, _) = source.run(start, Some(end));
-    let sizes = Mutex::new(vec![]);
+    // Keyed by extrinsic count; genesis, under `None`, belongs to neither empty nor non-empty.
+    let sizes = Mutex::new(BTreeMap::<Option<usize>, Totals>::new());
     let chunks = chunks.inspect(|chunk| {
         if let Ok(chunk) = chunk {
-            sizes
-                .lock()
-                .unwrap()
-                .extend(chunk.iter().map(BlockSizes::of));
+            let mut sizes = sizes.lock().unwrap();
+            chunk.iter().for_each(|block| {
+                let sizes_of = BlockSizes::of(block);
+                let key = (block.height() > 0).then_some(sizes_of.extrinsic_count);
+                sizes.entry(key).or_default().add(&sizes_of)
+            });
         }
     });
 
@@ -180,7 +185,7 @@ struct Consumer {
     started: Instant,
     blocks: u64,
     errors: Vec<String>,
-    /// The blocks received so far, at each arrival.
+    /// The blocks received so far, at most one entry per [ARRIVAL_RESOLUTION].
     arrivals: Vec<(Duration, u64)>,
     /// The last progress line: when, and the blocks received by then.
     progress: (Duration, u64),
@@ -218,7 +223,10 @@ impl Consumer {
                 self.blocks += blocks;
                 RECORDED.consumed.fetch_add(blocks, Ordering::Relaxed);
                 let now = self.started.elapsed();
-                self.arrivals.push((now, self.blocks));
+                match self.arrivals.last_mut() {
+                    Some((at, blocks)) if now - *at < ARRIVAL_RESOLUTION => *blocks = self.blocks,
+                    _ => self.arrivals.push((now, self.blocks)),
+                }
                 let (last_at, last_blocks) = self.progress;
                 if now - last_at >= PROGRESS_INTERVAL {
                     println!(
@@ -335,10 +343,43 @@ impl BlockSizes {
     }
 }
 
+/// Decoded bytes summed over blocks.
+#[derive(Debug, Default, Clone, Copy)]
+struct Totals {
+    blocks: u64,
+    extrinsics: usize,
+    fields: [usize; 8],
+}
+
+impl Totals {
+    fn add(&mut self, block: &BlockSizes) {
+        self.blocks += 1;
+        self.extrinsics += block.extrinsic_count;
+        self.fields
+            .iter_mut()
+            .zip(block.fields())
+            .for_each(|(total, (_, bytes))| *total += bytes);
+    }
+
+    fn merge(mut self, other: &Self) -> Self {
+        self.blocks += other.blocks;
+        self.extrinsics += other.extrinsics;
+        self.fields
+            .iter_mut()
+            .zip(other.fields)
+            .for_each(|(total, bytes)| *total += bytes);
+        self
+    }
+
+    fn mean(&self, field: usize) -> f64 {
+        self.fields[field] as f64 / self.blocks.max(1) as f64
+    }
+}
+
 fn report(
     source: &Source<impl Transport>,
     consumer: &Consumer,
-    sizes: &[BlockSizes],
+    sizes: &BTreeMap<Option<usize>, Totals>,
     wall: Duration,
     cpu: Option<f64>,
     decode_cpu_threads: Option<NonZeroUsize>,
@@ -391,36 +432,35 @@ fn report(
     );
 
     // Blocks with the run's fewest extrinsics carry nothing but inherents.
-    let fewest = sizes.iter().map(|s| s.extrinsic_count).min().unwrap_or(0);
-    let (empty, non_empty) = sizes
-        .iter()
-        .partition::<Vec<_>, _>(|s| s.extrinsic_count == fewest);
+    let fewest = sizes.keys().flatten().next().copied().unwrap_or(0);
+    let empty = sizes.get(&Some(fewest)).copied().unwrap_or_default();
+    let non_empty = sizes
+        .range(Some(fewest + 1)..)
+        .fold(Totals::default(), |totals, (_, other)| totals.merge(other));
+    let all = sizes
+        .values()
+        .fold(Totals::default(), |totals, other| totals.merge(other));
     println!("\n## Decoded bytes per block, by data type\n");
     println!(
         "Empty blocks have the run's fewest extrinsics ({fewest}): {} empty, {} non-empty.\n",
-        empty.len(),
-        non_empty.len()
+        empty.blocks, non_empty.blocks
     );
     println!("| type | all | empty | non-empty |\n|---|---:|---:|---:|");
-    let mean = |blocks: &[&BlockSizes], field: usize| {
-        let total = blocks.iter().map(|s| s.fields()[field].1).sum::<usize>();
-        total as f64 / blocks.len().max(1) as f64
-    };
-    let all = sizes.iter().collect::<Vec<_>>();
-    (0..BlockSizes::default().fields().len()).for_each(|field| {
-        println!(
-            "| {} | {:.1} | {:.1} | {:.1} |",
-            BlockSizes::default().fields()[field].0,
-            mean(&all, field),
-            mean(&empty, field),
-            mean(&non_empty, field)
-        );
-    });
-    let extrinsics = sizes.iter().map(|s| s.extrinsic_count).sum::<usize>();
-    let body = sizes.iter().map(|s| s.body).sum::<usize>();
+    BlockSizes::default()
+        .fields()
+        .iter()
+        .enumerate()
+        .for_each(|(field, (name, _))| {
+            println!(
+                "| {name} | {:.1} | {:.1} | {:.1} |",
+                all.mean(field),
+                empty.mean(field),
+                non_empty.mean(field)
+            );
+        });
     println!(
         "| body per extrinsic | {:.1} | | |",
-        body as f64 / extrinsics.max(1) as f64
+        all.fields[1] as f64 / all.extrinsics.max(1) as f64
     );
 
     println!("\n## Stages\n");

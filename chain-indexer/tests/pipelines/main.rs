@@ -13,4 +13,5 @@
 
 //! Tests of the block sourcing and decode pipelines against a node.
 
+mod node_calls;
 mod source_throughput;
