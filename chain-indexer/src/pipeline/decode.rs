@@ -42,6 +42,7 @@ use subxt::{
 use thiserror::Error;
 use tokio::sync::oneshot;
 
+pub mod deserialize;
 #[cfg(test)]
 mod tests;
 

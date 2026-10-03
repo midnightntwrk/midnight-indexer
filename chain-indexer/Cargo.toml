@@ -24,6 +24,7 @@ fastrace           = { workspace = true, features = [ "enable" ] }
 futures            = { workspace = true }
 humantime-serde    = { workspace = true }
 indexer-common     = { path = "../indexer-common" }
+midnight-storage-core_v1 = { workspace = true, features = [ "layout-v2", "gc-v1" ] }
 indoc              = { workspace = true }
 itertools          = { workspace = true }
 jsonrpsee          = { workspace = true, features = [ "ws-client", "client-ws-transport-tls" ] }

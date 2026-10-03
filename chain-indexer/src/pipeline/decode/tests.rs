@@ -17,14 +17,18 @@ use crate::{
     pipeline::{
         decode::{
             AuthoritySetError, BABE_NEXT_EPOCH_DATA, CpuPool, block_authorities, chunks_in_decode,
-            decode,
+            decode, deserialize::deserialize,
         },
         sourcing::{self, AUTHORITY_SET_ITEMS, Parent, storage_key},
     },
 };
 use futures::{StreamExt, TryStreamExt, stream};
-use indexer_common::domain::{BlockHash, BlockNumber, ByteArray, ByteVec, ProtocolVersion};
+use indexer_common::domain::{
+    BlockHash, BlockNumber, ByteArray, ByteVec, LedgerVersion, ProtocolVersion,
+};
+use midnight_storage_core_v1::{db::InMemoryDB, storage::try_get_default_storage};
 use parity_scale_codec::{Decode, Encode};
+use rayon::prelude::*;
 use serde_json::{Value, json};
 use std::{
     env, fs,
@@ -200,6 +204,35 @@ async fn test_cpu_pool_decode_in_height_order() {
     assert_eq!(decoded, expected);
 }
 
+#[test]
+fn test_deserialization_on_threads() {
+    let transactions = regular_transactions();
+    let on = |threads| {
+        CpuPool::new(NonZeroUsize::new(threads).unwrap())
+            .expect("pool builds")
+            .0
+            .install(|| {
+                // Many times over, so that every thread deserializes every transaction.
+                (0..16)
+                    .into_par_iter()
+                    .flat_map_iter(|_| transactions.iter())
+                    .map(|(bytes, ledger_version)| deserialize(bytes, *ledger_version))
+                    .collect::<Result<Vec<_>, _>>()
+                    .expect("transactions deserialize")
+            })
+    };
+
+    let one = on(1);
+    let four = on(4);
+    assert_eq!(four, one);
+    assert!(
+        one.iter()
+            .any(|deserialized| !deserialized.contract_actions.is_empty())
+    );
+    // The fixtures include a contract deploy, read from the default storage.
+    assert!(try_get_default_storage::<InMemoryDB>().is_some());
+}
+
 fn authorities(header: &SubstrateHeader<H256>) -> Option<Vec<[u8; 32]>> {
     block_authorities(header, &authority_set(), true, |_| true).expect("authority set")
 }
@@ -309,6 +342,27 @@ fn pairs_of(value: &Value) -> Vec<(ByteVec, ByteVec)> {
         .iter()
         .map(|pair| (bytes(&pair[0]), bytes(&pair[1])))
         .collect()
+}
+
+/// Regular transaction fixtures in indexer-common, with their ledger versions.
+fn regular_transactions() -> Vec<(Vec<u8>, LedgerVersion)> {
+    [
+        ("block_128537_tx.raw", LedgerVersion::V8),
+        ("block_164460_tx.raw", LedgerVersion::V8),
+        ("block_1788980_tx.raw", LedgerVersion::V8),
+        ("tx_1_2_2.raw", LedgerVersion::V9),
+        ("tx_1_2_3.raw", LedgerVersion::V9),
+        ("v9_regular_tx_devnet_182048.raw", LedgerVersion::V9),
+        ("v9_regular_tx_devnet_210505.raw", LedgerVersion::V9),
+    ]
+    .into_iter()
+    .map(|(file, ledger_version)| {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../indexer-common/tests")
+            .join(file);
+        (fs::read(path).expect("fixture can be read"), ledger_version)
+    })
+    .collect()
 }
 
 /// A [node::Block], every byte field in full, except transactions: their hashes.
