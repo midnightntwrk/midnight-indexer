@@ -15,14 +15,15 @@
 //! `NODE_URL`. Run with `just source-throughput url from count`.
 //!
 //! Settings, from env vars:
-//! - `SOURCE_FROM`, `SOURCE_COUNT`: the heights sourced;
+//! - `SOURCE_FROM`, `SOURCE_COUNT`: the heights sourced; from genesis, and up to the finalized
+//!   height at start, if unset or empty;
 //! - `SOURCE_CHUNK_SIZE`, `SOURCE_CHUNKS_AHEAD`, `RPC_BATCH_SIZE`, `RPC_BATCHES_IN_FLIGHT`;
 //! - `DECODE_CPU_THREADS`: decode on that many threads, no decode if unset;
 //! - `CONSUMER_SLEEP_MS`: the time the consumer sleeps per block.
 
 use chain_indexer::{
     domain::BlockRef,
-    infra::subxt_node::rpc::{Count, ReconnectPolicy, Transport},
+    infra::subxt_node::rpc::{Call, Count, ReconnectPolicy, Transport, method},
     pipeline::{
         decode::{self, CpuPool},
         metric,
@@ -59,33 +60,42 @@ static RECORDED: LazyLock<Recorded> = LazyLock::new(Recorded::default);
 async fn source_throughput() {
     let url = env::var("NODE_URL").expect("NODE_URL is set");
     let from = setting("SOURCE_FROM", 0u64);
-    let count = setting("SOURCE_COUNT", 10_000u64);
+    let count = optional_setting::<u64>("SOURCE_COUNT");
     let config = source::Config {
         chunk_size: setting("SOURCE_CHUNK_SIZE", NonZeroUsize::new(64).unwrap()),
-        chunks_ahead: setting("SOURCE_CHUNKS_AHEAD", NonZeroUsize::new(4).unwrap()),
+        chunks_ahead: setting("SOURCE_CHUNKS_AHEAD", NonZeroUsize::new(8).unwrap()),
         rpc_batch_size: setting("RPC_BATCH_SIZE", NonZeroUsize::new(64).unwrap()),
-        rpc_batches_in_flight: setting("RPC_BATCHES_IN_FLIGHT", NonZeroUsize::new(8).unwrap()),
+        rpc_batches_in_flight: setting("RPC_BATCHES_IN_FLIGHT", NonZeroUsize::new(16).unwrap()),
         recovery_timeout: Duration::from_secs(30),
         reconnect_policy: ReconnectPolicy {
             max_delay: Duration::from_secs(1),
             max_attempts: 10,
         },
     };
-    let decode_cpu_threads = env::var("DECODE_CPU_THREADS")
-        .ok()
-        .map(|threads| threads.parse::<NonZeroUsize>().expect("DECODE_CPU_THREADS"));
+    let decode_cpu_threads = optional_setting::<NonZeroUsize>("DECODE_CPU_THREADS");
     let consumer_sleep = Duration::from_millis(setting("CONSUMER_SLEEP_MS", 0));
-    println!(
-        "{url} heights {from}..={}: {config:?}, decode threads {decode_cpu_threads:?}, consumer \
-         sleep {consumer_sleep:?}",
-        from + count - 1
-    );
 
     metrics::set_global_recorder(HarnessRecorder).expect("no other recorder is set");
 
     let source = Source::connect(&url, config)
         .await
         .expect("node serves the required methods");
+    let end = match count {
+        Some(count) => from + count - 1,
+        None => source
+            .rpc()
+            .call::<u64>(Call {
+                method: method::ARCHIVE_FINALIZED_HEIGHT,
+                params: vec![],
+            })
+            .await
+            .expect("finalized height"),
+    };
+    let count = end + 1 - from;
+    println!(
+        "{url} heights {from}..={end}: {config:?}, decode threads {decode_cpu_threads:?}, \
+         consumer sleep {consumer_sleep:?}"
+    );
     let start = match from {
         0 => None,
         from => {
@@ -104,7 +114,7 @@ async fn source_throughput() {
 
     let cpu_start = cpu_seconds();
     let started = Instant::now();
-    let (chunks, _) = source.run(start, Some(from + count - 1));
+    let (chunks, _) = source.run(start, Some(end));
     let sizes = Mutex::new(vec![]);
     let chunks = chunks.inspect(|chunk| {
         if let Ok(chunk) = chunk {
@@ -147,13 +157,19 @@ async fn source_throughput() {
 }
 
 fn setting<T: FromStr<Err: Display>>(name: &str, default: T) -> T {
+    optional_setting(name).unwrap_or(default)
+}
+
+/// The setting of the given name, `None` if unset or empty.
+fn optional_setting<T: FromStr<Err: Display>>(name: &str) -> Option<T> {
     env::var(name)
+        .ok()
+        .filter(|value| !value.is_empty())
         .map(|value| {
             value
                 .parse()
                 .unwrap_or_else(|error| panic!("{name}: {error}"))
         })
-        .unwrap_or(default)
 }
 
 /// Receives blocks, sleeps per block, and records when blocks arrive.

@@ -71,10 +71,11 @@ all-all:
 coverage:
     ./coverage.sh
 
-# Measure block sourcing from a node, release build: `just source-throughput ws://… 0 10000`. Further
-# settings from env vars, see `chain-indexer/tests/pipelines/source_throughput.rs`. The pipelines
-# don't depend on the feature; standalone is the one that builds without services.
-source-throughput url from count:
+# Measure block sourcing from a node, release build: `just source-throughput ws://… [from] [count]`,
+# by default from genesis to the finalized height. Further settings from env vars, see
+# `chain-indexer/tests/pipelines/source_throughput.rs`. The pipelines don't depend on the feature;
+# standalone is the one that builds without services.
+source-throughput url from="0" count="":
     NODE_URL={{url}} SOURCE_FROM={{from}} SOURCE_COUNT={{count}} \
         cargo nextest run -p chain-indexer --features standalone --release --run-ignored only \
         -E 'binary(pipelines) & test(source_throughput::)' --no-capture
