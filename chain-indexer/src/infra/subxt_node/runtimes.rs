@@ -40,6 +40,8 @@ pub struct BlockDetails {
 }
 
 /// Runtime specific (serialized) transaction.
+#[derive(Debug)]
+#[cfg_attr(test, derive(Clone))]
 pub enum Transaction {
     Regular(ByteVec),
     System(ByteVec),

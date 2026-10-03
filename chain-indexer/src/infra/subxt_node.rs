@@ -12,12 +12,12 @@
 // limitations under the License.
 
 mod header;
-mod runtimes;
+pub(crate) mod runtimes;
 
 use crate::{
     domain::{
         BlockRef,
-        node::{Block, Node, RegularTransaction, SystemTransaction, Transaction},
+        node::{Block, Node},
     },
     infra::subxt_node::{header::SubstrateHeaderExt, runtimes::BlockDetails},
 };
@@ -388,10 +388,11 @@ impl SubxtNode {
             None
         };
 
-        let transactions = stream::iter(transactions)
-            .then(|t| make_transaction(t, protocol_version))
-            .try_collect::<Vec<_>>()
-            .await?;
+        // The genesis ledger state, if there is a ledger state root to compare it with.
+        let genesis_ledger_state = match ledger_state_root {
+            Some(_) => Some(self.fetch_genesis_ledger_state().await?),
+            None => None,
+        };
 
         // System parameters live in this block's state; fetching them here lets the lookups
         // ride the concurrent block prefetch instead of the sequential indexing path. Both are
@@ -422,6 +423,7 @@ impl SubxtNode {
                 bridge_events,
                 d_parameter: Some(d_parameter),
                 terms_and_conditions,
+                genesis_ledger_state,
             },
             client: block,
         })
@@ -893,67 +895,6 @@ fn decode_babe_authority_index(mut pre_digest: &[u8]) -> Result<u32, SubxtNodeEr
     }
 
     Ok(u32::decode(&mut pre_digest)?)
-}
-
-async fn make_transaction(
-    transaction: runtimes::Transaction,
-    protocol_version: ProtocolVersion,
-) -> Result<Transaction, SubxtNodeError> {
-    match transaction {
-        runtimes::Transaction::Regular(transaction) => {
-            make_regular_transaction(transaction, protocol_version).await
-        }
-
-        runtimes::Transaction::System(transaction) => {
-            make_system_transaction(transaction, protocol_version).await
-        }
-    }
-}
-
-async fn make_regular_transaction(
-    transaction: ByteVec,
-    protocol_version: ProtocolVersion,
-) -> Result<Transaction, SubxtNodeError> {
-    let ledger_transaction =
-        ledger::Transaction::deserialize(&transaction, protocol_version.ledger_version())?;
-
-    let hash = ledger_transaction.hash();
-
-    let identifiers = ledger_transaction.identifiers()?;
-
-    let contract_actions = ledger_transaction
-        .contract_actions()?
-        .into_iter()
-        .map(Into::into)
-        .collect();
-
-    let transaction = RegularTransaction {
-        hash,
-        protocol_version,
-        identifiers,
-        contract_actions,
-        raw: transaction,
-    };
-
-    Ok(Transaction::Regular(transaction))
-}
-
-async fn make_system_transaction(
-    transaction: ByteVec,
-    protocol_version: ProtocolVersion,
-) -> Result<Transaction, SubxtNodeError> {
-    let ledger_transaction =
-        ledger::SystemTransaction::deserialize(&transaction, protocol_version.ledger_version())?;
-
-    let hash = ledger_transaction.hash();
-
-    let transaction = SystemTransaction {
-        hash,
-        protocol_version,
-        raw: transaction,
-    };
-
-    Ok(Transaction::System(transaction))
 }
 
 #[trace]

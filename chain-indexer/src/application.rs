@@ -22,15 +22,16 @@ use crate::{
         should_bump_first_regular_tblock,
         storage::Storage,
     },
+    infra::subxt_node::runtimes,
 };
 use anyhow::{Context, bail};
 use async_stream::stream;
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
-use futures::{Stream, StreamExt, TryStreamExt, future::ok};
+use futures::{Stream, StreamExt, TryStreamExt, future::ok, stream};
 use indexer_common::{
     domain::{
-        BlockIndexed, BridgeEventIndexed, LedgerVersion, NetworkId, Publisher,
-        SerializedLedgerStateKey, UnshieldedUtxoIndexed,
+        BlockIndexed, BridgeEventIndexed, ByteVec, LedgerVersion, NetworkId, ProtocolVersion,
+        Publisher, SerializedLedgerStateKey, UnshieldedUtxoIndexed, ledger,
     },
     infra::ledger_db,
 };
@@ -314,7 +315,6 @@ pub async fn run(
                     &mut storage,
                     &publisher,
                     &metrics,
-                    &node,
                 )
                 .in_span(Span::root("get-and-index-block", SpanContext::random()))
                 .await?;
@@ -450,7 +450,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 #[trace]
-async fn get_and_index_block<E, N>(
+async fn get_and_index_block<E>(
     caught_up_max_distance: u32,
     caught_up_leeway: u32,
     blocks: &mut (impl Stream<Item = Result<node::Block, E>> + Unpin),
@@ -462,11 +462,9 @@ async fn get_and_index_block<E, N>(
     storage: &mut impl Storage,
     publisher: &impl Publisher,
     metrics: &Metrics,
-    node: &N,
 ) -> anyhow::Result<(LedgerState, SerializedLedgerStateKey)>
 where
     E: StdError + Send + Sync + 'static,
-    N: Node,
 {
     let index_wait_started = Instant::now();
     let block = get_next_block(blocks).await?;
@@ -484,7 +482,6 @@ where
         storage,
         publisher,
         metrics,
-        node,
     )
     .await?;
 
@@ -507,10 +504,10 @@ where
 
 #[allow(clippy::too_many_arguments)]
 #[trace]
-async fn index_block<N>(
+async fn index_block(
     caught_up_max_distance: u32,
     caught_up_leeway: u32,
-    block: node::Block,
+    mut block: node::Block,
     mut ledger_state: LedgerState,
     network_id: &NetworkId,
     highest_block_on_node: &Arc<RwLock<Option<BlockRef>>>,
@@ -519,11 +516,7 @@ async fn index_block<N>(
     storage: &mut impl Storage,
     publisher: &impl Publisher,
     metrics: &Metrics,
-    node: &N,
-) -> anyhow::Result<(LedgerState, SerializedLedgerStateKey)>
-where
-    N: Node,
-{
+) -> anyhow::Result<(LedgerState, SerializedLedgerStateKey)> {
     let index_block_started = Instant::now();
 
     // Capture the node's zswap merkle tree root (domain type) before `try_into` serializes it, to
@@ -531,11 +524,19 @@ where
     let zswap_merkle_tree_root = block.zswap_merkle_tree_root;
 
     // System parameters ride on the node block; capture them before the conversion consumes it.
-    let d_parameter = block.d_parameter.clone();
-    let terms_and_conditions = block.terms_and_conditions.clone();
+    let d_parameter = block.d_parameter.take();
+    let terms_and_conditions = block.terms_and_conditions.take();
+
+    // The genesis ledger state rides on block 0; take it before the conversion consumes the block.
+    let genesis_ledger_state = block.genesis_ledger_state.take();
 
     let index_convert_started = Instant::now();
     let (mut block, transactions) = block.try_into().context("convert node block into domain")?;
+    let transactions = stream::iter(transactions)
+        .then(|transaction| make_transaction(transaction, block.protocol_version))
+        .try_collect::<Vec<_>>()
+        .await
+        .context("make transactions")?;
     metrics.record_index_convert(index_convert_started.elapsed());
 
     let index_ledger_update_started = Instant::now();
@@ -587,10 +588,8 @@ where
         // genesis already includes transactions (post-block-0) or not (pre-block-0).
 
         if let Some(ledger_state_root) = block.ledger_state_root.as_ref() {
-            let genesis_ledger_state = node
-                .fetch_genesis_ledger_state()
-                .await
-                .context("fetch genesis ledger state")?;
+            let genesis_ledger_state =
+                genesis_ledger_state.context("genesis ledger state missing on block 0")?;
             let genesis_ledger_state = LedgerState::from_genesis(
                 genesis_ledger_state,
                 block.protocol_version.ledger_version(),
@@ -869,6 +868,69 @@ async fn determine_system_parameters_change(
     }
 }
 
+/// Deserialize a serialized transaction into a [node::Transaction]. Deserializing allocates in the
+/// ledger arena.
+pub async fn make_transaction(
+    transaction: runtimes::Transaction,
+    protocol_version: ProtocolVersion,
+) -> Result<node::Transaction, ledger::Error> {
+    match transaction {
+        runtimes::Transaction::Regular(transaction) => {
+            make_regular_transaction(transaction, protocol_version).await
+        }
+
+        runtimes::Transaction::System(transaction) => {
+            make_system_transaction(transaction, protocol_version).await
+        }
+    }
+}
+
+async fn make_regular_transaction(
+    transaction: ByteVec,
+    protocol_version: ProtocolVersion,
+) -> Result<node::Transaction, ledger::Error> {
+    let ledger_transaction =
+        ledger::Transaction::deserialize(&transaction, protocol_version.ledger_version())?;
+
+    let hash = ledger_transaction.hash();
+
+    let identifiers = ledger_transaction.identifiers()?;
+
+    let contract_actions = ledger_transaction
+        .contract_actions()?
+        .into_iter()
+        .map(Into::into)
+        .collect();
+
+    let transaction = node::RegularTransaction {
+        hash,
+        protocol_version,
+        identifiers,
+        contract_actions,
+        raw: transaction,
+    };
+
+    Ok(node::Transaction::Regular(transaction))
+}
+
+async fn make_system_transaction(
+    transaction: ByteVec,
+    protocol_version: ProtocolVersion,
+) -> Result<node::Transaction, ledger::Error> {
+    let ledger_transaction =
+        ledger::SystemTransaction::deserialize(&transaction, protocol_version.ledger_version())?;
+
+    let hash = ledger_transaction.hash();
+
+    let transaction = node::SystemTransaction {
+        hash,
+        protocol_version,
+        raw: transaction,
+    };
+
+    Ok(node::Transaction::System(transaction))
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
@@ -970,6 +1032,7 @@ mod tests {
         bridge_events: Default::default(),
         d_parameter: None,
         terms_and_conditions: None,
+        genesis_ledger_state: None,
     });
 
     static BLOCK_1: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -986,6 +1049,7 @@ mod tests {
         bridge_events: Default::default(),
         d_parameter: None,
         terms_and_conditions: None,
+        genesis_ledger_state: None,
     });
 
     static BLOCK_2: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -1002,6 +1066,7 @@ mod tests {
         bridge_events: Default::default(),
         d_parameter: None,
         terms_and_conditions: None,
+        genesis_ledger_state: None,
     });
 
     static BLOCK_3: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -1018,6 +1083,7 @@ mod tests {
         bridge_events: Default::default(),
         d_parameter: None,
         terms_and_conditions: None,
+        genesis_ledger_state: None,
     });
 
     const ZERO_HASH: BlockHash = ByteArray([0; 32]);
