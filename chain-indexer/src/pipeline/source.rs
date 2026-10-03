@@ -22,7 +22,7 @@ use crate::{
         header::SubstrateHeaderExt,
         rpc::{
             self, Batch, CallResult, Counters, NodeRpc, ReconnectPolicy, Subscription, Transport,
-            TransportError, WsTransport, hex, method,
+            WsTransport, hex, method,
         },
     },
     pipeline::{
@@ -219,8 +219,6 @@ pub enum Error {
     Unresolved(u64),
     #[error("blocks from height {0} do not link to the finalized chain")]
     Unlinked(u64),
-    #[error("cannot connect to the node")]
-    Connect(#[source] TransportError),
     #[error("following finalized blocks failed")]
     Follow(#[source] Box<Error>),
     #[error("following finalized blocks ended")]
@@ -1118,7 +1116,8 @@ pub struct Source<T> {
 }
 
 impl Source<WsTransport> {
-    /// Connect to the node at the given URL and check that it serves every required RPC method.
+    /// Connect to the node at the given URL, retrying per the config's reconnect policy, and check
+    /// that it serves every required RPC method.
     pub async fn connect(url: &str, config: Config) -> Result<Self, Error> {
         let user_agent = HeaderValue::from_static(concat!(
             env!("CARGO_PKG_NAME"),
@@ -1126,9 +1125,14 @@ impl Source<WsTransport> {
             env!("CARGO_PKG_VERSION")
         ));
         let headers = HeaderMap::from_iter([(USER_AGENT, user_agent)]);
-        let transport = WsTransport::new(url, headers)
-            .await
-            .map_err(Error::Connect)?;
+        let connect = || WsTransport::new(url, headers.clone());
+        let transport = match connect().await {
+            Ok(transport) => transport,
+            Err(error) => {
+                warn!(error:%; "cannot connect to node, retrying");
+                config.reconnect_policy.retry(error, connect).await?
+            }
+        };
 
         let source = Self::new(transport, config);
         source.rpc.check_methods().await?;

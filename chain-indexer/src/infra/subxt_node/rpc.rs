@@ -335,6 +335,31 @@ impl ReconnectPolicy {
         let millis = 10u64.saturating_mul(2u64.saturating_pow(attempt as u32));
         Duration::from_millis(millis).min(self.max_delay)
     }
+
+    /// Retry `attempt` after it failed with `error`, waiting before each try, at most
+    /// `max_attempts` times; [Error::Unreachable] with the last error if none succeeds.
+    pub async fn retry<T, F: Future<Output = Result<T, TransportError>>>(
+        &self,
+        error: TransportError,
+        mut attempt: impl FnMut() -> F,
+    ) -> Result<T, Error> {
+        let mut last_error = error;
+        for n in 0..self.max_attempts {
+            sleep(self.delay(n)).await;
+            match attempt().await {
+                Ok(value) => {
+                    debug!(attempt = n; "connected to node");
+                    return Ok(value);
+                }
+                Err(error) => last_error = error,
+            }
+        }
+
+        Err(Error::Unreachable {
+            attempts: self.max_attempts,
+            source: last_error,
+        })
+    }
 }
 
 /// Requests and bytes of one method, or of one storage item.
@@ -620,24 +645,9 @@ impl<T: Transport> NodeRpc<T> {
 
     async fn reconnect(&self, error: TransportError) -> Result<(), Error> {
         warn!(error:%; "node connection lost, reconnecting");
-
-        let ReconnectPolicy { max_attempts, .. } = self.reconnect_policy;
-        let mut last_error = error;
-        for attempt in 0..max_attempts {
-            sleep(self.reconnect_policy.delay(attempt)).await;
-            match self.transport.reconnect().await {
-                Ok(()) => {
-                    debug!(attempt; "reconnected to node");
-                    return Ok(());
-                }
-                Err(error) => last_error = error,
-            }
-        }
-
-        Err(Error::Unreachable {
-            attempts: max_attempts,
-            source: last_error,
-        })
+        self.reconnect_policy
+            .retry(error, || self.transport.reconnect())
+            .await
     }
 
     fn count(&self, calls: &[Call], results: &[CallResult]) {
@@ -693,13 +703,17 @@ mod tests {
         fake_node::FakeNode,
         rpc::{
             Batch, Call, CallResult, Count, Error, MAX_SUBSCRIPTIONS, NodeRpc, REQUIRED_METHODS,
-            ReconnectPolicy, json_size, method,
+            ReconnectPolicy, TransportError, json_size, method,
         },
     };
     use futures::{StreamExt, TryStreamExt, stream};
     use indexer_common::domain::ByteArray;
     use serde_json::{Value, json};
-    use std::{num::NonZeroUsize, time::Duration};
+    use std::{
+        num::NonZeroUsize,
+        sync::atomic::{AtomicUsize, Ordering},
+        time::Duration,
+    };
     use tokio::time::timeout;
 
     const POLICY: ReconnectPolicy = ReconnectPolicy {
@@ -899,6 +913,37 @@ mod tests {
 
         assert!(matches!(error, Error::Unreachable { attempts: 3, .. }));
         assert_eq!(node.reconnects(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_retry() {
+        let down = || TransportError::Disconnected("node is down".into());
+
+        // Up after two failed retries.
+        let attempts = AtomicUsize::new(0);
+        let value = POLICY
+            .retry(down(), || async {
+                match attempts.fetch_add(1, Ordering::SeqCst) {
+                    0 | 1 => Err(down()),
+                    _ => Ok(7),
+                }
+            })
+            .await
+            .expect("third retry succeeds");
+        assert_eq!(value, 7);
+        assert_eq!(attempts.load(Ordering::SeqCst), 3);
+
+        // Never up: the policy's retries, then unreachable.
+        let attempts = AtomicUsize::new(0);
+        let error = POLICY
+            .retry(down(), || async {
+                attempts.fetch_add(1, Ordering::SeqCst);
+                Err::<(), _>(down())
+            })
+            .await
+            .expect_err("node stays down");
+        assert!(matches!(error, Error::Unreachable { attempts: 3, .. }));
+        assert_eq!(attempts.load(Ordering::SeqCst), 3);
     }
 
     #[tokio::test]
