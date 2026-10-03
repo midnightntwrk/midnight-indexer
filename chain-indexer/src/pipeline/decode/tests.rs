@@ -172,7 +172,6 @@ fn sourced_json(block: &source::Block) -> Value {
             "metadata_hash": hex(metadata.hasher().hash()),
             "cnight_mappings": pairs(cnight_mappings),
         }),
-
         source::Block::Block {
             hash,
             height,
@@ -250,7 +249,6 @@ fn sourced_of(sourced: &Value) -> source::Block {
                 .collect(),
             events: bytes(&sourced["events"]),
         },
-
         _ => source::Block::Block {
             hash: block_hash(&sourced["hash"]),
             height: sourced["height"].as_u64().expect("height"),

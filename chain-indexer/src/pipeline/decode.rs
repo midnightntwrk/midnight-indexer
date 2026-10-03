@@ -185,7 +185,6 @@ impl TryFrom<source::Block> for node::Block {
                     genesis_ledger_state: Some(ledger_state),
                 })
             }
-
             source::Block::Block {
                 hash,
                 height,

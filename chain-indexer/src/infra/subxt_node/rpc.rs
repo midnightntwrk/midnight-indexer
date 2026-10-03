@@ -242,7 +242,6 @@ fn transport_error(error: ClientError) -> TransportError {
         ClientError::RestartNeeded(_) | ClientError::Transport(_) => {
             TransportError::Disconnected(error.into())
         }
-
         error => TransportError::Other(error.into()),
     }
 }
@@ -550,12 +549,10 @@ impl<T: Transport> NodeRpc<T> {
 
                     return Ok(Subscription { id, notifications });
                 }
-
                 Err(error @ TransportError::Disconnected(_)) if !reconnected => {
                     self.reconnect(error).await?;
                     reconnected = true;
                 }
-
                 Err(error) => {
                     return Err(Error::Subscribe {
                         method,
@@ -605,14 +602,12 @@ impl<T: Transport> NodeRpc<T> {
                     self.count(&calls, &results);
                     return Ok(results);
                 }
-
                 // A batch that loses a freshly made connection again is refused, most likely for its
                 // size, e.g. by a proxy closing the connection.
                 Err(error @ TransportError::Disconnected(_)) if !reconnected => {
                     self.reconnect(error).await?;
                     reconnected = true;
                 }
-
                 Err(error) => {
                     return Err(Error::BatchRejected {
                         batch_size,

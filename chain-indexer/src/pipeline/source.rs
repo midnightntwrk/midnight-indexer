@@ -253,17 +253,14 @@ pub async fn follow_finalized<T: Transport>(
         loop {
             let event = match timeout(recovery_timeout, notifications.next()).await {
                 Ok(Some(Ok(event))) => event,
-
                 Ok(Some(Err(error))) => {
                     warn!(error:%; "chainHead_v1_follow failed, resubscribing");
                     break;
                 }
-
                 Ok(None) => {
                     warn!("chainHead_v1_follow ended, resubscribing");
                     break;
                 }
-
                 Err(_) => {
                     warn!(recovery_timeout:?; "no chainHead_v1_follow event, resubscribing");
                     break;
@@ -283,11 +280,9 @@ pub async fn follow_finalized<T: Transport>(
                         publish(finalized, hashes, BlockRef { hash, height });
                     }
                 }
-
                 FollowEvent::NewBlock { block_hash } => {
                     unpin(rpc, &id, &[block_hash_of(block_hash)?]).await
                 }
-
                 FollowEvent::Finalized {
                     finalized_block_hashes,
                 } => {
@@ -298,12 +293,10 @@ pub async fn follow_finalized<T: Transport>(
                         publish(finalized, hashes, BlockRef { hash, height });
                     }
                 }
-
                 FollowEvent::Stop => {
                     warn!("chainHead_v1_follow stopped, resubscribing");
                     break;
                 }
-
                 FollowEvent::Other => {}
             }
 
@@ -618,7 +611,6 @@ impl Sourced {
                 extrinsics: self.extrinsics,
                 events: self.events,
             },
-
             (_, system_parameters) => Block::Block {
                 hash: self.hash,
                 height: self.height,
@@ -840,9 +832,7 @@ async fn query_storage<T: Transport>(
                     hash: value_hash,
                 });
             }
-
             StorageEvent::StorageError { error } => return Err(Error::Storage { hash, error }),
-
             StorageEvent::StorageDone => return Ok(items),
         }
     }
@@ -997,13 +987,11 @@ fn call_value(
                 hash,
                 source: error.into(),
             }),
-
         Some(CallOutcome { error, .. }) => Err(Error::RuntimeCall {
             function,
             hash,
             error: error.unwrap_or_default(),
         }),
-
         None => Err(Error::RuntimeCall {
             function,
             hash,
@@ -1097,7 +1085,6 @@ async fn fetch_metadata<T: Transport>(rpc: &NodeRpc<T>, at: BlockHash) -> Result
                     error: format!("no metadata of version {version}"),
                 })?
         }
-
         None => {
             let metadata = call("Metadata_metadata", vec![]).await?;
             Vec::<u8>::decode(&mut &metadata[..]).map_err(decode_error)?
@@ -1293,7 +1280,6 @@ impl<T: Transport> Producer<T> {
                 .await
             {
                 Ok(()) => return,
-
                 Err(error) => {
                     warn!(error:% = error; "block sourcing failed");
                     // Without finalized blocks nothing can be sourced any more.
@@ -1341,13 +1327,11 @@ impl<T: Transport> Producer<T> {
                     self.verify_and_emit(emission, planned, chunk, genesis_hash, run_start)
                         .await?;
                 }
-
                 changed = self.finalized.changed(), if in_progress.is_empty() => {
                     if changed.is_err() {
                         return Err(Error::FinalizedEnded);
                     }
                 }
-
                 error = &mut *follow_error => {
                     return Err(error.map_or(Error::FinalizedEnded, |error| Error::Follow(Box::new(error))));
                 }
@@ -1450,7 +1434,6 @@ impl<T: Transport> Producer<T> {
                         chunk => chunk?,
                     }
                 }
-
                 // A height without exactly one block: leave the chunk empty, so that Verify walks
                 // the parent links.
                 _ => vec![],
