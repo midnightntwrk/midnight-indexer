@@ -61,7 +61,6 @@ pub struct Config {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ApplicationConfig {
     pub network_id: NetworkId,
-    pub blocks_buffer: usize,
     pub caught_up_max_distance: u32,
     pub caught_up_leeway: u32,
     #[serde(with = "humantime_serde", default = "gc_bound_default")]
@@ -72,6 +71,8 @@ pub struct ApplicationConfig {
     pub arena_metrics_interval: u32,
     #[serde(default = "ledger_state_retention_default")]
     pub ledger_state_retention: NonZeroUsize,
+    #[serde(default = "chain_app::default_decode_cpu_threads")]
+    pub decode_cpu_threads: NonZeroUsize,
     #[serde(with = "humantime_serde")]
     pub active_wallets_query_delay: Duration,
     #[serde(with = "humantime_serde")]
@@ -114,25 +115,25 @@ impl From<ApplicationConfig> for chain_app::Config {
     fn from(config: ApplicationConfig) -> Self {
         let ApplicationConfig {
             network_id,
-            blocks_buffer,
             caught_up_max_distance,
             caught_up_leeway,
             gc_bound,
             gc_interval,
             arena_metrics_interval,
             ledger_state_retention,
+            decode_cpu_threads,
             ..
         } = config;
 
         Self {
             network_id,
-            blocks_buffer,
             caught_up_max_distance,
             caught_up_leeway,
             gc_bound,
             gc_interval,
             arena_metrics_interval,
             ledger_state_retention,
+            decode_cpu_threads,
         }
     }
 }

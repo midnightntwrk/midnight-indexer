@@ -40,7 +40,7 @@ use indexer_common::{
 use log::{debug, info, warn};
 use parity_scale_codec::Decode;
 use serde::Deserialize;
-use std::{future::ready, pin::pin, time::Duration};
+use std::{future::ready, num::NonZeroUsize, pin::pin, time::Duration};
 use subxt::{
     OnlineClient, SubstrateConfig,
     config::{
@@ -159,13 +159,15 @@ const CATCH_UP_LOG_INTERVAL: u64 = 1_000;
 /// Blocks further back are fetched by height with parent hash verification.
 const FINALIZATION_SAFETY_MARGIN: u64 = 400;
 
+/// Number of blocks [SubxtNode] fetches concurrently while catching up by height.
+const FETCH_CONCURRENCY: usize = 8;
+
 /// A [Node] implementation based on subxt.
 #[derive(Clone)]
 pub struct SubxtNode {
     rpc_client: ReconnectingRpcClient,
     online_client: OnlineClient<SubstrateConfig>,
     subscription_recovery_timeout: Duration,
-    fetch_concurrency: usize,
 }
 
 impl SubxtNode {
@@ -176,7 +178,7 @@ impl SubxtNode {
             reconnect_max_delay: retry_max_delay,
             reconnect_max_attempts: retry_max_attempts,
             subscription_recovery_timeout,
-            fetch_concurrency,
+            ..
         } = config;
 
         let retry_policy = ExponentialBackoff::from_millis(10)
@@ -198,7 +200,6 @@ impl SubxtNode {
             rpc_client,
             online_client,
             subscription_recovery_timeout,
-            fetch_concurrency,
         })
     }
 
@@ -524,7 +525,7 @@ impl Node for SubxtNode {
                             fetch_node.make_raw_block(block).await
                         }
                     })
-                    .buffered(self.fetch_concurrency.max(1));
+                    .buffered(FETCH_CONCURRENCY);
                 let mut raw_blocks = pin!(raw_blocks);
 
                 let mut height = start_height;
@@ -672,18 +673,42 @@ pub struct Config {
     )]
     pub subscription_recovery_timeout: Duration,
 
-    /// Number of blocks fetched concurrently while catching up by height. Author resolution
-    /// stays sequential, so this only bounds in-flight block fetches. Defaults to 8.
-    #[serde(default = "default_fetch_concurrency")]
-    pub fetch_concurrency: usize,
+    /// The most heights per chunk the block sourcing pipeline sources at once. Keep it well above
+    /// `application.decode_cpu_threads`, e.g. at least 8 times, so that one chunk keeps the decode
+    /// threads busy. Defaults to 64.
+    #[serde(default = "default_source_chunk_size")]
+    pub source_chunk_size: NonZeroUsize,
+    /// The most chunks in progress, and the most sourced chunks waiting to be decoded. Blocks held
+    /// in memory are bounded by about twice this many chunks. Defaults to 8.
+    #[serde(default = "default_source_chunks_ahead")]
+    pub source_chunks_ahead: NonZeroUsize,
+    /// The most calls per JSON-RPC batch. A node or proxy may reject large batches: public
+    /// endpoints accept 64 over WebSocket, the transport used. Defaults to 64.
+    #[serde(default = "default_rpc_batch_size")]
+    pub rpc_batch_size: NonZeroUsize,
+    /// The most JSON-RPC batches in flight on the connection. Defaults to 16.
+    #[serde(default = "default_rpc_batches_in_flight")]
+    pub rpc_batches_in_flight: NonZeroUsize,
 }
 
 fn default_subscription_recovery_timeout() -> Duration {
     Duration::from_secs(30)
 }
 
-fn default_fetch_concurrency() -> usize {
-    8
+fn default_source_chunk_size() -> NonZeroUsize {
+    NonZeroUsize::new(64).expect("64 is not zero")
+}
+
+fn default_source_chunks_ahead() -> NonZeroUsize {
+    NonZeroUsize::new(8).expect("8 is not zero")
+}
+
+fn default_rpc_batch_size() -> NonZeroUsize {
+    NonZeroUsize::new(64).expect("64 is not zero")
+}
+
+fn default_rpc_batches_in_flight() -> NonZeroUsize {
+    NonZeroUsize::new(16).expect("16 is not zero")
 }
 
 /// Error possibly returned by [SubxtNode::new].

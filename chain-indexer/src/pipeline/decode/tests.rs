@@ -79,7 +79,10 @@ async fn record_decode_fixtures() {
         reconnect_max_delay: Duration::from_secs(1),
         reconnect_max_attempts: 3,
         subscription_recovery_timeout: Duration::from_secs(30),
-        fetch_concurrency: 1,
+        source_chunk_size: NonZeroUsize::new(64).unwrap(),
+        source_chunks_ahead: NonZeroUsize::new(8).unwrap(),
+        rpc_batch_size: NonZeroUsize::new(64).unwrap(),
+        rpc_batches_in_flight: NonZeroUsize::new(16).unwrap(),
     })
     .await
     .expect("node adapter connects");
