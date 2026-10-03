@@ -357,7 +357,8 @@ pub struct BatchCount {
     pub largest_response_bytes: u64,
 }
 
-/// Request and byte counts, keyed by method or storage item. Bytes are JSON wire bytes.
+/// Request and byte counts, keyed by method, by method and runtime function, or by storage item.
+/// Bytes are JSON wire bytes, except for storage items, whose bytes are the decoded values.
 #[derive(Debug, Default)]
 pub struct Counters {
     counts: Mutex<BTreeMap<String, Count>>,
@@ -438,14 +439,20 @@ pub enum Error {
     },
 }
 
+/// The most subscriptions open at once: half of a node's default per-connection limit
+/// (`--rpc-max-subscriptions-per-connection`, 1024).
+pub const MAX_SUBSCRIPTIONS: usize = 512;
+
 /// JSON-RPC access to a node over a [Transport]. Batches are split at the batch size and sent
-/// concurrently, at most `batches_in_flight` at a time; a lost connection is replaced per the
-/// [ReconnectPolicy] and the batch sent again; every request and response is counted.
+/// concurrently, at most `batches_in_flight` at a time; at most [MAX_SUBSCRIPTIONS] subscriptions
+/// are open at a time; a lost connection is replaced per the [ReconnectPolicy] and the batch sent
+/// again; every request and response is counted.
 pub struct NodeRpc<T> {
     transport: Arc<T>,
     batch_size: NonZeroUsize,
     batches_in_flight: NonZeroUsize,
     in_flight: Arc<Semaphore>,
+    subscriptions: Arc<Semaphore>,
     reconnect_policy: ReconnectPolicy,
     counters: Arc<Counters>,
 }
@@ -457,6 +464,7 @@ impl<T> Clone for NodeRpc<T> {
             batch_size: self.batch_size,
             batches_in_flight: self.batches_in_flight,
             in_flight: self.in_flight.clone(),
+            subscriptions: self.subscriptions.clone(),
             reconnect_policy: self.reconnect_policy,
             counters: self.counters.clone(),
         }
@@ -478,6 +486,7 @@ where
             batch_size,
             batches_in_flight,
             in_flight: Arc::new(Semaphore::new(batches_in_flight.get())),
+            subscriptions: Arc::new(Semaphore::new(MAX_SUBSCRIPTIONS)),
             reconnect_policy,
             counters: Default::default(),
         }
@@ -520,13 +529,20 @@ where
         serde_json::from_value(result).map_err(|source| Error::Decode { method, source })
     }
 
-    /// Subscribe, reconnecting first if the connection is lost.
+    /// Subscribe, once fewer than [MAX_SUBSCRIPTIONS] are open, reconnecting first if the
+    /// connection is lost. The subscription is open until its notifications are dropped.
     pub async fn subscribe(
         &self,
         method: &'static str,
         params: Vec<Value>,
         unsubscribe: &'static str,
     ) -> Result<Subscription, Error> {
+        let permit = self
+            .subscriptions
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("subscriptions semaphore is not closed");
         let mut reconnected = false;
 
         loop {
@@ -542,6 +558,7 @@ where
                     let counters = self.counters.clone();
                     let notifications = notifications
                         .inspect_ok(move |notification| {
+                            let _permit = &permit;
                             counters.record(method, 0, 0, json_size(notification) as u64)
                         })
                         .boxed();
@@ -651,12 +668,20 @@ where
                 let request_bytes = call.params.iter().map(json_size).sum::<usize>() as u64;
                 let response_bytes = result.as_ref().map(json_size).unwrap_or_default() as u64;
                 self.counters
-                    .record(call.method, 1, request_bytes, response_bytes);
+                    .record(&count_key(call), 1, request_bytes, response_bytes);
                 response_bytes
             })
             .sum();
 
         self.counters.record_batch(response_bytes);
+    }
+}
+
+/// The key a call is counted under: its method, and for runtime calls also the function.
+fn count_key(call: &Call) -> String {
+    match (call.method, call.params.get(1).and_then(Value::as_str)) {
+        (method::ARCHIVE_CALL, Some(function)) => format!("{} {function}", call.method),
+        (method, _) => method.to_owned(),
     }
 }
 
@@ -687,14 +712,15 @@ mod tests {
     use crate::infra::subxt_node::{
         fake_node::FakeNode,
         rpc::{
-            Batch, Call, CallResult, Count, Error, NodeRpc, REQUIRED_METHODS, ReconnectPolicy,
-            json_size, method,
+            Batch, Call, CallResult, Count, Error, MAX_SUBSCRIPTIONS, NodeRpc, REQUIRED_METHODS,
+            ReconnectPolicy, json_size, method,
         },
     };
-    use futures::{StreamExt, TryStreamExt};
+    use futures::{StreamExt, TryStreamExt, stream};
     use indexer_common::domain::ByteArray;
     use serde_json::{Value, json};
     use std::{num::NonZeroUsize, time::Duration};
+    use tokio::time::timeout;
 
     const POLICY: ReconnectPolicy = ReconnectPolicy {
         max_delay: Duration::from_millis(10),
@@ -770,6 +796,7 @@ mod tests {
 
         let mut batch = heights(3);
         batch.header(ByteArray([1; 32]));
+        batch.call(ByteArray([1; 32]), "Test_function", &[]);
         rpc.batch(batch).await.expect("batch succeeds");
 
         let counts = rpc.counters().counts();
@@ -789,8 +816,10 @@ mod tests {
                 response_bytes: json_size(&json!("0x020202")) as u64,
             }
         );
+        assert_eq!(counts["archive_v1_call Test_function"].requests, 1);
+        assert!(!counts.contains_key(method::ARCHIVE_CALL));
         let batches = rpc.counters().batches();
-        assert_eq!(batches.batches, 2);
+        assert_eq!(batches.batches, 3);
         assert_eq!(
             batches.largest_response_bytes,
             2 * json_size(&json!(["0x0101"])) as u64
@@ -826,6 +855,36 @@ mod tests {
                 response_bytes: notifications.iter().map(json_size).sum::<usize>() as u64,
             }
         );
+    }
+
+    #[tokio::test]
+    async fn test_subscriptions_are_bounded() {
+        let node = FakeNode::new(echo).with_subscribe(|_, _| Some(vec![]));
+        let rpc = node_rpc(node, 4, 1);
+        let subscribe = || {
+            rpc.subscribe(
+                method::ARCHIVE_STORAGE,
+                vec![],
+                method::ARCHIVE_STOP_STORAGE,
+            )
+        };
+
+        let mut open = stream::iter(0..MAX_SUBSCRIPTIONS)
+            .then(|_| subscribe())
+            .try_collect::<Vec<_>>()
+            .await
+            .expect("subscriptions succeed");
+        assert!(
+            timeout(Duration::from_millis(50), subscribe())
+                .await
+                .is_err()
+        );
+
+        open.pop();
+        timeout(Duration::from_millis(50), subscribe())
+            .await
+            .expect("subscription is not blocked")
+            .expect("subscription succeeds");
     }
 
     #[test]

@@ -25,7 +25,10 @@ use crate::{
             TransportError, WsTransport, hex, method,
         },
     },
-    pipeline::source::chunk::{ChunkSpec, next_chunk},
+    pipeline::{
+        metric::{self, Timer},
+        source::chunk::{ChunkSpec, next_chunk},
+    },
 };
 use async_stream::stream;
 use futures::{
@@ -36,6 +39,7 @@ use futures::{
 use http::{HeaderMap, HeaderValue, header::USER_AGENT};
 use indexer_common::domain::{BlockHash, ByteArray, ByteVec, ProtocolVersionError};
 use log::{debug, warn};
+use metrics::counter;
 use parity_scale_codec::{Decode, Encode};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -431,6 +435,7 @@ pub async fn resolve<T>(
 where
     T: Transport,
 {
+    let _timer = Timer::start(metric::RESOLVE_DURATION);
     let batch = heights.fold(Batch::default(), |mut batch, height| {
         batch.hash_by_height(height);
         batch
@@ -482,6 +487,7 @@ pub async fn source<T>(
 where
     T: Transport,
 {
+    let _timer = Timer::start(metric::SOURCE_DURATION);
     let batch = hashes.iter().fold(Batch::default(), |mut batch, &hash| {
         batch
             .header(hash)
@@ -587,7 +593,8 @@ where
             let system_parameters = system_parameters.remove(&block.hash);
             block.into_block(system_parameters, genesis)
         })
-        .collect();
+        .collect::<Chunk>();
+    counter!(metric::SOURCED_BLOCK_COUNT).increment(chunk.len() as u64);
 
     Ok(chunk)
 }
@@ -1152,6 +1159,14 @@ where
         }
     }
 
+    pub fn config(&self) -> &Config {
+        &self.config
+    }
+
+    pub fn rpc(&self) -> &NodeRpc<T> {
+        &self.rpc
+    }
+
     /// The request and byte counts of every RPC call made.
     pub fn counters(&self) -> &Counters {
         self.rpc.counters()
@@ -1449,6 +1464,7 @@ where
         genesis_hash: Option<BlockHash>,
         run_start: u64,
     ) -> Result<(), Error> {
+        let timer = Timer::start(metric::VERIFY_DURATION);
         let expected_parent = emission.last_hash();
         let linked = links(&chunk, &planned.spec.heights, expected_parent, genesis_hash);
         let anchored = planned
@@ -1489,6 +1505,7 @@ where
             emission.held.extend(last);
             emit
         };
+        drop(timer);
 
         self.emit(emission, emit).await
     }
@@ -1564,6 +1581,7 @@ where
             height: last.height(),
         });
         // A closed channel means the stream is gone; the task is about to be aborted.
+        let _timer = Timer::start(metric::EMIT_DURATION);
         let _ = self.chunks.send(Ok(chunk)).await;
 
         Ok(())

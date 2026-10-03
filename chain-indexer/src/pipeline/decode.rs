@@ -19,7 +19,10 @@ use crate::{
         AURA_ENGINE_ID, BABE_ENGINE_ID, CONSENSUS_ENGINE_RUNTIME_API, SubxtNodeError,
         author_from_digest_logs, header::SubstrateHeaderExt, runtimes,
     },
-    pipeline::source::{self, AUTHORITY_SET_ITEMS, Parent, storage_key},
+    pipeline::{
+        metric::{self, Timer},
+        source::{self, AUTHORITY_SET_ITEMS, Parent, storage_key},
+    },
 };
 use futures::{Stream, StreamExt, TryStreamExt, executor::block_on, stream};
 use indexer_common::domain::{
@@ -118,9 +121,13 @@ where
                 let chunk = chunk?;
                 let (blocks_tx, blocks_rx) = oneshot::channel();
                 pool.0.spawn(move || {
+                    let _timer = Timer::start(metric::DECODE_CHUNK_DURATION);
                     let blocks = chunk
                         .into_par_iter()
-                        .map(node::Block::try_from)
+                        .map(|block| {
+                            let _timer = Timer::start(metric::DECODE_BLOCK_DURATION);
+                            node::Block::try_from(block)
+                        })
                         .collect::<Result<Vec<_>, _>>();
                     let _ = blocks_tx.send(blocks);
                 });
