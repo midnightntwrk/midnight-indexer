@@ -432,14 +432,15 @@ pub async fn resolve<T: Transport>(
 /// height `start`.
 ///
 /// `parent` is the hash of the block before the first, `None` only if the first is the genesis
-/// block; its state supplies the first block's authority set and the system-parameter storage the
-/// first block is compared with. With `first_of_run`, the first block carries the system
-/// parameters whatever its storage says; any other block carries them only if their storage differs
-/// from its parent's.
+/// block; its state supplies the first block's authority set and the authority-set and
+/// system-parameter storage hashes the first block is compared with. With `first_of_run`, the first
+/// block carries the system parameters whatever its storage says; any other block carries them only
+/// if their storage differs from its parent's.
 ///
 /// All calls for all blocks go out together: one set of batches with each block's header, body and
 /// state roots, one storage query per block, and one for the parent. Only system parameters, where
-/// due, and the metadata of a runtime not seen before take a second round.
+/// due, authority sets, where their storage differs from the previous block's, and the metadata of a
+/// runtime not seen before take a second round.
 pub async fn source<T: Transport>(
     rpc: &NodeRpc<T>,
     metadata: &MetadataCache,
@@ -478,7 +479,8 @@ pub async fn source<T: Transport>(
     )
     .await?;
 
-    let mut authority_set = parent_storage.as_deref().map(authority_set_of);
+    let parent_authority_set = parent_storage.as_deref().map(authority_set_of);
+    let mut previous_authority_set_hashes = parent_storage.as_deref().map(authority_set_hashes);
     let mut previous_system_parameters = parent_storage.as_deref().map(system_parameter_hashes);
     let mut results = results.into_iter();
     let mut sourced = Vec::with_capacity(hashes.len());
@@ -519,7 +521,10 @@ pub async fn source<T: Transport>(
             || previous_system_parameters.as_ref() != Some(&system_parameter_hashes);
         previous_system_parameters = Some(system_parameter_hashes);
 
-        let parent_authority_set = authority_set.replace(authority_set_of(&storage));
+        let authority_set_hashes = authority_set_hashes(&storage);
+        let authority_set_changed =
+            previous_authority_set_hashes.as_ref() != Some(&authority_set_hashes);
+        previous_authority_set_hashes = Some(authority_set_hashes);
 
         sourced.push(Sourced {
             hash,
@@ -531,12 +536,24 @@ pub async fn source<T: Transport>(
             metadata,
             extrinsics,
             events: events_of(&storage),
-            parent_authority_set,
+            parent_authority_set: None,
+            authority_set_changed,
             system_parameters_due,
         });
     }
 
-    let mut system_parameters = system_parameters(rpc, &sourced).await?;
+    let (mut system_parameters, mut authority_sets) = try_join(
+        system_parameters(rpc, &sourced),
+        changed_authority_sets(rpc, &sourced),
+    )
+    .await?;
+    // Each block's parent set is its predecessor's own: read where it changed, else carried on.
+    sourced
+        .iter_mut()
+        .fold(parent_authority_set, |authority_set, block| {
+            block.parent_authority_set = authority_set.clone();
+            authority_sets.remove(&block.hash).or(authority_set)
+        });
     let genesis = match sourced.first() {
         Some(block) if block.height == 0 => Some(genesis(rpc, block.hash).await?),
         _ => None,
@@ -572,6 +589,7 @@ struct Sourced {
     extrinsics: Vec<ByteVec>,
     events: ByteVec,
     parent_authority_set: Option<Vec<(ByteVec, ByteVec)>>,
+    authority_set_changed: bool,
     system_parameters_due: bool,
 }
 
@@ -657,6 +675,29 @@ async fn system_parameters<T: Transport>(
             Ok((hash, (d_parameter, terms_and_conditions)))
         })
         .collect()
+}
+
+/// The authority set of every block whose authority-set storage differs from its predecessor's, by
+/// block hash.
+async fn changed_authority_sets<T: Transport>(
+    rpc: &NodeRpc<T>,
+    sourced: &[Sourced],
+) -> Result<HashMap<BlockHash, Vec<(ByteVec, ByteVec)>>, Error> {
+    let changed = sourced
+        .iter()
+        .filter(|block| block.authority_set_changed)
+        .map(|block| block.hash)
+        .collect::<Vec<_>>();
+    let items = authority_set_items("value").collect::<Vec<_>>();
+
+    stream::iter(changed)
+        .map(|hash| {
+            let storage = query_storage(rpc, hash, items.clone());
+            async move { Ok((hash, authority_set_of(&storage.await?))) }
+        })
+        .buffered(rpc.max_calls_in_flight())
+        .try_collect()
+        .await
 }
 
 /// The genesis ledger state from the chain spec, and the cNight mappings at genesis.
@@ -822,24 +863,33 @@ fn storage_query(item: (&str, &str), query_type: &str) -> Value {
     json!({ "key": hex(storage_key(item)), "type": query_type })
 }
 
-/// A block's storage query: its events and authority set, and the hashes of its system parameters.
+/// A block's storage query: its events, and the hashes of its authority set and system parameters.
 fn block_storage_items() -> Vec<Value> {
     std::iter::once(storage_query(SYSTEM_EVENTS_ITEM, "value"))
-        .chain(parent_storage_items())
+        .chain(authority_set_items("hash"))
+        .chain(system_parameter_items())
         .collect()
 }
 
-/// A parent's storage query: its authority set and the hashes of its system parameters.
+/// A parent's storage query: its authority set, and the hashes of its authority set and system
+/// parameters.
 fn parent_storage_items() -> Vec<Value> {
+    authority_set_items("value")
+        .chain(authority_set_items("hash"))
+        .chain(system_parameter_items())
+        .collect()
+}
+
+fn authority_set_items(query_type: &str) -> impl Iterator<Item = Value> {
     AUTHORITY_SET_ITEMS
         .into_iter()
-        .map(|item| storage_query(item, "value"))
-        .chain(
-            SYSTEM_PARAMETERS_ITEMS
-                .into_iter()
-                .map(|item| storage_query(item, "hash")),
-        )
-        .collect()
+        .map(move |item| storage_query(item, query_type))
+}
+
+fn system_parameter_items() -> impl Iterator<Item = Value> {
+    SYSTEM_PARAMETERS_ITEMS
+        .into_iter()
+        .map(|item| storage_query(item, "hash"))
 }
 
 fn find_item<'a>(items: &'a [StorageItem], item: (&str, &str)) -> Option<&'a StorageItem> {
@@ -847,14 +897,30 @@ fn find_item<'a>(items: &'a [StorageItem], item: (&str, &str)) -> Option<&'a Sto
     items.iter().find(|stored| *stored.key == key)
 }
 
+/// The authority-set items present, as key and value, in [AUTHORITY_SET_ITEMS] order.
 fn authority_set_of(items: &[StorageItem]) -> Vec<(ByteVec, ByteVec)> {
+    authority_set_entries(items, |item| item.value.as_ref())
+}
+
+/// The authority-set items present, as key and value hash, in [AUTHORITY_SET_ITEMS] order.
+fn authority_set_hashes(items: &[StorageItem]) -> Vec<(ByteVec, ByteVec)> {
+    authority_set_entries(items, |item| item.hash.as_ref())
+}
+
+fn authority_set_entries(
+    items: &[StorageItem],
+    field: impl Fn(&StorageItem) -> Option<&ByteVec>,
+) -> Vec<(ByteVec, ByteVec)> {
     AUTHORITY_SET_ITEMS
         .into_iter()
-        .filter_map(|item| find_item(items, item))
         .filter_map(|item| {
-            item.value
-                .as_ref()
-                .map(|value| (item.key.to_owned(), value.to_owned()))
+            let key = storage_key(item);
+            items
+                .iter()
+                .filter(|stored| *stored.key == key)
+                .find_map(|stored| {
+                    field(stored).map(|bytes| (stored.key.to_owned(), bytes.to_owned()))
+                })
         })
         .collect()
 }
@@ -1851,14 +1917,27 @@ mod source_tests {
     #[derive(Default)]
     struct Chain {
         system_parameters: Vec<u8>,
+        /// The authority set at each height, as a set number; past the end, each block's own.
+        authority_sets: Vec<u8>,
         forks: Vec<u64>,
         failing: Vec<u64>,
         stamped_2_1_from: Option<u64>,
         state_2_1_from: Option<u64>,
         calls: Mutex<Vec<Call>>,
+        /// The heights at which authority-set values were queried.
+        authority_set_reads: Mutex<Vec<u64>>,
     }
 
     impl Chain {
+        /// The authority set at the given block: one authority, the set number repeated or the
+        /// block hash.
+        fn authority_set(&self, n: u64, block: &[u8]) -> [u8; 32] {
+            match self.authority_sets.get(n as usize) {
+                Some(&set) => [set; 32],
+                None => block.try_into().unwrap(),
+            }
+        }
+
         fn stamped_spec_version(&self, n: u64) -> u32 {
             match self.stamped_2_1_from {
                 Some(from) if n < from => SPEC_VERSION_1_0,
@@ -1928,8 +2007,14 @@ mod source_tests {
                     if is(SYSTEM_EVENTS_ITEM) {
                         Some(json!({ "event": "storage", "key": item["key"], "value": hex(&block) }))
                     } else if is(AUTHORITY_SET_ITEMS[0]) {
-                        let authorities = vec![<[u8; 32]>::try_from(&block[..]).unwrap()].encode();
-                        Some(json!({ "event": "storage", "key": item["key"], "value": hex(authorities) }))
+                        let authority = self.authority_set(n, &block);
+                        if item["type"] == "hash" {
+                            Some(json!({ "event": "storage", "key": item["key"], "hash": hex(authority) }))
+                        } else {
+                            self.authority_set_reads.lock().push(n);
+                            let authorities = vec![authority].encode();
+                            Some(json!({ "event": "storage", "key": item["key"], "value": hex(authorities) }))
+                        }
                     } else if SYSTEM_PARAMETERS_ITEMS.into_iter().any(is) {
                         let value_hash = [system_parameters; 32];
                         Some(json!({ "event": "storage", "key": item["key"], "hash": hex(value_hash) }))
@@ -2158,6 +2243,47 @@ mod source_tests {
         ] {
             assert_eq!(chain.calls_of(function), vec![hash(1), hash(3), hash(6)]);
         }
+    }
+
+    #[tokio::test]
+    async fn test_authority_set_change_only() {
+        // The authority set changes at block 3, the last of the first chunk, and at block 4, the
+        // first of the second.
+        let (chain, node) = Chain {
+            authority_sets: vec![1, 1, 1, 2, 3, 3, 3],
+            ..Default::default()
+        }
+        .node();
+        let rpc = node_rpc(node, 64, 4);
+        let metadata = MetadataCache::default();
+
+        let first = source(&rpc, &metadata, 1, &hashes(1..=3), Some(hash(0)), true)
+            .await
+            .expect("first chunk is sourced");
+        let second = source(&rpc, &metadata, 4, &hashes(4..=6), Some(hash(3)), false)
+            .await
+            .expect("second chunk is sourced");
+
+        let parent_sets = first
+            .iter()
+            .chain(&second)
+            .map(|block| match block {
+                Block::Block { parent, .. } => parent.authority_set.clone(),
+                Block::Genesis { .. } => panic!("no genesis"),
+            })
+            .collect::<Vec<_>>();
+        let expected = [1u8, 1, 1, 2, 3, 3].map(|set| {
+            vec![(
+                storage_key(AUTHORITY_SET_ITEMS[0]).to_vec().into(),
+                vec![[set; 32]].encode().into(),
+            )]
+        });
+        assert_eq!(parent_sets, expected);
+
+        // Values are read at each chunk's parent and where the set changed, never elsewhere.
+        let mut reads = chain.authority_set_reads.lock().clone();
+        reads.sort();
+        assert_eq!(reads, vec![0, 3, 3, 4]);
     }
 
     #[tokio::test]
