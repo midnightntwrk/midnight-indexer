@@ -24,10 +24,12 @@ use crate::{
         sourcing::{self, AUTHORITY_SET_ITEMS, Parent, storage_key},
     },
 };
+use deserialize::{Deserialized, deserialize};
 use futures::{Stream, StreamExt, TryStreamExt, executor::block_on, stream};
 use indexer_common::domain::{
     BlockAuthor, BlockHash, BlockNumber, ByteArray, ByteVec, NodeVersion, ProtocolVersion,
-    ProtocolVersionError, TransactionHash, ledger::ZswapMerkleTreeRoot,
+    ProtocolVersionError, TransactionHash,
+    ledger::{self, ZswapMerkleTreeRoot},
 };
 use parity_scale_codec::Decode;
 use rayon::{ThreadPool, ThreadPoolBuildError, ThreadPoolBuilder, prelude::*};
@@ -75,6 +77,14 @@ pub enum Error {
         spec_version: u32,
         pallet: &'static str,
         entry: &'static str,
+    },
+    #[error("cannot deserialize transaction {index} of block {hash} at height {height}")]
+    Transaction {
+        hash: BlockHash,
+        height: BlockNumber,
+        index: usize,
+        #[source]
+        source: ledger::Error,
     },
     #[error("the decode pool is gone")]
     PoolGone,
@@ -138,18 +148,8 @@ pub fn decode<S: Stream<Item = Result<sourcing::Chunk, sourcing::Error>>>(
         .try_flatten()
 }
 
-/// Each transaction with its hash: SHA-256 of its bytes, which are its tagged serialization, as
-/// `transaction_hash` hashes it.
-fn with_hashes(
-    transactions: Vec<runtimes::Transaction>,
-) -> Vec<(TransactionHash, runtimes::Transaction)> {
-    transactions
-        .into_iter()
-        .map(|transaction| (transaction_hash(&transaction), transaction))
-        .collect()
-}
-
-/// SHA-256 of a transaction's bytes.
+/// SHA-256 of a transaction's bytes, which are its tagged serialization, as `transaction_hash`
+/// hashes it.
 pub fn transaction_hash(transaction: &runtimes::Transaction) -> TransactionHash {
     ByteArray(Sha256::digest(transaction.bytes().as_ref()).into())
 }
@@ -202,7 +202,7 @@ impl TryFrom<sourcing::Block> for node::Block {
                     timestamp: details.timestamp.unwrap_or(0),
                     zswap_merkle_tree_root: decoder.zswap_merkle_tree_root(&zswap_state_root)?,
                     ledger_state_root: decoder.ledger_state_root(&ledger_state_root)?,
-                    transactions: with_hashes(details.transactions),
+                    transactions: decoder.transactions(details.transactions)?,
                     dust_registration_events,
                     bridge_events: details.bridge_events,
                     d_parameter,
@@ -239,7 +239,7 @@ impl TryFrom<sourcing::Block> for node::Block {
                     timestamp: details.timestamp.unwrap_or(0),
                     zswap_merkle_tree_root: decoder.zswap_merkle_tree_root(&zswap_state_root)?,
                     ledger_state_root: decoder.ledger_state_root(&ledger_state_root)?,
-                    transactions: with_hashes(details.transactions),
+                    transactions: decoder.transactions(details.transactions)?,
                     dust_registration_events: details.dust_registration_events,
                     bridge_events: details.bridge_events,
                     d_parameter,
@@ -264,6 +264,51 @@ struct Decoder {
 }
 
 impl Decoder {
+    /// The block's transactions with their hashes, and for regular transactions their identifiers
+    /// and contract actions, deserialized on the calling thread.
+    fn transactions(
+        &self,
+        transactions: Vec<runtimes::Transaction>,
+    ) -> Result<Vec<node::Transaction>, Error> {
+        let protocol_version = self.protocol_version;
+        transactions
+            .into_iter()
+            .enumerate()
+            .map(|(index, transaction)| {
+                let hash = transaction_hash(&transaction);
+                match transaction {
+                    runtimes::Transaction::Regular(raw) => {
+                        let Deserialized {
+                            identifiers,
+                            contract_actions,
+                        } = deserialize(&raw, protocol_version.ledger_version()).map_err(
+                            |source| Error::Transaction {
+                                hash: self.hash,
+                                height: self.height,
+                                index,
+                                source,
+                            },
+                        )?;
+                        Ok(node::Transaction::Regular(node::RegularTransaction {
+                            hash,
+                            protocol_version,
+                            raw,
+                            identifiers,
+                            contract_actions,
+                        }))
+                    }
+                    runtimes::Transaction::System(raw) => {
+                        Ok(node::Transaction::System(node::SystemTransaction {
+                            hash,
+                            protocol_version,
+                            raw,
+                        }))
+                    }
+                }
+            })
+            .collect()
+    }
+
     fn new(
         hash: BlockHash,
         height: BlockNumber,

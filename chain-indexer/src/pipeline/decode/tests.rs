@@ -13,7 +13,7 @@
 
 use crate::{
     domain::{DustRegistrationEvent, node},
-    infra::subxt_node::{AURA_ENGINE_ID, BABE_ENGINE_ID, runtimes},
+    infra::subxt_node::{AURA_ENGINE_ID, BABE_ENGINE_ID},
     pipeline::{
         decode::{
             AuthoritySetError, BABE_NEXT_EPOCH_DATA, CpuPool, block_authorities, chunks_in_decode,
@@ -367,13 +367,13 @@ fn regular_transactions() -> Vec<(Vec<u8>, LedgerVersion)> {
 
 /// A [node::Block], every byte field in full, except transactions: their hashes.
 fn render(block: &node::Block) -> Value {
-    use runtimes::Transaction::*;
+    use node::Transaction::*;
     let transactions = block
         .transactions
         .iter()
-        .map(|(hash, transaction)| match transaction {
-            Regular(_) => json!({ "regular": hex(hash) }),
-            System(_) => json!({ "system": hex(hash) }),
+        .map(|transaction| match transaction {
+            Regular(transaction) => json!({ "regular": hex(transaction.hash) }),
+            System(transaction) => json!({ "system": hex(transaction.hash) }),
         })
         .collect::<Vec<_>>();
 

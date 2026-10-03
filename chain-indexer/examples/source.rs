@@ -1,6 +1,6 @@
 use anyhow::Context;
 use chain_indexer::{
-    domain::BlockRef,
+    domain::{BlockRef, node},
     infra::subxt_node::Config,
     pipeline::{self, decode::CpuPool, sourcing::Source},
 };
@@ -77,13 +77,15 @@ impl Cli {
                 u32::from(block.protocol_version),
                 block.author
             );
-            for (index, (hash, transaction)) in block.transactions.iter().enumerate() {
-                let kind = if transaction.is_system() {
-                    "system"
-                } else {
-                    "regular"
+            for (index, transaction) in block.transactions.iter().enumerate() {
+                let (kind, hash, bytes) = match transaction {
+                    node::Transaction::Regular(transaction) => {
+                        ("regular", transaction.hash, &transaction.raw)
+                    }
+                    node::Transaction::System(transaction) => {
+                        ("system", transaction.hash, &transaction.raw)
+                    }
                 };
-                let bytes = transaction.bytes();
                 println!("\t## {kind} transaction {hash}, {} bytes", bytes.len());
                 if let Some(dir) = &self.save_transactions {
                     let file = dir.join(format!("{}-{index}-{kind}.raw", block.height));

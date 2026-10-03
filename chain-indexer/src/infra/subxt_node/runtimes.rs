@@ -61,10 +61,6 @@ impl Transaction {
         let (Self::Regular(bytes) | Self::System(bytes)) = self;
         bytes
     }
-
-    pub fn is_system(&self) -> bool {
-        matches!(self, Self::System(_))
-    }
 }
 
 /// Decode block details from a block's serialized extrinsics and its serialized `System.Events`

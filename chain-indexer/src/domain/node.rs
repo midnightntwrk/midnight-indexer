@@ -11,11 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{
-    domain::{
-        self, BlockRef, ContractAction, DParameter, DustRegistrationEvent, TermsAndConditions,
-    },
-    infra::subxt_node::runtimes,
+use crate::domain::{
+    self, BlockRef, ContractAction, DParameter, DustRegistrationEvent, TermsAndConditions,
 };
 use indexer_common::domain::{
     BlockAuthor, BlockHash, ByteVec, ProtocolVersion, SerializedTransaction,
@@ -35,8 +32,8 @@ pub struct Block {
     pub timestamp: u64,
     pub zswap_merkle_tree_root: ZswapMerkleTreeRoot,
     pub ledger_state_root: Option<ByteVec>,
-    /// Serialized Midnight transactions with their hashes, in block order.
-    pub transactions: Vec<(TransactionHash, runtimes::Transaction)>,
+    /// Midnight transactions, in block order.
+    pub transactions: Vec<Transaction>,
     pub dust_registration_events: Vec<DustRegistrationEvent>,
     pub bridge_events: Vec<indexer_common::domain::bridge::BridgeEvent>,
     /// D-parameter in this block's state, fetched alongside the block.
@@ -47,12 +44,10 @@ pub struct Block {
     pub genesis_ledger_state: Option<ByteVec>,
 }
 
-impl TryFrom<Block> for (domain::Block, Vec<(TransactionHash, runtimes::Transaction)>) {
+impl TryFrom<Block> for (domain::Block, Vec<Transaction>) {
     type Error = ledger::Error;
 
-    fn try_from(
-        block: Block,
-    ) -> Result<(domain::Block, Vec<(TransactionHash, runtimes::Transaction)>), Self::Error> {
+    fn try_from(block: Block) -> Result<(domain::Block, Vec<Transaction>), Self::Error> {
         let zswap_merkle_tree_root = block.zswap_merkle_tree_root.serialize()?;
 
         let transactions = block.transactions;
