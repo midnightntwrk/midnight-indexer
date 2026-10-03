@@ -26,7 +26,6 @@ use futures::{StreamExt, TryStreamExt, stream};
 use indexer_common::domain::{BlockHash, BlockNumber, ByteArray, ByteVec, ProtocolVersion};
 use parity_scale_codec::{Decode, Encode};
 use serde_json::{Value, json};
-use sha2::{Digest as _, Sha256};
 use std::{
     env, fs,
     num::NonZeroUsize,
@@ -312,15 +311,15 @@ fn pairs_of(value: &Value) -> Vec<(ByteVec, ByteVec)> {
         .collect()
 }
 
-/// A [node::Block], every byte field in full, except transactions: their SHA-256 hashes.
+/// A [node::Block], every byte field in full, except transactions: their hashes.
 fn render(block: &node::Block) -> Value {
     use runtimes::Transaction::*;
     let transactions = block
         .transactions
         .iter()
-        .map(|transaction| match transaction {
-            Regular(bytes) => json!({ "regular": hex(Sha256::digest(bytes)) }),
-            System(bytes) => json!({ "system": hex(Sha256::digest(bytes)) }),
+        .map(|(hash, transaction)| match transaction {
+            Regular(_) => json!({ "regular": hex(hash) }),
+            System(_) => json!({ "system": hex(hash) }),
         })
         .collect::<Vec<_>>();
 

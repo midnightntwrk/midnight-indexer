@@ -27,10 +27,11 @@ use crate::{
 use futures::{Stream, StreamExt, TryStreamExt, executor::block_on, stream};
 use indexer_common::domain::{
     BlockAuthor, BlockHash, BlockNumber, ByteArray, ByteVec, NodeVersion, ProtocolVersion,
-    ProtocolVersionError, ledger::ZswapMerkleTreeRoot,
+    ProtocolVersionError, TransactionHash, ledger::ZswapMerkleTreeRoot,
 };
 use parity_scale_codec::Decode;
 use rayon::{ThreadPool, ThreadPoolBuildError, ThreadPoolBuilder, prelude::*};
+use sha2::{Digest, Sha256};
 use std::{num::NonZeroUsize, sync::Arc};
 use subxt::{
     ArcMetadata, Metadata, OfflineClient, SubstrateConfig,
@@ -136,6 +137,22 @@ pub fn decode<S: Stream<Item = Result<sourcing::Chunk, sourcing::Error>>>(
         .try_flatten()
 }
 
+/// Each transaction with its hash: SHA-256 of its bytes, which are its tagged serialization, as
+/// `transaction_hash` hashes it.
+fn with_hashes(
+    transactions: Vec<runtimes::Transaction>,
+) -> Vec<(TransactionHash, runtimes::Transaction)> {
+    transactions
+        .into_iter()
+        .map(|transaction| (transaction_hash(&transaction), transaction))
+        .collect()
+}
+
+/// SHA-256 of a transaction's bytes.
+pub fn transaction_hash(transaction: &runtimes::Transaction) -> TransactionHash {
+    ByteArray(Sha256::digest(transaction.bytes().as_ref()).into())
+}
+
 impl TryFrom<sourcing::Block> for node::Block {
     type Error = Error;
 
@@ -184,7 +201,7 @@ impl TryFrom<sourcing::Block> for node::Block {
                     timestamp: details.timestamp.unwrap_or(0),
                     zswap_merkle_tree_root: decoder.zswap_merkle_tree_root(&zswap_state_root)?,
                     ledger_state_root: decoder.ledger_state_root(&ledger_state_root)?,
-                    transactions: details.transactions,
+                    transactions: with_hashes(details.transactions),
                     dust_registration_events,
                     bridge_events: details.bridge_events,
                     d_parameter,
@@ -221,7 +238,7 @@ impl TryFrom<sourcing::Block> for node::Block {
                     timestamp: details.timestamp.unwrap_or(0),
                     zswap_merkle_tree_root: decoder.zswap_merkle_tree_root(&zswap_state_root)?,
                     ledger_state_root: decoder.ledger_state_root(&ledger_state_root)?,
-                    transactions: details.transactions,
+                    transactions: with_hashes(details.transactions),
                     dust_registration_events: details.dust_registration_events,
                     bridge_events: details.bridge_events,
                     d_parameter,

@@ -35,6 +35,7 @@ parking_lot        = { workspace = true }
 rayon              = { workspace = true }
 serde              = { workspace = true, features = [ "derive" ] }
 serde_json         = { workspace = true }
+sha2               = { workspace = true }
 sqlx               = { workspace = true, features = [ "time" ] }
 subxt              = { workspace = true }
 thiserror          = { workspace = true }
@@ -51,7 +52,6 @@ indexer-common = { path = "../indexer-common", features = [ "testing" ] }
 reqwest   = { workspace = true, features = [ "json", "rustls" ] }
 serde     = { workspace = true, features = [ "derive" ] }
 serde_json = { workspace = true }
-sha2      = { workspace = true }
 tempfile  = { workspace = true }
 testcontainers = { workspace = true }
 testcontainers-modules = { workspace = true, features = [ "postgres" ] }

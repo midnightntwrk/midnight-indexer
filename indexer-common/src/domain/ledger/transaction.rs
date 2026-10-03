@@ -366,6 +366,41 @@ mod tests {
     use midnight_zswap_v8::keys::{SecretKeys, Seed};
     use std::{fs, str::FromStr};
 
+    /// SHA-256 of a transaction's bytes is its hash: deserialization accepts only the tagged
+    /// serialization that `transaction_hash` hashes.
+    #[cfg(any(feature = "cloud", feature = "standalone"))]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_hash_from_bytes() -> Result<(), BoxError> {
+        use crate::{domain::ledger::SystemTransaction, testing::init_ledger_db};
+        use sha2::{Digest, Sha256};
+
+        let _ledger_db = init_ledger_db().await?;
+
+        // File, ledger version, system transaction.
+        let fixtures = [
+            ("block_128537_tx.raw", LedgerVersion::V8, false),
+            ("block_164460_tx.raw", LedgerVersion::V8, false),
+            ("block_1788980_tx.raw", LedgerVersion::V8, false),
+            ("v8_system_tx_devnet_1.raw", LedgerVersion::V8, true),
+            ("tx_1_2_2.raw", LedgerVersion::V9, false),
+            ("tx_1_2_3.raw", LedgerVersion::V9, false),
+            ("v9_regular_tx_devnet_182048.raw", LedgerVersion::V9, false),
+            ("v9_regular_tx_devnet_210505.raw", LedgerVersion::V9, false),
+            ("v9_system_tx_devnet_169509.raw", LedgerVersion::V9, true),
+        ];
+        for (file, ledger_version, system) in fixtures {
+            let raw = fs::read(format!("{}/tests/{file}", env!("CARGO_MANIFEST_DIR")))?;
+            let hash = if system {
+                SystemTransaction::deserialize(&raw, ledger_version)?.hash()
+            } else {
+                Transaction::deserialize(&raw, ledger_version)?.hash()
+            };
+            assert_eq!(hash.as_ref(), Sha256::digest(&raw).as_slice(), "{file}");
+        }
+
+        Ok(())
+    }
+
     /// Notice: The raw test data is created with `generate_txs.sh`.
     #[cfg(any(feature = "cloud", feature = "standalone"))]
     #[tokio::test(flavor = "multi_thread")]

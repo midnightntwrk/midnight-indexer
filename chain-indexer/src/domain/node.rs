@@ -35,8 +35,8 @@ pub struct Block {
     pub timestamp: u64,
     pub zswap_merkle_tree_root: ZswapMerkleTreeRoot,
     pub ledger_state_root: Option<ByteVec>,
-    /// Serialized Midnight transactions, in block order.
-    pub transactions: Vec<runtimes::Transaction>,
+    /// Serialized Midnight transactions with their hashes, in block order.
+    pub transactions: Vec<(TransactionHash, runtimes::Transaction)>,
     pub dust_registration_events: Vec<DustRegistrationEvent>,
     pub bridge_events: Vec<indexer_common::domain::bridge::BridgeEvent>,
     /// D-parameter in this block's state, fetched alongside the block.
@@ -47,10 +47,12 @@ pub struct Block {
     pub genesis_ledger_state: Option<ByteVec>,
 }
 
-impl TryFrom<Block> for (domain::Block, Vec<runtimes::Transaction>) {
+impl TryFrom<Block> for (domain::Block, Vec<(TransactionHash, runtimes::Transaction)>) {
     type Error = ledger::Error;
 
-    fn try_from(block: Block) -> Result<(domain::Block, Vec<runtimes::Transaction>), Self::Error> {
+    fn try_from(
+        block: Block,
+    ) -> Result<(domain::Block, Vec<(TransactionHash, runtimes::Transaction)>), Self::Error> {
         let zswap_merkle_tree_root = block.zswap_merkle_tree_root.serialize()?;
 
         let transactions = block.transactions;

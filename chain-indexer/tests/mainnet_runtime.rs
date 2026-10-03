@@ -232,7 +232,7 @@ async fn test_mainnet_runtime_upgrade_boundary() -> anyhow::Result<()> {
     assert_eq!(block.height, 1_774_491);
     assert_eq!(u32::from(block.protocol_version), 22_000);
     let transactions = stream::iter(block.transactions)
-        .then(|transaction| make_transaction(transaction, block.protocol_version))
+        .then(|(hash, transaction)| make_transaction(transaction, hash, block.protocol_version))
         .try_collect::<Vec<_>>()
         .await
         .context("make transactions of mainnet block 1_774_491")?;
