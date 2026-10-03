@@ -25,14 +25,14 @@ use tokio::sync::Mutex;
 
 /// Metadata by runtime spec version, fetched from the node once per spec version.
 #[derive(Default)]
-pub(crate) struct MetadataCache(Mutex<HashMap<u32, ArcMetadata>>);
+pub(super) struct MetadataCache(Mutex<HashMap<u32, ArcMetadata>>);
 
 impl MetadataCache {
     /// The metadata of the runtime with the given spec version, which executed the given block.
     /// Unless cached, it is fetched from the parent's state, which runs that runtime after a
     /// `set_code` upgrade, else from the block's own state, which runs it after a switch without
     /// one. Fetched metadata must declare the spec version.
-    pub(crate) async fn get<T: Transport>(
+    pub(super) async fn get<T: Transport>(
         &self,
         rpc: &NodeRpc<T>,
         spec_version: u32,

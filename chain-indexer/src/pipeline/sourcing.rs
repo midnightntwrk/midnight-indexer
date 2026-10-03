@@ -23,7 +23,10 @@ use crate::{
             method,
         },
     },
-    pipeline::{metric, sourcing::finalized::follow_finalized},
+    pipeline::{
+        metric,
+        sourcing::{finalized::follow_finalized, metadata::MetadataCache},
+    },
 };
 use async_stream::stream;
 use futures::{
@@ -60,9 +63,6 @@ mod storage;
 mod tests;
 mod verify;
 
-pub(crate) use self::metadata::MetadataCache;
-#[cfg(test)]
-pub(crate) use self::source::source;
 pub use self::{metadata::metadata_spec_version, resolve::resolve};
 
 /// Storage items holding a consensus engine's authority set. An item a runtime lacks is absent from

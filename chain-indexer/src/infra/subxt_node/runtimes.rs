@@ -21,7 +21,7 @@ include!(concat!(env!("OUT_DIR"), "/generated_runtime.rs"));
 
 use crate::{
     domain::{DParameter, DustRegistrationEvent, TermsAndConditions},
-    infra::subxt_node::{ContentSource, OnlineClientAtBlock, SubxtNodeError},
+    infra::subxt_node::SubxtNodeError,
 };
 use indexer_common::{
     domain::{ByteVec, NodeVersion},
@@ -39,9 +39,6 @@ use subxt::{
 /// Runtime specific block details.
 pub struct BlockDetails {
     pub timestamp: Option<u64>,
-    /// True when this block emitted a `NewSession` event, i.e. the authority set used to
-    /// resolve block authors must be refetched for the next block.
-    pub new_session: bool,
     pub transactions: Vec<Transaction>,
     pub dust_registration_events: Vec<DustRegistrationEvent>,
     /// c2m-bridge events. Only populated for node 2.0+, where the
@@ -58,47 +55,6 @@ pub enum Transaction {
     System(ByteVec),
 }
 
-/// Make block details depending on the given protocol version.
-pub async fn make_block_details(
-    node_version: NodeVersion,
-    block: &OnlineClientAtBlock,
-    content: Option<&ContentSource>,
-) -> Result<BlockDetails, SubxtNodeError> {
-    // Raw event bytes are metadata-independent, so an enactment block's events are fetched from
-    // the block itself.
-    let events = block
-        .events()
-        .fetch()
-        .await
-        .map_err(|error| SubxtNodeError::FetchEvents(error.into()))?
-        .bytes()
-        .to_vec();
-
-    match content {
-        // Enactment block: decode this block's raw extrinsic and event bytes against the parent
-        // (old-runtime) client.
-        Some(content) => {
-            let extrinsics = content.extrinsic_bodies.clone();
-            decode_block_details(node_version, &content.client, extrinsics, events).await
-        }
-        None => {
-            let extrinsics = block
-                .extrinsics()
-                .fetch()
-                .await
-                .map_err(|error| SubxtNodeError::FetchExtrinsics(error.into()))?
-                .iter()
-                .map(|extrinsic| {
-                    extrinsic
-                        .map(|extrinsic| extrinsic.bytes().to_vec())
-                        .map_err(|error| SubxtNodeError::GetNextExtrinsic(error.into()))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            decode_block_details(node_version, block, extrinsics, events).await
-        }
-    }
-}
-
 /// Decode block details from a block's serialized extrinsics and its serialized `System.Events`
 /// value, against the given client's metadata.
 pub async fn decode_block_details<C: OfflineClientAtBlockT<SubstrateConfig>>(
@@ -112,19 +68,6 @@ pub async fn decode_block_details<C: OfflineClientAtBlockT<SubstrateConfig>>(
         NodeVersion::V1_0 => v1_0_300::decode_block_details(client, extrinsics, events).await,
         NodeVersion::V2_0 => v2_0_0::decode_block_details(client, extrinsics, events).await,
         NodeVersion::V2_1 => v2_1_0::decode_block_details(client, extrinsics, events).await,
-    }
-}
-
-/// Fetch authorities depending on the given protocol version.
-pub async fn fetch_authorities(
-    node_version: NodeVersion,
-    block: &OnlineClientAtBlock,
-) -> Result<Vec<[u8; 32]>, SubxtNodeError> {
-    match node_version {
-        NodeVersion::V0_22 => v0_22_0::fetch_authorities(block).await,
-        NodeVersion::V1_0 => v1_0_300::fetch_authorities(block).await,
-        NodeVersion::V2_0 => v2_0_0::fetch_authorities(block).await,
-        NodeVersion::V2_1 => v2_1_0::fetch_authorities(block).await,
     }
 }
 
@@ -144,18 +87,6 @@ pub fn decode_slot(slot: &[u8], node_version: NodeVersion) -> Result<u64, SubxtN
     }
 }
 
-pub async fn get_zswap_merkle_tree_root(
-    node_version: NodeVersion,
-    block: &OnlineClientAtBlock,
-) -> Result<Vec<u8>, SubxtNodeError> {
-    match node_version {
-        NodeVersion::V0_22 => v0_22_0::get_zswap_merkle_tree_root(block).await,
-        NodeVersion::V1_0 => v1_0_300::get_zswap_merkle_tree_root(block).await,
-        NodeVersion::V2_0 => v2_0_0::get_zswap_merkle_tree_root(block).await,
-        NodeVersion::V2_1 => v2_1_0::get_zswap_merkle_tree_root(block).await,
-    }
-}
-
 /// Decode the serialized result of the `get_zswap_state_root` runtime API call.
 pub fn decode_zswap_merkle_tree_root<C: OfflineClientAtBlockT<SubstrateConfig>>(
     node_version: NodeVersion,
@@ -167,19 +98,6 @@ pub fn decode_zswap_merkle_tree_root<C: OfflineClientAtBlockT<SubstrateConfig>>(
         NodeVersion::V1_0 => v1_0_300::decode_zswap_merkle_tree_root(client, result),
         NodeVersion::V2_0 => v2_0_0::decode_zswap_merkle_tree_root(client, result),
         NodeVersion::V2_1 => v2_1_0::decode_zswap_merkle_tree_root(client, result),
-    }
-}
-
-/// Get the pure ledger state root (without StorableLedgerState wrapping) at the given block.
-pub async fn get_ledger_state_root(
-    node_version: NodeVersion,
-    block: &OnlineClientAtBlock,
-) -> Result<Option<Vec<u8>>, SubxtNodeError> {
-    match node_version {
-        NodeVersion::V0_22 => v0_22_0::get_ledger_state_root(block).await,
-        NodeVersion::V1_0 => v1_0_300::get_ledger_state_root(block).await,
-        NodeVersion::V2_0 => v2_0_0::get_ledger_state_root(block).await,
-        NodeVersion::V2_1 => v2_1_0::get_ledger_state_root(block).await,
     }
 }
 
@@ -197,19 +115,6 @@ pub fn decode_ledger_state_root<C: OfflineClientAtBlockT<SubstrateConfig>>(
     }
 }
 
-/// Get D-Parameter depending on the given protocol version.
-pub async fn get_d_parameter(
-    node_version: NodeVersion,
-    block: &OnlineClientAtBlock,
-) -> Result<DParameter, SubxtNodeError> {
-    match node_version {
-        NodeVersion::V0_22 => v0_22_0::get_d_parameter(block).await,
-        NodeVersion::V1_0 => v1_0_300::get_d_parameter(block).await,
-        NodeVersion::V2_0 => v2_0_0::get_d_parameter(block).await,
-        NodeVersion::V2_1 => v2_1_0::get_d_parameter(block).await,
-    }
-}
-
 /// Decode the serialized result of the `get_d_parameter` runtime API call.
 pub fn decode_d_parameter<C: OfflineClientAtBlockT<SubstrateConfig>>(
     node_version: NodeVersion,
@@ -221,21 +126,6 @@ pub fn decode_d_parameter<C: OfflineClientAtBlockT<SubstrateConfig>>(
         NodeVersion::V1_0 => v1_0_300::decode_d_parameter(client, result),
         NodeVersion::V2_0 => v2_0_0::decode_d_parameter(client, result),
         NodeVersion::V2_1 => v2_1_0::decode_d_parameter(client, result),
-    }
-}
-
-/// Fetch genesis cNight registrations from pallet storage.
-/// At genesis, Substrate does not emit events (Parity PR #5463), so we query
-/// the cNightObservation.Mappings storage directly at block 0.
-pub async fn fetch_genesis_cnight_registrations(
-    node_version: NodeVersion,
-    block: &OnlineClientAtBlock,
-) -> Result<Vec<DustRegistrationEvent>, SubxtNodeError> {
-    match node_version {
-        NodeVersion::V0_22 => v0_22_0::fetch_genesis_cnight_registrations(block).await,
-        NodeVersion::V1_0 => v1_0_300::fetch_genesis_cnight_registrations(block).await,
-        NodeVersion::V2_0 => v2_0_0::fetch_genesis_cnight_registrations(block).await,
-        NodeVersion::V2_1 => v2_1_0::fetch_genesis_cnight_registrations(block).await,
     }
 }
 
@@ -251,19 +141,6 @@ pub fn decode_genesis_cnight_registrations<C: OfflineClientAtBlockT<SubstrateCon
         NodeVersion::V1_0 => v1_0_300::decode_genesis_cnight_registrations(client, mappings),
         NodeVersion::V2_0 => v2_0_0::decode_genesis_cnight_registrations(client, mappings),
         NodeVersion::V2_1 => v2_1_0::decode_genesis_cnight_registrations(client, mappings),
-    }
-}
-
-/// Get Terms and Conditions depending on the given protocol version.
-pub async fn get_terms_and_conditions(
-    node_version: NodeVersion,
-    block: &OnlineClientAtBlock,
-) -> Result<Option<TermsAndConditions>, SubxtNodeError> {
-    match node_version {
-        NodeVersion::V0_22 => v0_22_0::get_terms_and_conditions(block).await,
-        NodeVersion::V1_0 => v1_0_300::get_terms_and_conditions(block).await,
-        NodeVersion::V2_0 => v2_0_0::get_terms_and_conditions(block).await,
-        NodeVersion::V2_1 => v2_1_0::get_terms_and_conditions(block).await,
     }
 }
 

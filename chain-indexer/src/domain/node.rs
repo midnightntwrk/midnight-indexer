@@ -17,39 +17,12 @@ use crate::{
     },
     infra::subxt_node::runtimes,
 };
-use futures::Stream;
 use indexer_common::domain::{
     BlockAuthor, BlockHash, ByteVec, ProtocolVersion, SerializedTransaction,
     SerializedTransactionIdentifier, TransactionHash,
     ledger::{self, ZswapMerkleTreeRoot},
 };
-use std::{error::Error as StdError, fmt::Debug};
-
-/// Node abstraction.
-#[trait_variant::make(Send)]
-pub trait Node
-where
-    Self: Clone + Send + Sync + 'static,
-{
-    /// Error type for items of the stream of finalized [Block]s.
-    type Error: StdError + Send + Sync + 'static;
-
-    /// A stream of the latest/highest finalized blocks.
-    async fn highest_blocks(
-        &self,
-    ) -> Result<impl Stream<Item = Result<BlockRef, Self::Error>> + Send, Self::Error>;
-
-    /// A stream of finalized [Block]s in natural parent-child order without duplicates but possibly
-    /// with gaps, starting after the given block.
-    fn finalized_blocks(
-        &mut self,
-        after: Option<BlockRef>,
-    ) -> impl Stream<Item = Result<Block, Self::Error>>;
-
-    /// Fetch serialized genesis ledger state from the chain spec's system properties.
-    /// Returns the raw bytes of the genesis `LedgerState`, errs if unavailable.
-    async fn fetch_genesis_ledger_state(&self) -> Result<ByteVec, Self::Error>;
-}
+use std::fmt::Debug;
 
 #[derive(Debug)]
 #[cfg_attr(test, derive(Clone))]

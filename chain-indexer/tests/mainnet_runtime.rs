@@ -21,15 +21,13 @@
 use anyhow::Context;
 use chain_indexer::{
     application::make_transaction,
-    domain::{
-        BlockRef,
-        node::{Node, Transaction},
-    },
-    infra::subxt_node::{Config, SubxtNode},
+    domain::{BlockRef, node::Transaction},
+    infra::subxt_node::Config,
+    pipeline::{self, decode::CpuPool, sourcing::Source},
 };
 use fs_extra::dir::{CopyOptions, copy};
 use futures::{StreamExt, TryStreamExt, stream};
-use std::{fs, num::NonZeroUsize, path::Path, pin::pin, time::Duration};
+use std::{fs, num::NonZeroUsize, path::Path, pin::pin, sync::Arc, time::Duration};
 use testcontainers::{
     GenericImage, ImageExt,
     core::{Mount, WaitFor},
@@ -97,16 +95,19 @@ async fn test_finalized_blocks_node_1_0() -> anyhow::Result<()> {
         rpc_batch_size: NonZeroUsize::new(64).unwrap(),
         rpc_batches_in_flight: NonZeroUsize::new(16).unwrap(),
     };
-    let mut node = SubxtNode::new(config).await.context("create SubxtNode")?;
+    let source = Source::connect(&config.url, (&config).into())
+        .await
+        .context("connect block source")?;
+    let pool = Arc::new(CpuPool::new(NonZeroUsize::MIN).context("create decode pool")?);
 
-    let blocks = node.finalized_blocks(None);
+    let (blocks, _) = pipeline::finalized_blocks(&source, pool, None, Some(2));
     let mut blocks = pin!(blocks);
     for _ in 0..3 {
         let block = blocks
             .try_next()
             .await
             .context("get next finalized block")?
-            .context("stream of finalized blocks must not end")?;
+            .context("block stream must not end")?;
         assert_eq!(u32::from(block.protocol_version), 1_000_000);
     }
 
@@ -141,7 +142,10 @@ async fn test_mainnet_runtime_upgrade_boundary() -> anyhow::Result<()> {
         rpc_batch_size: NonZeroUsize::new(64).unwrap(),
         rpc_batches_in_flight: NonZeroUsize::new(16).unwrap(),
     };
-    let mut node = SubxtNode::new(config).await.context("create SubxtNode")?;
+    let source = Source::connect(&config.url, (&config).into())
+        .await
+        .context("connect block source")?;
+    let pool = Arc::new(CpuPool::new(NonZeroUsize::MIN).context("create decode pool")?);
 
     let after = BlockRef {
         hash: const_hex::decode_to_array::<_, 32>(
@@ -151,14 +155,14 @@ async fn test_mainnet_runtime_upgrade_boundary() -> anyhow::Result<()> {
         .into(),
         height: 1_774_490,
     };
-    let blocks = node.finalized_blocks(Some(after));
+    let (blocks, _) = pipeline::finalized_blocks(&source, pool, Some(after), Some(1_774_492));
     let mut blocks = pin!(blocks);
 
     let block = blocks
         .try_next()
         .await
         .context("get mainnet block 1_774_491")?
-        .context("stream of finalized blocks must not end")?;
+        .context("block stream must not end")?;
     assert_eq!(block.height, 1_774_491);
     assert_eq!(u32::from(block.protocol_version), 22_000);
     let transactions = stream::iter(block.transactions)
@@ -178,9 +182,9 @@ async fn test_mainnet_runtime_upgrade_boundary() -> anyhow::Result<()> {
                 == const_hex::decode(CONTRACT_ADDRESS).expect("valid address")
         })
         .context("mainnet block 1_774_491 must contain the known contract call")?;
-    // The node adapter no longer fetches contract state: it is captured from the indexer's own
-    // ledger state once per block, after all transactions are applied, so an action coming straight
-    // off the block stream carries no key yet. Asserting that guards against reintroducing a
+    // Contract state is not fetched from the node: it is captured from the indexer's own ledger
+    // state once per block, after all transactions are applied, so an action coming straight off
+    // the block stream carries no key yet. Asserting that guards against reintroducing a
     // per-action runtime API call here.
     assert!(contract_action.state_key.is_none());
     assert!(contract_action.zswap_state_key.is_none());
@@ -189,7 +193,7 @@ async fn test_mainnet_runtime_upgrade_boundary() -> anyhow::Result<()> {
         .try_next()
         .await
         .context("get mainnet block 1_774_492")?
-        .context("stream of finalized blocks must not end")?;
+        .context("block stream must not end")?;
     assert_eq!(block.height, 1_774_492);
     assert_eq!(u32::from(block.protocol_version), 1_000_000);
 
