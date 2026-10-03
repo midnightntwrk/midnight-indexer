@@ -130,7 +130,6 @@ async fn node_calls() {
                     .await
                     .expect("calls succeed");
             }
-
             Kind::Storage(_, items) => {
                 stream::iter(hashes.iter().copied())
                     .map(|hash| query(rpc, hash, items.clone()))
