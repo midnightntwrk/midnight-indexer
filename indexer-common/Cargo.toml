@@ -84,6 +84,12 @@ tokio-stream                 = { workspace = true, features = [ "sync" ] }
 trait-variant                = { workspace = true }
 uuid                         = { workspace = true }
 
+# Ledger v8 hashes with sha2 0.10, which uses the CPU's SHA-2 instructions on aarch64 only with
+# `asm`; on x86, and in sha2 0.11, they are detected at runtime. Enabling the feature here applies it
+# to every user of sha2 0.10 in the build.
+[target.'cfg(target_arch = "aarch64")'.dependencies]
+sha2_0_10 = { package = "sha2", version = "0.10", features = [ "asm" ] }
+
 [dev-dependencies]
 anyhow                 = { workspace = true }
 assert_matches         = { workspace = true }
