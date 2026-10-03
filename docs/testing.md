@@ -12,8 +12,9 @@ divergent state - `chain-indexer/src/application.rs` (~404-420):
 - **Zswap merkle tree root - every block.** `ledger_state.zswap_merkle_tree_root()` is
   compared to the node's per-block root; mismatch → `bail!`. This is the check that works
   against every node version.
-- **Full ledger-state root - every block the node supplies one.** When `block.ledger_state_root`
-  is present (Node ≥ 0.22) the recomputed `ledger_state.root()` is compared to it; mismatch →
+- **Full ledger-state root - every block the node supplies one.** Block sourcing fetches the
+  node's root for every block (Node ≥ 0.22), and the recomputed `ledger_state.root()` is compared to
+  it; mismatch →
   `bail!`. At genesis the state root additionally disambiguates a pre- vs post-block-0 genesis.
   (A `TODO` retires the zswap-only path once Node < 0.22 support is dropped.)
 
