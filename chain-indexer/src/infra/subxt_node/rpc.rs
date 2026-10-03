@@ -20,7 +20,9 @@ use http::HeaderMap;
 use indexer_common::{domain::BlockHash, error::BoxError};
 use jsonrpsee::{
     core::{
-        client::{BatchResponse, ClientT, Error as ClientError, SubscriptionClientT},
+        client::{
+            BatchResponse, ClientT, Error as ClientError, SubscriptionClientT, SubscriptionKind,
+        },
         params::{ArrayParams, BatchRequestBuilder},
     },
     ws_client::{WsClient, WsClientBuilder},
@@ -88,6 +90,12 @@ pub struct CallError {
 /// A subscription's notifications.
 pub type Notifications = BoxStream<'static, Result<Value, TransportError>>;
 
+/// A subscription: its ID, as the node names it in follow-up calls, and its notifications.
+pub struct Subscription {
+    pub id: Value,
+    pub notifications: Notifications,
+}
+
 /// Error of a [Transport].
 #[derive(Debug, Error)]
 pub enum TransportError {
@@ -115,7 +123,7 @@ where
         method: &'static str,
         params: Vec<Value>,
         unsubscribe: &'static str,
-    ) -> Result<Notifications, TransportError>;
+    ) -> Result<Subscription, TransportError>;
 
     /// Replace a lost connection with a new one.
     async fn reconnect(&self) -> Result<(), TransportError>;
@@ -193,7 +201,7 @@ impl Transport for WsTransport {
         method: &'static str,
         params: Vec<Value>,
         unsubscribe: &'static str,
-    ) -> Result<Notifications, TransportError> {
+    ) -> Result<Subscription, TransportError> {
         let subscription = self
             .client()
             .await
@@ -201,9 +209,20 @@ impl Transport for WsTransport {
             .await
             .map_err(transport_error)?;
 
-        Ok(subscription
+        let id = match subscription.kind() {
+            SubscriptionKind::Subscription(id) => {
+                serde_json::to_value(id).map_err(|error| TransportError::Other(error.into()))?
+            }
+            kind => {
+                let error = format!("subscription without an ID: {kind:?}");
+                return Err(TransportError::Other(error.into()));
+            }
+        };
+        let notifications = subscription
             .map_err(|error| TransportError::Other(error.into()))
-            .boxed())
+            .boxed();
+
+        Ok(Subscription { id, notifications })
     }
 
     async fn reconnect(&self) -> Result<(), TransportError> {
@@ -268,6 +287,13 @@ impl Batch {
     /// `archive_v1_finalizedHeight`: the height of the latest finalized block.
     pub fn finalized_height(&mut self) -> &mut Self {
         self.push(method::ARCHIVE_FINALIZED_HEIGHT, vec![])
+    }
+
+    /// `chainHead_v1_unpin`: release the given blocks pinned by a `chainHead_v1_follow`
+    /// subscription.
+    pub fn unpin(&mut self, subscription: Value, hashes: &[BlockHash]) -> &mut Self {
+        let hashes = hashes.iter().map(|hash| hex(hash.0)).collect::<Vec<_>>();
+        self.push(method::CHAIN_HEAD_UNPIN, vec![subscription, hashes.into()])
     }
 
     /// `chainSpec_v1_properties`: the chain spec's properties.
@@ -492,7 +518,7 @@ where
         method: &'static str,
         params: Vec<Value>,
         unsubscribe: &'static str,
-    ) -> Result<Notifications, Error> {
+    ) -> Result<Subscription, Error> {
         let mut reconnected = false;
 
         loop {
@@ -501,7 +527,7 @@ where
                 .subscribe(method, params.clone(), unsubscribe)
                 .await
             {
-                Ok(notifications) => {
+                Ok(Subscription { id, notifications }) => {
                     let request_bytes = params.iter().map(json_size).sum::<usize>() as u64;
                     self.counters.record(method, 1, request_bytes, 0);
 
@@ -512,7 +538,7 @@ where
                         })
                         .boxed();
 
-                    return Ok(notifications);
+                    return Ok(Subscription { id, notifications });
                 }
 
                 Err(error @ TransportError::Disconnected(_)) if !reconnected => {
@@ -657,7 +683,7 @@ mod tests {
             json_size, method,
         },
     };
-    use futures::TryStreamExt;
+    use futures::{StreamExt, TryStreamExt};
     use indexer_common::domain::ByteArray;
     use serde_json::{Value, json};
     use std::{num::NonZeroUsize, time::Duration};
@@ -777,6 +803,8 @@ mod tests {
             )
             .await
             .expect("subscription succeeds")
+            .notifications
+            .take(notifications.len())
             .try_collect::<Vec<_>>()
             .await
             .expect("notifications are received");

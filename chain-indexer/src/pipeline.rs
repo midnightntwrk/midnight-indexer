@@ -11,11 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg_attr(docsrs, feature(doc_cfg))]
+//! Pipeline stages from the node to [node::Block](crate::domain::node::Block)s.
 
-pub mod application;
-#[cfg(feature = "cloud")]
-pub mod config;
-pub mod domain;
-pub mod infra;
-pub mod pipeline;
+pub mod source;

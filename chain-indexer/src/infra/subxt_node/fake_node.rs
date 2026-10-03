@@ -14,7 +14,7 @@
 //! An in-memory [Transport] answering calls with a given function, with switches for the failure
 //! modes of a real node: lost connections, refused batches and slow responses.
 
-use crate::infra::subxt_node::rpc::{Call, CallResult, Notifications, Transport, TransportError};
+use crate::infra::subxt_node::rpc::{Call, CallResult, Subscription, Transport, TransportError};
 use futures::{StreamExt, stream};
 use parking_lot::Mutex;
 use serde_json::Value;
@@ -44,6 +44,8 @@ struct Inner {
     in_flight: AtomicUsize,
     max_in_flight: AtomicUsize,
     subscriptions: Mutex<Vec<Vec<Value>>>,
+    notification_interval: Duration,
+    subscribes: AtomicUsize,
 }
 
 impl FakeNode {
@@ -60,6 +62,8 @@ impl FakeNode {
             in_flight: AtomicUsize::new(0),
             max_in_flight: AtomicUsize::new(0),
             subscriptions: Mutex::default(),
+            notification_interval: Duration::ZERO,
+            subscribes: AtomicUsize::new(0),
         }))
     }
 
@@ -85,11 +89,21 @@ impl FakeNode {
         self
     }
 
-    /// Answer the next subscriptions with the given notifications, one list per subscription, then
-    /// end them.
+    /// Answer the next subscriptions with the given notifications, one list per subscription; after
+    /// its notifications a subscription stays open and silent.
     pub fn with_subscriptions(self, subscriptions: Vec<Vec<Value>>) -> Self {
         *self.0.subscriptions.lock() = subscriptions;
         self
+    }
+
+    /// Send subscription notifications at the given interval.
+    pub fn with_notification_interval(self, interval: Duration) -> Self {
+        self.map(|inner| inner.notification_interval = interval)
+    }
+
+    /// The number of subscriptions made.
+    pub fn subscribes(&self) -> usize {
+        self.0.subscribes.load(Ordering::SeqCst)
     }
 
     /// The size of every batch received, in order.
@@ -147,15 +161,29 @@ impl Transport for FakeNode {
         _method: &'static str,
         _params: Vec<Value>,
         _unsubscribe: &'static str,
-    ) -> Result<Notifications, TransportError> {
-        let mut subscriptions = self.0.subscriptions.lock();
-        let notifications = if subscriptions.is_empty() {
-            vec![]
-        } else {
-            subscriptions.remove(0)
+    ) -> Result<Subscription, TransportError> {
+        let n = self.0.subscribes.fetch_add(1, Ordering::SeqCst);
+        let notifications = {
+            let mut subscriptions = self.0.subscriptions.lock();
+            if subscriptions.is_empty() {
+                vec![]
+            } else {
+                subscriptions.remove(0)
+            }
         };
+        let interval = self.0.notification_interval;
+        let notifications = stream::iter(notifications)
+            .then(move |notification| async move {
+                sleep(interval).await;
+                Ok(notification)
+            })
+            .chain(stream::pending())
+            .boxed();
 
-        Ok(stream::iter(notifications.into_iter().map(Ok)).boxed())
+        Ok(Subscription {
+            id: format!("subscription-{n}").into(),
+            notifications,
+        })
     }
 
     async fn reconnect(&self) -> Result<(), TransportError> {

@@ -12,7 +12,7 @@
 // limitations under the License.
 
 #[cfg(test)]
-mod fake_node;
+pub(crate) mod fake_node;
 mod header;
 pub mod rpc;
 pub(crate) mod runtimes;
