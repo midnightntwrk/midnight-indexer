@@ -1826,9 +1826,9 @@ mod source_tests {
             rpc::{Call, CallError, CallResult, NodeRpc, ReconnectPolicy, method},
         },
         pipeline::source::{
-            AUTHORITY_SET_ITEMS, Block, CNIGHT_MAPPINGS_ITEMS, Chunk, Config, Error, MetadataCache,
-            SYSTEM_EVENTS_ITEM, SYSTEM_PARAMETERS_ITEMS, Source, metadata_spec_version, resolve,
-            source, storage_key,
+            AUTHORITY_SET_ITEMS, Block, CNIGHT_MAPPINGS_ITEMS, Chunk, Config, Error,
+            LEDGER_STATE_ROOT_FUNCTION, MetadataCache, SYSTEM_EVENTS_ITEM, SYSTEM_PARAMETERS_ITEMS,
+            Source, ZSWAP_STATE_ROOT_FUNCTION, metadata_spec_version, resolve, source, storage_key,
         },
     };
     use futures::{StreamExt, TryStreamExt};
@@ -2350,6 +2350,48 @@ mod source_tests {
     }
 
     #[tokio::test]
+    async fn test_enactment() {
+        // `set_code` lands in block 5, as at mainnet 1,774,491: block 5 is the last executed by
+        // 1.0.300 and block 6 the first executed by 2.1.
+        let (chain, node) = Chain {
+            stamped_2_1_from: Some(6),
+            state_2_1_from: Some(5),
+            ..Default::default()
+        }
+        .node();
+        let rpc = node_rpc(node, 64, 4);
+        source(
+            &rpc,
+            &MetadataCache::default(),
+            5,
+            &hashes(5..=7),
+            Some(hash(4)),
+            true,
+        )
+        .await
+        .expect("chunk is sourced");
+
+        // One metadata per runtime, each from the state of the parent of its first block.
+        assert_eq!(
+            chain.calls_of("Metadata_metadata_at_version"),
+            vec![hash(4), hash(5)]
+        );
+        // No runtime version lookup, and the roots come from each block itself, never retried at
+        // its parent or waiting for its successor.
+        assert!(chain.calls_of("Core_version").is_empty());
+        for function in [ZSWAP_STATE_ROOT_FUNCTION, LEDGER_STATE_ROOT_FUNCTION] {
+            assert_eq!(chain.calls_of(function), hashes(5..=7));
+        }
+        assert!(
+            chain
+                .calls
+                .lock()
+                .iter()
+                .all(|call| call.params.first() != Some(&hex(hash(8))))
+        );
+    }
+
+    #[tokio::test]
     async fn test_metadata_after_switch_without_set_code() {
         // Block 6 is stamped 2.1 while its parent's state still runs 1.0.300, as on a chain that
         // switched runtimes like a hard fork: the metadata comes from block 6's own state.
@@ -2434,7 +2476,7 @@ mod source_tests {
     }
 
     #[tokio::test]
-    async fn test_deep_fork_falls_back_to_parent_walk() {
+    async fn test_anchoring_deep_fork_falls_back_to_parent_walk() {
         // A fork sibling resolves at the last height of a deep chunk; its child exposes it.
         let (_, node) = Chain {
             forks: vec![109],
@@ -2450,7 +2492,7 @@ mod source_tests {
     }
 
     #[tokio::test]
-    async fn test_near_fork_falls_back_to_parent_walk() {
+    async fn test_anchoring_near_fork_falls_back_to_parent_walk() {
         // A fork sibling resolves mid-chunk within the margin.
         let (_, node) = Chain {
             forks: vec![955],

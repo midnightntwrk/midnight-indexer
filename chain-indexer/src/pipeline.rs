@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Pipeline stages from the node to [node::Block](crate::domain::node::Block)s.
+//! Pipeline stages from the node to [node::Block]s.
 
 pub mod decode;
 pub mod source;
