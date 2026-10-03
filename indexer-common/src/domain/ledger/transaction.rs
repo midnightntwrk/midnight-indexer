@@ -43,15 +43,27 @@ use midnight_zswap_v8::Offer as OfferV8;
 use midnight_zswap_v9::Offer as OfferV9;
 use std::str;
 
+/// A ledger transaction, its `Sp` nodes allocated in the storage of `D`.
 #[derive(Debug, Clone)]
-pub enum Transaction {
-    V8(TransactionV8<v1_1::LedgerDb>),
-    V9(TransactionV9<v1_1::LedgerDb>),
+pub enum Transaction<D: DB = v1_1::LedgerDb> {
+    V8(TransactionV8<D>),
+    V9(TransactionV9<D>),
 }
 
 impl Transaction {
+    /// Deserialize into the ledger DB's storage.
     #[trace(properties = { "ledger_version": "{ledger_version}" })]
     pub fn deserialize(
+        transaction: impl AsRef<[u8]>,
+        ledger_version: LedgerVersion,
+    ) -> Result<Self, Error> {
+        Self::deserialize_in(transaction, ledger_version)
+    }
+}
+
+impl<D: DB> Transaction<D> {
+    /// Deserialize into the default storage of `D`.
+    pub fn deserialize_in(
         transaction: impl AsRef<[u8]>,
         ledger_version: LedgerVersion,
     ) -> Result<Self, Error> {
