@@ -45,6 +45,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{
+    runtime::Handle,
     select,
     signal::unix::Signal,
     sync::mpsc,
@@ -260,15 +261,32 @@ pub async fn run(
             // `buffered` adapter cannot fetch ahead while a block is being processed. Run the
             // block stream on its own task feeding a bounded channel so fetching the next
             // blocks overlaps indexing, with at most `blocks_buffer` blocks in flight.
+            //
+            // Making a block deserializes its transactions into the ledger arena, whose lock gc and
+            // persist hold across `block_in_place(block_on(..))`. On a runtime worker this task can
+            // then deadlock the runtime (#1627), so it runs on the blocking pool. A blocking task
+            // cannot be aborted, so it ends when the receiver is dropped, i.e. with this task.
             let (block_tx, mut block_rx) = mpsc::channel(blocks_buffer.max(1));
-            task::spawn({
+            let handle = Handle::current();
+            task::spawn_blocking({
                 let node = node.clone();
-                async move {
-                    let blocks = node_blocks(highest_block_ref, node);
-                    let mut blocks = pin!(blocks);
-                    while let Some(block) = blocks.next().await
-                        && block_tx.send(block).await.is_ok()
-                    {}
+                move || {
+                    handle.block_on(async move {
+                        let blocks = node_blocks(highest_block_ref, node);
+                        let mut blocks = pin!(blocks);
+                        loop {
+                            select! {
+                                _ = block_tx.closed() => break,
+
+                                block = blocks.next() => {
+                                    let Some(block) = block else { break };
+                                    if block_tx.send(block).await.is_err() {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    })
                 }
             });
             let blocks = stream! {
