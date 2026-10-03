@@ -20,24 +20,39 @@ use crate::{
     domain::BlockRef,
     infra::subxt_node::{
         header::SubstrateHeaderExt,
-        rpc::{self, Batch, CallResult, NodeRpc, Subscription, Transport, hex, method},
+        rpc::{
+            self, Batch, CallResult, Counters, NodeRpc, ReconnectPolicy, Subscription, Transport,
+            TransportError, WsTransport, hex, method,
+        },
     },
+    pipeline::source::chunk::{ChunkSpec, next_chunk},
 };
-use futures::{StreamExt, TryStreamExt, future::try_join, stream};
+use async_stream::stream;
+use futures::{
+    StreamExt, TryStreamExt,
+    future::try_join,
+    stream::{self, BoxStream, FuturesOrdered},
+};
+use http::{HeaderMap, HeaderValue, header::USER_AGENT};
 use indexer_common::domain::{BlockHash, ByteArray, ByteVec, ProtocolVersionError};
 use log::{debug, warn};
 use parity_scale_codec::{Decode, Encode};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::{collections::HashMap, ops::RangeInclusive, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap, future::Future, num::NonZeroUsize, ops::RangeInclusive, sync::Arc,
+    time::Duration,
+};
 use subxt::{
     ArcMetadata, Metadata, config::substrate::SubstrateHeader,
     ext::frame_decode::storage::encode_storage_key_prefix, utils::H256,
 };
 use thiserror::Error;
 use tokio::{
-    sync::{Mutex, watch},
-    time::timeout,
+    select,
+    sync::{Mutex, mpsc, oneshot, watch},
+    task::{self, JoinHandle},
+    time::{sleep, timeout},
 };
 
 /// Storage items holding a consensus engine's authority set. An item a runtime lacks is absent from
@@ -195,6 +210,28 @@ pub enum Error {
 
     #[error("no genesis ledger state in the chain spec's properties")]
     MissingGenesisLedgerState,
+
+    #[error("block {hash} is at height {header_height}, not {height}")]
+    HeightMismatch {
+        hash: BlockHash,
+        height: u64,
+        header_height: u64,
+    },
+
+    #[error("no single block at height {0}")]
+    Unresolved(u64),
+
+    #[error("blocks from height {0} do not link to the finalized chain")]
+    Unlinked(u64),
+
+    #[error("cannot connect to the node")]
+    Connect(#[source] TransportError),
+
+    #[error("following finalized blocks failed")]
+    Follow(#[source] Box<Error>),
+
+    #[error("following finalized blocks ended")]
+    FinalizedEnded,
 }
 
 /// The Finalized stage: follow the node's finalized blocks with `chainHead_v1_follow` and publish
@@ -475,6 +512,13 @@ where
 
         let height = start + i as u64;
         let decoded_header = decode_header(&header, hash)?;
+        if decoded_header.number != height {
+            return Err(Error::HeightMismatch {
+                hash,
+                height,
+                header_height: decoded_header.number,
+            });
+        }
         let protocol_version = decoded_header
             .protocol_version()
             .map_err(|error| Error::ProtocolVersion(hash, error))?
@@ -998,6 +1042,518 @@ where
     Metadata::decode(&mut &*metadata).map_err(decode_error)
 }
 
+/// Settings of the block sourcing pipeline.
+#[derive(Debug, Clone, Copy)]
+pub struct Config {
+    /// The most heights per chunk.
+    pub chunk_size: NonZeroUsize,
+
+    /// The most chunks in progress, and the most chunks sourced but not yet received.
+    pub chunks_ahead: NonZeroUsize,
+
+    /// The most calls per JSON-RPC batch.
+    pub rpc_batch_size: NonZeroUsize,
+
+    /// The most JSON-RPC batches in flight.
+    pub rpc_batches_in_flight: NonZeroUsize,
+
+    /// How long the finalized-block subscription may stay silent before it is renewed.
+    pub recovery_timeout: Duration,
+
+    pub reconnect_policy: ReconnectPolicy,
+}
+
+/// The block sourcing pipeline over a [Transport].
+pub struct Source<T> {
+    rpc: NodeRpc<T>,
+    config: Config,
+    metadata: Arc<MetadataCache>,
+}
+
+impl Source<WsTransport> {
+    /// Connect to the node at the given URL and check that it serves every required RPC method.
+    pub async fn connect(url: &str, config: Config) -> Result<Self, Error> {
+        let user_agent = HeaderValue::from_static(concat!(
+            env!("CARGO_PKG_NAME"),
+            "/",
+            env!("CARGO_PKG_VERSION")
+        ));
+        let headers = HeaderMap::from_iter([(USER_AGENT, user_agent)]);
+        let transport = WsTransport::new(url, headers)
+            .await
+            .map_err(Error::Connect)?;
+
+        let source = Self::new(transport, config);
+        source.rpc.check_methods().await?;
+
+        Ok(source)
+    }
+}
+
+impl<T> Source<T>
+where
+    T: Transport,
+{
+    pub fn new(transport: T, config: Config) -> Self {
+        let rpc = NodeRpc::new(
+            transport,
+            config.rpc_batch_size,
+            config.rpc_batches_in_flight,
+            config.reconnect_policy,
+        );
+
+        Self {
+            rpc,
+            config,
+            metadata: Default::default(),
+        }
+    }
+
+    /// The request and byte counts of every RPC call made.
+    pub fn counters(&self) -> &Counters {
+        self.rpc.counters()
+    }
+
+    /// Run the pipeline from the block after `start`, or from genesis, up to and including the block
+    /// at height `end`, or without end. Returns the verified chunks in height order, and the latest
+    /// finalized block.
+    ///
+    /// After an error, the stream yields it and, if polled again, resumes after the last block it
+    /// yielded. Dropping the stream stops every task of the pipeline.
+    pub fn run(
+        &self,
+        start: Option<BlockRef>,
+        end: Option<u64>,
+    ) -> (
+        BoxStream<'static, Result<Chunk, Error>>,
+        watch::Receiver<Option<Finalized>>,
+    ) {
+        let (finalized_tx, finalized_rx) = watch::channel(None);
+        let (follow_error_tx, follow_error_rx) = oneshot::channel();
+        let follow = task::spawn({
+            let rpc = self.rpc.clone();
+            let recovery_timeout = self.config.recovery_timeout;
+            async move {
+                if let Err(error) = follow_finalized(&rpc, recovery_timeout, &finalized_tx).await {
+                    let _ = follow_error_tx.send(error);
+                }
+            }
+        });
+
+        let (chunk_tx, mut chunk_rx) = mpsc::channel(self.config.chunks_ahead.get());
+        let producer = Producer {
+            rpc: self.rpc.clone(),
+            metadata: self.metadata.clone(),
+            config: self.config,
+            finalized: finalized_rx.clone(),
+            chunks: chunk_tx,
+            start,
+            end,
+        };
+        let producer = task::spawn(async move {
+            let _follow = AbortOnDrop(follow);
+            producer.produce(follow_error_rx).await
+        });
+
+        let chunks = stream! {
+            let _producer = AbortOnDrop(producer);
+            while let Some(chunk) = chunk_rx.recv().await {
+                yield chunk;
+            }
+        };
+
+        (chunks.boxed(), finalized_rx)
+    }
+}
+
+/// Aborts the task when dropped.
+struct AbortOnDrop<O>(JoinHandle<O>);
+
+impl<O> Drop for AbortOnDrop<O> {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// A planned chunk, and the finalized tip it must link to before it is emitted, if near.
+struct Planned {
+    spec: ChunkSpec,
+    anchor: Option<BlockRef>,
+    first_of_run: bool,
+}
+
+/// The task sourcing, verifying and emitting chunks.
+struct Producer<T> {
+    rpc: NodeRpc<T>,
+    metadata: Arc<MetadataCache>,
+    config: Config,
+    finalized: watch::Receiver<Option<Finalized>>,
+    chunks: mpsc::Sender<Result<Chunk, Error>>,
+    start: Option<BlockRef>,
+    end: Option<u64>,
+}
+
+/// Emission state: the last block emitted, and the verified blocks held back.
+#[derive(Default)]
+struct Emission {
+    emitted: Option<BlockRef>,
+    held: Vec<Block>,
+}
+
+impl Emission {
+    /// The hash the next chunk's first block must have as its parent.
+    fn last_hash(&self) -> Option<BlockHash> {
+        self.held
+            .last()
+            .map(Block::hash)
+            .or(self.emitted.map(|emitted| emitted.hash))
+    }
+
+    /// The height of the first block not yet emitted.
+    fn next_height(&self) -> u64 {
+        self.emitted.map(|emitted| emitted.height + 1).unwrap_or(0)
+    }
+}
+
+impl<T> Producer<T>
+where
+    T: Transport,
+{
+    async fn produce(mut self, mut follow_error: oneshot::Receiver<Error>) {
+        let mut emission = Emission {
+            emitted: self.start,
+            held: vec![],
+        };
+
+        loop {
+            match self
+                .produce_until_error(&mut emission, &mut follow_error)
+                .await
+            {
+                Ok(()) => return,
+
+                Err(error) => {
+                    warn!(error:% = error; "block sourcing failed");
+                    // Without finalized blocks nothing can be sourced any more.
+                    let terminal = matches!(error, Error::FinalizedEnded | Error::Follow(_));
+                    if self.chunks.send(Err(error)).await.is_err() || terminal {
+                        return;
+                    }
+
+                    // Resume after the last block emitted.
+                    emission.held.clear();
+                    sleep(Duration::from_millis(100)).await;
+                }
+            }
+        }
+    }
+
+    async fn produce_until_error(
+        &mut self,
+        emission: &mut Emission,
+        follow_error: &mut oneshot::Receiver<Error>,
+    ) -> Result<(), Error> {
+        let genesis_hash = self.genesis_hash().await?;
+        let run_start = emission.next_height();
+        let mut next = run_start;
+        let mut in_progress = FuturesOrdered::new();
+
+        loop {
+            if self.end.is_some_and(|end| next > end) && in_progress.is_empty() {
+                let held = std::mem::take(&mut emission.held);
+                return self.emit(emission, held).await;
+            }
+
+            // Plan as many chunks as allowed and possible.
+            while in_progress.len() < self.config.chunks_ahead.get()
+                && self.end.is_none_or(|end| next <= end)
+                && let Some(planned) = self.plan(next, run_start)
+            {
+                next = planned.spec.heights.end() + 1;
+                in_progress.push_back(self.source_planned(planned));
+            }
+
+            select! {
+                Some(sourced) = in_progress.next() => {
+                    let (planned, chunk) = sourced?;
+                    self.verify_and_emit(emission, planned, chunk, genesis_hash, run_start)
+                        .await?;
+                }
+
+                changed = self.finalized.changed(), if in_progress.is_empty() => {
+                    if changed.is_err() {
+                        return Err(Error::FinalizedEnded);
+                    }
+                }
+
+                error = &mut *follow_error => {
+                    return Err(error.map_or(Error::FinalizedEnded, |error| Error::Follow(Box::new(error))));
+                }
+            }
+        }
+    }
+
+    /// The genesis hash, for verifying block 0, if the run starts there.
+    async fn genesis_hash(&self) -> Result<Option<BlockHash>, Error> {
+        if self.start.is_some() {
+            return Ok(None);
+        }
+
+        let mut batch = Batch::default();
+        batch.genesis_hash();
+        let hash = self
+            .rpc
+            .batch(batch)
+            .await?
+            .pop()
+            .expect("one result per call")
+            .map_err(|source| rpc::Error::Call {
+                method: method::ARCHIVE_GENESIS_HASH,
+                source,
+            })?;
+        let hash = serde_json::from_value::<String>(hash).map_err(|source| rpc::Error::Decode {
+            method: method::ARCHIVE_GENESIS_HASH,
+            source,
+        })?;
+
+        block_hash_of(hash).map(Some)
+    }
+
+    /// The next chunk from height `next`, if the finalized tip has reached it.
+    fn plan(&self, next: u64, run_start: u64) -> Option<Planned> {
+        let finalized = self.finalized.borrow();
+        let finalized = finalized.as_ref()?;
+        let mut spec = next_chunk(next, finalized, self.config.chunk_size)?;
+        if let Some(end) = self.end {
+            let chunk_end = (*spec.heights.end()).min(end);
+            spec.heights = *spec.heights.start()..=chunk_end;
+            if let Some(hashes) = spec.hashes.as_mut() {
+                hashes.truncate((chunk_end - next + 1) as usize);
+            }
+        }
+
+        let anchor =
+            (spec.near && *spec.heights.end() == finalized.tip.height).then_some(finalized.tip);
+
+        Some(Planned {
+            spec,
+            anchor,
+            first_of_run: next == run_start,
+        })
+    }
+
+    /// Resolve and source a planned chunk.
+    fn source_planned(
+        &self,
+        planned: Planned,
+    ) -> impl Future<Output = Result<(Planned, Chunk), Error>> + use<T> {
+        let rpc = self.rpc.clone();
+        let metadata = self.metadata.clone();
+
+        async move {
+            let start = *planned.spec.heights.start();
+            let end = *planned.spec.heights.end();
+
+            let (parent, hashes) = match &planned.spec.hashes {
+                Some(hashes) if start == 0 => (None, hashes.iter().copied().map(Some).collect()),
+                Some(hashes) => {
+                    let parent = resolve(&rpc, start - 1..=start - 1).await?.pop().flatten();
+                    (Some(parent), hashes.iter().copied().map(Some).collect())
+                }
+                None if start == 0 => (None, resolve(&rpc, 0..=end).await?),
+                None => {
+                    let mut hashes = resolve(&rpc, start - 1..=end).await?;
+                    let parent = hashes.remove(0);
+                    (Some(parent), hashes)
+                }
+            };
+
+            let hashes = hashes.into_iter().collect::<Option<Vec<_>>>();
+            let parent = parent.map(|parent| parent.ok_or(Error::Unresolved(start - 1)));
+            let chunk = match (hashes, parent.transpose()) {
+                (Some(hashes), Ok(parent)) => {
+                    match source(
+                        &rpc,
+                        &metadata,
+                        start,
+                        &hashes,
+                        parent,
+                        planned.first_of_run,
+                    )
+                    .await
+                    {
+                        // A hash at the wrong height: leave the chunk empty, so that Verify walks
+                        // the parent links.
+                        Err(Error::HeightMismatch { .. }) => vec![],
+                        chunk => chunk?,
+                    }
+                }
+
+                // A height without exactly one block: leave the chunk empty, so that Verify walks
+                // the parent links.
+                _ => vec![],
+            };
+
+            Ok((planned, chunk))
+        }
+    }
+
+    async fn verify_and_emit(
+        &mut self,
+        emission: &mut Emission,
+        planned: Planned,
+        chunk: Chunk,
+        genesis_hash: Option<BlockHash>,
+        run_start: u64,
+    ) -> Result<(), Error> {
+        let expected_parent = emission.last_hash();
+        let linked = links(&chunk, &planned.spec.heights, expected_parent, genesis_hash);
+        let anchored = planned
+            .anchor
+            .is_none_or(|anchor| chunk.last().map(Block::hash) == Some(anchor.hash));
+
+        let chunk = if linked && anchored {
+            chunk
+        } else {
+            // Re-source the held blocks and this chunk from hashes walked back from the tip.
+            let held_start = emission.held.first().map(Block::height);
+            let start = held_start.unwrap_or(*planned.spec.heights.start());
+            let end = *planned.spec.heights.end();
+            warn!(start, end; "block hashes do not link, walking parent hashes from the tip");
+
+            emission.held.clear();
+            let chunk = self.walk_and_source(start, end, run_start).await?;
+            let expected_parent = emission.emitted.map(|emitted| emitted.hash);
+            if !links(&chunk, &(start..=end), expected_parent, genesis_hash) {
+                return Err(Error::Unlinked(start));
+            }
+            chunk
+        };
+
+        emission.held.extend(chunk);
+
+        let emit = if planned.spec.near {
+            // Near blocks wait until they link to the finalized tip.
+            if planned.anchor.is_some() {
+                std::mem::take(&mut emission.held)
+            } else {
+                vec![]
+            }
+        } else {
+            // Deep blocks wait for their child to confirm them: all but the last.
+            let last = emission.held.pop();
+            let emit = std::mem::take(&mut emission.held);
+            emission.held.extend(last);
+            emit
+        };
+
+        self.emit(emission, emit).await
+    }
+
+    /// Source the blocks at heights `start..=end`, with hashes from walking parent hashes back from
+    /// the finalized tip.
+    async fn walk_and_source(&self, start: u64, end: u64, run_start: u64) -> Result<Chunk, Error> {
+        let tip = self
+            .finalized
+            .borrow()
+            .as_ref()
+            .map(|finalized| finalized.tip)
+            .ok_or(Error::FinalizedEnded)?;
+
+        let mut hashes = vec![];
+        let mut hash = tip.hash;
+        let mut height = tip.height;
+        loop {
+            if height <= end {
+                hashes.push(hash);
+            }
+            if height == start || height == 0 {
+                break;
+            }
+
+            let mut batch = Batch::default();
+            batch.header(hash);
+            let header = self
+                .rpc
+                .batch(batch)
+                .await?
+                .pop()
+                .expect("one result per call");
+            let header = header_bytes(header, hash)?;
+            hash = ByteArray(decode_header(&header, hash)?.parent_hash.0);
+            height -= 1;
+        }
+        hashes.reverse();
+
+        let parent = if start == 0 {
+            None
+        } else {
+            let mut batch = Batch::default();
+            batch.header(hashes[0]);
+            let header = self
+                .rpc
+                .batch(batch)
+                .await?
+                .pop()
+                .expect("one result per call");
+            let header = header_bytes(header, hashes[0])?;
+            Some(ByteArray(decode_header(&header, hashes[0])?.parent_hash.0))
+        };
+
+        source(
+            &self.rpc,
+            &self.metadata,
+            start,
+            &hashes,
+            parent,
+            start == run_start,
+        )
+        .await
+    }
+
+    async fn emit(&mut self, emission: &mut Emission, chunk: Chunk) -> Result<(), Error> {
+        let Some(last) = chunk.last() else {
+            return Ok(());
+        };
+
+        emission.emitted = Some(BlockRef {
+            hash: last.hash(),
+            height: last.height(),
+        });
+        // A closed channel means the stream is gone; the task is about to be aborted.
+        let _ = self.chunks.send(Ok(chunk)).await;
+
+        Ok(())
+    }
+}
+
+/// Whether the chunk holds exactly the given heights, the first block has the expected parent (or
+/// is the genesis block with the genesis hash), and every other block's parent is its predecessor.
+fn links(
+    chunk: &[Block],
+    heights: &RangeInclusive<u64>,
+    expected_parent: Option<BlockHash>,
+    genesis_hash: Option<BlockHash>,
+) -> bool {
+    let expected_heights = chunk.len() as u64 == heights.end() - heights.start() + 1
+        && chunk
+            .iter()
+            .zip(heights.clone())
+            .all(|(block, height)| block.height() == height);
+
+    let mut previous = expected_parent;
+    let linked = chunk.iter().all(|block| {
+        let linked = match block {
+            Block::Genesis { hash, .. } => Some(*hash) == genesis_hash,
+            Block::Block { parent, .. } => Some(parent.hash) == previous,
+        };
+        previous = Some(block.hash());
+        linked
+    });
+
+    expected_heights && linked
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
@@ -1199,15 +1755,17 @@ mod tests {
 #[cfg(test)]
 mod source_tests {
     use crate::{
+        domain::BlockRef,
         infra::subxt_node::{
             fake_node::FakeNode,
-            rpc::{Call, CallResult, NodeRpc, ReconnectPolicy, method},
+            rpc::{Call, CallError, CallResult, NodeRpc, ReconnectPolicy, method},
         },
         pipeline::source::{
-            AUTHORITY_SET_ITEMS, Block, CNIGHT_MAPPINGS_ITEMS, MetadataCache, SYSTEM_EVENTS_ITEM,
-            SYSTEM_PARAMETERS_ITEMS, resolve, source, storage_key,
+            AUTHORITY_SET_ITEMS, Block, CNIGHT_MAPPINGS_ITEMS, Chunk, Config, Error, MetadataCache,
+            SYSTEM_EVENTS_ITEM, SYSTEM_PARAMETERS_ITEMS, Source, resolve, source, storage_key,
         },
     };
+    use futures::{StreamExt, TryStreamExt};
     use indexer_common::domain::{BlockHash, ByteArray};
     use parity_scale_codec::Encode;
     use parking_lot::Mutex;
@@ -1224,37 +1782,49 @@ mod source_tests {
         config::substrate::{Digest, DigestItem, SubstrateHeader},
         utils::H256,
     };
+    use tokio::time::{sleep, timeout};
 
     /// A 2.1 runtime spec version.
     const SPEC_VERSION: u32 = 2_001_000;
+
+    /// Marks a fork sibling's hash.
+    const FORK: u8 = 0xff;
 
     static METADATA: LazyLock<Vec<u8>> = LazyLock::new(|| {
         fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.node/2.1.0-rc.4/metadata.scale"))
             .expect("metadata of node 2.1 can be read")
     });
 
-    /// Block `n` has hash `[n; 32]`, height `n`, and the system parameters `system_parameters[n]`.
-    struct Chain {
-        system_parameters: Vec<u8>,
-        calls: Mutex<Vec<Call>>,
+    /// The canonical block at height `n` has hash `hash(n)`; a fork sibling at height `n` has
+    /// `fork(n)`, with the same parent.
+    fn hash(n: u64) -> BlockHash {
+        let mut hash = [0; 32];
+        hash[..8].copy_from_slice(&n.to_le_bytes());
+        ByteArray(hash)
     }
 
-    fn hash(n: u8) -> BlockHash {
-        ByteArray([n; 32])
+    fn fork(n: u64) -> BlockHash {
+        let mut hash = hash(n);
+        hash.0[31] = FORK;
+        hash
+    }
+
+    fn height_of(hash: &[u8]) -> u64 {
+        u64::from_le_bytes(hash[..8].try_into().expect("8 bytes"))
     }
 
     fn hex(bytes: impl AsRef<[u8]>) -> Value {
         const_hex::encode_prefixed(bytes).into()
     }
 
-    fn n_of(param: &Value) -> u8 {
-        const_hex::decode(param.as_str().expect("hex param")).expect("hex")[0]
+    fn bytes_of(param: &Value) -> Vec<u8> {
+        const_hex::decode(param.as_str().expect("hex param")).expect("hex")
     }
 
-    fn header(n: u8) -> Vec<u8> {
+    fn header(n: u64) -> Vec<u8> {
         SubstrateHeader::<H256> {
-            parent_hash: H256([n.saturating_sub(1); 32]),
-            number: n as u64,
+            parent_hash: H256(hash(n.saturating_sub(1)).0),
+            number: n,
             state_root: H256::zero(),
             extrinsics_root: H256::zero(),
             digest: Digest {
@@ -1268,14 +1838,18 @@ mod source_tests {
         Ok(json!({ "success": true, "value": hex(bytes) }))
     }
 
-    impl Chain {
-        fn new(system_parameters: Vec<u8>) -> Arc<Self> {
-            Arc::new(Self {
-                system_parameters,
-                calls: Mutex::default(),
-            })
-        }
+    /// A chain answering archive calls for any height, with system parameters `system_parameters`
+    /// by height (1 beyond its end), fork siblings resolved at the `forks` heights, and failing
+    /// headers at the `failing` heights.
+    #[derive(Default)]
+    struct Chain {
+        system_parameters: Vec<u8>,
+        forks: Vec<u64>,
+        failing: Vec<u64>,
+        calls: Mutex<Vec<Call>>,
+    }
 
+    impl Chain {
         fn respond(&self, call: &Call) -> CallResult {
             self.calls.lock().push(call.clone());
             match call.method {
@@ -1283,13 +1857,25 @@ mod source_tests {
                     let n = call.params[0].as_u64().expect("height");
                     match n {
                         // No block, and two blocks, at these heights.
-                        100 => Ok(json!([])),
-                        101 => Ok(json!([hex([1; 32]), hex([2; 32])])),
-                        n => Ok(json!([hex([n as u8; 32])])),
+                        1_000_000 => Ok(json!([])),
+                        1_000_001 => Ok(json!([hex(hash(n)), hex(fork(n))])),
+                        n if self.forks.contains(&n) => Ok(json!([hex(fork(n))])),
+                        n => Ok(json!([hex(hash(n))])),
                     }
                 }
-                method::ARCHIVE_HEADER => Ok(hex(header(n_of(&call.params[0])))),
-                method::ARCHIVE_BODY => Ok(json!([hex([n_of(&call.params[0])])])),
+                method::ARCHIVE_GENESIS_HASH => Ok(hex(hash(0))),
+                method::ARCHIVE_HEADER => {
+                    let n = height_of(&bytes_of(&call.params[0]));
+                    if self.failing.contains(&n) {
+                        Err(CallError {
+                            code: -32000,
+                            message: "cannot build block".to_owned(),
+                        })
+                    } else {
+                        Ok(hex(header(n)))
+                    }
+                }
+                method::ARCHIVE_BODY => Ok(json!([hex(bytes_of(&call.params[0]))])),
                 method::ARCHIVE_CALL => match call.params[1].as_str().expect("function") {
                     "Metadata_metadata_versions" => success(vec![14u32, 15, u32::MAX].encode()),
                     "Metadata_metadata_at_version" => success(Some(METADATA.clone()).encode()),
@@ -1301,21 +1887,25 @@ mod source_tests {
         }
 
         fn storage(&self, params: &[Value]) -> Vec<Value> {
-            let n = n_of(&params[0]);
-            let items = params[1].as_array().expect("items");
-            items
+            let block = bytes_of(&params[0]);
+            let n = height_of(&block);
+            let system_parameters = self.system_parameters.get(n as usize).copied().unwrap_or(1);
+
+            params[1]
+                .as_array()
+                .expect("items")
                 .iter()
                 .filter_map(|item| {
-                    let key = const_hex::decode(item["key"].as_str().expect("key")).expect("hex");
+                    let key = bytes_of(&item["key"]);
                     let is = |item| key == storage_key(item);
 
                     if is(SYSTEM_EVENTS_ITEM) {
-                        Some(json!({ "event": "storage", "key": item["key"], "value": hex([n]) }))
+                        Some(json!({ "event": "storage", "key": item["key"], "value": hex(&block) }))
                     } else if is(AUTHORITY_SET_ITEMS[0]) {
-                        let authorities = vec![[n; 32]].encode();
+                        let authorities = vec![<[u8; 32]>::try_from(&block[..]).unwrap()].encode();
                         Some(json!({ "event": "storage", "key": item["key"], "value": hex(authorities) }))
                     } else if SYSTEM_PARAMETERS_ITEMS.into_iter().any(is) {
-                        let value_hash = [self.system_parameters[n as usize]; 32];
+                        let value_hash = [system_parameters; 32];
                         Some(json!({ "event": "storage", "key": item["key"], "hash": hex(value_hash) }))
                     } else if is(CNIGHT_MAPPINGS_ITEMS[1]) {
                         let mut key = key.clone();
@@ -1329,12 +1919,20 @@ mod source_tests {
                 .collect()
         }
 
-        fn node(self: &Arc<Self>) -> FakeNode {
-            let chain = self.clone();
-            let storage_chain = self.clone();
-            FakeNode::new(move |call| chain.respond(call)).with_subscribe(move |method, params| {
-                (method == method::ARCHIVE_STORAGE).then(|| storage_chain.storage(params))
+        fn node(self) -> (Arc<Self>, FakeNode) {
+            let chain = Arc::new(self);
+            let node = FakeNode::new({
+                let chain = chain.clone();
+                move |call| chain.respond(call)
             })
+            .with_subscribe({
+                let chain = chain.clone();
+                move |method, params| {
+                    (method == method::ARCHIVE_STORAGE).then(|| chain.storage(params))
+                }
+            });
+
+            (chain, node)
         }
 
         /// The block hashes of every call of the given runtime function.
@@ -1343,41 +1941,114 @@ mod source_tests {
                 .lock()
                 .iter()
                 .filter(|call| call.method == method::ARCHIVE_CALL && call.params[1] == function)
-                .map(|call| hash(n_of(&call.params[0])))
+                .map(|call| ByteArray(bytes_of(&call.params[0]).try_into().unwrap()))
                 .collect()
+        }
+
+        /// The heights of every `archive_v1_hashByHeight` call, in order.
+        fn resolved_heights(&self) -> Vec<u64> {
+            self.calls
+                .lock()
+                .iter()
+                .filter(|call| call.method == method::ARCHIVE_HASH_BY_HEIGHT)
+                .map(|call| call.params[0].as_u64().expect("height"))
+                .collect()
+        }
+    }
+
+    /// `chainHead_v1_follow` events: initialized at `tip`, then finalized one block at a time up
+    /// to `last`.
+    fn follow(tip: u64, last: u64) -> Vec<Value> {
+        std::iter::once(json!({ "event": "initialized", "finalizedBlockHashes": [hex(hash(tip))] }))
+            .chain((tip + 1..=last).map(|n| {
+                json!({ "event": "finalized", "finalizedBlockHashes": [hex(hash(n))], "prunedBlockHashes": [] })
+            }))
+            .collect()
+    }
+
+    fn size(n: usize) -> NonZeroUsize {
+        NonZeroUsize::new(n).unwrap()
+    }
+
+    fn config(chunk_size: usize, chunks_ahead: usize) -> Config {
+        Config {
+            chunk_size: size(chunk_size),
+            chunks_ahead: size(chunks_ahead),
+            rpc_batch_size: size(64),
+            rpc_batches_in_flight: size(4),
+            recovery_timeout: Duration::from_secs(5),
+            reconnect_policy: ReconnectPolicy {
+                max_delay: Duration::from_millis(10),
+                max_attempts: 3,
+            },
         }
     }
 
     fn node_rpc(node: FakeNode, batch_size: usize, in_flight: usize) -> NodeRpc<FakeNode> {
         NodeRpc::new(
             node,
-            NonZeroUsize::new(batch_size).unwrap(),
-            NonZeroUsize::new(in_flight).unwrap(),
-            ReconnectPolicy {
-                max_delay: Duration::from_millis(10),
-                max_attempts: 3,
-            },
+            size(batch_size),
+            size(in_flight),
+            config(1, 1).reconnect_policy,
         )
     }
 
-    fn hashes(heights: std::ops::RangeInclusive<u8>) -> Vec<BlockHash> {
+    fn hashes(heights: std::ops::RangeInclusive<u64>) -> Vec<BlockHash> {
         heights.map(hash).collect()
+    }
+
+    fn start(height: u64) -> Option<BlockRef> {
+        Some(BlockRef {
+            hash: hash(height),
+            height,
+        })
+    }
+
+    /// Run the pipeline to `end` and collect its blocks.
+    async fn run_to_end(source: &Source<FakeNode>, start: Option<BlockRef>, end: u64) -> Chunk {
+        let (chunks, _finalized) = source.run(start, Some(end));
+        timeout(Duration::from_secs(10), chunks.try_concat())
+            .await
+            .expect("pipeline finishes in time")
+            .expect("pipeline succeeds")
+    }
+
+    /// The heights and hashes of the blocks, and whether each block's parent is its predecessor.
+    fn assert_canonical(blocks: &[Block], heights: std::ops::RangeInclusive<u64>) {
+        assert_eq!(
+            blocks.iter().map(Block::height).collect::<Vec<_>>(),
+            heights.clone().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            blocks.iter().map(Block::hash).collect::<Vec<_>>(),
+            heights.map(hash).collect::<Vec<_>>()
+        );
+        for block in blocks {
+            if let Block::Block { height, parent, .. } = block {
+                assert_eq!(parent.hash, hash(height - 1));
+            }
+        }
     }
 
     #[tokio::test]
     async fn test_resolve() {
-        let chain = Chain::new(vec![]);
-        let rpc = node_rpc(chain.node(), 64, 4);
+        let (_, node) = Chain::default().node();
+        let rpc = node_rpc(node, 64, 4);
 
-        let resolved = resolve(&rpc, 98..=101).await.expect("hashes resolve");
+        let resolved = resolve(&rpc, 999_998..=1_000_001)
+            .await
+            .expect("hashes resolve");
 
-        assert_eq!(resolved, vec![Some(hash(98)), Some(hash(99)), None, None]);
+        assert_eq!(
+            resolved,
+            vec![Some(hash(999_998)), Some(hash(999_999)), None, None]
+        );
     }
 
     #[tokio::test]
     async fn test_source_from_genesis() {
-        let chain = Chain::new(vec![1; 4]);
-        let rpc = node_rpc(chain.node(), 64, 4);
+        let (chain, node) = Chain::default().node();
+        let rpc = node_rpc(node, 64, 4);
         let metadata = MetadataCache::default();
 
         let chunk = source(&rpc, &metadata, 0, &hashes(0..=3), None, true)
@@ -1399,6 +2070,7 @@ mod source_tests {
         assert_eq!(cnight_mappings.len(), 1);
 
         for (n, block) in chunk.iter().enumerate().skip(1) {
+            let n = n as u64;
             let Block::Block {
                 height,
                 parent,
@@ -1409,25 +2081,30 @@ mod source_tests {
             else {
                 panic!("block {n} is not genesis");
             };
-            assert_eq!(*height, n as u64);
-            assert_eq!(parent.hash, hash(n as u8 - 1));
+            assert_eq!(*height, n);
+            assert_eq!(parent.hash, hash(n - 1));
             // The parent's authority set: its own Aura authorities.
             assert_eq!(parent.authority_set.len(), 1);
-            assert_eq!(*parent.authority_set[0].1, vec![[n as u8 - 1; 32]].encode());
+            assert_eq!(*parent.authority_set[0].1, vec![hash(n - 1).0].encode());
             assert_eq!(extrinsics.len(), 1);
-            assert_eq!(*extrinsics[0], [n as u8]);
-            assert_eq!(**events, [n as u8]);
+            assert_eq!(*extrinsics[0], hash(n).0);
+            assert_eq!(**events, hash(n).0);
         }
 
-        // Metadata is fetched once for the whole run.
+        // Metadata is fetched once for the whole run; `Core_version` never.
         assert_eq!(chain.calls_of("Metadata_metadata_at_version").len(), 1);
+        assert!(chain.calls_of("Core_version").is_empty());
     }
 
     #[tokio::test]
     async fn test_system_parameters_change_only() {
         // The system parameters change at block 3 and again at block 6.
-        let chain = Chain::new(vec![1, 1, 1, 2, 2, 2, 3]);
-        let rpc = node_rpc(chain.node(), 64, 4);
+        let (chain, node) = Chain {
+            system_parameters: vec![1, 1, 1, 2, 2, 2, 3],
+            ..Default::default()
+        }
+        .node();
+        let rpc = node_rpc(node, 64, 4);
         let metadata = MetadataCache::default();
 
         let first = source(&rpc, &metadata, 1, &hashes(1..=3), Some(hash(0)), true)
@@ -1449,20 +2126,18 @@ mod source_tests {
             .collect::<Vec<_>>();
         // First of the run, then the changes at 3 and 6, also across the chunk boundary.
         assert_eq!(carried, vec![true, false, true, false, false, true]);
-        assert_eq!(
-            chain.calls_of("SystemParametersApi_get_d_parameter"),
-            vec![hash(1), hash(3), hash(6)]
-        );
-        assert_eq!(
-            chain.calls_of("SystemParametersApi_get_terms_and_conditions"),
-            vec![hash(1), hash(3), hash(6)]
-        );
+        for function in [
+            "SystemParametersApi_get_d_parameter",
+            "SystemParametersApi_get_terms_and_conditions",
+        ] {
+            assert_eq!(chain.calls_of(function), vec![hash(1), hash(3), hash(6)]);
+        }
     }
 
     #[tokio::test]
     async fn test_no_serial_fetch() {
-        let chain = Chain::new(vec![1; 33]);
-        let node = chain.node().with_delay(Duration::from_millis(20));
+        let (_, node) = Chain::default().node();
+        let node = node.with_delay(Duration::from_millis(20));
         let rpc = node_rpc(node.clone(), 8, 4);
         let metadata = MetadataCache::default();
 
@@ -1474,6 +2149,154 @@ mod source_tests {
         // another block's result.
         assert_eq!(node.max_in_flight(), 4);
         assert!(node.batch_sizes().iter().all(|&size| size <= 8));
+    }
+
+    #[tokio::test]
+    async fn test_genesis_catch_up() {
+        // Finalized at 10 when following starts; the tip keeps moving to 20 while catching up.
+        let (_, node) = Chain::default().node();
+        let node = node
+            .with_notification_interval(Duration::from_millis(5))
+            .with_subscriptions(vec![follow(10, 20)]);
+        let source = Source::new(node.clone(), config(4, 2));
+
+        let blocks = run_to_end(&source, None, 20).await;
+
+        assert!(matches!(blocks[0], Block::Genesis { .. }));
+        assert_canonical(&blocks, 0..=20);
+        let follows = node
+            .subscribed()
+            .into_iter()
+            .filter(|method| *method == method::CHAIN_HEAD_FOLLOW)
+            .count();
+        assert_eq!(follows, 1, "no resubscription while the tip moves");
+    }
+
+    #[tokio::test]
+    async fn test_ordering() {
+        // Chunks of lower heights answer slower, so later chunks complete first.
+        let (_, node) = Chain::default().node();
+        let node = node
+            .with_subscriptions(vec![follow(1_000, 1_000)])
+            .with_delay_for(|calls| {
+                let first_height = calls
+                    .iter()
+                    .find(|call| call.method == method::ARCHIVE_HEADER)
+                    .map(|call| height_of(&bytes_of(&call.params[0])))
+                    .unwrap_or(0);
+                Duration::from_millis(160 - first_height.min(160))
+            });
+        let source = Source::new(node, config(10, 4));
+
+        let blocks = run_to_end(&source, start(99), 150).await;
+
+        assert_canonical(&blocks, 100..=150);
+    }
+
+    #[tokio::test]
+    async fn test_deep_fork_falls_back_to_parent_walk() {
+        // A fork sibling resolves at the last height of a deep chunk; its child exposes it.
+        let (_, node) = Chain {
+            forks: vec![109],
+            ..Default::default()
+        }
+        .node();
+        let node = node.with_subscriptions(vec![follow(1_000, 1_000)]);
+        let source = Source::new(node, config(10, 2));
+
+        let blocks = run_to_end(&source, start(99), 130).await;
+
+        assert_canonical(&blocks, 100..=130);
+    }
+
+    #[tokio::test]
+    async fn test_near_fork_falls_back_to_parent_walk() {
+        // A fork sibling resolves mid-chunk within the margin.
+        let (_, node) = Chain {
+            forks: vec![955],
+            ..Default::default()
+        }
+        .node();
+        let node = node.with_subscriptions(vec![follow(1_000, 1_000)]);
+        let source = Source::new(node, config(20, 2));
+
+        let blocks = run_to_end(&source, start(949), 1_000).await;
+
+        assert_canonical(&blocks, 950..=1_000);
+    }
+
+    #[tokio::test]
+    async fn test_chunk_overlap() {
+        let (_, node) = Chain::default().node();
+        let node = node
+            .with_subscriptions(vec![follow(1_000, 1_000)])
+            .with_delay(Duration::from_millis(10));
+        let source = Source::new(node.clone(), config(10, 2));
+        let (mut chunks, _finalized) = source.run(start(99), Some(200));
+
+        chunks
+            .next()
+            .await
+            .expect("first chunk")
+            .expect("first chunk is sourced");
+        let batches = node.batch_sizes().len();
+
+        // While the consumer sleeps on the first chunk, the next chunks are sourced.
+        sleep(Duration::from_millis(200)).await;
+        assert!(node.batch_sizes().len() > batches);
+    }
+
+    #[tokio::test]
+    async fn test_failing_block_is_not_skipped_and_refetched() {
+        // The block at height 105 cannot be built: the stream yields an error, then resumes after
+        // the last block it yielded, so the very same block is fetched again.
+        let (chain, node) = Chain {
+            failing: vec![105],
+            ..Default::default()
+        }
+        .node();
+        let node = node.with_subscriptions(vec![follow(1_000, 1_000)]);
+        let source = Source::new(node, config(2, 1));
+        let (chunks, _finalized) = source.run(start(99), None);
+
+        let items = timeout(Duration::from_secs(10), chunks.take(5).collect::<Vec<_>>())
+            .await
+            .expect("items in time");
+
+        let heights = items
+            .iter()
+            .filter_map(|item| item.as_ref().ok())
+            .flatten()
+            .map(Block::height)
+            .collect::<Vec<_>>();
+        assert_eq!(heights, (100..=103).collect::<Vec<_>>());
+        let errors = items.iter().filter(|item| item.is_err()).count();
+        assert_eq!(errors, 2);
+
+        // After the first error, resolving restarts at the parent of the first block not yielded.
+        let resolved = chain.resolved_heights();
+        assert!(resolved.contains(&102));
+        assert!(matches!(items[2], Err(Error::Rpc(_))));
+    }
+
+    #[tokio::test]
+    async fn test_shutdown() {
+        let (_, node) = Chain::default().node();
+        let node = node.with_subscriptions(vec![follow(1_000, 1_000)]);
+        let source = Source::new(node.clone(), config(10, 2));
+        let (mut chunks, _finalized) = source.run(start(99), None);
+
+        chunks
+            .next()
+            .await
+            .expect("first chunk")
+            .expect("first chunk is sourced");
+        assert!(node.live_subscriptions() > 0);
+
+        drop(chunks);
+        sleep(Duration::from_millis(100)).await;
+
+        assert_eq!(node.live_subscriptions(), 0);
     }
 
     #[test]

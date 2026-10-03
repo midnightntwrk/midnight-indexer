@@ -28,6 +28,7 @@ use std::{
 use tokio::time::sleep;
 
 type Respond = dyn Fn(&Call) -> CallResult + Send + Sync;
+type DelayFor = dyn Fn(&[Call]) -> Duration + Send + Sync;
 type RespondSubscribe = dyn Fn(&'static str, &[Value]) -> Option<Vec<Value>> + Send + Sync;
 
 /// An in-memory node; clones share their state.
@@ -38,6 +39,8 @@ struct Inner {
     respond: Box<Respond>,
     respond_subscribe: Option<Box<RespondSubscribe>>,
     delay: Duration,
+    delay_for: Option<Box<DelayFor>>,
+    live_subscriptions: Arc<AtomicUsize>,
     max_batch_size: Option<usize>,
     disconnects: AtomicUsize,
     failing_reconnects: AtomicBool,
@@ -48,6 +51,7 @@ struct Inner {
     subscriptions: Mutex<Vec<Vec<Value>>>,
     notification_interval: Duration,
     subscribes: AtomicUsize,
+    subscribed: Mutex<Vec<&'static str>>,
 }
 
 impl FakeNode {
@@ -57,6 +61,8 @@ impl FakeNode {
             respond: Box::new(respond),
             respond_subscribe: None,
             delay: Duration::ZERO,
+            delay_for: None,
+            live_subscriptions: Arc::default(),
             max_batch_size: None,
             disconnects: AtomicUsize::new(0),
             failing_reconnects: AtomicBool::new(false),
@@ -67,12 +73,26 @@ impl FakeNode {
             subscriptions: Mutex::default(),
             notification_interval: Duration::ZERO,
             subscribes: AtomicUsize::new(0),
+            subscribed: Mutex::default(),
         }))
     }
 
     /// Answer each batch after the given delay.
     pub fn with_delay(self, delay: Duration) -> Self {
         self.map(|inner| inner.delay = delay)
+    }
+
+    /// Answer each batch after a delay that depends on its calls.
+    pub fn with_delay_for(
+        self,
+        delay_for: impl Fn(&[Call]) -> Duration + Send + Sync + 'static,
+    ) -> Self {
+        self.map(|inner| inner.delay_for = Some(Box::new(delay_for)))
+    }
+
+    /// The number of subscriptions not yet dropped.
+    pub fn live_subscriptions(&self) -> usize {
+        self.0.live_subscriptions.load(Ordering::SeqCst)
     }
 
     /// Refuse batches with more calls than the given size.
@@ -111,6 +131,11 @@ impl FakeNode {
     /// Send subscription notifications at the given interval.
     pub fn with_notification_interval(self, interval: Duration) -> Self {
         self.map(|inner| inner.notification_interval = interval)
+    }
+
+    /// The method of every subscription made, in order.
+    pub fn subscribed(&self) -> Vec<&'static str> {
+        self.0.subscribed.lock().clone()
     }
 
     /// The number of subscriptions made.
@@ -162,7 +187,12 @@ impl Transport for FakeNode {
         inner.batch_sizes.lock().push(calls.len());
         let in_flight = inner.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
         inner.max_in_flight.fetch_max(in_flight, Ordering::SeqCst);
-        sleep(inner.delay).await;
+        let delay = inner
+            .delay_for
+            .as_ref()
+            .map(|delay_for| delay_for(&calls))
+            .unwrap_or(inner.delay);
+        sleep(delay).await;
         inner.in_flight.fetch_sub(1, Ordering::SeqCst);
 
         Ok(calls.iter().map(|call| (inner.respond)(call)).collect())
@@ -175,6 +205,7 @@ impl Transport for FakeNode {
         _unsubscribe: &'static str,
     ) -> Result<Subscription, TransportError> {
         let n = self.0.subscribes.fetch_add(1, Ordering::SeqCst);
+        self.0.subscribed.lock().push(method);
         let responded = self
             .0
             .respond_subscribe
@@ -191,12 +222,17 @@ impl Transport for FakeNode {
             }
         };
         let interval = self.0.notification_interval;
+        let live = LiveSubscription::new(self.0.live_subscriptions.clone());
         let notifications = stream::iter(notifications)
             .then(move |notification| async move {
                 sleep(interval).await;
                 Ok(notification)
             })
             .chain(stream::pending())
+            .map(move |notification| {
+                let _live = &live;
+                notification
+            })
             .boxed();
 
         Ok(Subscription {
@@ -214,5 +250,21 @@ impl Transport for FakeNode {
         } else {
             Ok(())
         }
+    }
+}
+
+/// Counts a subscription as live until dropped.
+struct LiveSubscription(Arc<AtomicUsize>);
+
+impl LiveSubscription {
+    fn new(live: Arc<AtomicUsize>) -> Self {
+        live.fetch_add(1, Ordering::SeqCst);
+        Self(live)
+    }
+}
+
+impl Drop for LiveSubscription {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
     }
 }
