@@ -13,4 +13,5 @@
 
 //! Pipeline stages from the node to [node::Block](crate::domain::node::Block)s.
 
+pub mod decode;
 pub mod source;

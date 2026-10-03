@@ -145,15 +145,15 @@ async fn finish_block(
     Ok(block)
 }
 
-const AURA_ENGINE_ID: ConsensusEngineId = [b'a', b'u', b'r', b'a'];
-const BABE_ENGINE_ID: ConsensusEngineId = [b'B', b'A', b'B', b'E'];
+pub(crate) const AURA_ENGINE_ID: ConsensusEngineId = [b'a', b'u', b'r', b'a'];
+pub(crate) const BABE_ENGINE_ID: ConsensusEngineId = [b'B', b'A', b'B', b'E'];
 
 /// Name of the node runtime API reporting the active block-production engine, declared in
 /// `midnight-primitives-consensus-engine` and implemented alongside the pallet driving the
 /// Aura→BABE transition. Its presence in a block's runtime guarantees the correctness of Aura
 /// and BABE pre-runtime digests during the transition, so BABE digests are only trusted for
 /// author derivation where it exists.
-const CONSENSUS_ENGINE_RUNTIME_API: &str = "ConsensusEngineApi";
+pub(crate) const CONSENSUS_ENGINE_RUNTIME_API: &str = "ConsensusEngineApi";
 const CATCH_UP_LOG_INTERVAL: u64 = 1_000;
 
 /// One GRANDPA session worth of blocks. Blocks within this distance of the finalized tip are
@@ -837,7 +837,7 @@ where
 /// digests are only recognized if `babe_supported`, i.e. if the block's runtime guarantees
 /// their correctness (see [CONSENSUS_ENGINE_RUNTIME_API]); otherwise they are skipped like any
 /// unrecognized engine.
-fn author_from_digest_logs(
+pub(crate) fn author_from_digest_logs(
     logs: &[DigestItem],
     authorities: &[[u8; 32]],
     content_node_version: NodeVersion,

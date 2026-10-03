@@ -164,7 +164,6 @@ pub async fn get_terms_and_conditions(
 
 /// Decode block details from a block's serialized extrinsics and its serialized `System.Events`
 /// value, against the given client's metadata.
-#[expect(dead_code)]
 pub async fn decode_block_details<C>(
     node_version: NodeVersion,
     client: &ClientAtBlock<SubstrateConfig, C>,
@@ -184,13 +183,11 @@ where
 
 /// Decode an Aura authority set, a SCALE-encoded sequence of 32-byte public keys. The encoding is
 /// fixed by `sp_consensus_aura`, so it is the same in every runtime.
-#[expect(dead_code)]
 pub fn decode_authorities(mut authorities: &[u8]) -> Result<Vec<[u8; 32]>, SubxtNodeError> {
     Ok(Vec::<[u8; 32]>::decode(&mut authorities)?)
 }
 
 /// Decode the serialized result of the `get_zswap_state_root` runtime API call.
-#[expect(dead_code)]
 pub fn decode_zswap_merkle_tree_root<C>(
     node_version: NodeVersion,
     client: &ClientAtBlock<SubstrateConfig, C>,
@@ -208,7 +205,6 @@ where
 }
 
 /// Decode the serialized result of the `get_ledger_state_root` runtime API call.
-#[expect(dead_code)]
 pub fn decode_ledger_state_root<C>(
     node_version: NodeVersion,
     client: &ClientAtBlock<SubstrateConfig, C>,
@@ -226,7 +222,6 @@ where
 }
 
 /// Decode the serialized result of the `get_d_parameter` runtime API call.
-#[expect(dead_code)]
 pub fn decode_d_parameter<C>(
     node_version: NodeVersion,
     client: &ClientAtBlock<SubstrateConfig, C>,
@@ -244,7 +239,6 @@ where
 }
 
 /// Decode the serialized result of the `get_terms_and_conditions` runtime API call.
-#[expect(dead_code)]
 pub fn decode_terms_and_conditions<C>(
     node_version: NodeVersion,
     client: &ClientAtBlock<SubstrateConfig, C>,
@@ -263,7 +257,6 @@ where
 
 /// Decode genesis cNight registrations from the serialized key-value pairs of the cNight
 /// observation pallet's mapping storage.
-#[expect(dead_code)]
 pub fn decode_genesis_cnight_registrations<C>(
     node_version: NodeVersion,
     client: &ClientAtBlock<SubstrateConfig, C>,

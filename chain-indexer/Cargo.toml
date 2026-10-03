@@ -32,6 +32,7 @@ log                = { workspace = true, features = [ "kv_std" ] }
 metrics            = { workspace = true }
 parity-scale-codec = { workspace = true }
 parking_lot        = { workspace = true }
+rayon              = { workspace = true }
 serde              = { workspace = true, features = [ "derive" ] }
 serde_json         = { workspace = true }
 sqlx               = { workspace = true, features = [ "time" ] }

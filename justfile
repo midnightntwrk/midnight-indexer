@@ -71,6 +71,12 @@ all-all:
 coverage:
     ./coverage.sh
 
+# Record decode fixtures from a node: `just source-record-fixtures ws://… preprod genesis=0,block=1`.
+source-record-fixtures url name heights:
+    NODE_URL={{url}} FIXTURE_NAME={{name}} FIXTURE_HEIGHTS={{heights}} \
+        cargo nextest run -p chain-indexer --features {{feature}} --run-ignored only \
+        -E 'test(=pipeline::decode::tests::record_decode_fixtures)' --no-capture
+
 generate-indexer-api-schema:
     cargo run -p indexer-api --features {{feature}} --bin indexer-api-cli print-api-schema-v4 > \
         indexer-api/graphql/schema-v4.graphql

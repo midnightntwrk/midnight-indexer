@@ -95,7 +95,7 @@ pub type Chunk = Vec<Block>;
 /// Raw node data for one block.
 #[derive(Debug)]
 pub enum Block {
-    /// The genesis block, built from the chain spec: it has no parent, extrinsics or events.
+    /// The genesis block: it has no parent and no author.
     Genesis {
         hash: BlockHash,
         header: ByteVec,
@@ -108,6 +108,9 @@ pub enum Block {
         ledger_state: ByteVec,
         /// Serialized key-value pairs of the cNight mapping storage.
         cnight_mappings: Vec<(ByteVec, ByteVec)>,
+        extrinsics: Vec<ByteVec>,
+        /// The serialized `System.Events` value.
+        events: ByteVec,
     },
 
     Block {
@@ -216,6 +219,16 @@ pub enum Error {
         hash: BlockHash,
         height: u64,
         header_height: u64,
+    },
+
+    #[error(
+        "no metadata of runtime {spec_version} for block {hash}; the parent's and the block's \
+         state declare {found:?}"
+    )]
+    MetadataVersion {
+        hash: BlockHash,
+        spec_version: u32,
+        found: Vec<Option<u32>>,
     },
 
     #[error("no single block at height {0}")]
@@ -525,10 +538,13 @@ where
             .ok_or(Error::MissingProtocolVersion(hash))?;
         let parent_hash = ByteArray(decoded_header.parent_hash.0);
 
-        // The block's runtime is the one in its parent's state; genesis has only its own.
-        let metadata_at = if height == 0 { hash } else { parent_hash };
         let metadata = metadata
-            .get(rpc, u32::from(protocol_version), metadata_at)
+            .get(
+                rpc,
+                u32::from(protocol_version),
+                hash,
+                (height != 0).then_some(parent_hash),
+            )
             .await?;
 
         let system_parameter_hashes = system_parameter_hashes(&storage);
@@ -613,6 +629,8 @@ impl Sourced {
                 metadata: self.metadata,
                 ledger_state: genesis.ledger_state,
                 cnight_mappings: genesis.cnight_mappings,
+                extrinsics: self.extrinsics,
+                events: self.events,
             },
 
             (_, system_parameters) => Block::Block {
@@ -974,27 +992,52 @@ fn call_value(
 pub struct MetadataCache(Mutex<HashMap<u32, ArcMetadata>>);
 
 impl MetadataCache {
-    /// The metadata of the given spec version, fetched at the given block, whose state runs that
-    /// version, if not cached.
-    pub async fn get<T>(
+    /// The metadata of the runtime with the given spec version, which executed the given block.
+    /// Unless cached, it is fetched from the parent's state, which runs that runtime after a
+    /// `set_code` upgrade, else from the block's own state, which runs it after a switch without
+    /// one. Fetched metadata must declare the spec version.
+    pub async fn get<T: Transport>(
         &self,
         rpc: &NodeRpc<T>,
         spec_version: u32,
-        at: BlockHash,
-    ) -> Result<ArcMetadata, Error>
-    where
-        T: Transport,
-    {
+        block: BlockHash,
+        parent: Option<BlockHash>,
+    ) -> Result<ArcMetadata, Error> {
         let mut cache = self.0.lock().await;
         if let Some(metadata) = cache.get(&spec_version) {
             return Ok(metadata.clone());
         }
 
-        let metadata = Arc::new(fetch_metadata(rpc, at).await?);
-        cache.insert(spec_version, metadata.clone());
+        let mut found = vec![];
+        for at in parent.into_iter().chain([block]) {
+            let metadata = fetch_metadata(rpc, at).await?;
+            match metadata_spec_version(&metadata) {
+                Some(version) if version == spec_version => {
+                    let metadata = Arc::new(metadata);
+                    cache.insert(spec_version, metadata.clone());
+                    return Ok(metadata);
+                }
+                version => found.push(version),
+            }
+        }
 
-        Ok(metadata)
+        Err(Error::MetadataVersion {
+            hash: block,
+            spec_version,
+            found,
+        })
     }
+}
+
+/// The spec version a runtime's metadata declares in its `System.Version` constant.
+pub fn metadata_spec_version(metadata: &Metadata) -> Option<u32> {
+    let version = metadata
+        .pallet_by_name("System")?
+        .constant_by_name("Version")?;
+    // `RuntimeVersion` starts with `spec_name`, `impl_name`, `authoring_version`, `spec_version`.
+    let (_, _, _, spec_version) =
+        <(String, String, u32, u32)>::decode(&mut version.value()).ok()?;
+    Some(spec_version)
 }
 
 /// Fetch metadata as subxt does: the highest stable version `Metadata_metadata_versions` offers,
@@ -1762,7 +1805,8 @@ mod source_tests {
         },
         pipeline::source::{
             AUTHORITY_SET_ITEMS, Block, CNIGHT_MAPPINGS_ITEMS, Chunk, Config, Error, MetadataCache,
-            SYSTEM_EVENTS_ITEM, SYSTEM_PARAMETERS_ITEMS, Source, resolve, source, storage_key,
+            SYSTEM_EVENTS_ITEM, SYSTEM_PARAMETERS_ITEMS, Source, metadata_spec_version, resolve,
+            source, storage_key,
         },
     };
     use futures::{StreamExt, TryStreamExt};
@@ -1784,16 +1828,23 @@ mod source_tests {
     };
     use tokio::time::{sleep, timeout};
 
-    /// A 2.1 runtime spec version.
+    /// Spec versions of the 1.0.300 and 2.1 runtimes.
+    const SPEC_VERSION_1_0: u32 = 1_000_300;
     const SPEC_VERSION: u32 = 2_001_000;
 
     /// Marks a fork sibling's hash.
     const FORK: u8 = 0xff;
 
-    static METADATA: LazyLock<Vec<u8>> = LazyLock::new(|| {
-        fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.node/2.1.0-rc.4/metadata.scale"))
-            .expect("metadata of node 2.1 can be read")
-    });
+    static METADATA: LazyLock<Vec<u8>> = LazyLock::new(|| node_metadata("2.1.0-rc.4"));
+    static METADATA_1_0: LazyLock<Vec<u8>> = LazyLock::new(|| node_metadata("1.0.300"));
+
+    fn node_metadata(node_version: &str) -> Vec<u8> {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../.node")
+            .join(node_version)
+            .join("metadata.scale");
+        fs::read(path).expect("node metadata can be read")
+    }
 
     /// The canonical block at height `n` has hash `hash(n)`; a fork sibling at height `n` has
     /// `fork(n)`, with the same parent.
@@ -1821,14 +1872,14 @@ mod source_tests {
         const_hex::decode(param.as_str().expect("hex param")).expect("hex")
     }
 
-    fn header(n: u64) -> Vec<u8> {
+    fn header(n: u64, spec_version: u32) -> Vec<u8> {
         SubstrateHeader::<H256> {
             parent_hash: H256(hash(n.saturating_sub(1)).0),
             number: n,
             state_root: H256::zero(),
             extrinsics_root: H256::zero(),
             digest: Digest {
-                logs: vec![DigestItem::Consensus(*b"MNSV", SPEC_VERSION.encode())],
+                logs: vec![DigestItem::Consensus(*b"MNSV", spec_version.encode())],
             },
         }
         .encode()
@@ -1840,16 +1891,33 @@ mod source_tests {
 
     /// A chain answering archive calls for any height, with system parameters `system_parameters`
     /// by height (1 beyond its end), fork siblings resolved at the `forks` heights, and failing
-    /// headers at the `failing` heights.
+    /// headers at the `failing` heights. Blocks run the 2.1 runtime, except that headers below
+    /// `stamped_2_1_from` are stamped 1.0.300 and states below `state_2_1_from` run 1.0.300.
     #[derive(Default)]
     struct Chain {
         system_parameters: Vec<u8>,
         forks: Vec<u64>,
         failing: Vec<u64>,
+        stamped_2_1_from: Option<u64>,
+        state_2_1_from: Option<u64>,
         calls: Mutex<Vec<Call>>,
     }
 
     impl Chain {
+        fn stamped_spec_version(&self, n: u64) -> u32 {
+            match self.stamped_2_1_from {
+                Some(from) if n < from => SPEC_VERSION_1_0,
+                _ => SPEC_VERSION,
+            }
+        }
+
+        fn state_metadata(&self, n: u64) -> &'static [u8] {
+            match self.state_2_1_from {
+                Some(from) if n < from => &METADATA_1_0,
+                _ => &METADATA,
+            }
+        }
+
         fn respond(&self, call: &Call) -> CallResult {
             self.calls.lock().push(call.clone());
             match call.method {
@@ -1872,13 +1940,16 @@ mod source_tests {
                             message: "cannot build block".to_owned(),
                         })
                     } else {
-                        Ok(hex(header(n)))
+                        Ok(hex(header(n, self.stamped_spec_version(n))))
                     }
                 }
                 method::ARCHIVE_BODY => Ok(json!([hex(bytes_of(&call.params[0]))])),
                 method::ARCHIVE_CALL => match call.params[1].as_str().expect("function") {
                     "Metadata_metadata_versions" => success(vec![14u32, 15, u32::MAX].encode()),
-                    "Metadata_metadata_at_version" => success(Some(METADATA.clone()).encode()),
+                    "Metadata_metadata_at_version" => {
+                        let n = height_of(&bytes_of(&call.params[0]));
+                        success(Some(self.state_metadata(n).to_vec()).encode())
+                    }
                     function => success(function.as_bytes()),
                 },
                 method::CHAIN_SPEC_PROPERTIES => Ok(json!({ "genesis_state": "0xabcd" })),
@@ -2149,6 +2220,94 @@ mod source_tests {
         // another block's result.
         assert_eq!(node.max_in_flight(), 4);
         assert!(node.batch_sizes().iter().all(|&size| size <= 8));
+    }
+
+    /// The metadata spec versions of the blocks of a chunk sourced at heights 5 to 7.
+    async fn metadata_versions(chain: Chain) -> Result<Vec<Option<u32>>, Error> {
+        let (_, node) = chain.node();
+        let rpc = node_rpc(node, 64, 4);
+        let chunk = source(
+            &rpc,
+            &MetadataCache::default(),
+            5,
+            &hashes(5..=7),
+            Some(hash(4)),
+            true,
+        )
+        .await?;
+
+        Ok(chunk
+            .iter()
+            .map(|block| match block {
+                Block::Block { metadata, .. } | Block::Genesis { metadata, .. } => {
+                    metadata_spec_version(metadata)
+                }
+            })
+            .collect())
+    }
+
+    #[tokio::test]
+    async fn test_metadata_after_set_code_upgrade() {
+        // `set_code` lands in block 5: its state already runs 2.1, but block 6 is the first one
+        // executed, and stamped, by 2.1. Each block's runtime is in its parent's state.
+        let versions = metadata_versions(Chain {
+            stamped_2_1_from: Some(6),
+            state_2_1_from: Some(5),
+            ..Default::default()
+        })
+        .await
+        .expect("chunk is sourced");
+
+        assert_eq!(
+            versions,
+            vec![
+                Some(SPEC_VERSION_1_0),
+                Some(SPEC_VERSION),
+                Some(SPEC_VERSION)
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_metadata_after_switch_without_set_code() {
+        // Block 6 is stamped 2.1 while its parent's state still runs 1.0.300, as on a chain that
+        // switched runtimes like a hard fork: the metadata comes from block 6's own state.
+        let versions = metadata_versions(Chain {
+            stamped_2_1_from: Some(6),
+            state_2_1_from: Some(6),
+            ..Default::default()
+        })
+        .await
+        .expect("chunk is sourced");
+
+        assert_eq!(
+            versions,
+            vec![
+                Some(SPEC_VERSION_1_0),
+                Some(SPEC_VERSION),
+                Some(SPEC_VERSION)
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_metadata_of_another_runtime_is_rejected() {
+        // Every block is stamped 2.1, but no state runs it.
+        let error = metadata_versions(Chain {
+            state_2_1_from: Some(u64::MAX),
+            ..Default::default()
+        })
+        .await
+        .expect_err("no metadata of the stamped runtime");
+
+        assert!(matches!(
+            error,
+            Error::MetadataVersion {
+                spec_version: SPEC_VERSION,
+                ref found,
+                ..
+            } if *found == vec![Some(SPEC_VERSION_1_0), Some(SPEC_VERSION_1_0)]
+        ));
     }
 
     #[tokio::test]
