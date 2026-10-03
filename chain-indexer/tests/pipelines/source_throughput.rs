@@ -50,6 +50,8 @@ use std::{
 };
 use tokio::time::sleep;
 
+/// How often the consumer prints its progress.
+const PROGRESS_INTERVAL: Duration = Duration::from_secs(10);
 /// Clock ticks per second of `/proc/self/stat`'s CPU times, `USER_HZ`, fixed on Linux.
 const USER_HZ: f64 = 100.0;
 
@@ -180,6 +182,8 @@ struct Consumer {
     errors: Vec<String>,
     /// The blocks received so far, at each arrival.
     arrivals: Vec<(Duration, u64)>,
+    /// The last progress line: when, and the blocks received by then.
+    progress: (Duration, u64),
 }
 
 impl Consumer {
@@ -190,6 +194,7 @@ impl Consumer {
             blocks: 0,
             errors: vec![],
             arrivals: vec![],
+            progress: (Duration::ZERO, 0),
         }
     }
 
@@ -212,7 +217,18 @@ impl Consumer {
             Ok(blocks) => {
                 self.blocks += blocks;
                 RECORDED.consumed.fetch_add(blocks, Ordering::Relaxed);
-                self.arrivals.push((self.started.elapsed(), self.blocks));
+                let now = self.started.elapsed();
+                self.arrivals.push((now, self.blocks));
+                let (last_at, last_blocks) = self.progress;
+                if now - last_at >= PROGRESS_INTERVAL {
+                    println!(
+                        "{:.0} s: {} blocks, {:.0} blocks/s",
+                        now.as_secs_f64(),
+                        self.blocks,
+                        (self.blocks - last_blocks) as f64 / (now - last_at).as_secs_f64()
+                    );
+                    self.progress = (now, self.blocks);
+                }
                 self.sleep * blocks as u32
             }
 
