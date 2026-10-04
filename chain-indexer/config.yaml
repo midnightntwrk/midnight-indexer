@@ -2,7 +2,6 @@ thread_stack_size: "24MiB"
 
 application:
   network_id: "undeployed"
-  blocks_buffer: 10
   caught_up_max_distance: 10
   caught_up_leeway: 5
   # Budget for one gc pass per block it covers; the pass gets gc_bound * gc_interval.
@@ -14,6 +13,9 @@ application:
   # Recent blocks whose ledger states stay loadable (gc roots). Must comfortably exceed
   # indexer-api's dust_generations max_snapshot_age.
   ledger_state_retention: 1000
+  # Threads decoding sourced blocks; by default one less than the available cores, leaving one
+  # for node I/O and indexing.
+  # decode_cpu_threads: 7
 
 infra:
   run_migrations: true
@@ -39,8 +41,19 @@ infra:
   node:
     url: "ws://localhost:9944"
     reconnect_max_delay: "10s" # 10ms, 100ms, 1s, 10s
-    reconnect_max_attempts: 30 # Roughly 5m
-    subscription_recovery_timeout: "30s" # Re-subscribe if no block received within this time
+    reconnect_max_attempts: 30 # Failed tries, roughly 5m, before the node counts as unreachable
+    subscription_recovery_timeout: "30s" # Re-subscribe if no follow event received within this time
+    # Block sourcing. Heights per chunk; keep it at least 8 times application.decode_cpu_threads
+    # so one chunk keeps the decode threads busy.
+    source_chunk_size: 64
+    # Chunks in progress, and sourced chunks waiting for decode. Blocks held in memory are bounded
+    # by about 2 x source_chunks_ahead x source_chunk_size.
+    source_chunks_ahead: 8
+    # Calls per JSON-RPC batch. A node or proxy may reject large batches; public endpoints accept
+    # 64 over WebSocket.
+    rpc_batch_size: 64
+    # JSON-RPC batches in flight on the node connection.
+    rpc_batches_in_flight: 16
 
 telemetry:
   tracing:

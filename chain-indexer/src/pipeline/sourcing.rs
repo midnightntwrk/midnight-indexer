@@ -16,10 +16,17 @@
 
 use crate::{
     domain::BlockRef,
-    infra::subxt_node::rpc::{
-        self, Batch, CallResult, Counters, NodeRpc, ReconnectPolicy, Transport, WsTransport, method,
+    infra::subxt_node::{
+        self,
+        rpc::{
+            self, Batch, CallResult, Counters, NodeRpc, ReconnectPolicy, Transport, WsTransport,
+            method,
+        },
     },
-    pipeline::{metric, sourcing::finalized::follow_finalized},
+    pipeline::{
+        metric,
+        sourcing::{finalized::follow_finalized, metadata::MetadataCache},
+    },
 };
 use async_stream::stream;
 use futures::{
@@ -56,9 +63,6 @@ mod storage;
 mod tests;
 mod verify;
 
-pub(crate) use self::metadata::MetadataCache;
-#[cfg(test)]
-pub(crate) use self::source::source;
 pub use self::{metadata::metadata_spec_version, resolve::resolve};
 
 /// Storage items holding a consensus engine's authority set. An item a runtime lacks is absent from
@@ -239,6 +243,22 @@ pub struct Config {
     /// How long the finalized-block subscription may stay silent before it is renewed.
     pub recovery_timeout: Duration,
     pub reconnect_policy: ReconnectPolicy,
+}
+
+impl From<&subxt_node::Config> for Config {
+    fn from(config: &subxt_node::Config) -> Self {
+        Self {
+            chunk_size: config.source_chunk_size,
+            chunks_ahead: config.source_chunks_ahead,
+            rpc_batch_size: config.rpc_batch_size,
+            rpc_batches_in_flight: config.rpc_batches_in_flight,
+            recovery_timeout: config.subscription_recovery_timeout,
+            reconnect_policy: ReconnectPolicy {
+                max_delay: config.reconnect_max_delay,
+                max_attempts: config.reconnect_max_attempts,
+            },
+        }
+    }
 }
 
 /// The block sourcing pipeline over a [Transport].

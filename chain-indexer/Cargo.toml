@@ -36,7 +36,7 @@ rayon              = { workspace = true }
 serde              = { workspace = true, features = [ "derive" ] }
 serde_json         = { workspace = true }
 sqlx               = { workspace = true, features = [ "time" ] }
-subxt              = { workspace = true, features = [ "reconnecting-rpc-client" ] }
+subxt              = { workspace = true }
 thiserror          = { workspace = true }
 tokio              = { workspace = true, features = [ "macros", "rt-multi-thread", "sync", "time", "signal" ] }
 trait-variant      = { workspace = true }

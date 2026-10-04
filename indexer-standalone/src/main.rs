@@ -44,7 +44,8 @@ fn run() -> anyhow::Result<()> {
     use anyhow::Context;
     use chain_indexer::{
         application as chain_app,
-        infra::{storage as chain_storage, subxt_node::SubxtNode},
+        infra::storage as chain_storage,
+        pipeline::{self, decode::CpuPool, sourcing::Source},
     };
     use indexer_api::{
         application as api_app,
@@ -70,7 +71,7 @@ fn run() -> anyhow::Result<()> {
         application as spo_app,
         infra::{spo_client::SPOClient, storage as spo_storage},
     };
-    use std::{num::NonZeroUsize, panic};
+    use std::{num::NonZeroUsize, panic, sync::Arc};
     use tokio::{
         runtime::Builder,
         select,
@@ -197,19 +198,30 @@ fn run() -> anyhow::Result<()> {
         // or unreachable URL only blocks its own component, not the whole
         // runtime startup. The previous shape `task::spawn({ ... .await? ... })`
         // ran the .await synchronously in the outer block_on, holding back the
-        // indexer-api and wallet-indexer spawns for up to
-        // `reconnect_max_attempts × reconnect_max_delay` (≈5 min by default).
+        // indexer-api and wallet-indexer spawns until the node was reachable.
         let chain_indexer = {
             let storage = chain_storage::Storage::new(pool.clone());
             let publisher = pub_sub.publisher();
             let application_config = application_config.clone();
             task::spawn(async move {
-                let node = SubxtNode::new(node_config)
+                let source = Source::connect(&node_config.url, (&node_config).into())
                     .await
-                    .context("create SubxtNode")?;
+                    .context("connect block source")?;
+                let decode_pool = Arc::new(
+                    CpuPool::new(application_config.decode_cpu_threads)
+                        .context("create decode pool")?,
+                );
+                let blocks = |start| pipeline::finalized_blocks(&source, decode_pool, start, None);
                 let sigterm =
                     signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
-                chain_app::run(application_config.into(), node, storage, publisher, sigterm).await
+                chain_app::run(
+                    application_config.into(),
+                    blocks,
+                    storage,
+                    publisher,
+                    sigterm,
+                )
+                .await
             })
         };
 

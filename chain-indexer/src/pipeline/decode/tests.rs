@@ -12,21 +12,14 @@
 // limitations under the License.
 
 use crate::{
-    domain::{
-        BlockRef, DustRegistrationEvent,
-        node::{self, Node},
-    },
-    infra::subxt_node::{
-        AURA_ENGINE_ID, BABE_ENGINE_ID, Config, SubxtNode,
-        rpc::{NodeRpc, ReconnectPolicy, WsTransport},
-        runtimes,
-    },
+    domain::{DustRegistrationEvent, node},
+    infra::subxt_node::{AURA_ENGINE_ID, BABE_ENGINE_ID, runtimes},
     pipeline::{
         decode::{
             AuthoritySetError, BABE_NEXT_EPOCH_DATA, CpuPool, block_authorities, chunks_in_decode,
             decode,
         },
-        sourcing::{self, AUTHORITY_SET_ITEMS, MetadataCache, Parent, resolve, storage_key},
+        sourcing::{self, AUTHORITY_SET_ITEMS, Parent, storage_key},
     },
 };
 use futures::{StreamExt, TryStreamExt, stream};
@@ -38,127 +31,16 @@ use std::{
     env, fs,
     num::NonZeroUsize,
     path::{Path, PathBuf},
-    pin::pin,
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     },
-    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use subxt::{
     Metadata,
     config::substrate::{Digest, DigestItem, SubstrateHeader},
     utils::H256,
 };
-
-/// Records decode fixtures: for each `label=height` in `FIXTURE_HEIGHTS`, the block at that
-/// height as the block sourcing pipeline sources it, and the [node::Block] the subxt-based node
-/// adapter makes from the same block. Metadata missing from `.node` is saved alongside.
-#[tokio::test]
-#[ignore = "records fixtures from the node at NODE_URL"]
-async fn record_decode_fixtures() {
-    let url = env::var("NODE_URL").expect("NODE_URL");
-    let name = env::var("FIXTURE_NAME").expect("FIXTURE_NAME");
-    let heights = env::var("FIXTURE_HEIGHTS").expect("FIXTURE_HEIGHTS");
-
-    let transport = WsTransport::new(url.as_str(), Default::default())
-        .await
-        .expect("node can be reached");
-    let rpc = NodeRpc::new(
-        transport,
-        NonZeroUsize::new(64).unwrap(),
-        NonZeroUsize::new(4).unwrap(),
-        ReconnectPolicy {
-            max_delay: Duration::from_secs(1),
-            max_attempts: 3,
-        },
-    );
-    let metadata = MetadataCache::default();
-    let mut node = SubxtNode::new(Config {
-        url: url.clone(),
-        reconnect_max_delay: Duration::from_secs(1),
-        reconnect_max_attempts: 3,
-        subscription_recovery_timeout: Duration::from_secs(30),
-        fetch_concurrency: 1,
-    })
-    .await
-    .expect("node adapter connects");
-    let genesis_hash = resolve(&rpc, 0..=0)
-        .await
-        .expect("genesis resolves")
-        .pop()
-        .flatten()
-        .expect("genesis hash");
-
-    fs::create_dir_all(fixtures_dir().join("metadata")).expect("fixtures dir");
-
-    for label_height in heights.split(',') {
-        let (label, height) = label_height.split_once('=').expect("label=height");
-        let height = height.trim().parse::<BlockNumber>().expect("height");
-
-        let (parent, hash) = if height == 0 {
-            (None, genesis_hash)
-        } else {
-            let mut hashes = resolve(&rpc, height - 1..=height)
-                .await
-                .expect("hashes resolve")
-                .into_iter();
-            let parent = hashes.next().flatten().expect("parent hash");
-            (Some(parent), hashes.next().flatten().expect("hash"))
-        };
-
-        let sourced = sourcing::source(&rpc, &metadata, height, &[hash], parent, true)
-            .await
-            .expect("block is sourced")
-            .pop()
-            .expect("one block");
-        let made = {
-            let after = parent.map(|parent| BlockRef {
-                hash: parent,
-                height: u64::from(height - 1),
-            });
-            let blocks = node.finalized_blocks(after);
-            let mut blocks = pin!(blocks);
-            blocks
-                .try_next()
-                .await
-                .expect("node adapter makes block")
-                .expect("one block")
-        };
-        assert_eq!(made.hash, hash);
-
-        use sourcing::Block::*;
-        let sourced_metadata = match &sourced {
-            Genesis { metadata, .. } | Block { metadata, .. } => metadata.clone(),
-        };
-        let metadata_hash = hex(sourced_metadata.hasher().hash());
-        if std::panic::catch_unwind(|| metadata_with_hash(&metadata_hash)).is_err() {
-            // Not in `.node`: keep the node's metadata with the fixtures.
-            let bytes = fetch_metadata_bytes(&rpc, hash).await;
-            let file = format!("{}.scale", metadata_hash.as_str().unwrap());
-            fs::write(fixtures_dir().join("metadata").join(file), bytes)
-                .expect("metadata can be written");
-        }
-
-        let recorded_at = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("time after epoch")
-            .as_secs();
-        let fixture = json!({
-            "provenance": {
-                "node_url": url,
-                "genesis_hash": hex(genesis_hash),
-                "height": height,
-                "recorded_at": recorded_at,
-            },
-            "sourced": sourced_json(&sourced),
-            "made": render(&made),
-        });
-        let path = fixtures_dir().join(format!("{name}-{label}.json"));
-        fs::write(&path, serde_json::to_string(&fixture).unwrap()).expect("fixture can be written");
-        println!("recorded {}", path.display());
-    }
-}
 
 #[test]
 fn test_decode_round_trip() {
@@ -172,8 +54,8 @@ fn test_decode_round_trip() {
         let made = &fixture["made"];
 
         for (field, expected) in made.as_object().expect("made fields") {
-            // The node adapter fetched the ledger state root at genesis only; decode carries
-            // it for every block.
+            // The recorded blocks carry the ledger state root at genesis only; decode carries it
+            // for every block.
             if field == "ledger_state_root" && expected.is_null() {
                 continue;
             }
@@ -359,27 +241,6 @@ fn bytes(value: &Value) -> ByteVec {
         .into()
 }
 
-/// The SCALE-encoded `RuntimeMetadataPrefixed` the node serves at the given block.
-async fn fetch_metadata_bytes(rpc: &NodeRpc<WsTransport>, at: BlockHash) -> Vec<u8> {
-    use crate::infra::subxt_node::rpc::Batch;
-
-    let batch = Batch::default().call(at, "Metadata_metadata_at_version", &15u32.encode());
-    let result = rpc
-        .batch(batch)
-        .await
-        .expect("metadata call")
-        .pop()
-        .unwrap();
-    let value = result.expect("metadata call succeeds")["value"]
-        .as_str()
-        .expect("value")
-        .to_owned();
-    let bytes = const_hex::decode(value).expect("hex");
-    Option::<Vec<u8>>::decode(&mut &bytes[..])
-        .expect("optional metadata")
-        .expect("metadata v15")
-}
-
 fn fixture_block(name: &str) -> sourcing::Block {
     let (_, fixture) = fixtures()
         .into_iter()
@@ -440,13 +301,6 @@ fn metadata_with_hash(hash: &Value) -> Metadata {
         .map(|bytes| Metadata::decode(&mut &bytes[..]).expect("metadata can be decoded"))
         .find(|metadata| hex(metadata.hasher().hash()) == *hash)
         .unwrap_or_else(|| panic!("no metadata with hash {hash}"))
-}
-
-fn pairs(pairs: &[(ByteVec, ByteVec)]) -> Value {
-    pairs
-        .iter()
-        .map(|(key, value)| json!([hex(key), hex(value)]))
-        .collect()
 }
 
 fn pairs_of(value: &Value) -> Vec<(ByteVec, ByteVec)> {
@@ -562,65 +416,6 @@ fn restamped(block: sourcing::Block, spec_version: u32) -> sourcing::Block {
         parent,
         extrinsics,
         events,
-    }
-}
-
-/// A [sourcing::Block] as fixture JSON; its metadata by hash.
-fn sourced_json(block: &sourcing::Block) -> Value {
-    use sourcing::Block::*;
-    match block {
-        Genesis {
-            hash,
-            header,
-            zswap_state_root,
-            ledger_state_root,
-            system_parameters: (d_parameter, terms_and_conditions),
-            metadata,
-            ledger_state: _,
-            cnight_mappings,
-            extrinsics,
-            events,
-        } => json!({
-            "kind": "genesis",
-            "extrinsics": extrinsics.iter().map(hex).collect::<Vec<_>>(),
-            "events": hex(events),
-            "hash": hex(hash),
-            "header": hex(header),
-            "zswap_state_root": hex(zswap_state_root),
-            "ledger_state_root": hex(ledger_state_root),
-            "system_parameters": [hex(d_parameter), hex(terms_and_conditions)],
-            "metadata_hash": hex(metadata.hasher().hash()),
-            "cnight_mappings": pairs(cnight_mappings),
-        }),
-        Block {
-            hash,
-            height,
-            header,
-            zswap_state_root,
-            ledger_state_root,
-            system_parameters,
-            metadata,
-            parent,
-            extrinsics,
-            events,
-        } => json!({
-            "kind": "block",
-            "hash": hex(hash),
-            "height": height,
-            "header": hex(header),
-            "zswap_state_root": hex(zswap_state_root),
-            "ledger_state_root": hex(ledger_state_root),
-            "system_parameters": system_parameters
-                .as_ref()
-                .map(|(d_parameter, terms)| json!([hex(d_parameter), hex(terms)])),
-            "metadata_hash": hex(metadata.hasher().hash()),
-            "parent": {
-                "hash": hex(parent.hash),
-                "authority_set": pairs(&parent.authority_set),
-            },
-            "extrinsics": extrinsics.iter().map(hex).collect::<Vec<_>>(),
-            "events": hex(events),
-        }),
     }
 }
 

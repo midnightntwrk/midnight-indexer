@@ -21,17 +21,15 @@
 use anyhow::Context;
 use chain_indexer::{
     application::make_transaction,
-    domain::{
-        BlockRef,
-        node::{Node, Transaction},
-    },
-    infra::subxt_node::{Config, SubxtNode},
+    domain::{BlockRef, node::Transaction},
+    infra::subxt_node::Config,
+    pipeline::{self, decode::CpuPool, sourcing::Source},
 };
 use fs_extra::dir::{CopyOptions, copy};
 use futures::{StreamExt, TryStreamExt, stream};
-use std::{fs, path::Path, pin::pin, time::Duration};
+use std::{fs, num::NonZeroUsize, path::Path, pin::pin, sync::Arc, time::Duration};
 use testcontainers::{
-    GenericImage, ImageExt,
+    ContainerAsync, GenericImage, ImageExt,
     core::{Mount, WaitFor},
     runners::AsyncRunner,
 };
@@ -44,15 +42,88 @@ use walkdir::WalkDir;
 const NODE_VERSION: &str = "1.0.0";
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_finalized_blocks_node_1_0() -> anyhow::Result<()> {
+async fn test_source_node_1_0() -> anyhow::Result<()> {
     let _ledger_db = init_ledger_db().await?;
+    let node = start_node(None).await?;
 
+    let source = Source::connect(&node.url, (&config(&node.url)).into())
+        .await
+        .context("connect block source")?;
+    let pool = Arc::new(CpuPool::new(NonZeroUsize::MIN).context("create decode pool")?);
+
+    let (blocks, _) = pipeline::finalized_blocks(&source, pool, None, Some(2));
+    let mut blocks = pin!(blocks);
+    for _ in 0..3 {
+        let block = blocks
+            .try_next()
+            .await
+            .context("get next block")?
+            .context("block stream must not end")?;
+        assert_eq!(u32::from(block.protocol_version), 1_000_000);
+    }
+
+    // Only the new JSON-RPC spec's methods are called.
+    let legacy = source
+        .counters()
+        .counts()
+        .into_keys()
+        .filter(|key| {
+            ["chain_", "state_", "system_"]
+                .iter()
+                .any(|prefix| key.starts_with(prefix))
+        })
+        .collect::<Vec<_>>();
+    assert!(legacy.is_empty(), "legacy methods called: {legacy:?}");
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_source_requires_archive() -> anyhow::Result<()> {
+    // The dev preset's arguments, pruning state and blocks instead of archiving them. The node
+    // refuses to open the archived snapshot with another pruning mode, so it starts on an empty
+    // base path.
+    let args = [
+        "--base-path",
+        "/tmp/node",
+        "--dev",
+        "--node-key",
+        "0000000000000000000000000000000000000000000000000000000000000001",
+        "--rpc-external",
+        "--rpc-cors=all",
+        "--state-pruning",
+        "256",
+        "--blocks-pruning",
+        "256",
+    ];
+    let node = start_node(Some(&args.join(" "))).await?;
+
+    let Err(error) = Source::connect(&node.url, (&config(&node.url)).into()).await else {
+        panic!("connecting to a node without archive pruning must fail");
+    };
+    let error = format!("{:#}", anyhow::Error::from(error));
+    assert!(error.contains("archive_v1_"), "{error}");
+    assert!(error.contains("--state-pruning archive"), "{error}");
+
+    Ok(())
+}
+
+/// A running node container of [NODE_VERSION] on its `.node` snapshot.
+struct Node {
+    url: String,
+    _container: ContainerAsync<GenericImage>,
+    _snapshot: tempfile::TempDir,
+}
+
+/// Start a [NODE_VERSION] node on a copy of its snapshot with the dev preset, with its arguments
+/// replaced by `args` if given.
+async fn start_node(args: Option<&str>) -> anyhow::Result<Node> {
     let node_dir = Path::new(&format!("{}/../.node", env!("CARGO_MANIFEST_DIR")))
         .join(NODE_VERSION)
         .canonicalize()
         .context("create path to node directory")?;
-    let temp_dir = tempfile::tempdir().context("create tempdir")?;
-    copy(&node_dir, &temp_dir, &CopyOptions::default())
+    let snapshot = tempfile::tempdir().context("create tempdir")?;
+    copy(&node_dir, &snapshot, &CopyOptions::default())
         .context("copy .node directory into tempdir")?;
 
     // The node container runs as non-root user (appuser), so the bind-mounted directory
@@ -61,7 +132,7 @@ async fn test_finalized_blocks_node_1_0() -> anyhow::Result<()> {
     {
         use std::os::unix::fs::PermissionsExt;
 
-        let chain_dir = temp_dir.path().join(NODE_VERSION).join("chain");
+        let chain_dir = snapshot.path().join(NODE_VERSION).join("chain");
         if chain_dir.exists() {
             for entry in WalkDir::new(&chain_dir) {
                 let entry = entry.context("walk chain directory")?;
@@ -73,41 +144,40 @@ async fn test_finalized_blocks_node_1_0() -> anyhow::Result<()> {
         }
     }
 
-    let node_path = temp_dir.path().join(NODE_VERSION).display().to_string();
-    let node_container = GenericImage::new("midnightntwrk/midnight-node", NODE_VERSION)
+    let node_path = snapshot.path().join(NODE_VERSION).display().to_string();
+    let image = GenericImage::new("midnightntwrk/midnight-node", NODE_VERSION)
         .with_wait_for(WaitFor::message_on_stderr("9944"))
         .with_mount(Mount::bind_mount(node_path, "/node"))
         .with_env_var("SHOW_CONFIG", "false")
-        .with_env_var("CFG_PRESET", "dev")
-        .start()
-        .await
-        .context("start node container")?;
-    let node_port = node_container
+        .with_env_var("CFG_PRESET", "dev");
+    let image = match args {
+        Some(args) => image.with_env_var("ARGS", args),
+        None => image,
+    };
+    let container = image.start().await.context("start node container")?;
+    let port = container
         .get_host_port_ipv4(9944)
         .await
         .context("get node port")?;
 
-    let config = Config {
-        url: format!("ws://localhost:{node_port}"),
+    Ok(Node {
+        url: format!("ws://localhost:{port}"),
+        _container: container,
+        _snapshot: snapshot,
+    })
+}
+
+fn config(url: &str) -> Config {
+    Config {
+        url: url.to_owned(),
         reconnect_max_delay: Duration::from_secs(1),
         reconnect_max_attempts: 1,
         subscription_recovery_timeout: Duration::from_secs(30),
-        fetch_concurrency: 8,
-    };
-    let mut node = SubxtNode::new(config).await.context("create SubxtNode")?;
-
-    let blocks = node.finalized_blocks(None);
-    let mut blocks = pin!(blocks);
-    for _ in 0..3 {
-        let block = blocks
-            .try_next()
-            .await
-            .context("get next finalized block")?
-            .context("stream of finalized blocks must not end")?;
-        assert_eq!(u32::from(block.protocol_version), 1_000_000);
+        source_chunk_size: NonZeroUsize::new(64).unwrap(),
+        source_chunks_ahead: NonZeroUsize::new(8).unwrap(),
+        rpc_batch_size: NonZeroUsize::new(64).unwrap(),
+        rpc_batches_in_flight: NonZeroUsize::new(16).unwrap(),
     }
-
-    Ok(())
 }
 
 /// Ingest the exact mainnet blocks at the runtime upgrade boundary via the public mainnet
@@ -133,9 +203,15 @@ async fn test_mainnet_runtime_upgrade_boundary() -> anyhow::Result<()> {
         reconnect_max_delay: Duration::from_secs(1),
         reconnect_max_attempts: 3,
         subscription_recovery_timeout: Duration::from_secs(30),
-        fetch_concurrency: 8,
+        source_chunk_size: NonZeroUsize::new(64).unwrap(),
+        source_chunks_ahead: NonZeroUsize::new(8).unwrap(),
+        rpc_batch_size: NonZeroUsize::new(64).unwrap(),
+        rpc_batches_in_flight: NonZeroUsize::new(16).unwrap(),
     };
-    let mut node = SubxtNode::new(config).await.context("create SubxtNode")?;
+    let source = Source::connect(&config.url, (&config).into())
+        .await
+        .context("connect block source")?;
+    let pool = Arc::new(CpuPool::new(NonZeroUsize::MIN).context("create decode pool")?);
 
     let after = BlockRef {
         hash: const_hex::decode_to_array::<_, 32>(
@@ -145,14 +221,14 @@ async fn test_mainnet_runtime_upgrade_boundary() -> anyhow::Result<()> {
         .into(),
         height: 1_774_490,
     };
-    let blocks = node.finalized_blocks(Some(after));
+    let (blocks, _) = pipeline::finalized_blocks(&source, pool, Some(after), Some(1_774_492));
     let mut blocks = pin!(blocks);
 
     let block = blocks
         .try_next()
         .await
         .context("get mainnet block 1_774_491")?
-        .context("stream of finalized blocks must not end")?;
+        .context("block stream must not end")?;
     assert_eq!(block.height, 1_774_491);
     assert_eq!(u32::from(block.protocol_version), 22_000);
     let transactions = stream::iter(block.transactions)
@@ -172,9 +248,9 @@ async fn test_mainnet_runtime_upgrade_boundary() -> anyhow::Result<()> {
                 == const_hex::decode(CONTRACT_ADDRESS).expect("valid address")
         })
         .context("mainnet block 1_774_491 must contain the known contract call")?;
-    // The node adapter no longer fetches contract state: it is captured from the indexer's own
-    // ledger state once per block, after all transactions are applied, so an action coming straight
-    // off the block stream carries no key yet. Asserting that guards against reintroducing a
+    // Contract state is not fetched from the node: it is captured from the indexer's own ledger
+    // state once per block, after all transactions are applied, so an action coming straight off
+    // the block stream carries no key yet. Asserting that guards against reintroducing a
     // per-action runtime API call here.
     assert!(contract_action.state_key.is_none());
     assert!(contract_action.zswap_state_key.is_none());
@@ -183,7 +259,7 @@ async fn test_mainnet_runtime_upgrade_boundary() -> anyhow::Result<()> {
         .try_next()
         .await
         .context("get mainnet block 1_774_492")?
-        .context("stream of finalized blocks must not end")?;
+        .context("block stream must not end")?;
     assert_eq!(block.height, 1_774_492);
     assert_eq!(u32::from(block.protocol_version), 1_000_000);
 

@@ -41,7 +41,8 @@ fn run() -> anyhow::Result<()> {
     use chain_indexer::{
         application,
         config::Config,
-        infra::{self, subxt_node::SubxtNode},
+        infra,
+        pipeline::{self, decode::CpuPool, sourcing::Source},
     };
     use indexer_common::{
         config::ConfigExt,
@@ -52,7 +53,7 @@ fn run() -> anyhow::Result<()> {
         telemetry,
     };
     use log::info;
-    use std::time::Duration;
+    use std::{sync::Arc, time::Duration};
     use tokio::{
         runtime::Builder,
         signal::unix::{SignalKind, signal},
@@ -92,9 +93,12 @@ fn run() -> anyhow::Result<()> {
         telemetry::init_tracing(tracing_config);
         telemetry::init_metrics(metrics_config);
 
-        let node = SubxtNode::new(node_config)
+        let source = Source::connect(&node_config.url, (&node_config).into())
             .await
-            .context("create SubxtNode")?;
+            .context("connect block source")?;
+        let decode_pool = Arc::new(
+            CpuPool::new(application_config.decode_cpu_threads).context("create decode pool")?,
+        );
 
         let pool = pool::postgres::PostgresPool::new(storage_config)
             .await
@@ -113,7 +117,8 @@ fn run() -> anyhow::Result<()> {
             .await
             .context("create NatsPublisher")?;
 
-        application::run(application_config, node, storage, publisher, sigterm).await
+        let blocks = |start| pipeline::finalized_blocks(&source, decode_pool, start, None);
+        application::run(application_config, blocks, storage, publisher, sigterm).await
     });
 
     // The implicit runtime drop hangs indefinitely when spawned tasks are inside

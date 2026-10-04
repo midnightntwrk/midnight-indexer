@@ -119,7 +119,7 @@ impl<T: Transport> Producer<T> {
 /// One round fetches every block's header, body, state roots and storage hashes; a second fetches
 /// the system parameters where due (first of a run, or changed), changed authority sets and the
 /// metadata of runtimes not seen before.
-pub(crate) async fn source<T: Transport>(
+pub(super) async fn source<T: Transport>(
     rpc: &NodeRpc<T>,
     metadata: &MetadataCache,
     start: BlockNumber,

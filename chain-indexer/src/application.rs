@@ -17,17 +17,14 @@ use crate::{
     application::metrics::Metrics,
     domain::{
         Block, BlockRef, DParameter, LedgerState, SystemParametersChange, TermsAndConditions,
-        Transaction,
-        node::{self, Node},
-        should_bump_first_regular_tblock,
-        storage::Storage,
+        Transaction, node, should_bump_first_regular_tblock, storage::Storage,
     },
     infra::subxt_node::runtimes,
+    pipeline::sourcing::Finalized,
 };
 use anyhow::{Context, bail};
-use async_stream::stream;
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
-use futures::{Stream, StreamExt, TryStreamExt, future::ok, stream};
+use futures::{Stream, StreamExt, TryStreamExt, stream};
 use indexer_common::{
     domain::{
         BlockIndexed, BridgeEventIndexed, ByteVec, LedgerVersion, NetworkId, ProtocolVersion,
@@ -47,18 +44,15 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{
-    runtime::Handle,
     select,
     signal::unix::Signal,
-    sync::mpsc,
+    sync::watch,
     task::{self},
-    time::sleep,
 };
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub network_id: NetworkId,
-    pub blocks_buffer: usize,
     pub caught_up_max_distance: u32,
     pub caught_up_leeway: u32,
 
@@ -85,24 +79,35 @@ pub struct Config {
     /// is unpersisted. Must comfortably exceed indexer-api's block-hash snapshot reads, e.g.
     /// the dust generations subscription's max_snapshot_age, or those reads hit culled state.
     pub ledger_state_retention: NonZeroUsize,
+
+    /// Threads decoding sourced blocks. Defaults to one less than the available cores, leaving one
+    /// for the tasks driving node I/O and indexing.
+    #[serde(default = "default_decode_cpu_threads")]
+    pub decode_cpu_threads: NonZeroUsize,
 }
 
-pub async fn run(
+/// Index the blocks after the stored one. `blocks` gives the blocks after a block, or from genesis,
+/// in height order, and the latest finalized block on the node.
+pub async fn run<S, E>(
     config: Config,
-    node: impl Node,
+    blocks: impl FnOnce(Option<BlockRef>) -> (S, watch::Receiver<Option<Finalized>>),
     mut storage: impl Storage,
     publisher: impl Publisher,
     mut sigterm: Signal,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<()>
+where
+    S: Stream<Item = Result<node::Block, E>> + Send + 'static,
+    E: StdError + Send + Sync + 'static,
+{
     let Config {
         network_id,
-        blocks_buffer,
         caught_up_max_distance,
         caught_up_leeway,
         gc_bound,
         gc_interval,
         arena_metrics_interval,
         ledger_state_retention,
+        decode_cpu_threads: _,
     } = config;
 
     // Get info from highest block.
@@ -220,33 +225,24 @@ pub async fn run(
             .context("create ledger state")?,
     };
 
+    let (blocks, mut finalized) = blocks(highest_block_ref);
     let highest_block_on_node = Arc::new(RwLock::new(None));
 
     // Spawn task to set info for highest block on node.
     let mut highest_block_on_node_task = task::spawn({
-        let node = node.clone();
         let highest_block_on_node = highest_block_on_node.clone();
 
         async move {
-            let highest_blocks = node
-                .highest_blocks()
-                .await
-                .context("get stream of highest blocks")?;
-
-            highest_blocks
-                .try_for_each(|block_info| {
-                    info!(
-                        hash:% = block_info.hash,
-                        height = block_info.height;
-                        "highest finalized block on node"
-                    );
-
-                    *highest_block_on_node.write() = Some(block_info);
-
-                    ok(())
-                })
-                .await
-                .context("get next block of highest_blocks")?;
+            while finalized.changed().await.is_ok() {
+                let tip = finalized
+                    .borrow_and_update()
+                    .as_ref()
+                    .map(|finalized| BlockRef::from(finalized.tip));
+                if let Some(tip) = tip {
+                    info!(hash:% = tip.hash, height = tip.height; "highest finalized block on node");
+                    *highest_block_on_node.write() = Some(tip);
+                }
+            }
 
             warn!("highest_block_on_node_task completed");
 
@@ -256,46 +252,7 @@ pub async fn run(
 
     // Spawn task to index blocks.
     let mut index_blocks_task = task::spawn({
-        let node = node.clone();
-
         async move {
-            // Stream combinators only make progress while the consumer polls them, so a
-            // `buffered` adapter cannot fetch ahead while a block is being processed. Run the
-            // block stream on its own task feeding a bounded channel so fetching the next
-            // blocks overlaps indexing, with at most `blocks_buffer` blocks in flight.
-            //
-            // Making a block deserializes its transactions into the ledger arena, whose lock gc and
-            // persist hold across `block_in_place(block_on(..))`. On a runtime worker this task can
-            // then deadlock the runtime (#1627), so it runs on the blocking pool. A blocking task
-            // cannot be aborted, so it ends when the receiver is dropped, i.e. with this task.
-            let (block_tx, mut block_rx) = mpsc::channel(blocks_buffer.max(1));
-            let handle = Handle::current();
-            task::spawn_blocking({
-                let node = node.clone();
-                move || {
-                    handle.block_on(async move {
-                        let blocks = node_blocks(highest_block_ref, node);
-                        let mut blocks = pin!(blocks);
-                        loop {
-                            select! {
-                                _ = block_tx.closed() => break,
-
-                                block = blocks.next() => {
-                                    let Some(block) = block else { break };
-                                    if block_tx.send(block).await.is_err() {
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    })
-                }
-            });
-            let blocks = stream! {
-                while let Some(block) = block_rx.recv().await {
-                    yield block;
-                }
-            };
             let mut blocks = pin!(blocks);
             let mut caught_up = false;
             let mut parent_block_timestamp = initial_parent_block_timestamp;
@@ -402,50 +359,12 @@ pub async fn run(
     }
 }
 
-/// An infinite stream of node blocks, neither with duplicates, nor with gaps or otherwise
-/// unexpected blocks.
-fn node_blocks<N>(
-    mut highest_block: Option<BlockRef>,
-    mut node: N,
-) -> impl Stream<Item = Result<node::Block, N::Error>>
-where
-    N: Node,
-{
-    stream! {
-        loop {
-            let blocks = node.finalized_blocks(highest_block);
-            let mut blocks = pin!(blocks);
-
-            while let Some(block) = blocks.next().await {
-                if let Ok(block) = &block {
-                    let parent_hash = block.parent_hash;
-                    let (highest_hash, highest_height) = highest_block
-                        .map(|BlockRef { hash, height }| (hash, height))
-                        .unzip();
-
-                    // In case of unexpected blocks, e.g. because of a gap or the node lagging
-                    // behind, break and rerun the `finalized_blocks` stream.
-                    if parent_hash != highest_hash.unwrap_or_default() {
-                        warn!(
-                            parent_hash:%,
-                            height = block.height,
-                            highest_hash:?,
-                            highest_height:?;
-                            "unexpected block"
-                        );
-                        break;
-                    }
-
-                    highest_block = Some(block.into());
-                }
-
-                yield block;
-            }
-
-            // Sleep to avoid busy-spin.
-            sleep(Duration::from_millis(100)).await;
-        }
-    }
+/// One less than the available cores, at least one.
+pub fn default_decode_cpu_threads() -> NonZeroUsize {
+    std::thread::available_parallelism()
+        .ok()
+        .and_then(|threads| NonZeroUsize::new(threads.get() - 1))
+        .unwrap_or(NonZeroUsize::MIN)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -815,6 +734,11 @@ async fn determine_system_parameters_change(
     terms_and_conditions: Option<TermsAndConditions>,
     storage: &mut impl Storage,
 ) -> anyhow::Result<Option<SystemParametersChange>> {
+    // Blocks carry system parameters only where they may have changed.
+    if d_parameter.is_none() && terms_and_conditions.is_none() {
+        return Ok(None);
+    }
+
     // Get the latest stored parameters.
     let stored_d_param = storage
         .get_latest_d_parameter()
@@ -934,213 +858,230 @@ async fn make_system_transaction(
 #[cfg(test)]
 mod tests {
     use crate::{
-        application::node_blocks,
+        application::{
+            determine_system_parameters_change, get_next_block, index_block, metrics::Metrics,
+        },
         domain::{
-            BlockRef,
-            node::{self, Node},
+            Block, BlockRef, DParameter, DustRegistrationEvent, LedgerState,
+            SystemParametersChange, TermsAndConditions, Transaction, node, storage::Storage,
         },
     };
     use fake::{Fake, Faker};
-    use futures::{Stream, StreamExt, TryStreamExt, stream};
+    use futures::stream;
     use indexer_common::{
-        domain::{BlockHash, ByteArray, ByteVec, ProtocolVersion, ledger::ZswapMerkleTreeRoot},
+        domain::{
+            BlockHash, ByteArray, LedgerVersion, Message, ProtocolVersion, Publisher,
+            SerializedLedgerStateKey, ledger::ZswapMerkleTreeRoot,
+        },
         error::BoxError,
+        testing::{NETWORK_ID, init_ledger_db},
     };
+    use parking_lot::RwLock;
     use std::{
         convert::Infallible,
-        sync::{Arc, LazyLock, Mutex},
+        num::NonZeroUsize,
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
     };
     use thiserror::Error;
 
     #[tokio::test]
-    async fn test_blocks() -> Result<(), BoxError> {
-        let blocks = node_blocks(None, MockNode);
-        let heights = blocks
-            .take(4)
-            .map_ok(|block| block.height)
-            .try_collect::<Vec<_>>()
-            .await?;
-        assert_eq!(heights, vec![0, 1, 2, 3]);
-
-        Ok(())
-    }
-
-    /// A block that cannot be built - e.g. because building it looks up a contract state the node
-    /// does not have - must not be able to halt ingestion for good. This is what makes such a
-    /// block fatal: it is neither skipped nor tolerated, and the next subscription resumes at the
-    /// last good block, so the very same block is fetched again after a restart.
-    #[tokio::test]
-    async fn test_failing_block_is_not_skipped_and_refetched() -> Result<(), BoxError> {
-        let subscriptions = Arc::new(Mutex::new(Vec::new()));
-        let node = FailingNode {
-            subscriptions: subscriptions.clone(),
+    async fn test_system_parameters_carried() -> Result<(), BoxError> {
+        let stored = DParameter {
+            num_permissioned_candidates: 3,
+            num_registered_candidates: 2,
         };
+        let changed = DParameter {
+            num_permissioned_candidates: 4,
+            ..stored.clone()
+        };
+        let mut storage = SystemParametersStorage {
+            d_parameter: Some(stored.clone()),
+            reads: Default::default(),
+        };
+        let block = domain_block(block(5, None));
 
-        let blocks = node_blocks(None, node).take(4).collect::<Vec<_>>().await;
+        // Not carried: unchanged, without reading storage.
+        let change = determine_system_parameters_change(&block, None, None, &mut storage).await?;
+        assert!(change.is_none());
+        assert_eq!(storage.reads.load(Ordering::SeqCst), 0);
 
-        assert!(matches!(&blocks[0], Ok(block) if block.height == 0));
-        assert!(matches!(&blocks[1], Ok(block) if block.height == 1));
-        assert!(blocks[2].is_err());
-        assert!(blocks[3].is_err());
+        // Carried but equal to the stored values: unchanged.
+        let change =
+            determine_system_parameters_change(&block, Some(stored), None, &mut storage).await?;
+        assert!(change.is_none());
 
-        let subscriptions = subscriptions.lock().expect("subscriptions not poisoned");
-        assert_eq!(subscriptions.len(), 2);
-        assert!(subscriptions[0].is_none());
-        let resumed_at = subscriptions[1].expect("resubscribed after the last successful block");
-        assert_eq!(resumed_at.height, 1);
-        assert_eq!(resumed_at.hash, BLOCK_1_HASH);
+        // Carried and different: a change at this very block.
+        let change =
+            determine_system_parameters_change(&block, Some(changed.clone()), None, &mut storage)
+                .await?
+                .expect("D-Parameter change");
+        assert_eq!(change.block_height, 5);
+        assert_eq!(change.d_parameter, Some(changed));
 
         Ok(())
     }
 
-    #[derive(Clone)]
-    struct MockNode;
+    #[tokio::test]
+    async fn test_ledger_state_root_checked_on_every_block() -> Result<(), BoxError> {
+        let _ledger_db = init_ledger_db().await?;
+        let network_id = NETWORK_ID.try_into()?;
+        let ledger_state = LedgerState::new(network_id, LedgerVersion::V8)?;
+        let block = block(1, Some(vec![7; 32].into()));
 
-    impl Node for MockNode {
-        type Error = Infallible;
+        let result = index_block(
+            10,
+            5,
+            block,
+            ledger_state,
+            &NETWORK_ID.try_into()?,
+            &Arc::new(RwLock::new(None)),
+            &mut false,
+            &mut 0,
+            &mut SystemParametersStorage::default(),
+            &NoPublisher,
+            &Metrics::new(None, 0, (0, 0, 0)),
+        )
+        .await;
 
-        async fn highest_blocks(
-            &self,
-        ) -> Result<impl Stream<Item = Result<BlockRef, Self::Error>>, Self::Error> {
-            Ok(stream::empty())
-        }
+        let error = result.expect_err("a wrong ledger state root fails indexing");
+        assert!(
+            format!("{error:#}").contains("ledger state root mismatch"),
+            "{error:#}"
+        );
 
-        fn finalized_blocks(
-            &mut self,
-            _highest_block: Option<BlockRef>,
-        ) -> impl Stream<Item = Result<node::Block, Self::Error>> {
-            stream::iter([&*BLOCK_0, &*BLOCK_1, &*BLOCK_2, &*BLOCK_3])
-                .map(|block| Ok(block.to_owned()))
-        }
+        Ok(())
+    }
 
-        async fn fetch_genesis_ledger_state(&self) -> Result<ByteVec, Self::Error> {
-            Ok(Default::default())
+    /// An error from the block stream is returned as an error, so indexing stops at the failing
+    /// block rather than taking the next one in its place.
+    #[tokio::test]
+    async fn test_block_stream_error_propagates() -> Result<(), BoxError> {
+        let mut blocks = stream::iter([Ok(block(0, None)), Err(BlockError), Ok(block(2, None))]);
+
+        let first = get_next_block(&mut blocks).await?;
+        assert_eq!(first.height, 0);
+        assert!(get_next_block(&mut blocks).await.is_err());
+
+        Ok(())
+    }
+
+    fn block(
+        height: u64,
+        ledger_state_root: Option<indexer_common::domain::ByteVec>,
+    ) -> node::Block {
+        node::Block {
+            hash: ByteArray([height as u8 + 1; 32]),
+            height,
+            protocol_version: *PROTOCOL_VERSION,
+            parent_hash: if height == 0 {
+                ZERO_HASH
+            } else {
+                ByteArray([height as u8; 32])
+            },
+            author: Default::default(),
+            timestamp: Default::default(),
+            zswap_merkle_tree_root: ZswapMerkleTreeRoot::V8(Faker.fake()),
+            ledger_state_root,
+            transactions: Default::default(),
+            dust_registration_events: Default::default(),
+            bridge_events: Default::default(),
+            d_parameter: None,
+            terms_and_conditions: None,
+            genesis_ledger_state: None,
         }
     }
 
-    static BLOCK_0: LazyLock<node::Block> = LazyLock::new(|| node::Block {
-        hash: BLOCK_0_HASH,
-        height: 0,
-        protocol_version: *PROTOCOL_VERSION,
-        parent_hash: ZERO_HASH,
-        author: Default::default(),
-        timestamp: Default::default(),
-        zswap_merkle_tree_root: ZswapMerkleTreeRoot::V8(Faker.fake()),
-        ledger_state_root: None,
-        transactions: Default::default(),
-        dust_registration_events: Default::default(),
-        bridge_events: Default::default(),
-        d_parameter: None,
-        terms_and_conditions: None,
-        genesis_ledger_state: None,
-    });
-
-    static BLOCK_1: LazyLock<node::Block> = LazyLock::new(|| node::Block {
-        hash: BLOCK_1_HASH,
-        height: 1,
-        protocol_version: *PROTOCOL_VERSION,
-        parent_hash: BLOCK_0_HASH,
-        author: Default::default(),
-        timestamp: Default::default(),
-        zswap_merkle_tree_root: ZswapMerkleTreeRoot::V8(Faker.fake()),
-        ledger_state_root: None,
-        transactions: Default::default(),
-        dust_registration_events: Default::default(),
-        bridge_events: Default::default(),
-        d_parameter: None,
-        terms_and_conditions: None,
-        genesis_ledger_state: None,
-    });
-
-    static BLOCK_2: LazyLock<node::Block> = LazyLock::new(|| node::Block {
-        hash: BLOCK_2_HASH,
-        height: 2,
-        protocol_version: *PROTOCOL_VERSION,
-        parent_hash: BLOCK_1_HASH,
-        author: Default::default(),
-        timestamp: Default::default(),
-        zswap_merkle_tree_root: ZswapMerkleTreeRoot::V8(Faker.fake()),
-        ledger_state_root: None,
-        transactions: Default::default(),
-        dust_registration_events: Default::default(),
-        bridge_events: Default::default(),
-        d_parameter: None,
-        terms_and_conditions: None,
-        genesis_ledger_state: None,
-    });
-
-    static BLOCK_3: LazyLock<node::Block> = LazyLock::new(|| node::Block {
-        hash: BLOCK_3_HASH,
-        height: 3,
-        protocol_version: *PROTOCOL_VERSION,
-        parent_hash: BLOCK_2_HASH,
-        author: Default::default(),
-        timestamp: Default::default(),
-        zswap_merkle_tree_root: ZswapMerkleTreeRoot::V8(Faker.fake()),
-        ledger_state_root: None,
-        transactions: Default::default(),
-        dust_registration_events: Default::default(),
-        bridge_events: Default::default(),
-        d_parameter: None,
-        terms_and_conditions: None,
-        genesis_ledger_state: None,
-    });
+    fn domain_block(block: node::Block) -> Block {
+        let (block, _) = <(Block, _)>::try_from(block).expect("block converts");
+        block
+    }
 
     const ZERO_HASH: BlockHash = ByteArray([0; 32]);
 
-    const BLOCK_0_HASH: BlockHash = ByteArray([1; 32]);
-    const BLOCK_1_HASH: BlockHash = ByteArray([2; 32]);
-    const BLOCK_2_HASH: BlockHash = ByteArray([3; 32]);
-    const BLOCK_3_HASH: BlockHash = ByteArray([3; 32]);
-
     #[allow(clippy::zero_prefixed_literal)]
-    static PROTOCOL_VERSION: LazyLock<ProtocolVersion> =
-        LazyLock::new(|| 0_022_000_u32.try_into().unwrap());
-
-    /// A node which fails to build the block at height 2, recording what each subscription starts
-    /// after.
-    #[derive(Clone)]
-    struct FailingNode {
-        subscriptions: Arc<Mutex<Vec<Option<BlockRef>>>>,
-    }
-
-    impl Node for FailingNode {
-        type Error = FailingNodeError;
-
-        async fn highest_blocks(
-            &self,
-        ) -> Result<impl Stream<Item = Result<BlockRef, Self::Error>>, Self::Error> {
-            Ok(stream::empty())
-        }
-
-        fn finalized_blocks(
-            &mut self,
-            after: Option<BlockRef>,
-        ) -> impl Stream<Item = Result<node::Block, Self::Error>> {
-            self.subscriptions
-                .lock()
-                .expect("subscriptions not poisoned")
-                .push(after);
-
-            let blocks = match after {
-                None => vec![
-                    Ok(BLOCK_0.to_owned()),
-                    Ok(BLOCK_1.to_owned()),
-                    Err(FailingNodeError),
-                ],
-
-                Some(_) => vec![Err(FailingNodeError)],
-            };
-
-            stream::iter(blocks)
-        }
-
-        async fn fetch_genesis_ledger_state(&self) -> Result<ByteVec, Self::Error> {
-            Ok(Default::default())
-        }
-    }
+    static PROTOCOL_VERSION: std::sync::LazyLock<ProtocolVersion> =
+        std::sync::LazyLock::new(|| 0_022_000_u32.try_into().unwrap());
 
     #[derive(Debug, Error)]
-    #[error("cannot build block")]
-    struct FailingNodeError;
+    #[error("cannot source block")]
+    struct BlockError;
+
+    /// Storage holding only system parameters, counting their reads.
+    #[derive(Clone, Default)]
+    struct SystemParametersStorage {
+        d_parameter: Option<DParameter>,
+        reads: Arc<AtomicUsize>,
+    }
+
+    impl Storage for SystemParametersStorage {
+        async fn save_block(
+            &mut self,
+            _block: &Block,
+            _transactions: &[Transaction],
+            _dust_registration_events: &[DustRegistrationEvent],
+            _ledger_state_key: &SerializedLedgerStateKey,
+            _system_parameters_change: Option<&SystemParametersChange>,
+        ) -> Result<Option<u64>, sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn get_highest_block(
+            &self,
+        ) -> Result<Option<(BlockRef, ProtocolVersion, SerializedLedgerStateKey)>, sqlx::Error>
+        {
+            unimplemented!()
+        }
+
+        async fn get_highest_block_timestamp(&self) -> Result<Option<u64>, sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn get_newest_ledger_state_keys(
+            &self,
+            _limit: NonZeroUsize,
+        ) -> Result<Vec<(ProtocolVersion, SerializedLedgerStateKey)>, sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn get_transaction_count(&self) -> Result<u64, sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn get_contract_action_count(&self) -> Result<(u64, u64, u64), sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn contract_actions_without_state_keys_exist(&self) -> Result<bool, sqlx::Error> {
+            unimplemented!()
+        }
+
+        async fn get_latest_d_parameter(&self) -> Result<Option<DParameter>, sqlx::Error> {
+            self.reads.fetch_add(1, Ordering::SeqCst);
+            Ok(self.d_parameter.clone())
+        }
+
+        async fn get_latest_terms_and_conditions(
+            &self,
+        ) -> Result<Option<TermsAndConditions>, sqlx::Error> {
+            self.reads.fetch_add(1, Ordering::SeqCst);
+            Ok(None)
+        }
+    }
+
+    #[derive(Clone)]
+    struct NoPublisher;
+
+    impl Publisher for NoPublisher {
+        type Error = Infallible;
+
+        async fn publish<T>(&self, _message: &T) -> Result<(), Self::Error>
+        where
+            T: Message + Send + Sync,
+        {
+            Ok(())
+        }
+    }
 }

@@ -14,13 +14,12 @@
 use crate::{
     domain::{DParameter, DustRegistrationEvent, TermsAndConditions},
     infra::subxt_node::{
-        OnlineClientAtBlock, SubxtNodeError,
+        SubxtNodeError,
         runtimes::{
             BlockDetails, Transaction, decode_call_result, decode_storage_key, decode_storage_value,
         },
     },
 };
-use futures::TryStreamExt;
 use indexer_common::domain::{
     ByteVec, DustPublicKey, TermsAndConditionsHash,
     bridge::{BridgeEvent, BridgeRecipient},
@@ -30,7 +29,6 @@ use parity_scale_codec::Decode;
 use subxt::{
     SubstrateConfig,
     client::{ClientAtBlock, OfflineClientAtBlockT},
-    error::RuntimeApiError,
 };
 
 pub async fn decode_block_details<C: OfflineClientAtBlockT<SubstrateConfig>>(
@@ -47,7 +45,6 @@ pub async fn decode_block_details<C: OfflineClientAtBlockT<SubstrateConfig>>(
             pallet_midnight_system::pallet::{
                 Call::send_mn_system_transaction, Event::SystemTransactionApplied,
             },
-            pallet_partner_chains_session::pallet::Event::NewSession,
         },
         timestamp,
     };
@@ -91,7 +88,6 @@ pub async fn decode_block_details<C: OfflineClientAtBlockT<SubstrateConfig>>(
         })
         .collect::<Vec<_>>();
 
-    let mut new_session = false;
     let mut dust_registration_events = vec![];
     let mut system_transactions_from_events = vec![];
     let mut bridge_events = vec![];
@@ -105,10 +101,6 @@ pub async fn decode_block_details<C: OfflineClientAtBlockT<SubstrateConfig>>(
             .map_err(|error| SubxtNodeError::DecodeEvent(error.into()))?;
 
         match event {
-            Event::Session(NewSession { .. }) => {
-                new_session = true;
-            }
-
             // System transaction created by the node (not from extrinsics).
             // These come from inherents which execute BEFORE regular transactions,
             // so they must be prepended to maintain correct execution order.
@@ -240,67 +232,16 @@ pub async fn decode_block_details<C: OfflineClientAtBlockT<SubstrateConfig>>(
 
     Ok(BlockDetails {
         timestamp,
-        new_session,
         transactions,
         dust_registration_events,
         bridge_events,
     })
 }
 
-pub async fn fetch_authorities(
-    block: &OnlineClientAtBlock,
-) -> Result<Vec<[u8; 32]>, SubxtNodeError> {
-    let authorities = block
-        .storage()
-        .entry(super::runtime_2_1_0::storage().aura().authorities())
-        .map_err(|error| SubxtNodeError::FetchAuthorities(error.into()))?
-        .fetch(())
-        .await
-        .map_err(|error| SubxtNodeError::FetchAuthorities(error.into()))?
-        .decode()
-        .map_err(|error| SubxtNodeError::DecodeAuthorities(error.into()))?;
-    let authorities = authorities.0.into_iter().map(|a| a.0).collect();
-
-    Ok(authorities)
-}
-
 pub fn decode_slot(mut slot: &[u8]) -> Result<u64, SubxtNodeError> {
     let slot = super::runtime_2_1_0::runtime_types::sp_consensus_slots::Slot::decode(&mut slot)
         .map(|x| x.0)?;
     Ok(slot)
-}
-
-pub async fn get_zswap_merkle_tree_root(
-    block: &OnlineClientAtBlock,
-) -> Result<Vec<u8>, SubxtNodeError> {
-    let get_zswap_state_root = super::runtime_2_1_0::runtime_apis()
-        .midnight_runtime_api()
-        .get_zswap_state_root();
-
-    let root = block.runtime_apis().call(&get_zswap_state_root).await;
-
-    let root = match root {
-        // Retry with online client at parent block if codegen is incompatible which can happen for
-        // runtime updates, because subxt uses next metadata whereas Node uses previous metadata.
-        Err(RuntimeApiError::IncompatibleCodegen) => {
-            let parent_hash = block
-                .block_header()
-                .await
-                .map_err(|error| SubxtNodeError::GetBlockHeader(error.into()))?
-                .parent_hash;
-            let block = block
-                .online_client()
-                .at_block(parent_hash)
-                .await
-                .map_err(|error| SubxtNodeError::GetOnlineClientAt(parent_hash, error.into()))?;
-            block.runtime_apis().call(get_zswap_state_root).await
-        }
-
-        other => other,
-    };
-
-    root.map_err(|error| SubxtNodeError::GetZswapStateRoot(error.into()))?
-        .map_err(|error| SubxtNodeError::GetZswapStateRoot(format!("{error:?}").into()))
 }
 
 pub fn decode_zswap_merkle_tree_root<C: OfflineClientAtBlockT<SubstrateConfig>>(
@@ -314,23 +255,6 @@ pub fn decode_zswap_merkle_tree_root<C: OfflineClientAtBlockT<SubstrateConfig>>(
     decode_call_result(client, &get_zswap_state_root, result)
         .map_err(SubxtNodeError::GetZswapStateRoot)?
         .map_err(|error| SubxtNodeError::GetZswapStateRoot(format!("{error:?}").into()))
-}
-
-pub async fn get_ledger_state_root(
-    block: &OnlineClientAtBlock,
-) -> Result<Option<Vec<u8>>, SubxtNodeError> {
-    let get_ledger_state_root = super::runtime_2_1_0::runtime_apis()
-        .midnight_runtime_api()
-        .get_ledger_state_root();
-
-    let root = block
-        .runtime_apis()
-        .call(get_ledger_state_root)
-        .await
-        .map_err(|error| SubxtNodeError::GetLedgerStateRoot(error.into()))?
-        .map_err(|error| SubxtNodeError::GetLedgerStateRoot(format!("{error:?}").into()))?;
-
-    Ok(Some(root))
 }
 
 pub fn decode_ledger_state_root<C: OfflineClientAtBlockT<SubstrateConfig>>(
@@ -348,23 +272,6 @@ pub fn decode_ledger_state_root<C: OfflineClientAtBlockT<SubstrateConfig>>(
     Ok(Some(root))
 }
 
-pub async fn get_d_parameter(block: &OnlineClientAtBlock) -> Result<DParameter, SubxtNodeError> {
-    let get_d_param = super::runtime_2_1_0::runtime_apis()
-        .system_parameters_api()
-        .get_d_parameter();
-
-    let d_parameter = block
-        .runtime_apis()
-        .call(get_d_param)
-        .await
-        .map_err(|error| SubxtNodeError::GetDParameter(error.into()))?;
-
-    Ok(DParameter {
-        num_permissioned_candidates: d_parameter.num_permissioned_candidates,
-        num_registered_candidates: d_parameter.num_registered_candidates,
-    })
-}
-
 pub fn decode_d_parameter<C: OfflineClientAtBlockT<SubstrateConfig>>(
     client: &ClientAtBlock<SubstrateConfig, C>,
     result: &[u8],
@@ -380,58 +287,6 @@ pub fn decode_d_parameter<C: OfflineClientAtBlockT<SubstrateConfig>>(
         num_permissioned_candidates: d_parameter.num_permissioned_candidates,
         num_registered_candidates: d_parameter.num_registered_candidates,
     })
-}
-
-pub async fn fetch_genesis_cnight_registrations(
-    block: &OnlineClientAtBlock,
-) -> Result<Vec<DustRegistrationEvent>, SubxtNodeError> {
-    // In ledger 9 the cNight observation pallet stores registrations as a
-    // double map `(cardano_reward_address, utxo_id) -> dust_public_key`
-    // (was a single map to `Vec<MappingEntry>` in ledger 8). Each entry is one
-    // registration: the two keys carry the Cardano address and the UTXO id, the
-    // value carries the DUST public key.
-    let query = super::runtime_2_1_0::storage()
-        .c_night_observation()
-        .mapping();
-    block
-        .storage()
-        .entry(query)
-        .map_err(|error| SubxtNodeError::FetchGenesisCnightRegistrations(error.into()))?
-        .iter(())
-        .await
-        .map_err(|error| SubxtNodeError::FetchGenesisCnightRegistrations(error.into()))?
-        .try_collect::<Vec<_>>()
-        .await
-        .map_err(|error| SubxtNodeError::FetchGenesisCnightRegistrations(error.into()))?
-        .into_iter()
-        .try_fold(vec![], |mut events, entry| {
-            let (cardano_reward_address, utxo_id) =
-                entry.key().and_then(|key| key.decode()).map_err(|error| {
-                    SubxtNodeError::DecodeGenesisCnightRegistrationKey(error.into())
-                })?;
-            let dust_public_key = entry
-                .value()
-                .decode()
-                .map_err(|error| SubxtNodeError::DecodeGenesisCnightRegistrations(error.into()))?;
-
-            let cardano_stake_key = cardano_reward_address.0.into();
-            let dust_address = DustPublicKey::from(dust_public_key.0.0);
-            let utxo_index = utxo_id.index.0.into();
-            let utxo_id = utxo_id.tx_hash.0.as_ref().into();
-
-            events.push(DustRegistrationEvent::Registration {
-                cardano_stake_key,
-                dust_address: dust_address.clone(),
-            });
-            events.push(DustRegistrationEvent::MappingAdded {
-                cardano_stake_key,
-                dust_address,
-                utxo_id,
-                utxo_index,
-            });
-
-            Ok(events)
-        })
 }
 
 pub fn decode_genesis_cnight_registrations<C: OfflineClientAtBlockT<SubstrateConfig>>(
@@ -467,26 +322,6 @@ pub fn decode_genesis_cnight_registrations<C: OfflineClientAtBlockT<SubstrateCon
 
             Ok(events)
         })
-}
-
-pub async fn get_terms_and_conditions(
-    block: &OnlineClientAtBlock,
-) -> Result<Option<TermsAndConditions>, SubxtNodeError> {
-    let get_tc = super::runtime_2_1_0::runtime_apis()
-        .system_parameters_api()
-        .get_terms_and_conditions();
-
-    let tc = block
-        .runtime_apis()
-        .call(get_tc)
-        .await
-        .map_err(|error| SubxtNodeError::GetTermsAndConditions(error.into()))?;
-
-    Ok(tc.map(|response| {
-        let hash = TermsAndConditionsHash::from(response.hash.0);
-        let url = String::from_utf8_lossy(&response.url).to_string();
-        TermsAndConditions { hash, url }
-    }))
 }
 
 pub fn decode_terms_and_conditions<C: OfflineClientAtBlockT<SubstrateConfig>>(
