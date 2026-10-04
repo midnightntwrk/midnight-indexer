@@ -19,10 +19,7 @@ use crate::{
     infra::subxt_node::rpc::{
         self, Batch, CallResult, Counters, NodeRpc, ReconnectPolicy, Transport, WsTransport, method,
     },
-    pipeline::{
-        metric,
-        sourcing::{emit::Emission, finalized::follow_finalized},
-    },
+    pipeline::{metric, sourcing::finalized::follow_finalized},
 };
 use async_stream::stream;
 use futures::{
@@ -377,16 +374,39 @@ struct Producer<T> {
     end: Option<u64>,
 }
 
+/// The producer's progress: the last block emitted, and the verified blocks Verify holds back
+/// until they are confirmed.
+#[derive(Default)]
+struct Progress {
+    emitted: Option<BlockRef>,
+    held: Vec<Block>,
+}
+
+impl Progress {
+    /// The hash the next chunk's first block must have as its parent.
+    fn last_hash(&self) -> Option<BlockHash> {
+        self.held
+            .last()
+            .map(Block::hash)
+            .or(self.emitted.map(|emitted| emitted.hash))
+    }
+
+    /// The height of the first block not yet emitted.
+    fn next_height(&self) -> u64 {
+        self.emitted.map(|emitted| emitted.height + 1).unwrap_or(0)
+    }
+}
+
 impl<T: Transport> Producer<T> {
     async fn produce(mut self, mut follow_error: oneshot::Receiver<Error>) {
-        let mut emission = Emission {
+        let mut progress = Progress {
             emitted: self.start,
             held: vec![],
         };
 
         loop {
             match self
-                .produce_until_error(&mut emission, &mut follow_error)
+                .produce_until_error(&mut progress, &mut follow_error)
                 .await
             {
                 Ok(()) => return,
@@ -399,7 +419,7 @@ impl<T: Transport> Producer<T> {
                     }
 
                     // Resume after the last block emitted.
-                    emission.held.clear();
+                    progress.held.clear();
                     sleep(Duration::from_millis(100)).await;
                 }
             }
@@ -408,18 +428,19 @@ impl<T: Transport> Producer<T> {
 
     async fn produce_until_error(
         &mut self,
-        emission: &mut Emission,
+        progress: &mut Progress,
         follow_error: &mut oneshot::Receiver<Error>,
     ) -> Result<(), Error> {
         let genesis_hash = self.genesis_hash().await?;
-        let run_start = emission.next_height();
+        let run_start = progress.next_height();
         let mut next = run_start;
         let mut in_progress = FuturesOrdered::new();
 
         loop {
             if self.end.is_some_and(|end| next > end) && in_progress.is_empty() {
-                let held = std::mem::take(&mut emission.held);
-                return self.emit(emission, held).await;
+                let held = std::mem::take(&mut progress.held);
+                self.emit(progress, held).await;
+                return Ok(());
             }
 
             // Plan as many chunks as allowed and possible.
@@ -435,8 +456,10 @@ impl<T: Transport> Producer<T> {
             select! {
                 Some(sourced) = in_progress.next() => {
                     let (planned, chunk) = sourced?;
-                    self.verify_and_emit(emission, planned, chunk, genesis_hash, run_start)
+                    let confirmed = self
+                        .verify(progress, planned, chunk, genesis_hash, run_start)
                         .await?;
+                    self.emit(progress, confirmed).await;
                 }
                 changed = self.finalized.changed(), if in_progress.is_empty() => {
                     if changed.is_err() {

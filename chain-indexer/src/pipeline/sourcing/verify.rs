@@ -12,15 +12,15 @@
 // limitations under the License.
 
 //! The Verify stage: check that a chunk links to the blocks before it, else re-source it from
-//! hashes walked back from the finalized tip.
+//! hashes walked back from the finalized tip, and release the blocks that are confirmed.
 
 use crate::{
     infra::subxt_node::rpc::{Batch, Transport},
     pipeline::{
         metric::{self, Timer},
         sourcing::{
-            Block, Chunk, Error, Producer, chunk::Planned, decode_header, emit::Emission,
-            header_bytes, source::source,
+            Block, Chunk, Error, Producer, Progress, chunk::Planned, decode_header, header_bytes,
+            source::source,
         },
     },
 };
@@ -29,16 +29,18 @@ use log::warn;
 use std::ops::RangeInclusive;
 
 impl<T: Transport> Producer<T> {
-    pub(super) async fn verify_and_emit(
-        &mut self,
-        emission: &mut Emission,
+    /// Verify a sourced chunk against the blocks before it, re-sourcing it if it does not link,
+    /// and return the blocks now confirmed; the rest are held back in `progress`.
+    pub(super) async fn verify(
+        &self,
+        progress: &mut Progress,
         planned: Planned,
         chunk: Chunk,
         genesis_hash: Option<BlockHash>,
         run_start: u64,
-    ) -> Result<(), Error> {
-        let timer = Timer::start(metric::VERIFY_DURATION);
-        let expected_parent = emission.last_hash();
+    ) -> Result<Chunk, Error> {
+        let _timer = Timer::start(metric::VERIFY_DURATION);
+        let expected_parent = progress.last_hash();
         let linked = links(&chunk, &planned.spec.heights, expected_parent, genesis_hash);
         let anchored = planned
             .anchor
@@ -48,39 +50,38 @@ impl<T: Transport> Producer<T> {
             chunk
         } else {
             // Re-source the held blocks and this chunk from hashes walked back from the tip.
-            let held_start = emission.held.first().map(Block::height);
+            let held_start = progress.held.first().map(Block::height);
             let start = held_start.unwrap_or(*planned.spec.heights.start());
             let end = *planned.spec.heights.end();
             warn!(start, end; "block hashes do not link, walking parent hashes from the tip");
 
-            emission.held.clear();
+            progress.held.clear();
             let chunk = self.walk_and_source(start, end, run_start).await?;
-            let expected_parent = emission.emitted.map(|emitted| emitted.hash);
+            let expected_parent = progress.emitted.map(|emitted| emitted.hash);
             if !links(&chunk, &(start..=end), expected_parent, genesis_hash) {
                 return Err(Error::Unlinked(start));
             }
             chunk
         };
 
-        emission.held.extend(chunk);
+        progress.held.extend(chunk);
 
-        let emit = if planned.spec.near {
+        let confirmed = if planned.spec.near {
             // Near blocks wait until they link to the finalized tip.
             if planned.anchor.is_some() {
-                std::mem::take(&mut emission.held)
+                std::mem::take(&mut progress.held)
             } else {
                 vec![]
             }
         } else {
             // Deep blocks wait for their child to confirm them: all but the last.
-            let last = emission.held.pop();
-            let emit = std::mem::take(&mut emission.held);
-            emission.held.extend(last);
-            emit
+            let last = progress.held.pop();
+            let confirmed = std::mem::take(&mut progress.held);
+            progress.held.extend(last);
+            confirmed
         };
-        drop(timer);
 
-        self.emit(emission, emit).await
+        Ok(confirmed)
     }
 
     /// Source the blocks at heights `start..=end`, with hashes from walking parent hashes back from

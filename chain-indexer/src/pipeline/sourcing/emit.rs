@@ -18,55 +18,27 @@ use crate::{
     infra::subxt_node::rpc::Transport,
     pipeline::{
         metric::{self, Timer},
-        sourcing::{Block, Chunk, Error, Producer},
+        sourcing::{Chunk, Producer, Progress},
     },
 };
-use indexer_common::domain::BlockHash;
 use metrics::gauge;
 
-/// Emission state: the last block emitted, and the verified blocks held back.
-#[derive(Default)]
-pub(super) struct Emission {
-    pub(super) emitted: Option<BlockRef>,
-    pub(super) held: Vec<Block>,
-}
-
-impl Emission {
-    /// The hash the next chunk's first block must have as its parent.
-    pub(super) fn last_hash(&self) -> Option<BlockHash> {
-        self.held
-            .last()
-            .map(Block::hash)
-            .or(self.emitted.map(|emitted| emitted.hash))
-    }
-
-    /// The height of the first block not yet emitted.
-    pub(super) fn next_height(&self) -> u64 {
-        self.emitted.map(|emitted| emitted.height + 1).unwrap_or(0)
-    }
-}
-
 impl<T: Transport> Producer<T> {
-    pub(super) async fn emit(
-        &mut self,
-        emission: &mut Emission,
-        chunk: Chunk,
-    ) -> Result<(), Error> {
+    /// Send the blocks downstream, and record the last as emitted.
+    pub(super) async fn emit(&self, progress: &mut Progress, chunk: Chunk) {
         let Some(last) = chunk.last() else {
-            return Ok(());
+            return;
         };
 
-        emission.emitted = Some(BlockRef {
+        progress.emitted = Some(BlockRef {
             hash: last.hash(),
             height: last.height(),
         });
         // A closed channel means the stream is gone; the task is about to be aborted.
         let _timer = Timer::start(metric::EMIT_DURATION);
         let _ = self.chunks.send(Ok(chunk)).await;
-        gauge!(metric::EMITTED_HEIGHT).set(emission.next_height().saturating_sub(1) as f64);
+        gauge!(metric::EMITTED_HEIGHT).set(progress.next_height().saturating_sub(1) as f64);
         gauge!(metric::BUFFERED_CHUNK_COUNT)
             .set((self.chunks.max_capacity() - self.chunks.capacity()) as f64);
-
-        Ok(())
     }
 }
