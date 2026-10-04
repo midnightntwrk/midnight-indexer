@@ -1609,10 +1609,7 @@ fn links(
 #[cfg(test)]
 mod tests {
     use crate::{
-        infra::subxt_node::{
-            fake_node::FakeNode,
-            rpc::{Call, NodeRpc, ReconnectPolicy, method},
-        },
+        infra::subxt_node::rpc::{Call, NodeRpc, ReconnectPolicy, method, testing::FakeNode},
         pipeline::source::{Finalized, follow_finalized},
     };
     use indexer_common::domain::{BlockHash, ByteArray};
@@ -1660,7 +1657,7 @@ mod tests {
         })
     }
 
-    fn node_rpc(node: FakeNode) -> NodeRpc<FakeNode> {
+    fn node_rpc(node: Arc<FakeNode>) -> NodeRpc<Arc<FakeNode>> {
         NodeRpc::new(
             node,
             NonZeroUsize::new(64).unwrap(),
@@ -1698,7 +1695,7 @@ mod tests {
             json!({ "event": "newBlock", "blockHash": hex(4), "parentBlockHash": hex(3) }),
             json!({ "event": "finalized", "finalizedBlockHashes": [hex(3), hex(4)], "prunedBlockHashes": [] }),
         ]]);
-        let rpc = node_rpc(node);
+        let rpc = node_rpc(Arc::new(node));
         let (sender, mut receiver) = watch::channel(None);
 
         let task =
@@ -1737,7 +1734,7 @@ mod tests {
             json!({ "event": "finalized", "finalizedBlockHashes": [hex(2), hex(3)], "prunedBlockHashes": [] }),
             json!({ "event": "finalized", "finalizedBlockHashes": [hex(4)], "prunedBlockHashes": [] }),
         ]]);
-        let rpc = node_rpc(node);
+        let rpc = node_rpc(Arc::new(node));
         let (sender, mut receiver) = watch::channel(None);
 
         let task =
@@ -1755,13 +1752,13 @@ mod tests {
     #[tokio::test]
     async fn test_stop_resubscribes() {
         let calls = Arc::new(Mutex::new(vec![]));
-        let node = node(calls).with_subscriptions(vec![
+        let node = Arc::new(node(calls).with_subscriptions(vec![
             vec![
                 json!({ "event": "initialized", "finalizedBlockHashes": [hex(1)] }),
                 json!({ "event": "stop" }),
             ],
             vec![json!({ "event": "initialized", "finalizedBlockHashes": [hex(2)] })],
-        ]);
+        ]));
         let rpc = node_rpc(node.clone());
         let (sender, mut receiver) = watch::channel(None);
 
@@ -1781,9 +1778,11 @@ mod tests {
         let new_blocks = (10..20)
             .map(|n| json!({ "event": "newBlock", "blockHash": hex(n), "parentBlockHash": hex(n - 1) }))
             .collect::<Vec<_>>();
-        let node = node(calls)
-            .with_notification_interval(Duration::from_millis(20))
-            .with_subscriptions(vec![new_blocks]);
+        let node = Arc::new(
+            node(calls)
+                .with_notification_interval(Duration::from_millis(20))
+                .with_subscriptions(vec![new_blocks]),
+        );
         let rpc = node_rpc(node.clone());
         let (sender, _receiver) = watch::channel(None);
 
@@ -1808,9 +1807,8 @@ mod tests {
 mod source_tests {
     use crate::{
         domain::BlockRef,
-        infra::subxt_node::{
-            fake_node::FakeNode,
-            rpc::{Call, CallError, CallResult, NodeRpc, ReconnectPolicy, method},
+        infra::subxt_node::rpc::{
+            Call, CallError, CallResult, NodeRpc, ReconnectPolicy, method, testing::FakeNode,
         },
         pipeline::source::{
             AUTHORITY_SET_ITEMS, Block, CNIGHT_MAPPINGS_ITEMS, Chunk, Config, Error,
@@ -2082,7 +2080,11 @@ mod source_tests {
         }
     }
 
-    fn node_rpc(node: FakeNode, batch_size: usize, in_flight: usize) -> NodeRpc<FakeNode> {
+    fn node_rpc(
+        node: Arc<FakeNode>,
+        batch_size: usize,
+        in_flight: usize,
+    ) -> NodeRpc<Arc<FakeNode>> {
         NodeRpc::new(
             node,
             size(batch_size),
@@ -2103,7 +2105,11 @@ mod source_tests {
     }
 
     /// Run the pipeline to `end` and collect its blocks.
-    async fn run_to_end(source: &Source<FakeNode>, start: Option<BlockRef>, end: u64) -> Chunk {
+    async fn run_to_end(
+        source: &Source<Arc<FakeNode>>,
+        start: Option<BlockRef>,
+        end: u64,
+    ) -> Chunk {
         let (chunks, _finalized) = source.run(start, Some(end));
         timeout(Duration::from_secs(10), chunks.try_concat())
             .await
@@ -2131,7 +2137,7 @@ mod source_tests {
     #[tokio::test]
     async fn test_resolve() {
         let (_, node) = Chain::default().node();
-        let rpc = node_rpc(node, 64, 4);
+        let rpc = node_rpc(Arc::new(node), 64, 4);
 
         let resolved = resolve(&rpc, 999_998..=1_000_001)
             .await
@@ -2146,7 +2152,7 @@ mod source_tests {
     #[tokio::test]
     async fn test_source_from_genesis() {
         let (chain, node) = Chain::default().node();
-        let rpc = node_rpc(node, 64, 4);
+        let rpc = node_rpc(Arc::new(node), 64, 4);
         let metadata = MetadataCache::default();
 
         let chunk = source(&rpc, &metadata, 0, &hashes(0..=3), None, true)
@@ -2202,7 +2208,7 @@ mod source_tests {
             ..Default::default()
         }
         .node();
-        let rpc = node_rpc(node, 64, 4);
+        let rpc = node_rpc(Arc::new(node), 64, 4);
         let metadata = MetadataCache::default();
 
         let first = source(&rpc, &metadata, 1, &hashes(1..=3), Some(hash(0)), true)
@@ -2241,7 +2247,7 @@ mod source_tests {
             ..Default::default()
         }
         .node();
-        let rpc = node_rpc(node, 64, 4);
+        let rpc = node_rpc(Arc::new(node), 64, 4);
         let metadata = MetadataCache::default();
 
         let first = source(&rpc, &metadata, 1, &hashes(1..=3), Some(hash(0)), true)
@@ -2276,7 +2282,7 @@ mod source_tests {
     #[tokio::test]
     async fn test_no_serial_fetch() {
         let (_, node) = Chain::default().node();
-        let node = node.with_delay(Duration::from_millis(20));
+        let node = Arc::new(node.with_delay(Duration::from_millis(20)));
         let rpc = node_rpc(node.clone(), 8, 4);
         let metadata = MetadataCache::default();
 
@@ -2293,7 +2299,7 @@ mod source_tests {
     /// The metadata spec versions of the blocks of a chunk sourced at heights 5 to 7.
     async fn metadata_versions(chain: Chain) -> Result<Vec<Option<u32>>, Error> {
         let (_, node) = chain.node();
-        let rpc = node_rpc(node, 64, 4);
+        let rpc = node_rpc(Arc::new(node), 64, 4);
         let chunk = source(
             &rpc,
             &MetadataCache::default(),
@@ -2346,7 +2352,7 @@ mod source_tests {
             ..Default::default()
         }
         .node();
-        let rpc = node_rpc(node, 64, 4);
+        let rpc = node_rpc(Arc::new(node), 64, 4);
         source(
             &rpc,
             &MetadataCache::default(),
@@ -2424,9 +2430,10 @@ mod source_tests {
     async fn test_genesis_catch_up() {
         // Finalized at 10 when following starts; the tip keeps moving to 20 while catching up.
         let (_, node) = Chain::default().node();
-        let node = node
-            .with_notification_interval(Duration::from_millis(5))
-            .with_subscriptions(vec![follow(10, 20)]);
+        let node = Arc::new(
+            node.with_notification_interval(Duration::from_millis(5))
+                .with_subscriptions(vec![follow(10, 20)]),
+        );
         let source = Source::new(node.clone(), config(4, 2));
 
         let blocks = run_to_end(&source, None, 20).await;
@@ -2455,7 +2462,7 @@ mod source_tests {
                     .unwrap_or(0);
                 Duration::from_millis(160 - first_height.min(160))
             });
-        let source = Source::new(node, config(10, 4));
+        let source = Source::new(Arc::new(node), config(10, 4));
 
         let blocks = run_to_end(&source, start(99), 150).await;
 
@@ -2471,7 +2478,7 @@ mod source_tests {
         }
         .node();
         let node = node.with_subscriptions(vec![follow(1_000, 1_000)]);
-        let source = Source::new(node, config(10, 2));
+        let source = Source::new(Arc::new(node), config(10, 2));
 
         let blocks = run_to_end(&source, start(99), 130).await;
 
@@ -2487,7 +2494,7 @@ mod source_tests {
         }
         .node();
         let node = node.with_subscriptions(vec![follow(1_000, 1_000)]);
-        let source = Source::new(node, config(20, 2));
+        let source = Source::new(Arc::new(node), config(20, 2));
 
         let blocks = run_to_end(&source, start(949), 1_000).await;
 
@@ -2497,9 +2504,10 @@ mod source_tests {
     #[tokio::test]
     async fn test_chunk_overlap() {
         let (_, node) = Chain::default().node();
-        let node = node
-            .with_subscriptions(vec![follow(1_000, 1_000)])
-            .with_delay(Duration::from_millis(10));
+        let node = Arc::new(
+            node.with_subscriptions(vec![follow(1_000, 1_000)])
+                .with_delay(Duration::from_millis(10)),
+        );
         let source = Source::new(node.clone(), config(10, 2));
         let (mut chunks, _finalized) = source.run(start(99), Some(200));
 
@@ -2525,7 +2533,7 @@ mod source_tests {
         }
         .node();
         let node = node.with_subscriptions(vec![follow(1_000, 1_000)]);
-        let source = Source::new(node, config(2, 1));
+        let source = Source::new(Arc::new(node), config(2, 1));
         let (chunks, _finalized) = source.run(start(99), None);
 
         let items = timeout(Duration::from_secs(10), chunks.take(5).collect::<Vec<_>>())
@@ -2551,7 +2559,7 @@ mod source_tests {
     #[tokio::test]
     async fn test_shutdown() {
         let (_, node) = Chain::default().node();
-        let node = node.with_subscriptions(vec![follow(1_000, 1_000)]);
+        let node = Arc::new(node.with_subscriptions(vec![follow(1_000, 1_000)]));
         let source = Source::new(node.clone(), config(10, 2));
         let (mut chunks, _finalized) = source.run(start(99), None);
 

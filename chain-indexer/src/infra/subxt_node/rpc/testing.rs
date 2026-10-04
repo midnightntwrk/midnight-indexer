@@ -31,11 +31,8 @@ type Respond = dyn Fn(&Call) -> CallResult + Send + Sync;
 type DelayFor = dyn Fn(&[Call]) -> Duration + Send + Sync;
 type RespondSubscribe = dyn Fn(&'static str, &[Value]) -> Option<Vec<Value>> + Send + Sync;
 
-/// An in-memory node; clones share their state.
-#[derive(Clone)]
-pub struct FakeNode(Arc<Inner>);
-
-struct Inner {
+/// An in-memory node, configured before being shared and then shared as `Arc<FakeNode>`.
+pub struct FakeNode {
     respond: Box<Respond>,
     respond_subscribe: Option<Box<RespondSubscribe>>,
     delay: Duration,
@@ -57,7 +54,7 @@ struct Inner {
 impl FakeNode {
     /// A node answering every call with `respond`.
     pub fn new(respond: impl Fn(&Call) -> CallResult + Send + Sync + 'static) -> Self {
-        Self(Arc::new(Inner {
+        Self {
             respond: Box::new(respond),
             respond_subscribe: None,
             delay: Duration::ZERO,
@@ -74,12 +71,12 @@ impl FakeNode {
             notification_interval: Duration::ZERO,
             subscribes: AtomicUsize::new(0),
             subscribed: Mutex::default(),
-        }))
+        }
     }
 
     /// Answer each batch after the given delay.
     pub fn with_delay(self, delay: Duration) -> Self {
-        self.map(|inner| inner.delay = delay)
+        Self { delay, ..self }
     }
 
     /// Answer each batch after a delay that depends on its calls.
@@ -87,36 +84,48 @@ impl FakeNode {
         self,
         delay_for: impl Fn(&[Call]) -> Duration + Send + Sync + 'static,
     ) -> Self {
-        self.map(|inner| inner.delay_for = Some(Box::new(delay_for)))
+        Self {
+            delay_for: Some(Box::new(delay_for)),
+            ..self
+        }
     }
 
     /// The number of subscriptions not yet dropped.
     pub fn live_subscriptions(&self) -> usize {
-        self.0.live_subscriptions.load(Ordering::SeqCst)
+        self.live_subscriptions.load(Ordering::SeqCst)
     }
 
     /// Refuse batches with more calls than the given size.
     pub fn with_max_batch_size(self, max_batch_size: usize) -> Self {
-        self.map(|inner| inner.max_batch_size = Some(max_batch_size))
+        Self {
+            max_batch_size: Some(max_batch_size),
+            ..self
+        }
     }
 
     /// Lose the connection on the next `n` batches.
     pub fn with_disconnects(self, n: usize) -> Self {
-        self.0.disconnects.store(n, Ordering::SeqCst);
-        self
+        Self {
+            disconnects: AtomicUsize::new(n),
+            ..self
+        }
     }
 
     /// Fail every reconnect.
     pub fn with_failing_reconnects(self) -> Self {
-        self.0.failing_reconnects.store(true, Ordering::SeqCst);
-        self
+        Self {
+            failing_reconnects: AtomicBool::new(true),
+            ..self
+        }
     }
 
     /// Answer the next subscriptions with the given notifications, one list per subscription; after
     /// its notifications a subscription stays open and silent.
     pub fn with_subscriptions(self, subscriptions: Vec<Vec<Value>>) -> Self {
-        *self.0.subscriptions.lock() = subscriptions;
-        self
+        Self {
+            subscriptions: Mutex::new(subscriptions),
+            ..self
+        }
     }
 
     /// Answer subscriptions with the notifications `respond` returns for their method and
@@ -125,51 +134,49 @@ impl FakeNode {
         self,
         respond: impl Fn(&'static str, &[Value]) -> Option<Vec<Value>> + Send + Sync + 'static,
     ) -> Self {
-        self.map(|inner| inner.respond_subscribe = Some(Box::new(respond)))
+        Self {
+            respond_subscribe: Some(Box::new(respond)),
+            ..self
+        }
     }
 
     /// Send subscription notifications at the given interval.
     pub fn with_notification_interval(self, interval: Duration) -> Self {
-        self.map(|inner| inner.notification_interval = interval)
+        Self {
+            notification_interval: interval,
+            ..self
+        }
     }
 
     /// The method of every subscription made, in order.
     pub fn subscribed(&self) -> Vec<&'static str> {
-        self.0.subscribed.lock().clone()
+        self.subscribed.lock().clone()
     }
 
     /// The number of subscriptions made.
     pub fn subscribes(&self) -> usize {
-        self.0.subscribes.load(Ordering::SeqCst)
+        self.subscribes.load(Ordering::SeqCst)
     }
 
     /// The size of every batch received, in order.
     pub fn batch_sizes(&self) -> Vec<usize> {
-        self.0.batch_sizes.lock().clone()
+        self.batch_sizes.lock().clone()
     }
 
     /// The most batches answered at the same time.
     pub fn max_in_flight(&self) -> usize {
-        self.0.max_in_flight.load(Ordering::SeqCst)
+        self.max_in_flight.load(Ordering::SeqCst)
     }
 
     /// The number of reconnects.
     pub fn reconnects(&self) -> usize {
-        self.0.reconnects.load(Ordering::SeqCst)
-    }
-
-    fn map(self, f: impl FnOnce(&mut Inner)) -> Self {
-        let mut inner = Arc::into_inner(self.0).expect("configured before being shared");
-        f(&mut inner);
-        Self(Arc::new(inner))
+        self.reconnects.load(Ordering::SeqCst)
     }
 }
 
-impl Transport for FakeNode {
+impl Transport for Arc<FakeNode> {
     async fn batch(&self, calls: Vec<Call>) -> Result<Vec<CallResult>, TransportError> {
-        let inner = &self.0;
-
-        let disconnect = inner
+        let disconnect = self
             .disconnects
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
             .is_ok();
@@ -177,25 +184,25 @@ impl Transport for FakeNode {
             return Err(TransportError::Disconnected("fake disconnect".into()));
         }
 
-        if inner
+        if self
             .max_batch_size
             .is_some_and(|max_batch_size| calls.len() > max_batch_size)
         {
             return Err(TransportError::Other("batch too large".into()));
         }
 
-        inner.batch_sizes.lock().push(calls.len());
-        let in_flight = inner.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
-        inner.max_in_flight.fetch_max(in_flight, Ordering::SeqCst);
-        let delay = inner
+        self.batch_sizes.lock().push(calls.len());
+        let in_flight = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+        self.max_in_flight.fetch_max(in_flight, Ordering::SeqCst);
+        let delay = self
             .delay_for
             .as_ref()
             .map(|delay_for| delay_for(&calls))
-            .unwrap_or(inner.delay);
+            .unwrap_or(self.delay);
         sleep(delay).await;
-        inner.in_flight.fetch_sub(1, Ordering::SeqCst);
+        self.in_flight.fetch_sub(1, Ordering::SeqCst);
 
-        Ok(calls.iter().map(|call| (inner.respond)(call)).collect())
+        Ok(calls.iter().map(|call| (self.respond)(call)).collect())
     }
 
     async fn subscribe(
@@ -204,25 +211,24 @@ impl Transport for FakeNode {
         params: Vec<Value>,
         _unsubscribe: &'static str,
     ) -> Result<Subscription, TransportError> {
-        let n = self.0.subscribes.fetch_add(1, Ordering::SeqCst);
-        self.0.subscribed.lock().push(method);
+        let n = self.subscribes.fetch_add(1, Ordering::SeqCst);
+        self.subscribed.lock().push(method);
         let responded = self
-            .0
             .respond_subscribe
             .as_ref()
             .and_then(|respond| respond(method, &params));
         let notifications = if let Some(notifications) = responded {
             notifications
         } else {
-            let mut subscriptions = self.0.subscriptions.lock();
+            let mut subscriptions = self.subscriptions.lock();
             if subscriptions.is_empty() {
                 vec![]
             } else {
                 subscriptions.remove(0)
             }
         };
-        let interval = self.0.notification_interval;
-        let live = LiveSubscription::new(self.0.live_subscriptions.clone());
+        let interval = self.notification_interval;
+        let live = LiveSubscription::new(self.live_subscriptions.clone());
         let notifications = stream::iter(notifications)
             .then(move |notification| async move {
                 sleep(interval).await;
@@ -242,8 +248,8 @@ impl Transport for FakeNode {
     }
 
     async fn reconnect(&self) -> Result<(), TransportError> {
-        self.0.reconnects.fetch_add(1, Ordering::SeqCst);
-        if self.0.failing_reconnects.load(Ordering::SeqCst) {
+        self.reconnects.fetch_add(1, Ordering::SeqCst);
+        if self.failing_reconnects.load(Ordering::SeqCst) {
             Err(TransportError::Disconnected(
                 "fake reconnect failure".into(),
             ))

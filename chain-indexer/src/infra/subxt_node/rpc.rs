@@ -37,6 +37,13 @@ use tokio::{
     time::sleep,
 };
 
+#[cfg(test)]
+pub(crate) mod testing;
+
+/// The most subscriptions open at once: half of a node's default per-connection limit
+/// (`--rpc-max-subscriptions-per-connection`, 1024).
+pub const MAX_SUBSCRIPTIONS: usize = 512;
+
 /// Methods of the new JSON-RPC spec this module calls.
 pub mod method {
     pub const ARCHIVE_BODY: &str = "archive_v1_body";
@@ -454,10 +461,6 @@ pub enum Error {
     },
 }
 
-/// The most subscriptions open at once: half of a node's default per-connection limit
-/// (`--rpc-max-subscriptions-per-connection`, 1024).
-pub const MAX_SUBSCRIPTIONS: usize = 512;
-
 /// JSON-RPC access to a node over a [Transport]. Batches are split at the batch size and sent
 /// concurrently, at most `batches_in_flight` at a time; at most [MAX_SUBSCRIPTIONS] subscriptions
 /// are open at a time; a lost connection is replaced per the [ReconnectPolicy] and the batch sent
@@ -699,19 +702,19 @@ pub fn json_size(value: &Value) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use crate::infra::subxt_node::{
-        fake_node::FakeNode,
-        rpc::{
-            Batch, Call, CallResult, Count, Error, MAX_SUBSCRIPTIONS, NodeRpc, REQUIRED_METHODS,
-            ReconnectPolicy, TransportError, json_size, method,
-        },
+    use crate::infra::subxt_node::rpc::{
+        Batch, Call, CallResult, Count, Error, MAX_SUBSCRIPTIONS, NodeRpc, REQUIRED_METHODS,
+        ReconnectPolicy, TransportError, json_size, method, testing::FakeNode,
     };
     use futures::{StreamExt, TryStreamExt, stream};
     use indexer_common::domain::ByteArray;
     use serde_json::{Value, json};
     use std::{
         num::NonZeroUsize,
-        sync::atomic::{AtomicUsize, Ordering},
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
         time::Duration,
     };
     use tokio::time::timeout;
@@ -721,7 +724,11 @@ mod tests {
         max_attempts: 3,
     };
 
-    fn node_rpc(node: FakeNode, batch_size: usize, in_flight: usize) -> NodeRpc<FakeNode> {
+    fn node_rpc(
+        node: Arc<FakeNode>,
+        batch_size: usize,
+        in_flight: usize,
+    ) -> NodeRpc<Arc<FakeNode>> {
         NodeRpc::new(
             node,
             NonZeroUsize::new(batch_size).unwrap(),
@@ -744,7 +751,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_packing() {
-        let node = FakeNode::new(echo);
+        let node = Arc::new(FakeNode::new(echo));
         let rpc = node_rpc(node.clone(), 4, 2);
 
         let results = rpc.batch(heights(10)).await.expect("batch succeeds");
@@ -759,7 +766,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_batches_in_flight_are_bounded() {
-        let node = FakeNode::new(echo).with_delay(Duration::from_millis(20));
+        let node = Arc::new(FakeNode::new(echo).with_delay(Duration::from_millis(20)));
         let rpc = node_rpc(node.clone(), 2, 3);
 
         rpc.batch(heights(20)).await.expect("batch succeeds");
@@ -770,7 +777,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_rejected_batch() {
-        let node = FakeNode::new(echo).with_max_batch_size(3);
+        let node = Arc::new(FakeNode::new(echo).with_max_batch_size(3));
         let rpc = node_rpc(node, 4, 1);
 
         let error = rpc.batch(heights(4)).await.expect_err("batch is rejected");
@@ -781,11 +788,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_payload_accounting() {
-        let node = FakeNode::new(|call| match call.method {
+        let node = Arc::new(FakeNode::new(|call| match call.method {
             method::ARCHIVE_HASH_BY_HEIGHT => Ok(json!(["0x0101"])),
             method::ARCHIVE_HEADER => Ok(json!("0x020202")),
             _ => Ok(Value::Null),
-        });
+        }));
         let rpc = node_rpc(node, 2, 1);
 
         let mut batch = heights(3);
@@ -823,7 +830,7 @@ mod tests {
     #[tokio::test]
     async fn test_subscription_accounting() {
         let notifications = vec![json!({ "event": "initialized" }), json!("0x0102")];
-        let node = FakeNode::new(echo).with_subscriptions(vec![notifications.clone()]);
+        let node = Arc::new(FakeNode::new(echo).with_subscriptions(vec![notifications.clone()]));
         let rpc = node_rpc(node, 4, 1);
 
         let received = rpc
@@ -853,7 +860,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_subscriptions_are_bounded() {
-        let node = FakeNode::new(echo).with_subscribe(|_, _| Some(vec![]));
+        let node = Arc::new(FakeNode::new(echo).with_subscribe(|_, _| Some(vec![])));
         let rpc = node_rpc(node, 4, 1);
         let subscribe = || {
             rpc.subscribe(
@@ -889,7 +896,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_reconnect() {
-        let node = FakeNode::new(echo).with_disconnects(1);
+        let node = Arc::new(FakeNode::new(echo).with_disconnects(1));
         let rpc = node_rpc(node.clone(), 4, 1);
 
         rpc.batch(heights(2))
@@ -901,9 +908,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_unreachable() {
-        let node = FakeNode::new(echo)
-            .with_disconnects(1)
-            .with_failing_reconnects();
+        let node = Arc::new(
+            FakeNode::new(echo)
+                .with_disconnects(1)
+                .with_failing_reconnects(),
+        );
         let rpc = node_rpc(node.clone(), 4, 1);
 
         let error = rpc
@@ -948,7 +957,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_check_methods() {
-        let node = FakeNode::new(|call| match call.method {
+        let node = Arc::new(FakeNode::new(|call| match call.method {
             method::RPC_METHODS => Ok(json!({
                 "methods": REQUIRED_METHODS
                     .iter()
@@ -956,7 +965,7 @@ mod tests {
                     .collect::<Vec<_>>()
             })),
             _ => Ok(Value::Null),
-        });
+        }));
         let rpc = node_rpc(node, 4, 1);
 
         let error = rpc

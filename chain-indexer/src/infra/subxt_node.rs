@@ -11,8 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(test)]
-pub(crate) mod fake_node;
 pub(crate) mod header;
 pub mod rpc;
 pub(crate) mod runtimes;
