@@ -209,6 +209,65 @@ async fn test_unreachable() {
     assert_eq!(node.reconnects(), 3);
 }
 
+#[tokio::test(start_paused = true)]
+async fn test_single_reconnect() {
+    // Eight batches in flight at once lose the connection: one reconnect replaces it for all.
+    let node = Arc::new(FakeNode::new(echo).with_connection_lost());
+    let rpc = node_rpc(node.clone(), 4, 8);
+
+    rpc.batch(heights(32))
+        .await
+        .expect("every batch succeeds after one reconnect");
+
+    assert_eq!(node.reconnects(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn test_subscription_reconnects() {
+    // A subscription and a batch lose the connection together: one reconnect serves both.
+    let node = Arc::new(FakeNode::new(echo).with_connection_lost());
+    let rpc = node_rpc(node.clone(), 4, 1);
+
+    let (subscription, batch) = tokio::join!(
+        rpc.subscribe(
+            method::CHAIN_HEAD_FOLLOW,
+            vec![json!(false)],
+            method::CHAIN_HEAD_UNFOLLOW,
+        ),
+        rpc.batch(heights(2)),
+    );
+
+    subscription.expect("subscription succeeds after reconnecting");
+    batch.expect("batch succeeds after reconnecting");
+    assert_eq!(node.reconnects(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn test_timeout_retried() {
+    let node = Arc::new(FakeNode::new(echo).with_timeouts(2));
+    let rpc = node_rpc(node.clone(), 4, 1);
+
+    rpc.batch(heights(2))
+        .await
+        .expect("batch succeeds after two timeouts");
+
+    assert_eq!(node.reconnects(), 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn test_timeouts_exhausted() {
+    let node = Arc::new(FakeNode::new(echo).with_timeouts(10));
+    let rpc = node_rpc(node, 4, 1);
+
+    let error = rpc
+        .batch(heights(2))
+        .await
+        .expect_err("the node never answers in time");
+
+    // The first attempt and the policy's three retries.
+    assert!(matches!(error, Error::Timeout { attempts: 4, .. }));
+}
+
 #[tokio::test]
 async fn test_retry() {
     let down = || TransportError::Disconnected("node is down".into());

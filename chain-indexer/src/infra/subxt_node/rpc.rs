@@ -22,7 +22,10 @@ use metrics::counter;
 use serde_json::Value;
 use std::{num::NonZeroUsize, sync::Arc, time::Duration};
 use thiserror::Error;
-use tokio::{sync::Semaphore, time::sleep};
+use tokio::{
+    sync::{Mutex, Semaphore},
+    time::sleep,
+};
 
 mod counters;
 #[cfg(test)]
@@ -209,6 +212,12 @@ pub enum Error {
         #[source]
         source: TransportError,
     },
+    #[error("the node did not answer in time, {attempts} times")]
+    Timeout {
+        attempts: usize,
+        #[source]
+        source: TransportError,
+    },
     #[error("cannot reach the node after {attempts} reconnect attempts")]
     Unreachable {
         attempts: usize,
@@ -250,6 +259,8 @@ pub struct NodeRpc<T> {
     in_flight: Arc<Semaphore>,
     subscriptions: Arc<Semaphore>,
     reconnect_policy: ReconnectPolicy,
+    /// The generation of the connection, incremented by each reconnect; locked while reconnecting.
+    connection: Arc<Mutex<u64>>,
     counters: Arc<Counters>,
 }
 
@@ -262,6 +273,7 @@ impl<T> Clone for NodeRpc<T> {
             in_flight: self.in_flight.clone(),
             subscriptions: self.subscriptions.clone(),
             reconnect_policy: self.reconnect_policy,
+            connection: self.connection.clone(),
             counters: self.counters.clone(),
         }
     }
@@ -281,6 +293,7 @@ impl<T: Transport> NodeRpc<T> {
             in_flight: Arc::new(Semaphore::new(batches_in_flight.get())),
             subscriptions: Arc::new(Semaphore::new(MAX_SUBSCRIPTIONS)),
             reconnect_policy,
+            connection: Default::default(),
             counters: Default::default(),
         }
     }
@@ -333,40 +346,26 @@ impl<T: Transport> NodeRpc<T> {
             .acquire_owned()
             .await
             .expect("subscriptions semaphore is not closed");
-        let mut reconnected = false;
+        let Subscription { id, notifications } = self
+            .recovering(|| {
+                self.transport
+                    .subscribe(method, params.clone(), unsubscribe)
+            })
+            .await?
+            .map_err(|source| Error::Subscribe { method, source })?;
 
-        loop {
-            match self
-                .transport
-                .subscribe(method, params.clone(), unsubscribe)
-                .await
-            {
-                Ok(Subscription { id, notifications }) => {
-                    let request_bytes = params.iter().map(json_size).sum::<usize>() as u64;
-                    self.counters.record(method, 1, request_bytes, 0);
+        let request_bytes = params.iter().map(json_size).sum::<usize>() as u64;
+        self.counters.record(method, 1, request_bytes, 0);
 
-                    let counters = self.counters.clone();
-                    let notifications = notifications
-                        .inspect_ok(move |notification| {
-                            let _permit = &permit;
-                            counters.record(method, 0, 0, json_size(notification) as u64)
-                        })
-                        .boxed();
+        let counters = self.counters.clone();
+        let notifications = notifications
+            .inspect_ok(move |notification| {
+                let _permit = &permit;
+                counters.record(method, 0, 0, json_size(notification) as u64)
+            })
+            .boxed();
 
-                    return Ok(Subscription { id, notifications });
-                }
-                Err(error @ TransportError::Disconnected(_)) if !reconnected => {
-                    self.reconnect(error).await?;
-                    reconnected = true;
-                }
-                Err(error) => {
-                    return Err(Error::Subscribe {
-                        method,
-                        source: error,
-                    });
-                }
-            }
-        }
+        Ok(Subscription { id, notifications })
     }
 
     /// Fail with [Error::MissingMethods] unless the node serves every [REQUIRED_METHODS] method.
@@ -397,37 +396,69 @@ impl<T: Transport> NodeRpc<T> {
             .acquire()
             .await
             .expect("in-flight semaphore is never closed");
-        let batch_size = calls.len();
+
+        let results = self
+            .recovering(|| self.transport.batch(calls.clone()))
+            .await?
+            .map_err(|source| Error::BatchRejected {
+                batch_size: calls.len(),
+                source,
+            })?;
+        self.count(&calls, &results);
+
+        Ok(results)
+    }
+
+    /// Run `attempt` until it succeeds or fails otherwise than recoverably: once more after the
+    /// connection it used is lost and replaced, and after each timeout, with backoff, at most the
+    /// reconnect policy's attempts. The inner error is a failure for the caller to report; a lost
+    /// connection that was freshly made is one, as it is most likely a proxy closing it on the
+    /// request's size.
+    async fn recovering<R, F: Future<Output = Result<R, TransportError>>>(
+        &self,
+        mut attempt: impl FnMut() -> F,
+    ) -> Result<Result<R, TransportError>, Error> {
         let mut reconnected = false;
+        let mut timeouts = 0;
 
         loop {
-            match self.transport.batch(calls.clone()).await {
-                Ok(results) => {
-                    self.count(&calls, &results);
-                    return Ok(results);
-                }
-                // A batch that loses a freshly made connection again is refused, most likely for its
-                // size, e.g. by a proxy closing the connection.
+            let connection = *self.connection.lock().await;
+            match attempt().await {
+                Ok(value) => return Ok(Ok(value)),
                 Err(error @ TransportError::Disconnected(_)) if !reconnected => {
-                    self.reconnect(error).await?;
+                    self.reconnect(connection, error).await?;
                     reconnected = true;
                 }
-                Err(error) => {
-                    return Err(Error::BatchRejected {
-                        batch_size,
-                        source: error,
-                    });
+                Err(error @ TransportError::Timeout(_)) => {
+                    if timeouts == self.reconnect_policy.max_attempts {
+                        return Err(Error::Timeout {
+                            attempts: timeouts + 1,
+                            source: error,
+                        });
+                    }
+                    warn!(error:%; "no answer from the node in time, retrying");
+                    sleep(self.reconnect_policy.delay(timeouts)).await;
+                    timeouts += 1;
                 }
+                Err(error) => return Ok(Err(error)),
             }
         }
     }
 
-    async fn reconnect(&self, error: TransportError) -> Result<(), Error> {
-        warn!(error:%; "node connection lost, reconnecting");
-        counter!(metric::RECONNECT_COUNT).increment(1);
-        self.reconnect_policy
-            .retry(error, || self.transport.reconnect())
-            .await
+    /// Replace the connection of the given generation after it was lost, unless another call has
+    /// already replaced it.
+    async fn reconnect(&self, connection: u64, error: TransportError) -> Result<(), Error> {
+        let mut current = self.connection.lock().await;
+        if *current == connection {
+            warn!(error:%; "node connection lost, reconnecting");
+            counter!(metric::RECONNECT_COUNT).increment(1);
+            self.reconnect_policy
+                .retry(error, || self.transport.reconnect())
+                .await?;
+            *current += 1;
+        }
+
+        Ok(())
     }
 
     fn count(&self, calls: &[Call], results: &[CallResult]) {

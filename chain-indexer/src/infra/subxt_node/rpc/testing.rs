@@ -40,6 +40,8 @@ pub struct FakeNode {
     live_subscriptions: Arc<AtomicUsize>,
     max_batch_size: Option<usize>,
     disconnects: AtomicUsize,
+    connection_lost: AtomicBool,
+    timeouts: AtomicUsize,
     failing_reconnects: AtomicBool,
     reconnects: AtomicUsize,
     batch_sizes: Mutex<Vec<usize>>,
@@ -62,6 +64,8 @@ impl FakeNode {
             live_subscriptions: Arc::default(),
             max_batch_size: None,
             disconnects: AtomicUsize::new(0),
+            connection_lost: AtomicBool::new(false),
+            timeouts: AtomicUsize::new(0),
             failing_reconnects: AtomicBool::new(false),
             reconnects: AtomicUsize::new(0),
             batch_sizes: Mutex::default(),
@@ -107,6 +111,22 @@ impl FakeNode {
     pub fn with_disconnects(self, n: usize) -> Self {
         Self {
             disconnects: AtomicUsize::new(n),
+            ..self
+        }
+    }
+
+    /// Lose the connection: every call fails until a reconnect.
+    pub fn with_connection_lost(self) -> Self {
+        Self {
+            connection_lost: AtomicBool::new(true),
+            ..self
+        }
+    }
+
+    /// Time out on the next `n` batches.
+    pub fn with_timeouts(self, n: usize) -> Self {
+        Self {
+            timeouts: AtomicUsize::new(n),
             ..self
         }
     }
@@ -180,8 +200,16 @@ impl Transport for Arc<FakeNode> {
             .disconnects
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
             .is_ok();
-        if disconnect {
+        if disconnect || self.connection_lost.load(Ordering::SeqCst) {
             return Err(TransportError::Disconnected("fake disconnect".into()));
+        }
+
+        let timeout = self
+            .timeouts
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+            .is_ok();
+        if timeout {
+            return Err(TransportError::Timeout("fake timeout".into()));
         }
 
         if self
@@ -211,6 +239,10 @@ impl Transport for Arc<FakeNode> {
         params: Vec<Value>,
         _unsubscribe: &'static str,
     ) -> Result<Subscription, TransportError> {
+        if self.connection_lost.load(Ordering::SeqCst) {
+            return Err(TransportError::Disconnected("fake disconnect".into()));
+        }
+
         let n = self.subscribes.fetch_add(1, Ordering::SeqCst);
         self.subscribed.lock().push(method);
         let responded = self
@@ -254,6 +286,7 @@ impl Transport for Arc<FakeNode> {
                 "fake reconnect failure".into(),
             ))
         } else {
+            self.connection_lost.store(false, Ordering::SeqCst);
             Ok(())
         }
     }

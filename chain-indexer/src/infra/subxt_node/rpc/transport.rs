@@ -63,6 +63,9 @@ pub enum TransportError {
     /// The connection to the node is lost.
     #[error("node connection lost")]
     Disconnected(#[source] BoxError),
+    /// The node did not answer within the request timeout.
+    #[error("no answer from the node in time")]
+    Timeout(#[source] BoxError),
     /// Any other failure, e.g. a request or response the node or a proxy refuses.
     #[error(transparent)]
     Other(BoxError),
@@ -202,6 +205,7 @@ fn transport_error(error: ClientError) -> TransportError {
     use ClientError::*;
     match error {
         RestartNeeded(_) | Transport(_) => TransportError::Disconnected(error.into()),
+        RequestTimeout => TransportError::Timeout(error.into()),
         error => TransportError::Other(error.into()),
     }
 }
