@@ -197,6 +197,7 @@ pub(crate) async fn source<T: Transport>(
 
         let system_parameter_hashes = system_parameter_hashes(&storage);
         let system_parameters_due = (i == 0 && first_of_run)
+            || height == 0
             || previous_system_parameters.as_ref() != Some(&system_parameter_hashes);
         previous_system_parameters = Some(system_parameter_hashes);
 
@@ -284,20 +285,20 @@ impl Block {
         system_parameters: Option<(ByteVec, ByteVec)>,
         genesis: Option<Genesis>,
     ) -> sourcing::Block {
-        match (genesis, system_parameters) {
-            (Some(genesis), Some(system_parameters)) => sourcing::Block::Genesis {
+        match genesis {
+            Some(genesis) => sourcing::Block::Genesis {
                 hash: self.hash,
                 header: self.header,
                 zswap_state_root: self.zswap_state_root,
                 ledger_state_root: self.ledger_state_root,
-                system_parameters,
+                system_parameters: system_parameters.expect("system parameters are due at genesis"),
                 metadata: self.metadata,
                 ledger_state: genesis.ledger_state,
                 cnight_mappings: genesis.cnight_mappings,
                 extrinsics: self.extrinsics,
                 events: self.events,
             },
-            (_, system_parameters) => sourcing::Block::Block {
+            None => sourcing::Block::Block {
                 hash: self.hash,
                 height: self.height,
                 header: self.header,
