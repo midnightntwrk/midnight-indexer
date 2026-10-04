@@ -18,13 +18,15 @@
 //! - `SOURCE_FROM`, `SOURCE_COUNT`: the heights sourced; from genesis, and up to the finalized
 //!   height at start, if unset or empty;
 //! - `SOURCE_CHUNK_SIZE`, `SOURCE_CHUNKS_AHEAD`, `RPC_BATCH_SIZE`, `RPC_BATCHES_IN_FLIGHT`;
-//! - `DECODE_CPU_THREADS`: decode on that many threads, no decode if unset;
+//! - `DECODE_CPU_THREADS`: decode on that many threads, by default `decode_cpu_threads`'s default
+//!   (one less than the available cores); no decode if 0;
 //! - `CONSUMER_SLEEP_MS`: the time the consumer sleeps per block.
 //!
 //! Every 10 s it prints the last interval's rates and per-block sizes, so the cause of a slowdown
 //! shows at a glance; at the end it prints totals, requests and bytes per kind, and stage times.
 
 use chain_indexer::{
+    application::default_decode_cpu_threads,
     domain::BlockRef,
     infra::subxt_node::rpc::{Call, ReconnectPolicy, method},
     pipeline::{
@@ -72,7 +74,10 @@ async fn source_throughput() {
             max_attempts: 10,
         },
     };
-    let decode_cpu_threads = optional_setting::<NonZeroUsize>("DECODE_CPU_THREADS");
+    let decode_cpu_threads = match optional_setting::<usize>("DECODE_CPU_THREADS") {
+        Some(threads) => NonZeroUsize::new(threads),
+        None => Some(default_decode_cpu_threads()),
+    };
     let consumer_sleep = Duration::from_millis(setting("CONSUMER_SLEEP_MS", 0));
 
     metrics::set_global_recorder(HarnessRecorder).expect("no other recorder is set");
