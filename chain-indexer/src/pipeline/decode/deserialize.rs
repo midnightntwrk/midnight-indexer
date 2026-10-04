@@ -37,12 +37,9 @@ pub(super) struct Deserialized {
     pub(super) contract_actions: Vec<ContractAction>,
 }
 
-/// Deserialize a regular transaction into the calling thread's storage and read its identifiers and
-/// contract actions; the deserialized transaction is dropped there.
-///
-/// A contract deploy's address is the hash of the deploy's serialization, and serializing
-/// allocates in the process-wide default storage, so a transaction deploying contracts is read from
-/// the default in-memory storage instead.
+/// Read a regular transaction's identifiers and contract actions, deserialized in the calling
+/// thread's storage, or in the default storage if it deploys contracts, which hashing an address
+/// needs.
 pub(super) fn deserialize(
     transaction: &[u8],
     ledger_version: LedgerVersion,
