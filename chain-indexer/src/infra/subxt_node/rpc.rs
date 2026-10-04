@@ -253,28 +253,28 @@ fn transport_error(error: ClientError) -> TransportError {
     }
 }
 
-/// A set of calls to send together, built with one method per RPC method.
+/// A set of calls to send together, built with one consuming method per RPC method.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Batch(Vec<Call>);
 
 impl Batch {
     /// `archive_v1_hashByHeight`: the hashes of the blocks at the given height.
-    pub fn hash_by_height(&mut self, height: u64) -> &mut Self {
+    pub fn hash_by_height(self, height: u64) -> Self {
         self.push(method::ARCHIVE_HASH_BY_HEIGHT, vec![height.into()])
     }
 
     /// `archive_v1_header`: the SCALE-encoded header of the given block.
-    pub fn header(&mut self, hash: BlockHash) -> &mut Self {
+    pub fn header(self, hash: BlockHash) -> Self {
         self.push(method::ARCHIVE_HEADER, vec![hex(hash.0)])
     }
 
     /// `archive_v1_body`: the SCALE-encoded extrinsics of the given block.
-    pub fn body(&mut self, hash: BlockHash) -> &mut Self {
+    pub fn body(self, hash: BlockHash) -> Self {
         self.push(method::ARCHIVE_BODY, vec![hex(hash.0)])
     }
 
     /// `archive_v1_call`: the SCALE-encoded result of a runtime API function at the given block.
-    pub fn call(&mut self, hash: BlockHash, function: &str, parameters: &[u8]) -> &mut Self {
+    pub fn call(self, hash: BlockHash, function: &str, parameters: &[u8]) -> Self {
         self.push(
             method::ARCHIVE_CALL,
             vec![hex(hash.0), function.into(), hex(parameters)],
@@ -282,29 +282,29 @@ impl Batch {
     }
 
     /// `archive_v1_genesisHash`: the hash of the genesis block.
-    pub fn genesis_hash(&mut self) -> &mut Self {
+    pub fn genesis_hash(self) -> Self {
         self.push(method::ARCHIVE_GENESIS_HASH, vec![])
     }
 
     /// `archive_v1_finalizedHeight`: the height of the latest finalized block.
-    pub fn finalized_height(&mut self) -> &mut Self {
+    pub fn finalized_height(self) -> Self {
         self.push(method::ARCHIVE_FINALIZED_HEIGHT, vec![])
     }
 
     /// `chainHead_v1_unpin`: release the given blocks pinned by a `chainHead_v1_follow`
     /// subscription.
-    pub fn unpin(&mut self, subscription: Value, hashes: &[BlockHash]) -> &mut Self {
+    pub fn unpin(self, subscription: Value, hashes: &[BlockHash]) -> Self {
         let hashes = hashes.iter().map(|hash| hex(hash.0)).collect::<Vec<_>>();
         self.push(method::CHAIN_HEAD_UNPIN, vec![subscription, hashes.into()])
     }
 
     /// `chainSpec_v1_properties`: the chain spec's properties.
-    pub fn chain_spec_properties(&mut self) -> &mut Self {
+    pub fn chain_spec_properties(self) -> Self {
         self.push(method::CHAIN_SPEC_PROPERTIES, vec![])
     }
 
     /// `rpc_methods`: the methods the node serves.
-    pub fn rpc_methods(&mut self) -> &mut Self {
+    pub fn rpc_methods(self) -> Self {
         self.push(method::RPC_METHODS, vec![])
     }
 
@@ -318,7 +318,7 @@ impl Batch {
         self.0.is_empty()
     }
 
-    fn push(&mut self, method: &'static str, params: Vec<Value>) -> &mut Self {
+    fn push(mut self, method: &'static str, params: Vec<Value>) -> Self {
         self.0.push(Call { method, params });
         self
     }
@@ -598,9 +598,7 @@ impl<T: Transport> NodeRpc<T> {
             methods: Vec<String>,
         }
 
-        let mut batch = Batch::default();
-        batch.rpc_methods();
-        let call = batch.0.pop().expect("one call");
+        let call = Batch::default().rpc_methods().0.pop().expect("one call");
         let Methods { methods } = self.call(call).await?;
 
         let missing = REQUIRED_METHODS
@@ -743,10 +741,7 @@ mod tests {
     }
 
     fn heights(n: u64) -> Batch {
-        (0..n).fold(Batch::default(), |mut batch, height| {
-            batch.hash_by_height(height);
-            batch
-        })
+        (0..n).fold(Batch::default(), Batch::hash_by_height)
     }
 
     #[tokio::test]
@@ -795,9 +790,10 @@ mod tests {
         }));
         let rpc = node_rpc(node, 2, 1);
 
-        let mut batch = heights(3);
-        batch.header(ByteArray([1; 32]));
-        batch.call(ByteArray([1; 32]), "Test_function", &[]);
+        let batch =
+            heights(3)
+                .header(ByteArray([1; 32]))
+                .call(ByteArray([1; 32]), "Test_function", &[]);
         rpc.batch(batch).await.expect("batch succeeds");
 
         let counts = rpc.counters().counts();

@@ -66,17 +66,13 @@ async fn node_calls() {
 
     let item = |item, query_type| json!({ "key": hex(storage_key(item)), "type": query_type });
     let kinds = [
-        Kind::Batch("archive_v1_header", |batch, hash| {
-            batch.header(hash);
-        }),
-        Kind::Batch("archive_v1_body", |batch, hash| {
-            batch.body(hash);
-        }),
+        Kind::Batch("archive_v1_header", Batch::header),
+        Kind::Batch("archive_v1_body", Batch::body),
         Kind::Batch("get_zswap_state_root", |batch, hash| {
-            batch.call(hash, "MidnightRuntimeApi_get_zswap_state_root", &[]);
+            batch.call(hash, "MidnightRuntimeApi_get_zswap_state_root", &[])
         }),
         Kind::Batch("get_ledger_state_root", |batch, hash| {
-            batch.call(hash, "MidnightRuntimeApi_get_ledger_state_root", &[]);
+            batch.call(hash, "MidnightRuntimeApi_get_ledger_state_root", &[])
         }),
         Kind::Storage(
             "storage System.Events value",
@@ -119,10 +115,7 @@ async fn node_calls() {
             Kind::Batch(_, add) => {
                 stream::iter(hashes.chunks(batch_size))
                     .map(|hashes| {
-                        let batch = hashes.iter().fold(Batch::default(), |mut batch, &hash| {
-                            add(&mut batch, hash);
-                            batch
-                        });
+                        let batch = hashes.iter().copied().fold(Batch::default(), add);
                         rpc.batch(batch)
                     })
                     .buffer_unordered(batches_in_flight)
@@ -149,7 +142,7 @@ async fn node_calls() {
 }
 
 enum Kind {
-    Batch(&'static str, fn(&mut Batch, BlockHash)),
+    Batch(&'static str, fn(Batch, BlockHash) -> Batch),
     Storage(&'static str, Vec<Value>),
 }
 

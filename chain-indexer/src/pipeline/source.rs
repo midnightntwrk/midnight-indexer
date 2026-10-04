@@ -336,8 +336,7 @@ fn publish(finalized: &watch::Sender<Option<Finalized>>, hashes: Vec<BlockHash>,
 
 /// Unpin the given blocks; a failure only means the node has dropped them already.
 async fn unpin<T: Transport>(rpc: &NodeRpc<T>, subscription: &Value, hashes: &[BlockHash]) {
-    let mut batch = Batch::default();
-    batch.unpin(subscription.to_owned(), hashes);
+    let batch = Batch::default().unpin(subscription.to_owned(), hashes);
 
     match rpc.batch(batch).await.map(|mut results| results.pop()) {
         Ok(Some(Ok(_))) => {}
@@ -349,8 +348,7 @@ async fn unpin<T: Transport>(rpc: &NodeRpc<T>, subscription: &Value, hashes: &[B
 
 /// The height of the given block, from its header.
 async fn header_height<T: Transport>(rpc: &NodeRpc<T>, hash: BlockHash) -> Result<u64, Error> {
-    let mut batch = Batch::default();
-    batch.header(hash);
+    let batch = Batch::default().header(hash);
     let header = rpc.batch(batch).await?.pop().expect("one result per call");
     let header = header_bytes(header, hash)?;
 
@@ -391,10 +389,7 @@ pub async fn resolve<T: Transport>(
     heights: RangeInclusive<u64>,
 ) -> Result<Vec<Option<BlockHash>>, Error> {
     let _timer = Timer::start(metric::RESOLVE_DURATION);
-    let batch = heights.fold(Batch::default(), |mut batch, height| {
-        batch.hash_by_height(height);
-        batch
-    });
+    let batch = heights.fold(Batch::default(), Batch::hash_by_height);
 
     rpc.batch(batch)
         .await?
@@ -441,13 +436,12 @@ pub async fn source<T: Transport>(
     first_of_run: bool,
 ) -> Result<Chunk, Error> {
     let _timer = Timer::start(metric::SOURCE_DURATION);
-    let batch = hashes.iter().fold(Batch::default(), |mut batch, &hash| {
+    let batch = hashes.iter().fold(Batch::default(), |batch, &hash| {
         batch
             .header(hash)
             .body(hash)
             .call(hash, ZSWAP_STATE_ROOT_FUNCTION, &[])
-            .call(hash, LEDGER_STATE_ROOT_FUNCTION, &[]);
-        batch
+            .call(hash, LEDGER_STATE_ROOT_FUNCTION, &[])
     });
 
     let block_items = block_storage_items();
@@ -642,11 +636,10 @@ async fn system_parameters<T: Transport>(
         return Ok(HashMap::new());
     }
 
-    let batch = due.iter().fold(Batch::default(), |mut batch, &hash| {
+    let batch = due.iter().fold(Batch::default(), |batch, &hash| {
         batch
             .call(hash, D_PARAMETER_FUNCTION, &[])
-            .call(hash, TERMS_AND_CONDITIONS_FUNCTION, &[]);
-        batch
+            .call(hash, TERMS_AND_CONDITIONS_FUNCTION, &[])
     });
     let mut results = rpc.batch(batch).await?.into_iter();
 
@@ -693,8 +686,7 @@ async fn changed_authority_sets<T: Transport>(
 /// The genesis ledger state from the chain spec, and the cNight mappings at genesis.
 async fn genesis<T: Transport>(rpc: &NodeRpc<T>, hash: BlockHash) -> Result<Genesis, Error> {
     let properties = async {
-        let mut batch = Batch::default();
-        batch.chain_spec_properties();
+        let batch = Batch::default().chain_spec_properties();
         let properties = rpc
             .batch(batch)
             .await?
@@ -1055,8 +1047,7 @@ pub fn metadata_spec_version(metadata: &Metadata) -> Option<u32> {
 /// falling back to `Metadata_metadata`.
 async fn fetch_metadata<T: Transport>(rpc: &NodeRpc<T>, at: BlockHash) -> Result<Metadata, Error> {
     let call = |function: &'static str, parameters: Vec<u8>| async move {
-        let mut batch = Batch::default();
-        batch.call(at, function, &parameters);
+        let batch = Batch::default().call(at, function, &parameters);
         let result = rpc.batch(batch).await?.pop().expect("one result per call");
         call_value(result, function, at)
     };
@@ -1349,8 +1340,7 @@ impl<T: Transport> Producer<T> {
             return Ok(None);
         }
 
-        let mut batch = Batch::default();
-        batch.genesis_hash();
+        let batch = Batch::default().genesis_hash();
         let hash = self
             .rpc
             .batch(batch)
@@ -1522,8 +1512,7 @@ impl<T: Transport> Producer<T> {
                 break;
             }
 
-            let mut batch = Batch::default();
-            batch.header(hash);
+            let batch = Batch::default().header(hash);
             let header = self
                 .rpc
                 .batch(batch)
@@ -1539,8 +1528,7 @@ impl<T: Transport> Producer<T> {
         let parent = if start == 0 {
             None
         } else {
-            let mut batch = Batch::default();
-            batch.header(hashes[0]);
+            let batch = Batch::default().header(hashes[0]);
             let header = self
                 .rpc
                 .batch(batch)

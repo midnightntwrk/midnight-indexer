@@ -405,8 +405,7 @@ async fn record_decode_fixtures() {
 async fn fetch_metadata_bytes(rpc: &NodeRpc<WsTransport>, at: BlockHash) -> Vec<u8> {
     use crate::infra::subxt_node::rpc::Batch;
 
-    let mut batch = Batch::default();
-    batch.call(at, "Metadata_metadata_at_version", &15u32.encode());
+    let batch = Batch::default().call(at, "Metadata_metadata_at_version", &15u32.encode());
     let result = rpc
         .batch(batch)
         .await
