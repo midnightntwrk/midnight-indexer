@@ -29,7 +29,7 @@ use crate::{
         sourcing::{self, AUTHORITY_SET_ITEMS, MetadataCache, Parent, resolve, storage_key},
     },
 };
-use futures::{TryStreamExt, stream};
+use futures::{StreamExt, TryStreamExt, stream};
 use indexer_common::domain::{BlockHash, BlockNumber, ByteArray, ByteVec, ProtocolVersion};
 use parity_scale_codec::{Decode, Encode};
 use serde_json::{Value, json};
@@ -39,7 +39,10 @@ use std::{
     num::NonZeroUsize,
     path::{Path, PathBuf},
     pin::pin,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use subxt::{
@@ -252,6 +255,42 @@ fn test_cpu_pool_chunks_in_decode() {
     assert_eq!(chunks_in_decode(15, 120), 2);
     assert_eq!(chunks_in_decode(32, 16), 3);
     assert_eq!(chunks_in_decode(32, 8), 5);
+}
+
+#[tokio::test]
+async fn test_cpu_pool_bounds_chunks_in_decode() {
+    // Chunks of one block, so that the chunks pulled from the input and not yet yielded are the
+    // chunks in decode.
+    let blocks = fixtures()
+        .into_iter()
+        .filter(|(name, _)| name == "devnet-2.1" || name == "devnet-hardfork-first-2.1")
+        .map(|(_, fixture)| fixture)
+        .collect::<Vec<_>>();
+    let chunks = (0..5)
+        .flat_map(|_| &blocks)
+        .map(|fixture| Ok(vec![sourced_of(&fixture["sourced"])]))
+        .collect::<Vec<_>>();
+    let (threads, chunk_size) = (4, 1);
+    let bound = chunks_in_decode(threads, chunk_size);
+
+    let pulled = Arc::new(AtomicUsize::new(0));
+    let in_decode = stream::iter(chunks).inspect({
+        let pulled = pulled.clone();
+        move |_| {
+            pulled.fetch_add(1, Ordering::SeqCst);
+        }
+    });
+    let pool = Arc::new(CpuPool::new(NonZeroUsize::new(threads).unwrap()).unwrap());
+    let most = decode(in_decode, pool, NonZeroUsize::new(chunk_size).unwrap())
+        .try_fold((0, 0), |(yielded, most), _| {
+            let pulled = pulled.load(Ordering::SeqCst);
+            async move { Ok((yielded + 1, most.max(pulled - yielded))) }
+        })
+        .await
+        .expect("blocks decode")
+        .1;
+
+    assert!(most <= bound, "{most} chunks in decode, at most {bound}");
 }
 
 #[tokio::test]
