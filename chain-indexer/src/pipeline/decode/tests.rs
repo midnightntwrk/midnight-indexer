@@ -33,6 +33,7 @@ use futures::{TryStreamExt, stream};
 use indexer_common::domain::{BlockHash, ByteArray, ByteVec, ProtocolVersion};
 use parity_scale_codec::{Decode, Encode};
 use serde_json::{Value, json};
+use sha2::{Digest as _, Sha256};
 use std::{
     env, fs,
     num::NonZeroUsize,
@@ -151,8 +152,7 @@ async fn record_decode_fixtures() {
             "made": render(&made),
         });
         let path = fixtures_dir().join(format!("{name}-{label}.json"));
-        fs::write(&path, serde_json::to_string_pretty(&fixture).unwrap())
-            .expect("fixture can be written");
+        fs::write(&path, serde_json::to_string(&fixture).unwrap()).expect("fixture can be written");
         println!("recorded {}", path.display());
     }
 }
@@ -419,15 +419,15 @@ fn pairs_of(value: &Value) -> Vec<(ByteVec, ByteVec)> {
         .collect()
 }
 
-/// A [node::Block], every byte field in full.
+/// A [node::Block], every byte field in full, except transactions: their SHA-256 hashes.
 fn render(block: &node::Block) -> Value {
     use runtimes::Transaction::*;
     let transactions = block
         .transactions
         .iter()
         .map(|transaction| match transaction {
-            Regular(bytes) => json!({ "regular": hex(bytes) }),
-            System(bytes) => json!({ "system": hex(bytes) }),
+            Regular(bytes) => json!({ "regular": hex(Sha256::digest(bytes)) }),
+            System(bytes) => json!({ "system": hex(Sha256::digest(bytes)) }),
         })
         .collect::<Vec<_>>();
 
