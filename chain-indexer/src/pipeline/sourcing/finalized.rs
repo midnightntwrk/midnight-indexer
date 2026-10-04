@@ -236,7 +236,7 @@ mod tests {
     };
     use tokio::{sync::watch, task, time::sleep};
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_signal() {
         let calls = Arc::new(Mutex::new(vec![]));
         let node = node(calls.clone()).with_subscriptions(vec![vec![
@@ -323,7 +323,7 @@ mod tests {
         assert!(matches!(error, Error::Rpc(rpc::Error::Unreachable { .. })));
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_skipped_update() {
         let calls = Arc::new(Mutex::new(vec![]));
         let node = node(calls).with_subscriptions(vec![vec![
@@ -346,7 +346,7 @@ mod tests {
         assert_eq!(finalized.tip.height, 4);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_stop_resubscribes() {
         let calls = Arc::new(Mutex::new(vec![]));
         let node = Arc::new(node(calls).with_subscriptions(vec![
@@ -369,7 +369,7 @@ mod tests {
         assert_eq!(node.subscribes(), 2);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_watchdog() {
         let calls = Arc::new(Mutex::new(vec![]));
         let new_blocks = (10..20)

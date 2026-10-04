@@ -131,7 +131,7 @@ mod tests {
     use serde_json::{Value, json};
     use std::{fs, num::NonZeroUsize, path::Path, sync::Arc, time::Duration};
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_highest_supported_version() {
         // The node offers V17, which subxt cannot decode, besides V14 to V16 and the unstable one.
         let metadata = node_metadata();

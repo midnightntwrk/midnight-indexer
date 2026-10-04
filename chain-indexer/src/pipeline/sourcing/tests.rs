@@ -27,7 +27,7 @@ use tokio::time::{sleep, timeout};
 
 pub(crate) mod chain;
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_genesis_catch_up() {
     // Finalized at 10 when following starts; the tip keeps moving to 20 while catching up.
     let (_, node) = Chain::default().node();
@@ -49,7 +49,7 @@ async fn test_genesis_catch_up() {
     assert_eq!(follows, 1, "no resubscription while the tip moves");
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_ordering() {
     // Chunks of lower heights answer slower, so later chunks complete first.
     let (_, node) = Chain::default().node();
@@ -70,7 +70,7 @@ async fn test_ordering() {
     assert_canonical(&blocks, 100..=150);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_anchoring_deep_fork_falls_back_to_parent_walk() {
     // A fork sibling resolves at the last height of a deep chunk; its child exposes it.
     let (chain, node) = Chain {
@@ -93,7 +93,7 @@ async fn test_anchoring_deep_fork_falls_back_to_parent_walk() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_fork_siblings_resolve_by_parent() {
     // The node reports a fork sibling beside the canonical block mid-chunk, at a chunk's last height
     // and at the next chunk's first.
@@ -116,7 +116,7 @@ async fn test_fork_siblings_resolve_by_parent() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_anchoring_near_fork_falls_back_to_parent_walk() {
     // A fork sibling resolves mid-chunk within the margin.
     let (_, node) = Chain {
@@ -132,7 +132,7 @@ async fn test_anchoring_near_fork_falls_back_to_parent_walk() {
     assert_canonical(&blocks, 950..=1_000);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_chunk_overlap() {
     let (_, node) = Chain::default().node();
     let node = Arc::new(
@@ -154,7 +154,7 @@ async fn test_chunk_overlap() {
     assert!(node.batch_sizes().len() > batches);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_failing_block_is_not_skipped_and_refetched() {
     // The block at height 105 cannot be built: the stream yields an error, then resumes after
     // the last block it yielded, so the very same block is fetched again.
@@ -187,7 +187,7 @@ async fn test_failing_block_is_not_skipped_and_refetched() {
     assert!(matches!(items[2], Err(Error::Rpc(_))));
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_shutdown() {
     let (_, node) = Chain::default().node();
     let node = Arc::new(node.with_subscriptions(vec![follow(1_000, 1_000)]));

@@ -230,7 +230,7 @@ mod tests {
     use std::{fs, num::NonZeroUsize, path::Path, sync::Arc, time::Duration};
     use subxt::Metadata;
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_storage_error() {
         let node = FakeNode::new(|_| Ok(Value::Null)).with_subscriptions(vec![vec![
             json!({ "event": "storageError", "error": "state pruned" }),
@@ -243,7 +243,7 @@ mod tests {
         assert!(matches!(error, Error::Storage { ref error, .. } if error == "state pruned"));
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_storage_ends_early() {
         let node = FakeNode::new(|_| Ok(Value::Null))
             .with_subscriptions(vec![vec![]])

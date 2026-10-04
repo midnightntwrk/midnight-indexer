@@ -33,7 +33,7 @@ const POLICY: ReconnectPolicy = ReconnectPolicy {
     max_attempts: 3,
 };
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_packing() {
     let node = Arc::new(FakeNode::new(echo));
     let rpc = node_rpc(node.clone(), 4, 2);
@@ -48,7 +48,7 @@ async fn test_packing() {
     assert_eq!(heights, (0..10).map(Value::from).collect::<Vec<_>>());
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_batches_in_flight_are_bounded() {
     let node = Arc::new(FakeNode::new(echo).with_delay(Duration::from_millis(20)));
     let rpc = node_rpc(node.clone(), 2, 3);
@@ -59,7 +59,7 @@ async fn test_batches_in_flight_are_bounded() {
     assert_eq!(node.max_in_flight(), 3);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_rejected_batch() {
     let node = Arc::new(FakeNode::new(echo).with_max_batch_size(3));
     let rpc = node_rpc(node, 4, 1);
@@ -70,7 +70,7 @@ async fn test_rejected_batch() {
     assert!(error.to_string().contains("rpc_batch_size"));
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_payload_accounting() {
     let node = Arc::new(FakeNode::new(|call| match call.method {
         method::ARCHIVE_HASH_BY_HEIGHT => Ok(json!(["0x0101"])),
@@ -112,7 +112,7 @@ async fn test_payload_accounting() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_subscription_accounting() {
     let notifications = vec![json!({ "event": "initialized" }), json!("0x0102")];
     let node = Arc::new(FakeNode::new(echo).with_subscriptions(vec![notifications.clone()]));
@@ -143,7 +143,7 @@ async fn test_subscription_accounting() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_subscriptions_are_bounded() {
     let node = Arc::new(FakeNode::new(echo).with_subscribe(|_, _| Some(vec![])));
     let rpc = node_rpc(node, 4, 1);
@@ -179,7 +179,7 @@ fn test_json_size() {
     assert_eq!(json_size(&value), value.to_string().len());
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_reconnect() {
     let node = Arc::new(FakeNode::new(echo).with_disconnects(1));
     let rpc = node_rpc(node.clone(), 4, 1);
@@ -191,7 +191,7 @@ async fn test_reconnect() {
     assert_eq!(node.reconnects(), 1);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_unreachable() {
     let node = Arc::new(
         FakeNode::new(echo)
@@ -268,7 +268,7 @@ async fn test_timeouts_exhausted() {
     assert!(matches!(error, Error::Timeout { attempts: 4, .. }));
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_retry() {
     let down = || TransportError::Disconnected("node is down".into());
 
@@ -299,7 +299,7 @@ async fn test_retry() {
     assert_eq!(attempts.load(Ordering::SeqCst), 3);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_check_methods() {
     let node = Arc::new(FakeNode::new(|call| match call.method {
         method::RPC_METHODS => Ok(json!({

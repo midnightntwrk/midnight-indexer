@@ -21,7 +21,7 @@ use indexer_common::domain::BlockNumber;
 use parity_scale_codec::Encode;
 use std::{sync::Arc, time::Duration};
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_source_from_genesis() {
     let (chain, node) = Chain::default().node();
     let rpc = node_rpc(Arc::new(node), 64, 4);
@@ -72,7 +72,7 @@ async fn test_source_from_genesis() {
     assert!(chain.calls_of("Core_version").is_empty());
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_system_parameters_change_only() {
     // The system parameters change at block 3 and again at block 6.
     let (chain, node) = Chain {
@@ -111,7 +111,7 @@ async fn test_system_parameters_change_only() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_authority_set_change_only() {
     // The authority set changes at block 3, the last of the first chunk, and at block 4, the
     // first of the second.
@@ -153,7 +153,7 @@ async fn test_authority_set_change_only() {
     assert_eq!(reads, vec![0, 3, 3, 4]);
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_no_serial_fetch() {
     let (_, node) = Chain::default().node();
     let node = Arc::new(node.with_delay(Duration::from_millis(20)));
@@ -170,7 +170,7 @@ async fn test_no_serial_fetch() {
     assert!(node.batch_sizes().iter().all(|&size| size <= 8));
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_metadata_after_set_code_upgrade() {
     // `set_code` lands in block 5: its state already runs 2.1, but block 6 is the first one
     // executed, and stamped, by 2.1. Each block's runtime is in its parent's state.
@@ -192,7 +192,7 @@ async fn test_metadata_after_set_code_upgrade() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_enactment() {
     // `set_code` lands in block 5, as at mainnet 1,774,491: block 5 is the last executed by
     // 1.0.300 and block 6 the first executed by 2.1.
@@ -234,7 +234,7 @@ async fn test_enactment() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_metadata_after_switch_without_set_code() {
     // Block 6 is stamped 2.1 while its parent's state still runs 1.0.300, as on a chain that
     // switched runtimes like a hard fork: the metadata comes from block 6's own state.
@@ -256,7 +256,7 @@ async fn test_metadata_after_switch_without_set_code() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_metadata_of_another_runtime_is_rejected() {
     // Every block is stamped 2.1, but no state runs it.
     let error = metadata_versions(Chain {

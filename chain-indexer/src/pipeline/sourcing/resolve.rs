@@ -133,7 +133,7 @@ mod tests {
     };
     use std::sync::Arc;
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_resolve() {
         let (_, node) = Chain::default().node();
         let rpc = node_rpc(Arc::new(node), 64, 4);
