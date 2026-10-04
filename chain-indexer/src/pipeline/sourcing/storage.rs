@@ -218,12 +218,45 @@ pub(super) fn events_of(items: &[StorageItem]) -> ByteVec {
 
 #[cfg(test)]
 mod tests {
-    use crate::pipeline::sourcing::{
-        AUTHORITY_SET_ITEMS, CNIGHT_MAPPINGS_ITEMS, SYSTEM_EVENTS_ITEM, SYSTEM_PARAMETERS_ITEMS,
-        storage_key,
+    use crate::{
+        infra::subxt_node::rpc::{NodeRpc, ReconnectPolicy, testing::FakeNode},
+        pipeline::sourcing::{
+            AUTHORITY_SET_ITEMS, CNIGHT_MAPPINGS_ITEMS, Error, SYSTEM_EVENTS_ITEM,
+            SYSTEM_PARAMETERS_ITEMS, storage::query_storage, storage_key,
+        },
     };
-    use std::{fs, path::Path};
+    use indexer_common::domain::ByteArray;
+    use serde_json::{Value, json};
+    use std::{fs, num::NonZeroUsize, path::Path, sync::Arc, time::Duration};
     use subxt::Metadata;
+
+    #[tokio::test]
+    async fn test_storage_error() {
+        let node = FakeNode::new(|_| Ok(Value::Null)).with_subscriptions(vec![vec![
+            json!({ "event": "storageError", "error": "state pruned" }),
+        ]]);
+
+        let error = query_storage(&node_rpc(node), ByteArray([1; 32]), vec![])
+            .await
+            .expect_err("the query fails");
+
+        assert!(matches!(error, Error::Storage { ref error, .. } if error == "state pruned"));
+    }
+
+    #[tokio::test]
+    async fn test_storage_ends_early() {
+        let node = FakeNode::new(|_| Ok(Value::Null))
+            .with_subscriptions(vec![vec![]])
+            .with_ending_subscriptions();
+
+        let error = query_storage(&node_rpc(node), ByteArray([1; 32]), vec![])
+            .await
+            .expect_err("the query fails");
+
+        assert!(
+            matches!(error, Error::Storage { ref error, .. } if error.contains("before storageDone"))
+        );
+    }
 
     #[test]
     fn test_storage_keys() {
@@ -268,5 +301,17 @@ mod tests {
                 "{node_version}: cNight mappings"
             );
         }
+    }
+
+    fn node_rpc(node: FakeNode) -> NodeRpc<Arc<FakeNode>> {
+        NodeRpc::new(
+            Arc::new(node),
+            NonZeroUsize::new(64).unwrap(),
+            NonZeroUsize::new(4).unwrap(),
+            ReconnectPolicy {
+                max_delay: Duration::from_millis(10),
+                max_attempts: 3,
+            },
+        )
     }
 }

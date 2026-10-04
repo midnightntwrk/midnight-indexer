@@ -15,12 +15,13 @@ use crate::{
     domain::BlockRef,
     infra::subxt_node::rpc::{method, testing::FakeNode},
     pipeline::sourcing::{
-        Block, Chunk, Error, Source,
+        Block, Chunk, Error, Source, call_value,
         tests::chain::{Chain, bytes_of, config, follow, hash, height_of, start},
     },
 };
 use futures::{StreamExt, TryStreamExt};
-use indexer_common::domain::BlockNumber;
+use indexer_common::domain::{BlockNumber, ByteArray};
+use serde_json::{Value, json};
 use std::{sync::Arc, time::Duration};
 use tokio::time::{sleep, timeout};
 
@@ -204,6 +205,26 @@ async fn test_shutdown() {
     sleep(Duration::from_millis(100)).await;
 
     assert_eq!(node.live_subscriptions(), 0);
+}
+
+#[test]
+fn test_call_value() {
+    let hash = ByteArray([1; 32]);
+
+    let value = call_value(Ok(json!({ "success": true, "value": "0x0102" })), "F", hash)
+        .expect("a successful call has a value");
+    assert_eq!(*value, [1, 2]);
+
+    let error = call_value(
+        Ok(json!({ "success": false, "error": "trapped" })),
+        "F",
+        hash,
+    )
+    .expect_err("a failed call fails");
+    assert!(matches!(error, Error::RuntimeCall { ref error, .. } if error == "trapped"));
+
+    let error = call_value(Ok(Value::Null), "F", hash).expect_err("a missing block fails");
+    assert!(matches!(error, Error::RuntimeCall { ref error, .. } if error == "block not found"));
 }
 
 /// The heights and hashes of the blocks, and whether each block's parent is its predecessor.

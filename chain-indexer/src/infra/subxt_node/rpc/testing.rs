@@ -49,6 +49,7 @@ pub struct FakeNode {
     max_in_flight: AtomicUsize,
     subscriptions: Mutex<Vec<Vec<Value>>>,
     notification_interval: Duration,
+    ending_subscriptions: bool,
     subscribes: AtomicUsize,
     subscribed: Mutex<Vec<&'static str>>,
 }
@@ -73,6 +74,7 @@ impl FakeNode {
             max_in_flight: AtomicUsize::new(0),
             subscriptions: Mutex::default(),
             notification_interval: Duration::ZERO,
+            ending_subscriptions: false,
             subscribes: AtomicUsize::new(0),
             subscribed: Mutex::default(),
         }
@@ -156,6 +158,14 @@ impl FakeNode {
     ) -> Self {
         Self {
             respond_subscribe: Some(Box::new(respond)),
+            ..self
+        }
+    }
+
+    /// End each subscription after its notifications, rather than leaving it open and silent.
+    pub fn with_ending_subscriptions(self) -> Self {
+        Self {
+            ending_subscriptions: true,
             ..self
         }
     }
@@ -266,7 +276,11 @@ impl Transport for Arc<FakeNode> {
                 sleep(interval).await;
                 Ok(notification)
             })
-            .chain(stream::pending())
+            .chain(if self.ending_subscriptions {
+                stream::empty().boxed()
+            } else {
+                stream::pending().boxed()
+            })
             .map(move |notification| {
                 let _live = &live;
                 notification
