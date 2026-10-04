@@ -16,11 +16,15 @@
 use crate::{
     domain::BlockRef,
     infra::subxt_node::rpc::{Batch, NodeRpc, Subscription, Transport, method},
-    pipeline::sourcing::{Error, Finalized, block_hash_of, decode_header, header_bytes},
+    pipeline::{
+        metric,
+        sourcing::{Error, Finalized, block_hash_of, decode_header, header_bytes},
+    },
 };
 use futures::StreamExt;
 use indexer_common::domain::BlockHash;
 use log::{debug, warn};
+use metrics::{counter, gauge};
 use serde::Deserialize;
 use serde_json::Value;
 use std::time::Duration;
@@ -47,6 +51,7 @@ pub(super) async fn follow_finalized<T: Transport>(
                 method::CHAIN_HEAD_UNFOLLOW,
             )
             .await?;
+        counter!(metric::FOLLOW_SUBSCRIPTION_COUNT).increment(1);
         let mut tip = None;
 
         loop {
@@ -131,6 +136,7 @@ enum FollowEvent {
 
 fn publish(finalized: &watch::Sender<Option<Finalized>>, hashes: Vec<BlockHash>, tip: BlockRef) {
     debug!(hash:% = tip.hash, height = tip.height; "block finalized");
+    gauge!(metric::FINALIZED_HEIGHT).set(tip.height as f64);
     finalized.send_replace(Some(Finalized { hashes, tip }));
 }
 

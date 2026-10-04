@@ -55,6 +55,11 @@ pub mod metric {
     pub const VERIFY_DURATION: &str = "indexer_source_verify_duration_seconds";
     pub const EMIT_DURATION: &str = "indexer_source_emit_duration_seconds";
     pub const SOURCED_BLOCK_COUNT: &str = "indexer_source_block_count";
+    pub const FOLLOW_SUBSCRIPTION_COUNT: &str = "indexer_source_follow_subscription_count";
+    pub const FINALIZED_HEIGHT: &str = "indexer_source_finalized_height";
+    pub const PLANNED_HEIGHT: &str = "indexer_source_planned_height";
+    pub const EMITTED_HEIGHT: &str = "indexer_source_emitted_height";
+    pub const BUFFERED_CHUNK_COUNT: &str = "indexer_source_buffered_chunk_count";
     pub const DECODE_CHUNK_DURATION: &str = "indexer_decode_chunk_duration_seconds";
     pub const DECODE_BLOCK_DURATION: &str = "indexer_decode_block_duration_seconds";
 

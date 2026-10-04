@@ -22,6 +22,7 @@ use crate::{
     },
 };
 use indexer_common::domain::BlockHash;
+use metrics::gauge;
 
 /// Emission state: the last block emitted, and the verified blocks held back.
 #[derive(Default)]
@@ -62,6 +63,9 @@ impl<T: Transport> Producer<T> {
         // A closed channel means the stream is gone; the task is about to be aborted.
         let _timer = Timer::start(metric::EMIT_DURATION);
         let _ = self.chunks.send(Ok(chunk)).await;
+        gauge!(metric::EMITTED_HEIGHT).set(emission.next_height().saturating_sub(1) as f64);
+        gauge!(metric::BUFFERED_CHUNK_COUNT)
+            .set((self.chunks.max_capacity() - self.chunks.capacity()) as f64);
 
         Ok(())
     }

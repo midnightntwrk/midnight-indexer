@@ -28,6 +28,7 @@ use jsonrpsee::{
     ws_client::{WsClient, WsClientBuilder},
 };
 use log::{debug, warn};
+use metrics::counter;
 use parking_lot::Mutex;
 use serde_json::Value;
 use std::{collections::BTreeMap, num::NonZeroUsize, sync::Arc, time::Duration};
@@ -43,6 +44,16 @@ pub(crate) mod testing;
 /// The most subscriptions open at once: half of a node's default per-connection limit
 /// (`--rpc-max-subscriptions-per-connection`, 1024).
 pub const MAX_SUBSCRIPTIONS: usize = 512;
+
+/// Names of the RPC client's metrics. Request and byte counts carry a `call` label: the method,
+/// the method and runtime function, or the storage item, as [Counters] keys them.
+pub mod metric {
+    pub const REQUEST_COUNT: &str = "indexer_rpc_request_count";
+    pub const REQUEST_BYTES: &str = "indexer_rpc_request_bytes";
+    pub const RESPONSE_BYTES: &str = "indexer_rpc_response_bytes";
+    pub const BATCH_COUNT: &str = "indexer_rpc_batch_count";
+    pub const RECONNECT_COUNT: &str = "indexer_rpc_reconnect_count";
+}
 
 /// Methods of the new JSON-RPC spec this module calls.
 pub mod method {
@@ -387,8 +398,13 @@ pub struct Counters {
 }
 
 impl Counters {
-    /// Add to the count of the given key.
+    /// Add to the count of the given key, and to the metrics labelled with it.
     pub fn record(&self, key: &str, requests: u64, request_bytes: u64, response_bytes: u64) {
+        let label = [("call", key.to_owned())];
+        counter!(metric::REQUEST_COUNT, &label).increment(requests);
+        counter!(metric::REQUEST_BYTES, &label).increment(request_bytes);
+        counter!(metric::RESPONSE_BYTES, &label).increment(response_bytes);
+
         let mut counts = self.counts.lock();
         let count = counts.entry(key.to_owned()).or_default();
         count.requests += requests;
@@ -407,6 +423,7 @@ impl Counters {
     }
 
     fn record_batch(&self, response_bytes: u64) {
+        counter!(metric::BATCH_COUNT).increment(1);
         let mut batches = self.batches.lock();
         batches.batches += 1;
         batches.largest_response_bytes = batches.largest_response_bytes.max(response_bytes);
@@ -640,6 +657,7 @@ impl<T: Transport> NodeRpc<T> {
 
     async fn reconnect(&self, error: TransportError) -> Result<(), Error> {
         warn!(error:%; "node connection lost, reconnecting");
+        counter!(metric::RECONNECT_COUNT).increment(1);
         self.reconnect_policy
             .retry(error, || self.transport.reconnect())
             .await

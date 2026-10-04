@@ -19,7 +19,10 @@ use crate::{
     infra::subxt_node::rpc::{
         self, Batch, CallResult, Counters, NodeRpc, ReconnectPolicy, Transport, WsTransport, method,
     },
-    pipeline::sourcing::{emit::Emission, finalized::follow_finalized},
+    pipeline::{
+        metric,
+        sourcing::{emit::Emission, finalized::follow_finalized},
+    },
 };
 use async_stream::stream;
 use futures::{
@@ -29,6 +32,7 @@ use futures::{
 use http::{HeaderMap, HeaderValue, header::USER_AGENT};
 use indexer_common::domain::{BlockHash, ByteArray, ByteVec, ProtocolVersionError};
 use log::warn;
+use metrics::gauge;
 use parity_scale_codec::Decode;
 use serde::Deserialize;
 use std::{num::NonZeroUsize, sync::Arc, time::Duration};
@@ -344,6 +348,7 @@ impl<T: Transport> Source<T> {
         let chunks = stream! {
             let _producer = AbortOnDrop(producer);
             while let Some(chunk) = chunk_rx.recv().await {
+                gauge!(metric::BUFFERED_CHUNK_COUNT).set(chunk_rx.len() as f64);
                 yield chunk;
             }
         };
@@ -423,6 +428,7 @@ impl<T: Transport> Producer<T> {
                 && let Some(planned) = self.plan(next, run_start)
             {
                 next = planned.spec.heights.end() + 1;
+                gauge!(metric::PLANNED_HEIGHT).set((next - 1) as f64);
                 in_progress.push_back(self.source_planned(planned));
             }
 
