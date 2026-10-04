@@ -80,8 +80,12 @@ async fn test_source_node_1_0() -> anyhow::Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_source_requires_archive() -> anyhow::Result<()> {
-    // The dev preset's arguments, pruning state and blocks instead of archiving them.
+    // The dev preset's arguments, pruning state and blocks instead of archiving them. The node
+    // refuses to open the archived snapshot with another pruning mode, so it starts on an empty
+    // base path.
     let args = [
+        "--base-path",
+        "/tmp/node",
         "--dev",
         "--node-key",
         "0000000000000000000000000000000000000000000000000000000000000001",
