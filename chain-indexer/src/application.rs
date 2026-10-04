@@ -86,14 +86,6 @@ pub struct Config {
     pub decode_cpu_threads: NonZeroUsize,
 }
 
-/// One less than the available cores, at least one.
-pub fn default_decode_cpu_threads() -> NonZeroUsize {
-    std::thread::available_parallelism()
-        .ok()
-        .and_then(|threads| NonZeroUsize::new(threads.get() - 1))
-        .unwrap_or(NonZeroUsize::MIN)
-}
-
 /// Index the blocks after the stored one. `blocks` gives the blocks after a block, or from genesis,
 /// in height order, and the latest finalized block on the node.
 pub async fn run<S, E>(
@@ -365,6 +357,14 @@ where
             Ok(())
         }
     }
+}
+
+/// One less than the available cores, at least one.
+pub fn default_decode_cpu_threads() -> NonZeroUsize {
+    std::thread::available_parallelism()
+        .ok()
+        .and_then(|threads| NonZeroUsize::new(threads.get() - 1))
+        .unwrap_or(NonZeroUsize::MIN)
 }
 
 #[allow(clippy::too_many_arguments)]
