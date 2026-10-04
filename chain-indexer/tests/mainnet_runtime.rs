@@ -20,13 +20,12 @@
 
 use anyhow::Context;
 use chain_indexer::{
-    application::make_transaction,
     domain::{BlockRef, node::Transaction},
     infra::subxt_node::Config,
     pipeline::{self, decode::CpuPool, sourcing::Source},
 };
 use fs_extra::dir::{CopyOptions, copy};
-use futures::{StreamExt, TryStreamExt, stream};
+use futures::TryStreamExt;
 use std::{fs, num::NonZeroUsize, path::Path, pin::pin, sync::Arc, time::Duration};
 use testcontainers::{
     ContainerAsync, GenericImage, ImageExt,
@@ -231,12 +230,8 @@ async fn test_mainnet_runtime_upgrade_boundary() -> anyhow::Result<()> {
         .context("block stream must not end")?;
     assert_eq!(block.height, 1_774_491);
     assert_eq!(u32::from(block.protocol_version), 22_000);
-    let transactions = stream::iter(block.transactions)
-        .then(|transaction| make_transaction(transaction, block.protocol_version))
-        .try_collect::<Vec<_>>()
-        .await
-        .context("make transactions of mainnet block 1_774_491")?;
-    let contract_action = transactions
+    let contract_action = block
+        .transactions
         .iter()
         .filter_map(|transaction| match transaction {
             Transaction::Regular(transaction) => Some(&transaction.contract_actions),

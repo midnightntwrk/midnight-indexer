@@ -52,7 +52,10 @@ Finalized ─▶ Chunk ─▶ Resolve ─▶ Source ─▶ Verify ─▶ Emit �
   link to it; anything that doesn't is re-sourced by walking parent hashes down, from the chunk's
   last block, or near the tip from the finalized tip.
 - **Emit** hands verified chunks on in height order; **Decode** turns them into blocks on a
-  dedicated pool of `decode_cpu_threads` threads, chunks in parallel, blocks in order.
+  dedicated pool of `decode_cpu_threads` threads, chunks in parallel, blocks in order. It hashes
+  each transaction from its bytes, and deserializes each regular transaction in the decoding
+  thread's own in-memory storage for its identifiers and contract actions, so indexing only applies
+  transactions to the ledger state.
 - Indexing then applies blocks one at a time.
 
 A node outage does not end the indexer: lost connections are replaced, retrying until the node is

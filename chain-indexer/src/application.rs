@@ -19,16 +19,15 @@ use crate::{
         Block, BlockRef, DParameter, LedgerState, SystemParametersChange, TermsAndConditions,
         Transaction, node, should_bump_first_regular_tblock, storage::Storage,
     },
-    infra::subxt_node::runtimes,
     pipeline::sourcing::Finalized,
 };
 use anyhow::{Context, bail};
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
-use futures::{Stream, StreamExt, TryStreamExt, stream};
+use futures::{Stream, TryStreamExt};
 use indexer_common::{
     domain::{
-        BlockIndexed, BridgeEventIndexed, ByteVec, LedgerVersion, NetworkId, ProtocolVersion,
-        Publisher, SerializedLedgerStateKey, UnshieldedUtxoIndexed, ledger,
+        BlockIndexed, BridgeEventIndexed, LedgerVersion, NetworkId, Publisher,
+        SerializedLedgerStateKey, UnshieldedUtxoIndexed,
     },
     infra::ledger_db,
 };
@@ -451,11 +450,6 @@ async fn index_block(
 
     let index_convert_started = Instant::now();
     let (mut block, transactions) = block.try_into().context("convert node block into domain")?;
-    let transactions = stream::iter(transactions)
-        .then(|transaction| make_transaction(transaction, block.protocol_version))
-        .try_collect::<Vec<_>>()
-        .await
-        .context("make transactions")?;
     metrics.record_index_convert(index_convert_started.elapsed());
 
     let index_ledger_update_started = Instant::now();
@@ -790,69 +784,6 @@ async fn determine_system_parameters_change(
     } else {
         Ok(None)
     }
-}
-
-/// Deserialize a serialized transaction into a [node::Transaction]. Deserializing allocates in the
-/// ledger arena.
-pub async fn make_transaction(
-    transaction: runtimes::Transaction,
-    protocol_version: ProtocolVersion,
-) -> Result<node::Transaction, ledger::Error> {
-    match transaction {
-        runtimes::Transaction::Regular(transaction) => {
-            make_regular_transaction(transaction, protocol_version).await
-        }
-
-        runtimes::Transaction::System(transaction) => {
-            make_system_transaction(transaction, protocol_version).await
-        }
-    }
-}
-
-async fn make_regular_transaction(
-    transaction: ByteVec,
-    protocol_version: ProtocolVersion,
-) -> Result<node::Transaction, ledger::Error> {
-    let ledger_transaction =
-        ledger::Transaction::deserialize(&transaction, protocol_version.ledger_version())?;
-
-    let hash = ledger_transaction.hash();
-
-    let identifiers = ledger_transaction.identifiers()?;
-
-    let contract_actions = ledger_transaction
-        .contract_actions()?
-        .into_iter()
-        .map(Into::into)
-        .collect();
-
-    let transaction = node::RegularTransaction {
-        hash,
-        protocol_version,
-        identifiers,
-        contract_actions,
-        raw: transaction,
-    };
-
-    Ok(node::Transaction::Regular(transaction))
-}
-
-async fn make_system_transaction(
-    transaction: ByteVec,
-    protocol_version: ProtocolVersion,
-) -> Result<node::Transaction, ledger::Error> {
-    let ledger_transaction =
-        ledger::SystemTransaction::deserialize(&transaction, protocol_version.ledger_version())?;
-
-    let hash = ledger_transaction.hash();
-
-    let transaction = node::SystemTransaction {
-        hash,
-        protocol_version,
-        raw: transaction,
-    };
-
-    Ok(node::Transaction::System(transaction))
 }
 
 #[cfg(test)]

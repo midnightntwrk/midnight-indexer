@@ -33,25 +33,58 @@ use midnight_ledger_v9::structure::{
     ContractAction as ContractActionV9, StandardTransaction as StandardTransactionV9,
     SystemTransaction as LedgerSystemTransactionV9,
 };
-use midnight_serialize_v1::tagged_deserialize;
-use midnight_storage_core_v1::db::DB;
+use midnight_serialize_v1::{GLOBAL_TAG, Tagged, tagged_deserialize};
+use midnight_storage_core_v1::{Storable, Storage, db::DB};
 use midnight_transient_crypto_v2::{encryption::SecretKey, proofs::Proof};
 use midnight_transient_crypto_v3::{
     encryption::SecretKey as SecretKeyV9, proofs::Proof as ProofV9,
 };
 use midnight_zswap_v8::Offer as OfferV8;
 use midnight_zswap_v9::Offer as OfferV9;
-use std::str;
+use std::{io, str};
 
+/// A ledger transaction, its `Sp` nodes allocated in the storage of `D`.
 #[derive(Debug, Clone)]
-pub enum Transaction {
-    V8(TransactionV8<v1_1::LedgerDb>),
-    V9(TransactionV9<v1_1::LedgerDb>),
+pub enum Transaction<D: DB = v1_1::LedgerDb> {
+    V8(TransactionV8<D>),
+    V9(TransactionV9<D>),
 }
 
 impl Transaction {
+    /// Deserialize into the ledger DB's storage.
     #[trace(properties = { "ledger_version": "{ledger_version}" })]
     pub fn deserialize(
+        transaction: impl AsRef<[u8]>,
+        ledger_version: LedgerVersion,
+    ) -> Result<Self, Error> {
+        Self::deserialize_in(transaction, ledger_version)
+    }
+}
+
+impl<D: DB> Transaction<D> {
+    /// Deserialize into the given storage.
+    pub fn deserialize_into(
+        storage: &Storage<D>,
+        transaction: impl AsRef<[u8]>,
+        ledger_version: LedgerVersion,
+    ) -> Result<Self, Error> {
+        let transaction = transaction.as_ref();
+        let transaction = match ledger_version {
+            LedgerVersion::V8 => Self::V8(
+                tagged_deserialize_into(storage, transaction)
+                    .map_err(|error| Error::Deserialize("LedgerTransactionV8", error))?,
+            ),
+            LedgerVersion::V9 => Self::V9(
+                tagged_deserialize_into(storage, transaction)
+                    .map_err(|error| Error::Deserialize("LedgerTransactionV9", error))?,
+            ),
+        };
+
+        Ok(transaction)
+    }
+
+    /// Deserialize into the default storage of `D`.
+    pub fn deserialize_in(
         transaction: impl AsRef<[u8]>,
         ledger_version: LedgerVersion,
     ) -> Result<Self, Error> {
@@ -100,6 +133,19 @@ impl Transaction {
                     Ok(identifier)
                 })
                 .collect(),
+        }
+    }
+
+    /// Whether any of its contract actions deploys a contract.
+    pub fn deploys_contracts(&self) -> bool {
+        match self {
+            Self::V8(TransactionV8::Standard(transaction)) => transaction
+                .actions()
+                .any(|(_, action)| matches!(action, ContractActionV8::Deploy(_))),
+            Self::V9(TransactionV9::Standard(transaction)) => transaction
+                .actions()
+                .any(|(_, action)| matches!(action, ContractActionV9::Deploy(_))),
+            _ => false,
         }
     }
 
@@ -287,6 +333,30 @@ impl SystemTransaction {
     }
 }
 
+/// `tagged_deserialize` of all the given bytes, the value's nodes allocated in the given storage
+/// rather than the default storage of `D`.
+fn tagged_deserialize_into<T: Storable<D> + Tagged, D: DB>(
+    storage: &Storage<D>,
+    mut bytes: &[u8],
+) -> io::Result<T> {
+    let tag = format!("{GLOBAL_TAG}{}:", T::tag());
+    bytes = bytes.strip_prefix(tag.as_bytes()).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("expected header tag '{tag}'"),
+        )
+    })?;
+    let value = storage.arena.deserialize_sp::<T, _>(&mut bytes, 0)?;
+    if !bytes.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{} bytes left after the value", bytes.len()),
+        ));
+    }
+
+    Ok((*value).clone())
+}
+
 fn serialize_contract_address(
     address: ContractAddress,
 ) -> Result<SerializedContractAddress, Error> {
@@ -365,6 +435,76 @@ mod tests {
     use bip32::{DerivationPath, XPrv};
     use midnight_zswap_v8::keys::{SecretKeys, Seed};
     use std::{fs, str::FromStr};
+
+    /// SHA-256 of a transaction's bytes is its hash: deserialization accepts only the tagged
+    /// serialization that `transaction_hash` hashes.
+    #[cfg(any(feature = "cloud", feature = "standalone"))]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_hash_from_bytes() -> Result<(), BoxError> {
+        use crate::{domain::ledger::SystemTransaction, testing::init_ledger_db};
+        use sha2::{Digest, Sha256};
+
+        let _ledger_db = init_ledger_db().await?;
+
+        // File, ledger version, system transaction.
+        let fixtures = [
+            ("block_128537_tx.raw", LedgerVersion::V8, false),
+            ("block_164460_tx.raw", LedgerVersion::V8, false),
+            ("block_1788980_tx.raw", LedgerVersion::V8, false),
+            ("v8_system_tx_devnet_1.raw", LedgerVersion::V8, true),
+            ("tx_1_2_2.raw", LedgerVersion::V9, false),
+            ("tx_1_2_3.raw", LedgerVersion::V9, false),
+            ("v9_regular_tx_devnet_182048.raw", LedgerVersion::V9, false),
+            ("v9_regular_tx_devnet_210505.raw", LedgerVersion::V9, false),
+            ("v9_system_tx_devnet_169509.raw", LedgerVersion::V9, true),
+        ];
+        for (file, ledger_version, system) in fixtures {
+            let raw = fs::read(format!("{}/tests/{file}", env!("CARGO_MANIFEST_DIR")))?;
+            let hash = if system {
+                SystemTransaction::deserialize(&raw, ledger_version)?.hash()
+            } else {
+                Transaction::deserialize(&raw, ledger_version)?.hash()
+            };
+            assert_eq!(hash.as_ref(), Sha256::digest(&raw).as_slice(), "{file}");
+        }
+
+        Ok(())
+    }
+
+    /// Deserialized into an in-memory storage, a transaction gives the same identifiers and contract
+    /// actions as deserialized into the ledger DB.
+    #[cfg(any(feature = "cloud", feature = "standalone"))]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_deserialization_matches_ledger_db() -> Result<(), BoxError> {
+        use crate::testing::init_ledger_db;
+        use midnight_storage_core_v1::db::InMemoryDB;
+
+        let _ledger_db = init_ledger_db().await?;
+
+        let fixtures = [
+            ("block_128537_tx.raw", LedgerVersion::V8),
+            ("block_164460_tx.raw", LedgerVersion::V8),
+            ("block_1788980_tx.raw", LedgerVersion::V8),
+            ("tx_1_2_2.raw", LedgerVersion::V9),
+            ("tx_1_2_3.raw", LedgerVersion::V9),
+            ("v9_regular_tx_devnet_182048.raw", LedgerVersion::V9),
+            ("v9_regular_tx_devnet_210505.raw", LedgerVersion::V9),
+        ];
+        for (file, ledger_version) in fixtures {
+            let raw = fs::read(format!("{}/tests/{file}", env!("CARGO_MANIFEST_DIR")))?;
+            let ledger_db = Transaction::deserialize(&raw, ledger_version)?;
+            let in_memory = Transaction::<InMemoryDB>::deserialize_in(&raw, ledger_version)?;
+
+            assert_eq!(in_memory.identifiers()?, ledger_db.identifiers()?, "{file}");
+            assert_eq!(
+                in_memory.contract_actions()?,
+                ledger_db.contract_actions()?,
+                "{file}"
+            );
+        }
+
+        Ok(())
+    }
 
     /// Notice: The raw test data is created with `generate_txs.sh`.
     #[cfg(any(feature = "cloud", feature = "standalone"))]

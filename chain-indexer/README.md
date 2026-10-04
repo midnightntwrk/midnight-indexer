@@ -28,6 +28,6 @@ few chunks.
 
 - `cargo run -p chain-indexer --features standalone --example source -- --node <url> --from <height> --count <n>`
   prints sourced and decoded blocks.
-- `just source-throughput <url> [from] [count]` measures block sourcing against a node, from
-  genesis to the finalized height by default. Env vars select the settings and add the decode
-  stage (`DECODE_CPU_THREADS`); see `tests/pipelines/source_throughput.rs`.
+- `just source-throughput <url> [from] [count]` measures block sourcing and decoding against a
+  node, from genesis to the finalized height by default. Env vars select the settings;
+  `DECODE_CPU_THREADS=0` measures sourcing alone. See `tests/pipelines/source_throughput.rs`.

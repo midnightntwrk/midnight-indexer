@@ -55,6 +55,14 @@ pub enum Transaction {
     System(ByteVec),
 }
 
+impl Transaction {
+    /// The serialized transaction.
+    pub fn bytes(&self) -> &ByteVec {
+        let (Self::Regular(bytes) | Self::System(bytes)) = self;
+        bytes
+    }
+}
+
 /// Decode block details from a block's serialized extrinsics and its serialized `System.Events`
 /// value, against the given client's metadata.
 pub async fn decode_block_details<C: OfflineClientAtBlockT<SubstrateConfig>>(

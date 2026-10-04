@@ -24,6 +24,7 @@ fastrace           = { workspace = true, features = [ "enable" ] }
 futures            = { workspace = true }
 humantime-serde    = { workspace = true }
 indexer-common     = { path = "../indexer-common" }
+midnight-storage-core_v1 = { workspace = true, features = [ "layout-v2", "gc-v1" ] }
 indoc              = { workspace = true }
 itertools          = { workspace = true }
 jsonrpsee          = { workspace = true, features = [ "ws-client", "client-ws-transport-tls" ] }
@@ -35,6 +36,7 @@ parking_lot        = { workspace = true }
 rayon              = { workspace = true }
 serde              = { workspace = true, features = [ "derive" ] }
 serde_json         = { workspace = true }
+sha2               = { workspace = true }
 sqlx               = { workspace = true, features = [ "time" ] }
 subxt              = { workspace = true }
 thiserror          = { workspace = true }
@@ -51,7 +53,6 @@ indexer-common = { path = "../indexer-common", features = [ "testing" ] }
 reqwest   = { workspace = true, features = [ "json", "rustls" ] }
 serde     = { workspace = true, features = [ "derive" ] }
 serde_json = { workspace = true }
-sha2      = { workspace = true }
 tempfile  = { workspace = true }
 testcontainers = { workspace = true }
 testcontainers-modules = { workspace = true, features = [ "postgres" ] }

@@ -1,13 +1,13 @@
 use anyhow::Context;
 use chain_indexer::{
-    domain::BlockRef,
+    domain::{BlockRef, node},
     infra::subxt_node::Config,
     pipeline::{self, decode::CpuPool, sourcing::Source},
 };
 use clap::Parser;
 use futures::TryStreamExt;
 use indexer_common::domain::BlockNumber;
-use std::{num::NonZeroUsize, pin::pin, sync::Arc, time::Duration};
+use std::{fs, num::NonZeroUsize, path::PathBuf, pin::pin, sync::Arc, time::Duration};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -27,6 +27,9 @@ struct Cli {
     /// How many blocks to print; unlimited if omitted.
     #[arg(long)]
     count: Option<BlockNumber>,
+    /// A directory to write each transaction's bytes to, as `<height>-<index>-<kind>.raw`.
+    #[arg(long)]
+    save_transactions: Option<PathBuf>,
 }
 
 impl Cli {
@@ -74,8 +77,20 @@ impl Cli {
                 u32::from(block.protocol_version),
                 block.author
             );
-            for transaction in &block.transactions {
-                println!("\t## {transaction:?}");
+            for (index, transaction) in block.transactions.iter().enumerate() {
+                let (kind, hash, bytes) = match transaction {
+                    node::Transaction::Regular(transaction) => {
+                        ("regular", transaction.hash, &transaction.raw)
+                    }
+                    node::Transaction::System(transaction) => {
+                        ("system", transaction.hash, &transaction.raw)
+                    }
+                };
+                println!("\t## {kind} transaction {hash}, {} bytes", bytes.len());
+                if let Some(dir) = &self.save_transactions {
+                    let file = dir.join(format!("{}-{index}-{kind}.raw", block.height));
+                    fs::write(&file, bytes).with_context(|| format!("write {}", file.display()))?;
+                }
             }
         }
 
