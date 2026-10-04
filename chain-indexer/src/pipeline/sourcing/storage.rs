@@ -226,9 +226,10 @@ mod tests {
         },
     };
     use indexer_common::domain::ByteArray;
+    use parity_scale_codec::Encode;
     use serde_json::{Value, json};
     use std::{fs, num::NonZeroUsize, path::Path, sync::Arc, time::Duration};
-    use subxt::Metadata;
+    use subxt::{Metadata, ext::scale_value::scale::decode_as_type};
 
     #[tokio::test(start_paused = true)]
     async fn test_storage_error() {
@@ -292,6 +293,23 @@ mod tests {
             assert!(
                 has(AUTHORITY_SET_ITEMS[0]),
                 "{node_version}: Aura.Authorities"
+            );
+            // Aura.Authorities holds a sequence of 32-byte keys, as `decode_authorities` reads it:
+            // two keys encoded so decode as its value type, to the last byte.
+            let (pallet, entry) = AUTHORITY_SET_ITEMS[0];
+            let ty = metadata
+                .pallet_by_name(pallet)
+                .and_then(|pallet| pallet.storage())
+                .and_then(|storage| storage.entry_by_name(entry))
+                .expect("Aura.Authorities")
+                .value_ty();
+            let authorities = vec![[7u8; 32], [8; 32]].encode();
+            let mut input = &authorities[..];
+            decode_as_type(&mut input, ty, metadata.types())
+                .unwrap_or_else(|error| panic!("{node_version}: Aura.Authorities: {error}"));
+            assert!(
+                input.is_empty(),
+                "{node_version}: Aura.Authorities is a sequence of 32-byte keys"
             );
             for item in SYSTEM_PARAMETERS_ITEMS {
                 assert!(has(item), "{node_version}: {item:?}");
