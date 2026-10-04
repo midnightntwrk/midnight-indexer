@@ -414,8 +414,9 @@ impl<T: Transport> NodeRpc<T> {
     }
 
     /// Run `attempt` until it succeeds or fails for good. A lost connection is replaced and the
-    /// attempt run again, and so is a timeout, as a half-open connection only times out; losing a
-    /// freshly made connection again fails, most likely a proxy refusing the request's size.
+    /// attempt run again, and so is a timeout, as a half-open connection only times out; that ends
+    /// every call on the connection, to be retried as well. Losing a freshly made connection again
+    /// fails, most likely a proxy refusing the request's size.
     async fn recovering<R, F: Future<Output = Result<R, TransportError>>>(
         &self,
         mut attempt: impl FnMut() -> F,
