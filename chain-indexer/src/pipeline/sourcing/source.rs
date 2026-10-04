@@ -44,9 +44,13 @@ use subxt::ArcMetadata;
 #[cfg(test)]
 mod tests;
 
+/// The runtime API function returning the zswap state root.
 pub(super) const ZSWAP_STATE_ROOT_FUNCTION: &str = "MidnightRuntimeApi_get_zswap_state_root";
+/// The runtime API function returning the ledger state root.
 pub(super) const LEDGER_STATE_ROOT_FUNCTION: &str = "MidnightRuntimeApi_get_ledger_state_root";
+/// The runtime API function returning the D-Parameter.
 pub(super) const D_PARAMETER_FUNCTION: &str = "SystemParametersApi_get_d_parameter";
+/// The runtime API function returning the terms and conditions.
 pub(super) const TERMS_AND_CONDITIONS_FUNCTION: &str =
     "SystemParametersApi_get_terms_and_conditions";
 
@@ -110,18 +114,11 @@ impl<T: Transport> Producer<T> {
 }
 
 /// The Source stage: the raw data of the blocks with the given consecutive hashes, the first at
-/// height `start`.
+/// height `start` with the parent `parent`, `None` for genesis.
 ///
-/// `parent` is the hash of the block before the first, `None` only if the first is the genesis
-/// block; its state supplies the first block's authority set and the authority-set and
-/// system-parameter storage hashes the first block is compared with. With `first_of_run`, the first
-/// block carries the system parameters whatever its storage says; any other block carries them only
-/// if their storage differs from its parent's.
-///
-/// All calls for all blocks go out together: one set of batches with each block's header, body and
-/// state roots, one storage query per block, and one for the parent. Only system parameters, where
-/// due, authority sets, where their storage differs from the previous block's, and the metadata of a
-/// runtime not seen before take a second round.
+/// One round fetches every block's header, body, state roots and storage hashes; a second fetches
+/// the system parameters where due (first of a run, or changed), changed authority sets and the
+/// metadata of runtimes not seen before.
 pub(crate) async fn source<T: Transport>(
     rpc: &NodeRpc<T>,
     metadata: &MetadataCache,

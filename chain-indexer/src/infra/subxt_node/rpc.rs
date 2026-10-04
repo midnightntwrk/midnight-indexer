@@ -251,10 +251,8 @@ pub enum Error {
     },
 }
 
-/// JSON-RPC access to a node over a [Transport]. Batches are split at the batch size and sent
-/// concurrently, at most `batches_in_flight` at a time; at most [MAX_SUBSCRIPTIONS] subscriptions
-/// are open at a time; a lost connection is replaced per the [ReconnectPolicy] and the batch sent
-/// again; every request and response is counted.
+/// JSON-RPC access to a node over a [Transport]: batches split and bounded in flight, at most
+/// [MAX_SUBSCRIPTIONS] subscriptions, lost connections replaced, and every call counted.
 pub struct NodeRpc<T> {
     transport: Arc<T>,
     batch_size: NonZeroUsize,

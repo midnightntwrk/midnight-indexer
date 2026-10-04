@@ -12,7 +12,7 @@
 // limitations under the License.
 
 //! The Verify stage: check that a chunk links to the blocks before it, else re-source it from
-//! hashes walked back from the finalized tip, and release the blocks that are confirmed.
+//! parent hashes walked down, and release the blocks that are confirmed.
 
 use crate::{
     domain::BlockRef,

@@ -139,6 +139,7 @@ fn storage_label(key: &[u8]) -> String {
         .unwrap_or_else(|| "other".to_owned())
 }
 
+/// An `archive_v1_storage` query item for the given storage item and query type.
 pub(super) fn storage_query(item: (&str, &str), query_type: &str) -> Value {
     json!({ "key": hex(storage_key(item)), "type": query_type })
 }
@@ -160,6 +161,7 @@ pub(super) fn parent_storage_items() -> Vec<Value> {
         .collect()
 }
 
+/// Queries of the given type for every [AUTHORITY_SET_ITEMS] item.
 pub(super) fn authority_set_items(query_type: &str) -> impl Iterator<Item = Value> {
     AUTHORITY_SET_ITEMS
         .into_iter()
@@ -205,6 +207,7 @@ fn authority_set_entries(
         .collect()
 }
 
+/// The value hashes of the [SYSTEM_PARAMETERS_ITEMS], `None` where absent.
 pub(super) fn system_parameter_hashes(items: &[StorageItem]) -> [Option<ByteVec>; 2] {
     SYSTEM_PARAMETERS_ITEMS.map(|item| find_item(items, item).and_then(|item| item.hash.to_owned()))
 }

@@ -427,10 +427,8 @@ impl From<SubxtNodeError> for AuthoritySetError {
     }
 }
 
-/// The authority set that verifies a block's author: that of the consensus engine of the block's
-/// first recognized pre-runtime digest, from the parent's state. `None` if no digest is recognized.
-/// Fails with the engine and storage item if `has_storage` reports that the block's runtime has no
-/// such item. BABE uses the parent's next authorities when the block opens a new epoch.
+/// The authority set verifying a block's author, from the parent's state for the engine of its
+/// pre-runtime digest (BABE's next set when the block opens an epoch); `None` without a digest.
 fn block_authorities(
     header: &SubstrateHeader<H256>,
     parent_authority_set: &[(ByteVec, ByteVec)],
