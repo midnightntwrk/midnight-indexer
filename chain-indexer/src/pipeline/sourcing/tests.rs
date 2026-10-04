@@ -15,7 +15,7 @@ use crate::{
     domain::BlockRef,
     infra::subxt_node::rpc::{method, testing::FakeNode},
     pipeline::sourcing::{
-        Block, Chunk, Error, Source, call_value,
+        Block, Chunk, Error, Failures, Source, call_value,
         tests::chain::{Chain, bytes_of, config, follow, hash, height_of, start},
     },
 };
@@ -226,6 +226,18 @@ fn test_call_value() {
 
     let error = call_value(Ok(Value::Null), "F", hash).expect_err("a missing block fails");
     assert!(matches!(error, Error::RuntimeCall { ref error, .. } if error == "block not found"));
+}
+
+#[test]
+fn test_failures_in_a_row_at_a_height() {
+    let mut failures = Failures::default();
+
+    assert_eq!(failures.record(105), 1);
+    assert_eq!(failures.record(105), 2);
+    assert_eq!(failures.record(105), 3);
+    // Progress moved the failing height: counting starts over.
+    assert_eq!(failures.record(107), 1);
+    assert_eq!(failures.record(107), 2);
 }
 
 /// The heights and hashes of the blocks, and whether each block's parent is its predecessor.

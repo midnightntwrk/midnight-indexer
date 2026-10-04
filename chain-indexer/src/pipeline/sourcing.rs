@@ -28,7 +28,7 @@ use futures::{
 };
 use http::{HeaderMap, HeaderValue, header::USER_AGENT};
 use indexer_common::domain::{BlockHash, BlockNumber, ByteArray, ByteVec, ProtocolVersionError};
-use log::warn;
+use log::{error, warn};
 use metrics::{counter, gauge};
 use parity_scale_codec::Decode;
 use serde::Deserialize;
@@ -394,6 +394,27 @@ impl Progress {
     }
 }
 
+/// Sourcing failures in a row at the same height.
+#[derive(Debug, Default)]
+struct Failures {
+    height: Option<BlockNumber>,
+    count: usize,
+}
+
+impl Failures {
+    /// Record a failure at `height`: the number in a row there, from 1.
+    fn record(&mut self, height: BlockNumber) -> usize {
+        if self.height != Some(height) {
+            *self = Self {
+                height: Some(height),
+                count: 0,
+            };
+        }
+        self.count += 1;
+        self.count
+    }
+}
+
 impl<T: Transport> Producer<T> {
     /// Produce chunks until the end or until no finalized blocks follow any more. A sourcing error
     /// is retried with the reconnect policy's backoff, resuming after the last block emitted.
@@ -413,8 +434,7 @@ impl<T: Transport> Producer<T> {
             held: vec![],
         };
 
-        let mut failures = 0;
-        let mut failed_at = None;
+        let mut failures = Failures::default();
         loop {
             match self.produce_until_error(&mut progress).await {
                 Ok(()) => return,
@@ -424,20 +444,26 @@ impl<T: Transport> Producer<T> {
                     return;
                 }
                 Err(error) => {
-                    // Failures in a row, at the same height, back off further.
-                    let next_height = progress.next_height();
-                    failures = if failed_at == Some(next_height) {
-                        failures + 1
-                    } else {
-                        0
-                    };
-                    failed_at = Some(next_height);
+                    // Failures in a row at the same height back off further, and every
+                    // reconnect_max_attempts of them is an error.
+                    let height = progress.next_height();
+                    let in_a_row = failures.record(height);
                     counter!(metric::SOURCE_ERROR_COUNT).increment(1);
-                    warn!(error:% = error, height = next_height; "block sourcing failed, retrying");
+                    let policy = self.config.reconnect_policy;
+                    if in_a_row % policy.max_attempts.max(1) == 0 {
+                        error!(
+                            error:%,
+                            height,
+                            failures = in_a_row;
+                            "block sourcing keeps failing at the same height, retrying"
+                        );
+                    } else {
+                        warn!(error:%, height; "block sourcing failed, retrying");
+                    }
 
                     // Resume after the last block emitted.
                     progress.held.clear();
-                    sleep(self.config.reconnect_policy.delay(failures)).await;
+                    sleep(policy.delay(in_a_row - 1)).await;
                 }
             }
         }

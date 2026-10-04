@@ -254,6 +254,20 @@ async fn test_timeout_retried() {
     assert_eq!(node.reconnects(), 2);
 }
 
+#[test]
+fn test_backoff() {
+    // From 10 ms, doubling, up to the maximum delay, however many attempts.
+    let policy = ReconnectPolicy {
+        max_delay: Duration::from_secs(1),
+        max_attempts: 3,
+    };
+
+    assert_eq!(policy.delay(0), Duration::from_millis(10));
+    assert_eq!(policy.delay(3), Duration::from_millis(80));
+    assert_eq!(policy.delay(7), Duration::from_secs(1));
+    assert_eq!(policy.delay(usize::MAX), Duration::from_secs(1));
+}
+
 #[tokio::test(start_paused = true)]
 async fn test_retry() {
     // Up after ten failed tries, past the policy's three.
