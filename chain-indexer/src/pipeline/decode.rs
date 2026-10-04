@@ -102,7 +102,8 @@ fn chunks_in_decode(threads: usize, chunk_size: usize) -> usize {
 }
 
 /// The decode stage: each chunk is one job on the pool, its blocks decoded in parallel; blocks come
-/// out in height order.
+/// out in height order. Dropping the stream stops pulling chunks, but jobs already on the pool, at
+/// most the chunks decoding at once, finish and their blocks are discarded.
 pub fn decode<S: Stream<Item = Result<sourcing::Chunk, sourcing::Error>>>(
     chunks: S,
     pool: Arc<CpuPool>,
