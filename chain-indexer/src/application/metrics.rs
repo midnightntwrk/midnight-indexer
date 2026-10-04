@@ -17,26 +17,47 @@ use metrics::{Counter, Gauge, Histogram, counter, gauge, histogram};
 use std::time::Duration;
 
 pub struct Metrics {
+    /// The height of the last indexed block.
     block_height: Counter,
+    /// The height of the highest block on the node.
     node_block_height: Counter,
+    /// 1 when indexing is within the caught-up distance of the node, else 0.
     caught_up: Gauge,
+    /// Transactions indexed.
     transaction_count: Counter,
+    /// Contract deploys indexed.
     contract_deploy_count: Counter,
+    /// Contract calls indexed.
     contract_call_count: Counter,
+    /// Contract maintenance updates indexed.
     contract_update_count: Counter,
+    /// Ledger arena garbage collection passes.
     gc_run_count: Counter,
+    /// Ledger arena nodes removed by garbage collection.
     gc_culled_node_count: Counter,
+    /// Duration of each garbage collection pass.
     gc_duration_seconds: Histogram,
+    /// Ledger arena roots after the last garbage collection pass.
     gc_root_count: Gauge,
+    /// Rows in `ledger_db_nodes`: the size of the ledger arena.
     arena_node_count: Gauge,
+    /// Contract addresses whose state could not be captured from the ledger state.
     uncaptured_contract_state_count: Counter,
+    /// Time waiting for the next block to index.
     index_wait_duration_seconds: Histogram,
+    /// Time converting a block into its domain types.
     index_convert_duration_seconds: Histogram,
+    /// Time applying a block to the ledger state and validating its roots.
     index_ledger_update_duration_seconds: Histogram,
+    /// Time persisting the ledger state.
     index_ledger_persist_duration_seconds: Histogram,
+    /// Time determining a block's system parameter changes.
     index_system_parameters_duration_seconds: Histogram,
+    /// Time saving a block to storage.
     index_storage_duration_seconds: Histogram,
+    /// Time publishing a block's events.
     index_publish_duration_seconds: Histogram,
+    /// Time indexing a block, from conversion to publishing.
     index_block_duration_seconds: Histogram,
 }
 
@@ -196,41 +217,49 @@ impl Metrics {
         self.uncaptured_contract_state_count.increment(count as u64);
     }
 
+    /// Record the time waiting for the next block to index.
     pub fn record_index_wait(&self, duration: Duration) {
         self.index_wait_duration_seconds
             .record(duration.as_secs_f64());
     }
 
+    /// Record the time converting a block into its domain types.
     pub fn record_index_convert(&self, duration: Duration) {
         self.index_convert_duration_seconds
             .record(duration.as_secs_f64());
     }
 
+    /// Record the time applying a block to the ledger state and validating its roots.
     pub fn record_index_ledger_update(&self, duration: Duration) {
         self.index_ledger_update_duration_seconds
             .record(duration.as_secs_f64());
     }
 
+    /// Record the time persisting the ledger state.
     pub fn record_index_ledger_persist(&self, duration: Duration) {
         self.index_ledger_persist_duration_seconds
             .record(duration.as_secs_f64());
     }
 
+    /// Record the time determining a block's system parameter changes.
     pub fn record_index_system_parameters(&self, duration: Duration) {
         self.index_system_parameters_duration_seconds
             .record(duration.as_secs_f64());
     }
 
+    /// Record the time saving a block to storage.
     pub fn record_index_storage(&self, duration: Duration) {
         self.index_storage_duration_seconds
             .record(duration.as_secs_f64());
     }
 
+    /// Record the time publishing a block's events.
     pub fn record_index_publish(&self, duration: Duration) {
         self.index_publish_duration_seconds
             .record(duration.as_secs_f64());
     }
 
+    /// Record the time indexing a block, from conversion to publishing.
     pub fn record_index_block(&self, duration: Duration) {
         self.index_block_duration_seconds
             .record(duration.as_secs_f64());
