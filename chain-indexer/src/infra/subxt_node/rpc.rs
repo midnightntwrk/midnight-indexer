@@ -16,16 +16,15 @@
 //! and counts every call.
 
 use futures::{StreamExt, TryStreamExt, future::try_join_all};
-use log::warn;
+use indexer_common::domain::BlockHash;
+use log::{debug, warn};
 use metrics::counter;
 use serde_json::Value;
-use std::{num::NonZeroUsize, sync::Arc};
+use std::{num::NonZeroUsize, sync::Arc, time::Duration};
 use thiserror::Error;
-use tokio::sync::Semaphore;
+use tokio::{sync::Semaphore, time::sleep};
 
-mod batch;
 mod counters;
-mod reconnect;
 #[cfg(test)]
 pub(crate) mod testing;
 #[cfg(test)]
@@ -34,9 +33,7 @@ mod transport;
 
 use self::counters::{count_key, json_size};
 pub use self::{
-    batch::Batch,
     counters::{BatchCount, Count, Counters},
-    reconnect::ReconnectPolicy,
     transport::{
         Call, CallError, CallResult, Notifications, Subscription, Transport, TransportError,
         WsTransport,
@@ -89,9 +86,115 @@ pub const REQUIRED_METHODS: [&str; 10] = [
     method::CHAIN_SPEC_PROPERTIES,
 ];
 
+/// A set of calls to send together, built with one consuming method per RPC method.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct Batch(Vec<Call>);
+
+impl Batch {
+    /// `archive_v1_hashByHeight`: the hashes of the blocks at the given height.
+    pub fn hash_by_height(self, height: u64) -> Self {
+        self.push(method::ARCHIVE_HASH_BY_HEIGHT, vec![height.into()])
+    }
+
+    /// `archive_v1_header`: the SCALE-encoded header of the given block.
+    pub fn header(self, hash: BlockHash) -> Self {
+        self.push(method::ARCHIVE_HEADER, vec![hex(hash.0)])
+    }
+
+    /// `archive_v1_body`: the SCALE-encoded extrinsics of the given block.
+    pub fn body(self, hash: BlockHash) -> Self {
+        self.push(method::ARCHIVE_BODY, vec![hex(hash.0)])
+    }
+
+    /// `archive_v1_call`: the SCALE-encoded result of a runtime API function at the given block.
+    pub fn call(self, hash: BlockHash, function: &str, parameters: &[u8]) -> Self {
+        self.push(
+            method::ARCHIVE_CALL,
+            vec![hex(hash.0), function.into(), hex(parameters)],
+        )
+    }
+
+    /// `archive_v1_genesisHash`: the hash of the genesis block.
+    pub fn genesis_hash(self) -> Self {
+        self.push(method::ARCHIVE_GENESIS_HASH, vec![])
+    }
+
+    /// `chainHead_v1_unpin`: release the given blocks pinned by a `chainHead_v1_follow`
+    /// subscription.
+    pub fn unpin(self, subscription: Value, hashes: &[BlockHash]) -> Self {
+        let hashes = hashes.iter().map(|hash| hex(hash.0)).collect::<Vec<_>>();
+        self.push(method::CHAIN_HEAD_UNPIN, vec![subscription, hashes.into()])
+    }
+
+    /// `chainSpec_v1_properties`: the chain spec's properties.
+    pub fn chain_spec_properties(self) -> Self {
+        self.push(method::CHAIN_SPEC_PROPERTIES, vec![])
+    }
+
+    /// `rpc_methods`: the methods the node serves.
+    pub fn rpc_methods(self) -> Self {
+        self.push(method::RPC_METHODS, vec![])
+    }
+
+    /// The number of calls.
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Whether there are no calls.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    fn push(mut self, method: &'static str, params: Vec<Value>) -> Self {
+        self.0.push(Call { method, params });
+        self
+    }
+}
+
 /// `0x`-prefixed hex, as the JSON-RPC spec encodes bytes.
 pub fn hex(bytes: impl AsRef<[u8]>) -> Value {
     const_hex::encode_prefixed(bytes).into()
+}
+
+/// How often and how patiently to reconnect after the connection is lost.
+#[derive(Debug, Clone, Copy)]
+pub struct ReconnectPolicy {
+    pub max_delay: Duration,
+    pub max_attempts: usize,
+}
+
+impl ReconnectPolicy {
+    /// Exponential backoff from 10 ms, doubling up to `max_delay`.
+    fn delay(&self, attempt: usize) -> Duration {
+        let millis = 10u64.saturating_mul(2u64.saturating_pow(attempt as u32));
+        Duration::from_millis(millis).min(self.max_delay)
+    }
+
+    /// Retry `attempt` after it failed with `error`, waiting before each try, at most
+    /// `max_attempts` times; [Error::Unreachable] with the last error if none succeeds.
+    pub(crate) async fn retry<T, F: Future<Output = Result<T, TransportError>>>(
+        &self,
+        error: TransportError,
+        mut attempt: impl FnMut() -> F,
+    ) -> Result<T, Error> {
+        let mut last_error = error;
+        for n in 0..self.max_attempts {
+            sleep(self.delay(n)).await;
+            match attempt().await {
+                Ok(value) => {
+                    debug!(attempt = n; "connected to node");
+                    return Ok(value);
+                }
+                Err(error) => last_error = error,
+            }
+        }
+
+        Err(Error::Unreachable {
+            attempts: self.max_attempts,
+            source: last_error,
+        })
+    }
 }
 
 /// Error of [NodeRpc].
