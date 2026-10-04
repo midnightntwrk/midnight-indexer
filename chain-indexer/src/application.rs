@@ -468,9 +468,9 @@ where
     E: StdError + Send + Sync + 'static,
     N: Node,
 {
-    let block_fetch_started = Instant::now();
+    let index_wait_started = Instant::now();
     let block = get_next_block(blocks).await?;
-    metrics.record_block_fetch(block_fetch_started.elapsed());
+    metrics.record_index_wait(index_wait_started.elapsed());
 
     let result = index_block(
         caught_up_max_distance,
@@ -524,7 +524,7 @@ async fn index_block<N>(
 where
     N: Node,
 {
-    let block_processing_started = Instant::now();
+    let index_block_started = Instant::now();
 
     // Capture the node's zswap merkle tree root (domain type) before `try_into` serializes it, to
     // compare against the zswap merkle tree root in the ledger state below.
@@ -534,11 +534,11 @@ where
     let d_parameter = block.d_parameter.clone();
     let terms_and_conditions = block.terms_and_conditions.clone();
 
-    let block_conversion_started = Instant::now();
+    let index_convert_started = Instant::now();
     let (mut block, transactions) = block.try_into().context("convert node block into domain")?;
-    metrics.record_block_conversion(block_conversion_started.elapsed());
+    metrics.record_index_convert(index_convert_started.elapsed());
 
-    let ledger_update_started = Instant::now();
+    let index_ledger_update_started = Instant::now();
     let ledger_version = block.protocol_version.ledger_version();
     ledger_state = if block.height == 0 {
         // The genesis block establishes the chain's ledger version. The inherited
@@ -671,7 +671,7 @@ where
             local_zswap_merkle_tree_root,
         );
     }
-    metrics.record_ledger_update(ledger_update_started.elapsed());
+    metrics.record_index_ledger_update(index_ledger_update_started.elapsed());
 
     // Capture the ledger-arena key and balances of each contract action's contract state. This
     // happens once per block, deliberately after the root validations above and after the genesis
@@ -717,22 +717,22 @@ where
     }
 
     // Persist ledger state.
-    let ledger_persist_started = Instant::now();
+    let index_ledger_persist_started = Instant::now();
     let (new_ledger_state, ledger_state_key) =
         ledger_state.0.persist().context("persist ledger state")?;
     ledger_state = new_ledger_state.into();
-    metrics.record_ledger_persist(ledger_persist_started.elapsed());
+    metrics.record_index_ledger_persist(index_ledger_persist_started.elapsed());
 
     // Determine system parameters change if any.
-    let system_parameters_started = Instant::now();
+    let index_system_parameters_started = Instant::now();
     let system_parameters_change =
         determine_system_parameters_change(&block, d_parameter, terms_and_conditions, storage)
             .await
             .context("determine system parameters change")?;
-    metrics.record_system_parameters(system_parameters_started.elapsed());
+    metrics.record_index_system_parameters(index_system_parameters_started.elapsed());
 
     // Save the block with its related data and system parameters atomically.
-    let block_storage_started = Instant::now();
+    let index_storage_started = Instant::now();
     let max_transaction_id = storage
         .save_block(
             &block,
@@ -743,10 +743,10 @@ where
         )
         .await
         .context("save block")?;
-    metrics.record_block_storage(block_storage_started.elapsed());
+    metrics.record_index_storage(index_storage_started.elapsed());
 
     // Publish BlockIndexed.
-    let event_publish_started = Instant::now();
+    let index_publish_started = Instant::now();
     publisher
         .publish(&BlockIndexed {
             height: block.height,
@@ -788,7 +788,7 @@ where
             .await
             .context("publish BridgeEventIndexed event")?;
     }
-    metrics.record_event_publish(event_publish_started.elapsed());
+    metrics.record_index_publish(index_publish_started.elapsed());
 
     // Update metrics.
     metrics.update(&block, &transactions, node_block_height, *caught_up);
@@ -803,7 +803,7 @@ where
         "block indexed"
     );
 
-    metrics.record_block_processing(block_processing_started.elapsed());
+    metrics.record_index_block(index_block_started.elapsed());
 
     Ok((ledger_state, ledger_state_key))
 }

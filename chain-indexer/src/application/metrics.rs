@@ -30,14 +30,14 @@ pub struct Metrics {
     gc_root_count: Gauge,
     arena_node_count: Gauge,
     uncaptured_contract_state_count: Counter,
-    block_fetch_duration_seconds: Histogram,
-    block_conversion_duration_seconds: Histogram,
-    ledger_update_duration_seconds: Histogram,
-    ledger_persist_duration_seconds: Histogram,
-    system_parameters_duration_seconds: Histogram,
-    block_storage_duration_seconds: Histogram,
-    event_publish_duration_seconds: Histogram,
-    block_processing_duration_seconds: Histogram,
+    index_wait_duration_seconds: Histogram,
+    index_convert_duration_seconds: Histogram,
+    index_ledger_update_duration_seconds: Histogram,
+    index_ledger_persist_duration_seconds: Histogram,
+    index_system_parameters_duration_seconds: Histogram,
+    index_storage_duration_seconds: Histogram,
+    index_publish_duration_seconds: Histogram,
+    index_block_duration_seconds: Histogram,
 }
 
 impl Metrics {
@@ -60,20 +60,20 @@ impl Metrics {
             gc_root_count: gauge!("indexer_gc_root_count"),
             arena_node_count: gauge!("indexer_arena_node_count"),
             uncaptured_contract_state_count: counter!("indexer_uncaptured_contract_state_count"),
-            block_fetch_duration_seconds: histogram!("indexer_block_fetch_duration_seconds"),
-            block_conversion_duration_seconds: histogram!(
-                "indexer_block_conversion_duration_seconds"
+            index_wait_duration_seconds: histogram!("indexer_index_wait_duration_seconds"),
+            index_convert_duration_seconds: histogram!("indexer_index_convert_duration_seconds"),
+            index_ledger_update_duration_seconds: histogram!(
+                "indexer_index_ledger_update_duration_seconds"
             ),
-            ledger_update_duration_seconds: histogram!("indexer_ledger_update_duration_seconds"),
-            ledger_persist_duration_seconds: histogram!("indexer_ledger_persist_duration_seconds"),
-            system_parameters_duration_seconds: histogram!(
-                "indexer_system_parameters_duration_seconds"
+            index_ledger_persist_duration_seconds: histogram!(
+                "indexer_index_ledger_persist_duration_seconds"
             ),
-            block_storage_duration_seconds: histogram!("indexer_block_storage_duration_seconds"),
-            event_publish_duration_seconds: histogram!("indexer_event_publish_duration_seconds"),
-            block_processing_duration_seconds: histogram!(
-                "indexer_block_processing_duration_seconds"
+            index_system_parameters_duration_seconds: histogram!(
+                "indexer_index_system_parameters_duration_seconds"
             ),
+            index_storage_duration_seconds: histogram!("indexer_index_storage_duration_seconds"),
+            index_publish_duration_seconds: histogram!("indexer_index_publish_duration_seconds"),
+            index_block_duration_seconds: histogram!("indexer_index_block_duration_seconds"),
         };
 
         if let Some(block_height) = block_height {
@@ -196,43 +196,43 @@ impl Metrics {
         self.uncaptured_contract_state_count.increment(count as u64);
     }
 
-    pub fn record_block_fetch(&self, duration: Duration) {
-        self.block_fetch_duration_seconds
+    pub fn record_index_wait(&self, duration: Duration) {
+        self.index_wait_duration_seconds
             .record(duration.as_secs_f64());
     }
 
-    pub fn record_block_conversion(&self, duration: Duration) {
-        self.block_conversion_duration_seconds
+    pub fn record_index_convert(&self, duration: Duration) {
+        self.index_convert_duration_seconds
             .record(duration.as_secs_f64());
     }
 
-    pub fn record_ledger_update(&self, duration: Duration) {
-        self.ledger_update_duration_seconds
+    pub fn record_index_ledger_update(&self, duration: Duration) {
+        self.index_ledger_update_duration_seconds
             .record(duration.as_secs_f64());
     }
 
-    pub fn record_ledger_persist(&self, duration: Duration) {
-        self.ledger_persist_duration_seconds
+    pub fn record_index_ledger_persist(&self, duration: Duration) {
+        self.index_ledger_persist_duration_seconds
             .record(duration.as_secs_f64());
     }
 
-    pub fn record_system_parameters(&self, duration: Duration) {
-        self.system_parameters_duration_seconds
+    pub fn record_index_system_parameters(&self, duration: Duration) {
+        self.index_system_parameters_duration_seconds
             .record(duration.as_secs_f64());
     }
 
-    pub fn record_block_storage(&self, duration: Duration) {
-        self.block_storage_duration_seconds
+    pub fn record_index_storage(&self, duration: Duration) {
+        self.index_storage_duration_seconds
             .record(duration.as_secs_f64());
     }
 
-    pub fn record_event_publish(&self, duration: Duration) {
-        self.event_publish_duration_seconds
+    pub fn record_index_publish(&self, duration: Duration) {
+        self.index_publish_duration_seconds
             .record(duration.as_secs_f64());
     }
 
-    pub fn record_block_processing(&self, duration: Duration) {
-        self.block_processing_duration_seconds
+    pub fn record_index_block(&self, duration: Duration) {
+        self.index_block_duration_seconds
             .record(duration.as_secs_f64());
     }
 }
