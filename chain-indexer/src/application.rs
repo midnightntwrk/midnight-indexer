@@ -955,11 +955,10 @@ mod tests {
         Ok(())
     }
 
-    /// A block that cannot be sourced or decoded must not be skipped: indexing stops at it rather
-    /// than taking the next block in its place. The block stream resumes after the last block it
-    /// yielded, so the same block is fetched again.
+    /// An error from the block stream is returned as an error, so indexing stops at the failing
+    /// block rather than taking the next one in its place.
     #[tokio::test]
-    async fn test_failing_block_is_not_skipped() -> Result<(), BoxError> {
+    async fn test_block_stream_error_propagates() -> Result<(), BoxError> {
         let mut blocks = stream::iter([Ok(block(0, None)), Err(BlockError), Ok(block(2, None))]);
 
         let first = get_next_block(&mut blocks).await?;

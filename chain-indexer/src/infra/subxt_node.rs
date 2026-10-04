@@ -45,9 +45,8 @@ pub struct Config {
 
     pub reconnect_max_attempts: usize,
 
-    /// Timeout for receiving a valid block after a reconnect or duplicate event.
-    /// If no valid block is received within this duration, the subscription is considered
-    /// stuck and will be re-established. Defaults to 30 seconds.
+    /// How long the finalized-block subscription (`chainHead_v1_follow`) may go without an event
+    /// before it is renewed. Defaults to 30 seconds.
     #[serde(
         with = "humantime_serde",
         default = "default_subscription_recovery_timeout"
