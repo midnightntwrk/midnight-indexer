@@ -44,7 +44,7 @@ use subxt::{
 use thiserror::Error;
 use tokio::sync::oneshot;
 
-pub mod deserialize;
+mod deserialize;
 #[cfg(test)]
 mod tests;
 
@@ -150,7 +150,7 @@ pub fn decode<S: Stream<Item = Result<sourcing::Chunk, sourcing::Error>>>(
 
 /// SHA-256 of a transaction's bytes, which are its tagged serialization, as `transaction_hash`
 /// hashes it.
-pub fn transaction_hash(transaction: &runtimes::Transaction) -> TransactionHash {
+fn transaction_hash(transaction: &runtimes::Transaction) -> TransactionHash {
     ByteArray(Sha256::digest(transaction.bytes().as_ref()).into())
 }
 

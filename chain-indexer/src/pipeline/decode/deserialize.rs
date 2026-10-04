@@ -32,9 +32,9 @@ thread_local! {
 
 /// What decode takes from a regular transaction.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Deserialized {
-    pub identifiers: Vec<SerializedTransactionIdentifier>,
-    pub contract_actions: Vec<ContractAction>,
+pub(super) struct Deserialized {
+    pub(super) identifiers: Vec<SerializedTransactionIdentifier>,
+    pub(super) contract_actions: Vec<ContractAction>,
 }
 
 /// Deserialize a regular transaction into the calling thread's storage and read its identifiers and
@@ -43,7 +43,7 @@ pub struct Deserialized {
 /// A contract deploy's address is the hash of the deploy's serialization, and serializing
 /// allocates in the process-wide default storage, so a transaction deploying contracts is read from
 /// the default in-memory storage instead.
-pub fn deserialize(
+pub(super) fn deserialize(
     transaction: &[u8],
     ledger_version: LedgerVersion,
 ) -> Result<Deserialized, ledger::Error> {
