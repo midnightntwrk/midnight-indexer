@@ -148,10 +148,8 @@ pub fn decode<S: Stream<Item = Result<sourcing::Chunk, sourcing::Error>>>(
         .try_flatten()
 }
 
-/// A transaction's hash: in every ledger version so far, SHA-256 of its bytes, which are its tagged
-/// serialization, as the ledger's `transaction_hash` hashes it. That holds while deserialization
-/// accepts only the canonical encoding; a new ledger version is added here once that is confirmed
-/// for it.
+/// A transaction's hash: SHA-256 of its bytes, as the ledger hashes them while it accepts only the
+/// canonical encoding; a new ledger version is added once that holds for it.
 fn transaction_hash(
     transaction: &runtimes::Transaction,
     ledger_version: LedgerVersion,
