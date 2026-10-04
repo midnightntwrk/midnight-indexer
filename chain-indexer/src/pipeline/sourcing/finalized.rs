@@ -15,7 +15,7 @@
 
 use crate::{
     domain::BlockRef,
-    infra::subxt_node::rpc::{Batch, NodeRpc, Subscription, Transport, method},
+    infra::subxt_node::rpc::{self, Batch, NodeRpc, Subscription, Transport, method},
     pipeline::{
         metric,
         sourcing::{Error, Finalized, block_hash_of, block_number, decode_header, header_bytes},
@@ -28,88 +28,135 @@ use metrics::{counter, gauge};
 use serde::Deserialize;
 use serde_json::Value;
 use std::time::Duration;
-use tokio::{sync::watch, time::timeout};
+use tokio::{
+    sync::watch,
+    time::{sleep, timeout},
+};
+
+/// How long to wait before resubscribing after the Finalized stage failed.
+const RESUBSCRIBE_DELAY: Duration = Duration::from_secs(1);
 
 /// The Finalized stage: follow the node's finalized blocks with `chainHead_v1_follow` and publish
 /// each [Finalized] to `finalized`. Every block the subscription reports is unpinned as soon as it
 /// is reported; nothing else is fetched except one header per subscription, for the tip's height.
-/// The subscription is renewed on `stop`, when it ends, and when no event arrives within
-/// `recovery_timeout`. Returns once `finalized` has no receivers.
+/// The subscription is renewed on `stop`, when it ends, when no event arrives within
+/// `recovery_timeout`, and after any error but an unreachable node. Returns once `finalized` has no
+/// receivers.
 pub(super) async fn follow_finalized<T: Transport>(
     rpc: &NodeRpc<T>,
     recovery_timeout: Duration,
     finalized: &watch::Sender<Option<Finalized>>,
 ) -> Result<(), Error> {
     while !finalized.is_closed() {
-        let Subscription {
-            id,
-            mut notifications,
-        } = rpc
-            .subscribe(
-                method::CHAIN_HEAD_FOLLOW,
-                vec![false.into()],
-                method::CHAIN_HEAD_UNFOLLOW,
-            )
-            .await?;
-        counter!(metric::FOLLOW_SUBSCRIPTION_COUNT).increment(1);
-        let mut tip = None;
-
-        loop {
-            let event = match timeout(recovery_timeout, notifications.next()).await {
-                Ok(Some(Ok(event))) => event,
-                Ok(Some(Err(error))) => {
-                    warn!(error:%; "chainHead_v1_follow failed, resubscribing");
-                    break;
-                }
-                Ok(None) => {
-                    warn!("chainHead_v1_follow ended, resubscribing");
-                    break;
-                }
-                Err(_) => {
-                    warn!(recovery_timeout:?; "no chainHead_v1_follow event, resubscribing");
-                    break;
-                }
-            };
-
-            use FollowEvent::*;
-            match serde_json::from_value(event).map_err(Error::FollowEvent)? {
-                Initialized {
-                    finalized_block_hashes,
-                } => {
-                    let hashes = block_hashes(finalized_block_hashes)?;
-                    unpin(rpc, &id, &hashes).await;
-
-                    if let Some(&hash) = hashes.last() {
-                        let height = header_height(rpc, hash).await?;
-                        tip = Some(BlockRef { hash, height });
-                        publish(finalized, hashes, BlockRef { hash, height });
-                    }
-                }
-                NewBlock { block_hash } => unpin(rpc, &id, &[block_hash_of(block_hash)?]).await,
-                Finalized {
-                    finalized_block_hashes,
-                } => {
-                    let hashes = block_hashes(finalized_block_hashes)?;
-                    if let (Some(BlockRef { height, .. }), Some(&hash)) = (tip, hashes.last()) {
-                        let height = height + hashes.len() as BlockNumber;
-                        tip = Some(BlockRef { hash, height });
-                        publish(finalized, hashes, BlockRef { hash, height });
-                    }
-                }
-                Stop => {
-                    warn!("chainHead_v1_follow stopped, resubscribing");
-                    break;
-                }
-                Other => {}
-            }
-
-            if finalized.is_closed() {
-                return Ok(());
+        match follow_once(rpc, recovery_timeout, finalized).await {
+            Ok(()) => {}
+            Err(error @ Error::Rpc(rpc::Error::Unreachable { .. })) => return Err(error),
+            Err(error) => {
+                warn!(error:%; "following finalized blocks failed, resubscribing");
+                sleep(RESUBSCRIBE_DELAY).await;
             }
         }
     }
 
     Ok(())
+}
+
+/// Follow finalized blocks with one subscription, until it should be renewed or `finalized` has no
+/// receivers.
+async fn follow_once<T: Transport>(
+    rpc: &NodeRpc<T>,
+    recovery_timeout: Duration,
+    finalized: &watch::Sender<Option<Finalized>>,
+) -> Result<(), Error> {
+    let Subscription {
+        id,
+        mut notifications,
+    } = rpc
+        .subscribe(
+            method::CHAIN_HEAD_FOLLOW,
+            vec![false.into()],
+            method::CHAIN_HEAD_UNFOLLOW,
+        )
+        .await?;
+    counter!(metric::FOLLOW_SUBSCRIPTION_COUNT).increment(1);
+    let mut tip = None;
+
+    while !finalized.is_closed() {
+        let event = match timeout(recovery_timeout, notifications.next()).await {
+            Ok(Some(Ok(event))) => event,
+            Ok(Some(Err(error))) => {
+                warn!(error:%; "chainHead_v1_follow failed, resubscribing");
+                return Ok(());
+            }
+            Ok(None) => {
+                warn!("chainHead_v1_follow ended, resubscribing");
+                return Ok(());
+            }
+            Err(_) => {
+                warn!(recovery_timeout:?; "no chainHead_v1_follow event, resubscribing");
+                return Ok(());
+            }
+        };
+
+        use FollowEvent::*;
+        match serde_json::from_value(event).map_err(Error::FollowEvent)? {
+            Initialized {
+                finalized_block_hashes,
+            } => {
+                let hashes = block_hashes(finalized_block_hashes)?;
+                unpin(rpc, &id, &hashes).await;
+
+                if let Some(&hash) = hashes.last() {
+                    let height = header_height(rpc, hash).await?;
+                    let finalized_tip = finalized_window(&hashes, height)?;
+                    tip = Some(finalized_tip);
+                    publish(finalized, hashes, finalized_tip);
+                }
+            }
+            NewBlock { block_hash } => unpin(rpc, &id, &[block_hash_of(block_hash)?]).await,
+            Finalized {
+                finalized_block_hashes,
+            } => {
+                let hashes = block_hashes(finalized_block_hashes)?;
+                if let (Some(BlockRef { height, .. }), false) = (tip, hashes.is_empty()) {
+                    let height = BlockNumber::try_from(hashes.len())
+                        .ok()
+                        .and_then(|count| height.checked_add(count))
+                        .ok_or(Error::FinalizedHashes {
+                            height,
+                            count: hashes.len(),
+                        })?;
+                    let finalized_tip = finalized_window(&hashes, height)?;
+                    tip = Some(finalized_tip);
+                    publish(finalized, hashes, finalized_tip);
+                }
+            }
+            Stop => {
+                warn!("chainHead_v1_follow stopped, resubscribing");
+                return Ok(());
+            }
+            Other => {}
+        }
+    }
+
+    Ok(())
+}
+
+/// The tip of a finalized window: the last of `hashes`, at `height`. Fails if there are more hashes
+/// than heights up to `height`.
+fn finalized_window(
+    hashes: &[BlockHash],
+    height: BlockNumber,
+) -> Result<BlockRef<BlockNumber>, Error> {
+    let hash = *hashes.last().expect("finalized hashes are not empty");
+    if hashes.len() as u64 > u64::from(height) + 1 {
+        return Err(Error::FinalizedHashes {
+            height,
+            count: hashes.len(),
+        });
+    }
+
+    Ok(BlockRef { hash, height })
 }
 
 /// A `chainHead_v1_follow` event, with `withRuntime` false.
@@ -175,8 +222,8 @@ fn block_hashes(hashes: Vec<String>) -> Result<Vec<BlockHash>, Error> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        infra::subxt_node::rpc::{Call, NodeRpc, ReconnectPolicy, method, testing::FakeNode},
-        pipeline::sourcing::{Finalized, finalized::follow_finalized},
+        infra::subxt_node::rpc::{self, Call, NodeRpc, ReconnectPolicy, method, testing::FakeNode},
+        pipeline::sourcing::{Error, Finalized, finalized::follow_finalized},
     };
     use indexer_common::domain::{BlockHash, BlockNumber, ByteArray};
     use parity_scale_codec::Encode;
@@ -228,6 +275,52 @@ mod tests {
             unpinned,
             vec![json!([hex(1), hex(2)]), json!([hex(3)]), json!([hex(4)])]
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_error_resubscribes() {
+        // An undecodable hash, then an initialized event with more hashes than heights up to the tip.
+        let calls = Arc::new(Mutex::new(vec![]));
+        let node = Arc::new(node(calls).with_subscriptions(vec![
+            vec![json!({ "event": "initialized", "finalizedBlockHashes": ["0xzz"] })],
+            vec![
+                json!({ "event": "initialized", "finalizedBlockHashes": [hex(7), hex(8), hex(1)] }),
+            ],
+            vec![json!({ "event": "initialized", "finalizedBlockHashes": [hex(2)] })],
+        ]));
+        let rpc = node_rpc(node.clone());
+        let (sender, mut receiver) = watch::channel(None);
+
+        let task =
+            task::spawn(
+                async move { follow_finalized(&rpc, Duration::from_secs(5), &sender).await },
+            );
+        let finalized = latest(&mut receiver, 2).await;
+        task.abort();
+
+        assert_eq!(finalized.hashes, vec![hash(2)]);
+        assert_eq!(node.subscribes(), 3);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_unreachable_ends() {
+        let calls = Arc::new(Mutex::new(vec![]));
+        // The connection is lost on the unpin, which only logs it, and on the tip's header; every
+        // reconnect fails.
+        let node = node(calls)
+            .with_subscriptions(vec![vec![
+                json!({ "event": "initialized", "finalizedBlockHashes": [hex(1)] }),
+            ]])
+            .with_disconnects(2)
+            .with_failing_reconnects();
+        let rpc = node_rpc(Arc::new(node));
+        let (sender, _receiver) = watch::channel(None);
+
+        let error = follow_finalized(&rpc, Duration::from_secs(5), &sender)
+            .await
+            .expect_err("an unreachable node ends following");
+
+        assert!(matches!(error, Error::Rpc(rpc::Error::Unreachable { .. })));
     }
 
     #[tokio::test]

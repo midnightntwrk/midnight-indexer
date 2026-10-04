@@ -219,6 +219,8 @@ pub enum Error {
     Unresolved(BlockNumber),
     #[error("blocks from height {0} do not link to the finalized chain")]
     Unlinked(BlockNumber),
+    #[error("a finalized event lists {count} hashes up to height {height}")]
+    FinalizedHashes { height: BlockNumber, count: usize },
     #[error("following finalized blocks failed")]
     Follow(#[source] Box<Error>),
     #[error("following finalized blocks ended")]
