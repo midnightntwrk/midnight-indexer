@@ -285,11 +285,6 @@ impl Batch {
         self.push(method::ARCHIVE_GENESIS_HASH, vec![])
     }
 
-    /// `archive_v1_finalizedHeight`: the height of the latest finalized block.
-    pub fn finalized_height(self) -> Self {
-        self.push(method::ARCHIVE_FINALIZED_HEIGHT, vec![])
-    }
-
     /// `chainHead_v1_unpin`: release the given blocks pinned by a `chainHead_v1_follow`
     /// subscription.
     pub fn unpin(self, subscription: Value, hashes: &[BlockHash]) -> Self {
@@ -344,7 +339,7 @@ impl ReconnectPolicy {
 
     /// Retry `attempt` after it failed with `error`, waiting before each try, at most
     /// `max_attempts` times; [Error::Unreachable] with the last error if none succeeds.
-    pub async fn retry<T, F: Future<Output = Result<T, TransportError>>>(
+    pub(crate) async fn retry<T, F: Future<Output = Result<T, TransportError>>>(
         &self,
         error: TransportError,
         mut attempt: impl FnMut() -> F,
@@ -512,7 +507,7 @@ impl<T: Transport> NodeRpc<T> {
     }
 
     /// The most calls in flight at once: the batch size times the batches in flight.
-    pub fn max_calls_in_flight(&self) -> usize {
+    pub(crate) fn max_calls_in_flight(&self) -> usize {
         self.batch_size.get() * self.batches_in_flight.get()
     }
 
@@ -591,7 +586,7 @@ impl<T: Transport> NodeRpc<T> {
     }
 
     /// Fail with [Error::MissingMethods] unless the node serves every [REQUIRED_METHODS] method.
-    pub async fn check_methods(&self) -> Result<(), Error> {
+    pub(crate) async fn check_methods(&self) -> Result<(), Error> {
         #[derive(serde::Deserialize)]
         struct Methods {
             methods: Vec<String>,
@@ -676,7 +671,7 @@ fn count_key(call: &Call) -> String {
 }
 
 /// The size of a JSON value as serialized, without serializing it.
-pub fn json_size(value: &Value) -> usize {
+fn json_size(value: &Value) -> usize {
     use Value::*;
     match value {
         Null => 4,

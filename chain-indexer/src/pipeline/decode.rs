@@ -96,7 +96,7 @@ impl CpuPool {
 
 /// The number of chunks decoding at once: two, so that threads freed by a chunk's last blocks pick
 /// up the next chunk, and more only if one chunk has fewer blocks than the pool has threads.
-pub fn chunks_in_decode(threads: usize, chunk_size: usize) -> usize {
+fn chunks_in_decode(threads: usize, chunk_size: usize) -> usize {
     2.max(threads.div_ceil(chunk_size) + 1)
 }
 
