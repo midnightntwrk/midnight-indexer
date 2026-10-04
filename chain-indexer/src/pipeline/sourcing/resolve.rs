@@ -127,11 +127,40 @@ async fn resolve_all<T: Transport>(
 
 #[cfg(test)]
 mod tests {
-    use crate::pipeline::sourcing::{
-        resolve,
-        tests::chain::{Chain, hash, node_rpc},
+    use crate::{
+        infra::subxt_node::rpc::method,
+        pipeline::sourcing::{
+            resolve,
+            resolve::canonical,
+            tests::chain::{Chain, hash, node_rpc},
+        },
     };
     use std::sync::Arc;
+
+    #[tokio::test(start_paused = true)]
+    async fn test_canonical_from_above() {
+        // A parent with a fork sibling resolves through the given child, as a near chunk's parent
+        // does through the first hash of the finalized window, without resolving the child's height.
+        let (chain, node) = Chain {
+            siblings: vec![104],
+            ..Default::default()
+        }
+        .node();
+        let rpc = node_rpc(Arc::new(node), 64, 4);
+
+        let parent = canonical(&rpc, 104..=104, Some(hash(105)))
+            .await
+            .expect("parent resolves");
+
+        assert_eq!(parent, vec![hash(104)]);
+        let resolved = chain
+            .calls
+            .lock()
+            .iter()
+            .filter(|call| call.method == method::ARCHIVE_HASH_BY_HEIGHT)
+            .count();
+        assert_eq!(resolved, 1);
+    }
 
     #[tokio::test(start_paused = true)]
     async fn test_resolve() {
