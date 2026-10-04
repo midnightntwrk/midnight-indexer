@@ -23,7 +23,7 @@ use crate::{
         SYSTEM_PARAMETERS_ITEMS, storage_key,
     },
 };
-use indexer_common::domain::{BlockHash, ByteArray};
+use indexer_common::domain::{BlockHash, BlockNumber, ByteArray};
 use parity_scale_codec::Encode;
 use parking_lot::Mutex;
 use serde_json::{Value, json};
@@ -60,33 +60,33 @@ pub(crate) struct Chain {
     pub(crate) system_parameters: Vec<u8>,
     /// The authority set at each height, as a set number; past the end, each block's own.
     pub(crate) authority_sets: Vec<u8>,
-    pub(crate) forks: Vec<u64>,
-    pub(crate) failing: Vec<u64>,
-    pub(crate) stamped_2_1_from: Option<u64>,
-    pub(crate) state_2_1_from: Option<u64>,
+    pub(crate) forks: Vec<BlockNumber>,
+    pub(crate) failing: Vec<BlockNumber>,
+    pub(crate) stamped_2_1_from: Option<BlockNumber>,
+    pub(crate) state_2_1_from: Option<BlockNumber>,
     pub(crate) calls: Mutex<Vec<Call>>,
     /// The heights at which authority-set values were queried.
-    pub(crate) authority_set_reads: Mutex<Vec<u64>>,
+    pub(crate) authority_set_reads: Mutex<Vec<BlockNumber>>,
 }
 
 impl Chain {
     /// The authority set at the given block: one authority, the set number repeated or the
     /// block hash.
-    pub(crate) fn authority_set(&self, n: u64, block: &[u8]) -> [u8; 32] {
+    pub(crate) fn authority_set(&self, n: BlockNumber, block: &[u8]) -> [u8; 32] {
         match self.authority_sets.get(n as usize) {
             Some(&set) => [set; 32],
             None => block.try_into().unwrap(),
         }
     }
 
-    pub(crate) fn stamped_spec_version(&self, n: u64) -> u32 {
+    pub(crate) fn stamped_spec_version(&self, n: BlockNumber) -> u32 {
         match self.stamped_2_1_from {
             Some(from) if n < from => SPEC_VERSION_1_0,
             _ => SPEC_VERSION,
         }
     }
 
-    pub(crate) fn state_metadata(&self, n: u64) -> &'static [u8] {
+    pub(crate) fn state_metadata(&self, n: BlockNumber) -> &'static [u8] {
         match self.state_2_1_from {
             Some(from) if n < from => &METADATA_1_0,
             _ => &METADATA,
@@ -97,7 +97,7 @@ impl Chain {
         self.calls.lock().push(call.clone());
         match call.method {
             method::ARCHIVE_HASH_BY_HEIGHT => {
-                let n = call.params[0].as_u64().expect("height");
+                let n = height(&call.params[0]);
                 match n {
                     // No block, and two blocks, at these heights.
                     1_000_000 => Ok(json!([])),
@@ -196,12 +196,12 @@ impl Chain {
     }
 
     /// The heights of every `archive_v1_hashByHeight` call, in order.
-    pub(crate) fn resolved_heights(&self) -> Vec<u64> {
+    pub(crate) fn resolved_heights(&self) -> Vec<BlockNumber> {
         self.calls
             .lock()
             .iter()
             .filter(|call| call.method == method::ARCHIVE_HASH_BY_HEIGHT)
-            .map(|call| call.params[0].as_u64().expect("height"))
+            .map(|call| height(&call.params[0]))
             .collect()
     }
 }
@@ -222,7 +222,7 @@ pub(crate) fn config(chunk_size: usize, chunks_ahead: usize) -> Config {
 
 /// `chainHead_v1_follow` events: initialized at `tip`, then finalized one block at a time up
 /// to `last`.
-pub(crate) fn follow(tip: u64, last: u64) -> Vec<Value> {
+pub(crate) fn follow(tip: BlockNumber, last: BlockNumber) -> Vec<Value> {
     std::iter::once(json!({ "event": "initialized", "finalizedBlockHashes": [hex(hash(tip))] }))
         .chain((tip + 1..=last).map(|n| {
             json!({ "event": "finalized", "finalizedBlockHashes": [hex(hash(n))], "prunedBlockHashes": [] })
@@ -230,7 +230,7 @@ pub(crate) fn follow(tip: u64, last: u64) -> Vec<Value> {
         .collect()
 }
 
-fn fork(n: u64) -> BlockHash {
+fn fork(n: BlockNumber) -> BlockHash {
     let mut hash = hash(n);
     hash.0[31] = FORK;
     hash
@@ -238,20 +238,20 @@ fn fork(n: u64) -> BlockHash {
 
 /// The canonical block at height `n` has hash `hash(n)`; a fork sibling at height `n` has
 /// `fork(n)`, with the same parent.
-pub(crate) fn hash(n: u64) -> BlockHash {
+pub(crate) fn hash(n: BlockNumber) -> BlockHash {
     let mut hash = [0; 32];
-    hash[..8].copy_from_slice(&n.to_le_bytes());
+    hash[..4].copy_from_slice(&n.to_le_bytes());
     ByteArray(hash)
 }
 
-pub(crate) fn hashes(heights: std::ops::RangeInclusive<u64>) -> Vec<BlockHash> {
+pub(crate) fn hashes(heights: std::ops::RangeInclusive<BlockNumber>) -> Vec<BlockHash> {
     heights.map(hash).collect()
 }
 
-fn header(n: u64, spec_version: u32) -> Vec<u8> {
+fn header(n: BlockNumber, spec_version: u32) -> Vec<u8> {
     SubstrateHeader::<H256> {
         parent_hash: H256(hash(n.saturating_sub(1)).0),
-        number: n,
+        number: n.into(),
         state_root: H256::zero(),
         extrinsics_root: H256::zero(),
         digest: Digest {
@@ -261,8 +261,8 @@ fn header(n: u64, spec_version: u32) -> Vec<u8> {
     .encode()
 }
 
-pub(crate) fn height_of(hash: &[u8]) -> u64 {
-    u64::from_le_bytes(hash[..8].try_into().expect("8 bytes"))
+pub(crate) fn height_of(hash: &[u8]) -> BlockNumber {
+    BlockNumber::from_le_bytes(hash[..4].try_into().expect("4 bytes"))
 }
 
 pub(crate) fn hex(bytes: impl AsRef<[u8]>) -> Value {
@@ -294,13 +294,19 @@ fn size(n: usize) -> NonZeroUsize {
     NonZeroUsize::new(n).unwrap()
 }
 
-pub(crate) fn start(height: u64) -> Option<BlockRef> {
+pub(crate) fn start(height: BlockNumber) -> Option<BlockRef> {
     Some(BlockRef {
         hash: hash(height),
-        height,
+        height: height.into(),
     })
 }
 
 fn success(bytes: impl AsRef<[u8]>) -> CallResult {
     Ok(json!({ "success": true, "value": hex(bytes) }))
+}
+
+/// The height parameter of an `archive_v1_hashByHeight` call.
+fn height(param: &Value) -> BlockNumber {
+    let height = param.as_u64().expect("height");
+    BlockNumber::try_from(height).expect("height is a block number")
 }

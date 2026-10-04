@@ -17,6 +17,7 @@ use crate::pipeline::sourcing::{
     storage_key,
     tests::chain::{Chain, SPEC_VERSION, SPEC_VERSION_1_0, hash, hashes, hex, node_rpc},
 };
+use indexer_common::domain::BlockNumber;
 use parity_scale_codec::Encode;
 use std::{sync::Arc, time::Duration};
 
@@ -45,7 +46,7 @@ async fn test_source_from_genesis() {
     assert_eq!(cnight_mappings.len(), 1);
 
     for (n, block) in chunk.iter().enumerate().skip(1) {
-        let n = n as u64;
+        let n = n as BlockNumber;
         let Block::Block {
             height,
             parent,
@@ -259,7 +260,7 @@ async fn test_metadata_after_switch_without_set_code() {
 async fn test_metadata_of_another_runtime_is_rejected() {
     // Every block is stamped 2.1, but no state runs it.
     let error = metadata_versions(Chain {
-        state_2_1_from: Some(u64::MAX),
+        state_2_1_from: Some(BlockNumber::MAX),
         ..Default::default()
     })
     .await

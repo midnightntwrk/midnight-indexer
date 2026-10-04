@@ -20,14 +20,14 @@ use crate::{
         sourcing::{Error, block_hash_of},
     },
 };
-use indexer_common::domain::BlockHash;
+use indexer_common::domain::{BlockHash, BlockNumber};
 use std::ops::RangeInclusive;
 
 /// The Resolve stage: the hash of the block at each height, `None` where the node reports no block
 /// or several.
 pub async fn resolve<T: Transport>(
     rpc: &NodeRpc<T>,
-    heights: RangeInclusive<u64>,
+    heights: RangeInclusive<BlockNumber>,
 ) -> Result<Vec<Option<BlockHash>>, Error> {
     let _timer = Timer::start(metric::RESOLVE_DURATION);
     let batch = heights.fold(Batch::default(), Batch::hash_by_height);

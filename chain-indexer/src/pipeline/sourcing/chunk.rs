@@ -18,18 +18,18 @@ use crate::{
     infra::subxt_node::rpc::Transport,
     pipeline::sourcing::{Finalized, Producer},
 };
-use indexer_common::domain::BlockHash;
+use indexer_common::domain::{BlockHash, BlockNumber};
 use std::{num::NonZeroUsize, ops::RangeInclusive};
 
 /// Distance below the finalized tip within which a chunk is *near*: it is only emitted once it links
 /// to the finalized hash. Chunks further down are *deep*: anchored at their start and confirmed
 /// block by block. Two GRANDPA sessions' worth of blocks (#1038).
-pub(super) const FINALIZATION_SAFETY_MARGIN: u64 = 400;
+pub(super) const FINALIZATION_SAFETY_MARGIN: BlockNumber = 400;
 
 /// A run of heights to source.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct ChunkSpec {
-    pub(super) heights: RangeInclusive<u64>,
+    pub(super) heights: RangeInclusive<BlockNumber>,
     /// Whether the chunk lies within [FINALIZATION_SAFETY_MARGIN] of the finalized tip.
     pub(super) near: bool,
     /// The hashes at these heights, if the [Finalized] window covers all of them.
@@ -39,7 +39,7 @@ pub(super) struct ChunkSpec {
 /// The chunk starting at height `next`: up to `max_size` heights, cut at the finalized tip and at
 /// the boundary between deep and near heights; `None` if `next` is above the tip.
 pub(super) fn next_chunk(
-    next: u64,
+    next: BlockNumber,
     finalized: &Finalized,
     max_size: NonZeroUsize,
 ) -> Option<ChunkSpec> {
@@ -50,10 +50,10 @@ pub(super) fn next_chunk(
 
     let boundary = tip.saturating_sub(FINALIZATION_SAFETY_MARGIN);
     let near = next >= boundary;
-    let end = (next + max_size.get() as u64 - 1).min(tip);
+    let end = (next + max_size.get() as BlockNumber - 1).min(tip);
     let end = if near { end } else { end.min(boundary - 1) };
 
-    let window_start = tip + 1 - finalized.hashes.len() as u64;
+    let window_start = tip + 1 - finalized.hashes.len() as BlockNumber;
     let hashes = (next >= window_start).then(|| {
         let start = (next - window_start) as usize;
         let end = (end - window_start) as usize;
@@ -70,13 +70,13 @@ pub(super) fn next_chunk(
 /// A planned chunk, and the finalized tip it must link to before it is emitted, if near.
 pub(super) struct Planned {
     pub(super) spec: ChunkSpec,
-    pub(super) anchor: Option<BlockRef>,
+    pub(super) anchor: Option<BlockRef<BlockNumber>>,
     pub(super) first_of_run: bool,
 }
 
 impl<T: Transport> Producer<T> {
     /// The next chunk from height `next`, if the finalized tip has reached it.
-    pub(super) fn plan(&self, next: u64, run_start: u64) -> Option<Planned> {
+    pub(super) fn plan(&self, next: BlockNumber, run_start: BlockNumber) -> Option<Planned> {
         let finalized = self.finalized.borrow();
         let finalized = finalized.as_ref()?;
         let mut spec = next_chunk(next, finalized, self.config.chunk_size)?;
@@ -108,7 +108,7 @@ mod tests {
             chunk::{ChunkSpec, FINALIZATION_SAFETY_MARGIN, next_chunk},
         },
     };
-    use indexer_common::domain::ByteArray;
+    use indexer_common::domain::{BlockNumber, ByteArray};
     use std::num::NonZeroUsize;
 
     #[test]
@@ -166,7 +166,7 @@ mod tests {
         assert_eq!(next_chunk(97, &finalized, size(512)).unwrap().hashes, None);
     }
 
-    fn finalized(tip: u64, window: u8) -> Finalized {
+    fn finalized(tip: BlockNumber, window: u8) -> Finalized {
         Finalized {
             hashes: (0..window).map(|n| ByteArray([n; 32])).collect(),
             tip: BlockRef {

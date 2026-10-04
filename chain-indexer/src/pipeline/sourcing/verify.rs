@@ -24,7 +24,7 @@ use crate::{
         },
     },
 };
-use indexer_common::domain::{BlockHash, ByteArray};
+use indexer_common::domain::{BlockHash, BlockNumber, ByteArray};
 use log::warn;
 use std::ops::RangeInclusive;
 
@@ -37,7 +37,7 @@ impl<T: Transport> Producer<T> {
         planned: Planned,
         chunk: Chunk,
         genesis_hash: Option<BlockHash>,
-        run_start: u64,
+        run_start: BlockNumber,
     ) -> Result<Chunk, Error> {
         let _timer = Timer::start(metric::VERIFY_DURATION);
         let expected_parent = progress.last_hash();
@@ -86,7 +86,12 @@ impl<T: Transport> Producer<T> {
 
     /// Source the blocks at heights `start..=end`, with hashes from walking parent hashes back from
     /// the finalized tip.
-    async fn walk_and_source(&self, start: u64, end: u64, run_start: u64) -> Result<Chunk, Error> {
+    async fn walk_and_source(
+        &self,
+        start: BlockNumber,
+        end: BlockNumber,
+        run_start: BlockNumber,
+    ) -> Result<Chunk, Error> {
         let tip = self
             .finalized
             .borrow()
@@ -148,11 +153,11 @@ impl<T: Transport> Producer<T> {
 /// is the genesis block with the genesis hash), and every other block's parent is its predecessor.
 fn links(
     chunk: &[Block],
-    heights: &RangeInclusive<u64>,
+    heights: &RangeInclusive<BlockNumber>,
     expected_parent: Option<BlockHash>,
     genesis_hash: Option<BlockHash>,
 ) -> bool {
-    let expected_heights = chunk.len() as u64 == heights.end() - heights.start() + 1
+    let expected_heights = chunk.len() == (heights.end() - heights.start() + 1) as usize
         && chunk
             .iter()
             .zip(heights.clone())

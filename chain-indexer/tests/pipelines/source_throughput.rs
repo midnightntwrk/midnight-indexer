@@ -33,6 +33,7 @@ use chain_indexer::{
     },
 };
 use futures::{StreamExt, TryStreamExt};
+use indexer_common::domain::BlockNumber;
 use serde_json::Value;
 use std::{
     env,
@@ -58,8 +59,8 @@ use self::{
 #[ignore = "needs a node at NODE_URL"]
 async fn source_throughput() {
     let url = env::var("NODE_URL").expect("NODE_URL is set");
-    let from = setting("SOURCE_FROM", 0u64);
-    let count = optional_setting::<u64>("SOURCE_COUNT");
+    let from = setting::<BlockNumber>("SOURCE_FROM", 0);
+    let count = optional_setting::<BlockNumber>("SOURCE_COUNT");
     let config = sourcing::Config {
         chunk_size: setting("SOURCE_CHUNK_SIZE", NonZeroUsize::new(64).unwrap()),
         chunks_ahead: setting("SOURCE_CHUNKS_AHEAD", NonZeroUsize::new(8).unwrap()),
@@ -83,7 +84,7 @@ async fn source_throughput() {
         Some(count) => from + count - 1,
         None => source
             .rpc()
-            .call::<u64>(Call {
+            .call::<BlockNumber>(Call {
                 method: method::ARCHIVE_FINALIZED_HEIGHT,
                 params: vec![],
             })
@@ -118,7 +119,7 @@ async fn source_throughput() {
             vec!["finalized height".to_owned(), finalized],
             vec![
                 "heights".to_owned(),
-                format!("{from}..={end} ({} blocks)", group(count)),
+                format!("{from}..={end} ({} blocks)", group(count.into())),
             ],
             vec![
                 "settings".to_owned(),
@@ -152,7 +153,7 @@ async fn source_throughput() {
                 .expect("one block at the height before SOURCE_FROM");
             Some(BlockRef {
                 hash,
-                height: from - 1,
+                height: (from - 1).into(),
             })
         }
     };
@@ -203,7 +204,7 @@ async fn source_throughput() {
     progress.abort();
 
     report(&source, &consumer, &sourced, wall, cpu, decode_cpu_threads);
-    assert_eq!(consumer.blocks, count, "every block is received");
+    assert_eq!(consumer.blocks, u64::from(count), "every block is received");
 }
 
 fn setting<T: FromStr<Err: Display>>(name: &str, default: T) -> T {

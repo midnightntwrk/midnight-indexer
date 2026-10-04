@@ -13,11 +13,11 @@
 
 use crate::domain::DustRegistrationEvent;
 use indexer_common::domain::{
-    BlockAuthor, BlockHash, ByteVec, ProtocolVersion, SerializedDustCommitmentMerkleTreeRoot,
-    SerializedDustGenerationMerkleTreeRoot, SerializedLedgerParameters,
-    SerializedZswapMerkleTreeRoot, bridge::BridgeEvent,
+    BlockAuthor, BlockHash, BlockNumber, ByteVec, ProtocolVersion,
+    SerializedDustCommitmentMerkleTreeRoot, SerializedDustGenerationMerkleTreeRoot,
+    SerializedLedgerParameters, SerializedZswapMerkleTreeRoot, bridge::BridgeEvent,
 };
-use std::fmt::Debug;
+use std::{fmt::Debug, num::TryFromIntError};
 
 #[derive(Debug, Clone)]
 pub struct Block {
@@ -46,8 +46,29 @@ pub struct Block {
     pub dust_generation_merkle_tree_root: SerializedDustGenerationMerkleTreeRoot,
 }
 
+/// A block by hash and height; the height is a `u64`, or the runtime's [BlockNumber].
 #[derive(Debug, Clone, Copy)]
-pub struct BlockRef {
+pub struct BlockRef<N = u64> {
     pub hash: BlockHash,
-    pub height: u64,
+    pub height: N,
+}
+
+impl From<BlockRef<BlockNumber>> for BlockRef {
+    fn from(BlockRef { hash, height }: BlockRef<BlockNumber>) -> Self {
+        Self {
+            hash,
+            height: height.into(),
+        }
+    }
+}
+
+impl TryFrom<BlockRef> for BlockRef<BlockNumber> {
+    type Error = TryFromIntError;
+
+    fn try_from(BlockRef { hash, height }: BlockRef) -> Result<Self, Self::Error> {
+        Ok(Self {
+            hash,
+            height: height.try_into()?,
+        })
+    }
 }

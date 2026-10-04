@@ -31,6 +31,9 @@ use sqlx::Type;
 use std::str::FromStr;
 use thiserror::Error;
 
+/// A block's number, its height: the runtime's `BlockNumber`.
+pub type BlockNumber = u32;
+
 // Plain bytes: very simple hashes/identifiers used without serialization.
 pub type BlockAuthor = ByteArray<32>;
 pub type BlockHash = ByteArray<32>;

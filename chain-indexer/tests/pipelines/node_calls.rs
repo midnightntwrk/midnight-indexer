@@ -25,7 +25,7 @@ use chain_indexer::{
     },
 };
 use futures::{StreamExt, TryStreamExt, stream};
-use indexer_common::domain::BlockHash;
+use indexer_common::domain::{BlockHash, BlockNumber};
 use serde_json::{Value, json};
 use std::{
     env,
@@ -43,7 +43,7 @@ async fn node_calls() {
             .and_then(|v| v.parse().ok())
             .unwrap_or(default)
     };
-    let from = setting("SOURCE_FROM", 2_000_000);
+    let from: BlockNumber = setting("SOURCE_FROM", 2_000_000);
     let count = setting("SOURCE_COUNT", 5_000);
     let subscriptions = setting("PROBE_SUBSCRIPTIONS", 256) as usize;
     let batch_size = setting("RPC_BATCH_SIZE", 64) as usize;
@@ -98,7 +98,7 @@ async fn node_calls() {
 
     println!("| kind | heights | calls/s |\n|---|---|---:|");
     let started = Instant::now();
-    let hashes = resolve(rpc, from..=from + count * kinds.len() as u64 - 1)
+    let hashes = resolve(rpc, from..=from + count * kinds.len() as BlockNumber - 1)
         .await
         .expect("hashes resolve")
         .into_iter()
@@ -131,7 +131,7 @@ async fn node_calls() {
                     .await;
             }
         }
-        let start = from + i as u64 * count;
+        let start = from + i as BlockNumber * count;
         println!(
             "| {} | {start}..{} | {:.0} |",
             kind.name(),

@@ -16,7 +16,7 @@ use crate::infra::subxt_node::rpc::{
     ReconnectPolicy, TransportError, json_size, method, testing::FakeNode,
 };
 use futures::{StreamExt, TryStreamExt, stream};
-use indexer_common::domain::ByteArray;
+use indexer_common::domain::{BlockNumber, ByteArray};
 use serde_json::{Value, json};
 use std::{
     num::NonZeroUsize,
@@ -275,7 +275,7 @@ fn echo(call: &Call) -> CallResult {
     Ok(json!({ "method": call.method, "params": call.params }))
 }
 
-fn heights(n: u64) -> Batch {
+fn heights(n: BlockNumber) -> Batch {
     (0..n).fold(Batch::default(), Batch::hash_by_height)
 }
 

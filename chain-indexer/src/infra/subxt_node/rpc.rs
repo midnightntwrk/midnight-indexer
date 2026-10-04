@@ -16,7 +16,7 @@
 //! and counts every call.
 
 use futures::{StreamExt, TryStreamExt, future::try_join_all};
-use indexer_common::domain::BlockHash;
+use indexer_common::domain::{BlockHash, BlockNumber};
 use log::{debug, warn};
 use metrics::counter;
 use serde_json::Value;
@@ -92,7 +92,7 @@ pub struct Batch(Vec<Call>);
 
 impl Batch {
     /// `archive_v1_hashByHeight`: the hashes of the blocks at the given height.
-    pub fn hash_by_height(self, height: u64) -> Self {
+    pub fn hash_by_height(self, height: BlockNumber) -> Self {
         self.push(method::ARCHIVE_HASH_BY_HEIGHT, vec![height.into()])
     }
 

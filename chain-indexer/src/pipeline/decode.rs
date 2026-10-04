@@ -26,8 +26,8 @@ use crate::{
 };
 use futures::{Stream, StreamExt, TryStreamExt, executor::block_on, stream};
 use indexer_common::domain::{
-    BlockAuthor, BlockHash, ByteArray, ByteVec, NodeVersion, ProtocolVersion, ProtocolVersionError,
-    ledger::ZswapMerkleTreeRoot,
+    BlockAuthor, BlockHash, BlockNumber, ByteArray, ByteVec, NodeVersion, ProtocolVersion,
+    ProtocolVersionError, ledger::ZswapMerkleTreeRoot,
 };
 use parity_scale_codec::Decode;
 use rayon::{ThreadPool, ThreadPoolBuildError, ThreadPoolBuilder, prelude::*};
@@ -54,7 +54,7 @@ pub enum Error {
     #[error("cannot decode block {hash} at height {height}")]
     Decode {
         hash: BlockHash,
-        height: u64,
+        height: BlockNumber,
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
@@ -212,7 +212,7 @@ impl TryFrom<sourcing::Block> for node::Block {
 
                 Ok(node::Block {
                     hash,
-                    height,
+                    height: height.into(),
                     protocol_version: decoder.protocol_version,
                     parent_hash: parent.hash,
                     author: decoder.author(&parent)?,
@@ -234,7 +234,7 @@ impl TryFrom<sourcing::Block> for node::Block {
 /// Decodes one block against the metadata of the runtime that executed it.
 struct Decoder {
     hash: BlockHash,
-    height: u64,
+    height: BlockNumber,
     header: SubstrateHeader<H256>,
     protocol_version: ProtocolVersion,
     node_version: NodeVersion,
@@ -244,7 +244,7 @@ struct Decoder {
 impl Decoder {
     fn new(
         hash: BlockHash,
-        height: u64,
+        height: BlockNumber,
         header: &[u8],
         metadata: ArcMetadata,
     ) -> Result<Self, Error> {
@@ -275,14 +275,14 @@ impl Decoder {
         let config = SubstrateConfig::builder()
             .set_metadata_for_spec_versions([(spec_version, self.metadata.clone())])
             .set_spec_version_for_block_ranges([SpecVersionForRange {
-                block_range: self.height..self.height + 1,
+                block_range: u64::from(self.height)..u64::from(self.height) + 1,
                 spec_version,
                 transaction_version: 0,
             }])
             .build();
 
         OfflineClient::new_with_config(config)
-            .at_block(self.height)
+            .at_block(u64::from(self.height))
             .map_err(|error| self.error(error))
     }
 

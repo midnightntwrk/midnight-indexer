@@ -18,11 +18,11 @@ use crate::{
     infra::subxt_node::rpc::{Batch, NodeRpc, Subscription, Transport, method},
     pipeline::{
         metric,
-        sourcing::{Error, Finalized, block_hash_of, decode_header, header_bytes},
+        sourcing::{Error, Finalized, block_hash_of, block_number, decode_header, header_bytes},
     },
 };
 use futures::StreamExt;
-use indexer_common::domain::BlockHash;
+use indexer_common::domain::{BlockHash, BlockNumber};
 use log::{debug, warn};
 use metrics::{counter, gauge};
 use serde::Deserialize;
@@ -91,7 +91,7 @@ pub(super) async fn follow_finalized<T: Transport>(
                 } => {
                     let hashes = block_hashes(finalized_block_hashes)?;
                     if let (Some(BlockRef { height, .. }), Some(&hash)) = (tip, hashes.last()) {
-                        let height = height + hashes.len() as u64;
+                        let height = height + hashes.len() as BlockNumber;
                         tip = Some(BlockRef { hash, height });
                         publish(finalized, hashes, BlockRef { hash, height });
                     }
@@ -134,7 +134,11 @@ enum FollowEvent {
     Other,
 }
 
-fn publish(finalized: &watch::Sender<Option<Finalized>>, hashes: Vec<BlockHash>, tip: BlockRef) {
+fn publish(
+    finalized: &watch::Sender<Option<Finalized>>,
+    hashes: Vec<BlockHash>,
+    tip: BlockRef<BlockNumber>,
+) {
     debug!(hash:% = tip.hash, height = tip.height; "block finalized");
     gauge!(metric::FINALIZED_HEIGHT).set(tip.height as f64);
     finalized.send_replace(Some(Finalized { hashes, tip }));
@@ -153,12 +157,15 @@ async fn unpin<T: Transport>(rpc: &NodeRpc<T>, subscription: &Value, hashes: &[B
 }
 
 /// The height of the given block, from its header.
-async fn header_height<T: Transport>(rpc: &NodeRpc<T>, hash: BlockHash) -> Result<u64, Error> {
+async fn header_height<T: Transport>(
+    rpc: &NodeRpc<T>,
+    hash: BlockHash,
+) -> Result<BlockNumber, Error> {
     let batch = Batch::default().header(hash);
     let header = rpc.batch(batch).await?.pop().expect("one result per call");
     let header = header_bytes(header, hash)?;
 
-    Ok(decode_header(&header, hash)?.number)
+    block_number(decode_header(&header, hash)?.number)
 }
 
 fn block_hashes(hashes: Vec<String>) -> Result<Vec<BlockHash>, Error> {
@@ -171,7 +178,7 @@ mod tests {
         infra::subxt_node::rpc::{Call, NodeRpc, ReconnectPolicy, method, testing::FakeNode},
         pipeline::sourcing::{Finalized, finalized::follow_finalized},
     };
-    use indexer_common::domain::{BlockHash, ByteArray};
+    use indexer_common::domain::{BlockHash, BlockNumber, ByteArray};
     use parity_scale_codec::Encode;
     use parking_lot::Mutex;
     use serde_json::{Value, json};
@@ -318,7 +325,10 @@ mod tests {
         const_hex::encode_prefixed([n; 32])
     }
 
-    async fn latest(finalized: &mut watch::Receiver<Option<Finalized>>, height: u64) -> Finalized {
+    async fn latest(
+        finalized: &mut watch::Receiver<Option<Finalized>>,
+        height: BlockNumber,
+    ) -> Finalized {
         let finalized = tokio::time::timeout(
             Duration::from_secs(5),
             finalized.wait_for(|finalized| {

@@ -21,7 +21,7 @@ use crate::{
     pipeline::{
         metric::{self, Timer},
         sourcing::{
-            self, CNIGHT_MAPPINGS_ITEMS, Chunk, Error, Parent, Producer, call_value,
+            self, CNIGHT_MAPPINGS_ITEMS, Chunk, Error, Parent, Producer, block_number, call_value,
             chunk::Planned,
             decode_header, header_bytes,
             metadata::MetadataCache,
@@ -35,7 +35,7 @@ use crate::{
     },
 };
 use futures::{StreamExt, TryStreamExt, future::try_join, stream};
-use indexer_common::domain::{BlockHash, ByteArray, ByteVec};
+use indexer_common::domain::{BlockHash, BlockNumber, ByteArray, ByteVec};
 use metrics::counter;
 use serde_json::Value;
 use std::{collections::HashMap, future::Future};
@@ -123,7 +123,7 @@ impl<T: Transport> Producer<T> {
 pub(crate) async fn source<T: Transport>(
     rpc: &NodeRpc<T>,
     metadata: &MetadataCache,
-    start: u64,
+    start: BlockNumber,
     hashes: &[BlockHash],
     parent: Option<BlockHash>,
     first_of_run: bool,
@@ -170,13 +170,14 @@ pub(crate) async fn source<T: Transport>(
         let zswap_state_root = call_value(next(), ZSWAP_STATE_ROOT_FUNCTION, hash)?;
         let ledger_state_root = call_value(next(), LEDGER_STATE_ROOT_FUNCTION, hash)?;
 
-        let height = start + i as u64;
+        let height = start + i as BlockNumber;
         let decoded_header = decode_header(&header, hash)?;
-        if decoded_header.number != height {
+        let header_height = block_number(decoded_header.number)?;
+        if header_height != height {
             return Err(Error::HeightMismatch {
                 hash,
                 height,
-                header_height: decoded_header.number,
+                header_height,
             });
         }
         let protocol_version = decoded_header
@@ -258,7 +259,7 @@ pub(crate) async fn source<T: Transport>(
 /// A block as sourced, before it becomes a [sourcing::Block].
 struct Block {
     hash: BlockHash,
-    height: u64,
+    height: BlockNumber,
     header: ByteVec,
     parent_hash: BlockHash,
     zswap_state_root: ByteVec,

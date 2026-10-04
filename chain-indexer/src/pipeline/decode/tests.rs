@@ -30,7 +30,7 @@ use crate::{
     },
 };
 use futures::{TryStreamExt, stream};
-use indexer_common::domain::{BlockHash, ByteArray, ByteVec, ProtocolVersion};
+use indexer_common::domain::{BlockHash, BlockNumber, ByteArray, ByteVec, ProtocolVersion};
 use parity_scale_codec::{Decode, Encode};
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
@@ -91,7 +91,7 @@ async fn record_decode_fixtures() {
 
     for label_height in heights.split(',') {
         let (label, height) = label_height.split_once('=').expect("label=height");
-        let height = height.trim().parse::<u64>().expect("height");
+        let height = height.trim().parse::<BlockNumber>().expect("height");
 
         let (parent, hash) = if height == 0 {
             (None, genesis_hash)
@@ -112,7 +112,7 @@ async fn record_decode_fixtures() {
         let made = {
             let after = parent.map(|parent| BlockRef {
                 hash: parent,
-                height: height - 1,
+                height: u64::from(height - 1),
             });
             let blocks = node.finalized_blocks(after);
             let mut blocks = pin!(blocks);
@@ -614,7 +614,8 @@ fn sourced_of(sourced: &Value) -> sourcing::Block {
         },
         _ => sourcing::Block::Block {
             hash: block_hash(&sourced["hash"]),
-            height: sourced["height"].as_u64().expect("height"),
+            height: BlockNumber::try_from(sourced["height"].as_u64().expect("height"))
+                .expect("height is a block number"),
             header: bytes(&sourced["header"]),
             zswap_state_root: bytes(&sourced["zswap_state_root"]),
             ledger_state_root: bytes(&sourced["ledger_state_root"]),

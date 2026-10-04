@@ -20,6 +20,7 @@ use crate::{
     },
 };
 use futures::{StreamExt, TryStreamExt};
+use indexer_common::domain::BlockNumber;
 use std::{sync::Arc, time::Duration};
 use tokio::time::{sleep, timeout};
 
@@ -59,7 +60,7 @@ async fn test_ordering() {
                 .find(|call| call.method == method::ARCHIVE_HEADER)
                 .map(|call| height_of(&bytes_of(&call.params[0])))
                 .unwrap_or(0);
-            Duration::from_millis(160 - first_height.min(160))
+            Duration::from_millis(u64::from(160 - first_height.min(160)))
         });
     let source = Source::new(Arc::new(node), config(10, 4));
 
@@ -176,7 +177,7 @@ async fn test_shutdown() {
 }
 
 /// The heights and hashes of the blocks, and whether each block's parent is its predecessor.
-fn assert_canonical(blocks: &[Block], heights: std::ops::RangeInclusive<u64>) {
+fn assert_canonical(blocks: &[Block], heights: std::ops::RangeInclusive<BlockNumber>) {
     assert_eq!(
         blocks.iter().map(Block::height).collect::<Vec<_>>(),
         heights.clone().collect::<Vec<_>>()
@@ -193,7 +194,11 @@ fn assert_canonical(blocks: &[Block], heights: std::ops::RangeInclusive<u64>) {
 }
 
 /// Run the pipeline to `end` and collect its blocks.
-async fn run_to_end(source: &Source<Arc<FakeNode>>, start: Option<BlockRef>, end: u64) -> Chunk {
+async fn run_to_end(
+    source: &Source<Arc<FakeNode>>,
+    start: Option<BlockRef>,
+    end: BlockNumber,
+) -> Chunk {
     let (chunks, _finalized) = source.run(start, Some(end));
     timeout(Duration::from_secs(10), chunks.try_concat())
         .await

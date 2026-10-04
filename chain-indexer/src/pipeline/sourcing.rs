@@ -27,7 +27,7 @@ use futures::{
     stream::{BoxStream, FuturesOrdered},
 };
 use http::{HeaderMap, HeaderValue, header::USER_AGENT};
-use indexer_common::domain::{BlockHash, ByteArray, ByteVec, ProtocolVersionError};
+use indexer_common::domain::{BlockHash, BlockNumber, ByteArray, ByteVec, ProtocolVersionError};
 use log::warn;
 use metrics::gauge;
 use parity_scale_codec::Decode;
@@ -112,7 +112,7 @@ pub enum Block {
     },
     Block {
         hash: BlockHash,
-        height: u64,
+        height: BlockNumber,
         header: ByteVec,
         zswap_state_root: ByteVec,
         ledger_state_root: ByteVec,
@@ -135,7 +135,7 @@ impl Block {
         }
     }
 
-    pub fn height(&self) -> u64 {
+    pub fn height(&self) -> BlockNumber {
         match self {
             Self::Genesis { .. } => 0,
             Self::Block { height, .. } => *height,
@@ -156,7 +156,7 @@ pub struct Parent {
 #[derive(Debug, Clone)]
 pub struct Finalized {
     pub hashes: Vec<BlockHash>,
-    pub tip: BlockRef,
+    pub tip: BlockRef<BlockNumber>,
 }
 
 /// Error of the block sourcing pipeline.
@@ -201,8 +201,8 @@ pub enum Error {
     #[error("block {hash} is at height {header_height}, not {height}")]
     HeightMismatch {
         hash: BlockHash,
-        height: u64,
-        header_height: u64,
+        height: BlockNumber,
+        header_height: BlockNumber,
     },
     #[error(
         "no metadata of runtime {spec_version} for block {hash}; the parent's and the block's \
@@ -213,10 +213,12 @@ pub enum Error {
         spec_version: u32,
         found: Vec<Option<u32>>,
     },
+    #[error("block number {0} is beyond the runtime's BlockNumber")]
+    BlockNumber(u64),
     #[error("no single block at height {0}")]
-    Unresolved(u64),
+    Unresolved(BlockNumber),
     #[error("blocks from height {0} do not link to the finalized chain")]
-    Unlinked(u64),
+    Unlinked(BlockNumber),
     #[error("following finalized blocks failed")]
     Follow(#[source] Box<Error>),
     #[error("following finalized blocks ended")]
@@ -310,7 +312,7 @@ impl<T: Transport> Source<T> {
     pub fn run(
         &self,
         start: Option<BlockRef>,
-        end: Option<u64>,
+        end: Option<BlockNumber>,
     ) -> (
         BoxStream<'static, Result<Chunk, Error>>,
         watch::Receiver<Option<Finalized>>,
@@ -371,14 +373,14 @@ struct Producer<T> {
     finalized: watch::Receiver<Option<Finalized>>,
     chunks: mpsc::Sender<Result<Chunk, Error>>,
     start: Option<BlockRef>,
-    end: Option<u64>,
+    end: Option<BlockNumber>,
 }
 
 /// The producer's progress: the last block emitted, and the verified blocks Verify holds back
 /// until they are confirmed.
 #[derive(Default)]
 struct Progress {
-    emitted: Option<BlockRef>,
+    emitted: Option<BlockRef<BlockNumber>>,
     held: Vec<Block>,
 }
 
@@ -392,15 +394,25 @@ impl Progress {
     }
 
     /// The height of the first block not yet emitted.
-    fn next_height(&self) -> u64 {
+    fn next_height(&self) -> BlockNumber {
         self.emitted.map(|emitted| emitted.height + 1).unwrap_or(0)
     }
 }
 
 impl<T: Transport> Producer<T> {
     async fn produce(mut self, mut follow_error: oneshot::Receiver<Error>) {
+        let start = self.start.map(|start| {
+            BlockRef::<BlockNumber>::try_from(start).map_err(|_| Error::BlockNumber(start.height))
+        });
+        let emitted = match start.transpose() {
+            Ok(emitted) => emitted,
+            Err(error) => {
+                let _ = self.chunks.send(Err(error)).await;
+                return;
+            }
+        };
         let mut progress = Progress {
-            emitted: self.start,
+            emitted,
             held: vec![],
         };
 
@@ -514,6 +526,11 @@ fn header_bytes(header: CallResult, hash: BlockHash) -> Result<ByteVec, Error> {
 fn decode_header(header: &[u8], hash: BlockHash) -> Result<SubstrateHeader<H256>, Error> {
     SubstrateHeader::<H256>::decode(&mut &*header)
         .map_err(|error| Error::Header(hash, error.into()))
+}
+
+/// A header's block number as the runtime's [BlockNumber].
+fn block_number(number: u64) -> Result<BlockNumber, Error> {
+    BlockNumber::try_from(number).map_err(|_| Error::BlockNumber(number))
 }
 
 fn block_hash_of(hash: String) -> Result<BlockHash, Error> {

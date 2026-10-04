@@ -22,6 +22,7 @@ use crate::{
     },
 };
 use futures::Stream;
+use indexer_common::domain::BlockNumber;
 use std::sync::Arc;
 use tokio::sync::watch;
 
@@ -34,7 +35,7 @@ pub fn finalized_blocks<T: Transport>(
     source: &Source<T>,
     pool: Arc<CpuPool>,
     start: Option<BlockRef>,
-    end: Option<u64>,
+    end: Option<BlockNumber>,
 ) -> (
     impl Stream<Item = Result<node::Block, decode::Error>> + use<T>,
     watch::Receiver<Option<Finalized>>,
