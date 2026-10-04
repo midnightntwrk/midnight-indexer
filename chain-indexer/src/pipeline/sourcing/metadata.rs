@@ -20,7 +20,7 @@ use crate::{
 use indexer_common::domain::BlockHash;
 use parity_scale_codec::{Decode, Encode};
 use std::{collections::HashMap, sync::Arc};
-use subxt::{ArcMetadata, Metadata};
+use subxt::{ArcMetadata, Metadata, metadata::SUPPORTED_METADATA_VERSIONS};
 use tokio::sync::Mutex;
 
 /// Metadata by runtime spec version, fetched from the node once per spec version.
@@ -76,8 +76,8 @@ pub fn metadata_spec_version(metadata: &Metadata) -> Option<u32> {
     Some(spec_version)
 }
 
-/// Fetch metadata as subxt does: the highest stable version `Metadata_metadata_versions` offers,
-/// falling back to `Metadata_metadata`.
+/// Fetch metadata as subxt does: the highest version `Metadata_metadata_versions` offers that subxt
+/// can decode, falling back to `Metadata_metadata`.
 async fn fetch_metadata<T: Transport>(rpc: &NodeRpc<T>, at: BlockHash) -> Result<Metadata, Error> {
     let call = |function: &'static str, parameters: Vec<u8>| async move {
         let batch = Batch::default().call(at, function, &parameters);
@@ -94,7 +94,11 @@ async fn fetch_metadata<T: Transport>(rpc: &NodeRpc<T>, at: BlockHash) -> Result
         .await
         .ok()
         .and_then(|versions| Vec::<u32>::decode(&mut &versions[..]).ok())
-        .and_then(|versions| versions.into_iter().filter(|v| *v != u32::MAX).max());
+        .and_then(|versions| {
+            SUPPORTED_METADATA_VERSIONS
+                .into_iter()
+                .find(|supported| versions.contains(supported))
+        });
 
     let metadata = match version {
         Some(version) => {
@@ -114,4 +118,57 @@ async fn fetch_metadata<T: Transport>(rpc: &NodeRpc<T>, at: BlockHash) -> Result
     };
 
     Metadata::decode(&mut &*metadata).map_err(decode_error)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        infra::subxt_node::rpc::{NodeRpc, ReconnectPolicy, method, testing::FakeNode},
+        pipeline::sourcing::metadata::fetch_metadata,
+    };
+    use indexer_common::domain::ByteArray;
+    use parity_scale_codec::{Decode, Encode};
+    use serde_json::{Value, json};
+    use std::{fs, num::NonZeroUsize, path::Path, sync::Arc, time::Duration};
+
+    #[tokio::test]
+    async fn test_highest_supported_version() {
+        // The node offers V17, which subxt cannot decode, besides V14 to V16 and the unstable one.
+        let metadata = node_metadata();
+        let node = Arc::new(FakeNode::new(move |call| {
+            let function = call.params[1].as_str().expect("function");
+            let parameters = const_hex::decode(call.params[2].as_str().expect("hex")).unwrap();
+            let value = match function {
+                "Metadata_metadata_versions" => vec![14u32, 15, 16, 17, u32::MAX].encode(),
+                "Metadata_metadata_at_version" => {
+                    match u32::decode(&mut &parameters[..]).expect("version") {
+                        16 => Some(metadata.clone()).encode(),
+                        _ => None::<Vec<u8>>.encode(),
+                    }
+                }
+                _ => return Ok(Value::Null),
+            };
+            assert_eq!(call.method, method::ARCHIVE_CALL);
+            Ok(json!({ "success": true, "value": const_hex::encode_prefixed(value) }))
+        }));
+        let rpc = NodeRpc::new(
+            node,
+            NonZeroUsize::new(64).unwrap(),
+            NonZeroUsize::new(4).unwrap(),
+            ReconnectPolicy {
+                max_delay: Duration::from_millis(10),
+                max_attempts: 3,
+            },
+        );
+
+        fetch_metadata(&rpc, ByteArray([1; 32]))
+            .await
+            .expect("V16 metadata is fetched and decodes");
+    }
+
+    /// The SCALE-encoded `RuntimeMetadataPrefixed` of the 2.1 node.
+    fn node_metadata() -> Vec<u8> {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../.node/2.1.0-rc.4/metadata.scale");
+        fs::read(path).expect("node metadata can be read")
+    }
 }
