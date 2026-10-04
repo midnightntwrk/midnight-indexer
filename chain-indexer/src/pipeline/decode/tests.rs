@@ -13,20 +13,21 @@
 
 use crate::{
     domain::{DustRegistrationEvent, node},
-    infra::subxt_node::{AURA_ENGINE_ID, BABE_ENGINE_ID},
+    infra::subxt_node::{AURA_ENGINE_ID, BABE_ENGINE_ID, runtimes},
     pipeline::{
         decode::{
-            AuthoritySetError, BABE_NEXT_EPOCH_DATA, CpuPool, block_authorities, chunks_in_decode,
-            decode, deserialize::deserialize,
+            AuthoritySetError, BABE_NEXT_EPOCH_DATA, CpuPool, Decoder, Error, block_authorities,
+            chunks_in_decode, decode, deserialize::deserialize,
         },
         sourcing::{self, AUTHORITY_SET_ITEMS, Parent, storage_key},
     },
 };
 use futures::{StreamExt, TryStreamExt, stream};
 use indexer_common::domain::{
-    BlockHash, BlockNumber, ByteArray, ByteVec, LedgerVersion, ProtocolVersion,
+    BlockHash, BlockNumber, ByteArray, ByteVec, ContractAttributes, LedgerVersion, ProtocolVersion,
+    ledger,
 };
-use midnight_storage_core_v1::{db::InMemoryDB, storage::try_get_default_storage};
+use midnight_storage_core_v1::db::InMemoryDB;
 use parity_scale_codec::{Decode, Encode};
 use rayon::prelude::*;
 use serde_json::{Value, json};
@@ -229,8 +230,61 @@ fn test_deserialization_on_threads() {
         one.iter()
             .any(|deserialized| !deserialized.contract_actions.is_empty())
     );
-    // The fixtures include a contract deploy, read from the default storage.
-    assert!(try_get_default_storage::<InMemoryDB>().is_some());
+}
+
+#[test]
+fn test_deploy_deserializes_in_default_storage() {
+    // Reading a deploy's contract address from a thread's own storage panics in storage-core; the
+    // deploy is read from the default storage instead.
+    let (bytes, ledger_version) = regular_transactions()
+        .into_iter()
+        .find(|(bytes, ledger_version)| {
+            ledger::Transaction::<InMemoryDB>::deserialize_in(bytes, *ledger_version)
+                .expect("transaction deserializes")
+                .deploys_contracts()
+        })
+        .expect("a fixture deploys a contract");
+
+    let deserialized = deserialize(&bytes, ledger_version).expect("deploy deserializes");
+
+    assert!(
+        deserialized
+            .contract_actions
+            .iter()
+            .any(|action| matches!(action.attributes, ContractAttributes::Deploy))
+    );
+}
+
+#[test]
+fn test_corrupt_transaction_fails_its_block() {
+    let sourcing::Block::Block {
+        hash,
+        height,
+        header,
+        metadata,
+        ..
+    } = fixture_block("devnet-2.1")
+    else {
+        panic!("devnet-2.1 is not genesis");
+    };
+    let decoder = Decoder::new(hash, height, &header, metadata).expect("header decodes");
+    let (valid, _) = regular_transactions()
+        .into_iter()
+        .find(|(_, ledger_version)| *ledger_version == LedgerVersion::V9)
+        .expect("a V9 transaction");
+
+    let error = decoder
+        .transactions(vec![
+            runtimes::Transaction::Regular(valid.into()),
+            runtimes::Transaction::Regular(vec![0xff; 8].into()),
+        ])
+        .expect_err("a corrupt transaction fails");
+
+    assert!(matches!(
+        error,
+        Error::Transaction { hash: error_hash, height: error_height, index: 1, .. }
+            if error_hash == hash && error_height == height
+    ));
 }
 
 fn authorities(header: &SubstrateHeader<H256>) -> Option<Vec<[u8; 32]>> {
