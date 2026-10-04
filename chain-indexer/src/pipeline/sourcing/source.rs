@@ -41,6 +41,9 @@ use serde_json::Value;
 use std::{collections::HashMap, future::Future};
 use subxt::ArcMetadata;
 
+#[cfg(test)]
+mod tests;
+
 pub(super) const ZSWAP_STATE_ROOT_FUNCTION: &str = "MidnightRuntimeApi_get_zswap_state_root";
 pub(super) const LEDGER_STATE_ROOT_FUNCTION: &str = "MidnightRuntimeApi_get_ledger_state_root";
 pub(super) const D_PARAMETER_FUNCTION: &str = "SystemParametersApi_get_d_parameter";

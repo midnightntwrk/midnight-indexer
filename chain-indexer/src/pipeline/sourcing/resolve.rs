@@ -54,3 +54,27 @@ pub async fn resolve<T: Transport>(
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::pipeline::sourcing::{
+        resolve,
+        tests::chain::{Chain, hash, node_rpc},
+    };
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn test_resolve() {
+        let (_, node) = Chain::default().node();
+        let rpc = node_rpc(Arc::new(node), 64, 4);
+
+        let resolved = resolve(&rpc, 999_998..=1_000_001)
+            .await
+            .expect("hashes resolve");
+
+        assert_eq!(
+            resolved,
+            vec![Some(hash(999_998)), Some(hash(999_999)), None, None]
+        );
+    }
+}

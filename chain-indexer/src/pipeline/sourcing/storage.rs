@@ -215,3 +215,58 @@ pub(super) fn events_of(items: &[StorageItem]) -> ByteVec {
         .and_then(|item| item.value.to_owned())
         .unwrap_or_else(|| Vec::<()>::new().encode().into())
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::pipeline::sourcing::{
+        AUTHORITY_SET_ITEMS, CNIGHT_MAPPINGS_ITEMS, SYSTEM_EVENTS_ITEM, SYSTEM_PARAMETERS_ITEMS,
+        storage_key,
+    };
+    use std::{fs, path::Path};
+    use subxt::Metadata;
+
+    #[test]
+    fn test_storage_keys() {
+        // Published key of `System.Events`.
+        assert_eq!(
+            const_hex::encode(storage_key(SYSTEM_EVENTS_ITEM)),
+            "26aa394eea5630e07c48ae0c9558cef780d41e5e16056765bc8461851072c9d7"
+        );
+
+        let node_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../.node");
+        let node_versions = fs::read_to_string(node_dir.join("../NODE_VERSIONS"))
+            .expect("NODE_VERSIONS can be read");
+
+        for node_version in node_versions
+            .lines()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            let metadata = fs::read(node_dir.join(node_version).join("metadata.scale"))
+                .expect("metadata can be read");
+            let metadata = <Metadata as parity_scale_codec::Decode>::decode(&mut &*metadata)
+                .expect("metadata can be decoded");
+
+            let has = |(pallet, entry): (&str, &str)| {
+                metadata
+                    .pallet_by_name(pallet)
+                    .and_then(|pallet| pallet.storage())
+                    .and_then(|storage| storage.entry_by_name(entry))
+                    .is_some()
+            };
+
+            assert!(has(SYSTEM_EVENTS_ITEM), "{node_version}: System.Events");
+            assert!(
+                has(AUTHORITY_SET_ITEMS[0]),
+                "{node_version}: Aura.Authorities"
+            );
+            for item in SYSTEM_PARAMETERS_ITEMS {
+                assert!(has(item), "{node_version}: {item:?}");
+            }
+            assert!(
+                CNIGHT_MAPPINGS_ITEMS.into_iter().any(has),
+                "{node_version}: cNight mappings"
+            );
+        }
+    }
+}
