@@ -25,7 +25,7 @@ use crate::{
             chunk::Planned,
             decode_header, header_bytes,
             metadata::MetadataCache,
-            resolve::resolve,
+            resolve::canonical,
             storage::{
                 authority_set_hashes, authority_set_items, authority_set_of, block_storage_items,
                 events_of, parent_storage_items, query_storage, storage_query,
@@ -63,24 +63,25 @@ impl<T: Transport> Producer<T> {
             let start = *planned.spec.heights.start();
             let end = *planned.spec.heights.end();
 
-            let (parent, hashes) = match &planned.spec.hashes {
-                Some(hashes) if start == 0 => (None, hashes.iter().copied().map(Some).collect()),
-                Some(hashes) => {
-                    let parent = resolve(&rpc, start - 1..=start - 1).await?.pop().flatten();
-                    (Some(parent), hashes.iter().copied().map(Some).collect())
-                }
-                None if start == 0 => (None, resolve(&rpc, 0..=end).await?),
-                None => {
-                    let mut hashes = resolve(&rpc, start - 1..=end).await?;
-                    let parent = hashes.remove(0);
-                    (Some(parent), hashes)
+            let resolved = async {
+                match &planned.spec.hashes {
+                    Some(hashes) if start == 0 => Ok((None, hashes.clone())),
+                    Some(hashes) => {
+                        let parent =
+                            canonical(&rpc, start - 1..=start - 1, hashes.first().copied()).await?;
+                        Ok((parent.first().copied(), hashes.clone()))
+                    }
+                    None if start == 0 => Ok((None, canonical(&rpc, 0..=end, None).await?)),
+                    None => {
+                        let mut hashes = canonical(&rpc, start - 1..=end, None).await?;
+                        let parent = hashes.remove(0);
+                        Ok((Some(parent), hashes))
+                    }
                 }
             };
 
-            let hashes = hashes.into_iter().collect::<Option<Vec<_>>>();
-            let parent = parent.map(|parent| parent.ok_or(Error::Unresolved(start - 1)));
-            let chunk = match (hashes, parent.transpose()) {
-                (Some(hashes), Ok(parent)) => {
+            let chunk = match resolved.await {
+                Ok((parent, hashes)) => {
                     match source(
                         &rpc,
                         &metadata,
@@ -91,15 +92,16 @@ impl<T: Transport> Producer<T> {
                     )
                     .await
                     {
-                        // A hash at the wrong height: leave the chunk empty, so that Verify walks
-                        // the parent links.
+                        // A hash at the wrong height: leave the chunk empty, so that Verify
+                        // re-sources it.
                         Err(Error::HeightMismatch { .. }) => vec![],
                         chunk => chunk?,
                     }
                 }
-                // A height without exactly one block: leave the chunk empty, so that Verify walks
-                // the parent links.
-                _ => vec![],
+                // A near height without a block yet: leave the chunk empty, so that Verify walks
+                // the parent links from the finalized tip.
+                Err(Error::Unresolved(_)) if planned.spec.near => vec![],
+                Err(error) => return Err(error),
             };
 
             Ok((planned, chunk))

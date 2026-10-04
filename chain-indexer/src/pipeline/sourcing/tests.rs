@@ -72,7 +72,7 @@ async fn test_ordering() {
 #[tokio::test]
 async fn test_anchoring_deep_fork_falls_back_to_parent_walk() {
     // A fork sibling resolves at the last height of a deep chunk; its child exposes it.
-    let (_, node) = Chain {
+    let (chain, node) = Chain {
         forks: vec![109],
         ..Default::default()
     }
@@ -83,6 +83,36 @@ async fn test_anchoring_deep_fork_falls_back_to_parent_walk() {
     let blocks = run_to_end(&source, start(99), 130).await;
 
     assert_canonical(&blocks, 100..=130);
+    // The walk starts at the next chunk's last block, not 900 blocks up at the finalized tip: the
+    // 31 blocks' headers, the 11 walked and the 11 sourced again.
+    assert!(
+        chain.header_calls() <= 60,
+        "{} headers",
+        chain.header_calls()
+    );
+}
+
+#[tokio::test]
+async fn test_fork_siblings_resolve_by_parent() {
+    // The node reports a fork sibling beside the canonical block mid-chunk, at a chunk's last height
+    // and at the next chunk's first.
+    let (chain, node) = Chain {
+        siblings: vec![105, 109, 110],
+        ..Default::default()
+    }
+    .node();
+    let node = node.with_subscriptions(vec![follow(1_000, 1_000)]);
+    let source = Source::new(Arc::new(node), config(10, 2));
+
+    let blocks = run_to_end(&source, start(99), 130).await;
+
+    assert_canonical(&blocks, 100..=130);
+    // Each sibling takes one or two parent lookups, and nothing is walked or sourced again.
+    assert!(
+        chain.header_calls() <= 40,
+        "{} headers",
+        chain.header_calls()
+    );
 }
 
 #[tokio::test]

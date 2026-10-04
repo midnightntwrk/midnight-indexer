@@ -530,6 +530,15 @@ fn decode_header(header: &[u8], hash: BlockHash) -> Result<SubstrateHeader<H256>
         .map_err(|error| Error::Header(hash, error.into()))
 }
 
+/// The parent hash of the given block, from its header.
+async fn parent_hash<T: Transport>(rpc: &NodeRpc<T>, hash: BlockHash) -> Result<BlockHash, Error> {
+    let batch = Batch::default().header(hash);
+    let header = rpc.batch(batch).await?.pop().expect("one result per call");
+    let header = header_bytes(header, hash)?;
+
+    Ok(ByteArray(decode_header(&header, hash)?.parent_hash.0))
+}
+
 /// A header's block number as the runtime's [BlockNumber].
 fn block_number(number: u64) -> Result<BlockNumber, Error> {
     BlockNumber::try_from(number).map_err(|_| Error::BlockNumber(number))

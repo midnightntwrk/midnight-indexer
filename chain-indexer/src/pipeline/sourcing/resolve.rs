@@ -17,7 +17,7 @@ use crate::{
     infra::subxt_node::rpc::{self, Batch, NodeRpc, Transport, method},
     pipeline::{
         metric::{self, Timer},
-        sourcing::{Error, block_hash_of},
+        sourcing::{Error, block_hash_of, parent_hash},
     },
 };
 use indexer_common::domain::{BlockHash, BlockNumber};
@@ -29,6 +29,79 @@ pub async fn resolve<T: Transport>(
     rpc: &NodeRpc<T>,
     heights: RangeInclusive<BlockNumber>,
 ) -> Result<Vec<Option<BlockHash>>, Error> {
+    let hashes = resolve_all(rpc, heights).await?;
+
+    Ok(hashes
+        .into_iter()
+        .map(|hashes| match hashes.as_slice() {
+            [hash] => Some(*hash),
+            _ => None,
+        })
+        .collect())
+}
+
+/// The canonical hash at each height. A height with several blocks, such as fork siblings a node
+/// keeps, takes the parent of the canonical block above it: `above` past the last height if given,
+/// else resolved further up. A height without a block fails.
+pub(super) async fn canonical<T: Transport>(
+    rpc: &NodeRpc<T>,
+    heights: RangeInclusive<BlockNumber>,
+    above: Option<BlockHash>,
+) -> Result<Vec<BlockHash>, Error> {
+    let start = *heights.start();
+    let mut hashes = resolve_all(rpc, heights).await?;
+
+    let mut child = None;
+    for (index, candidates) in hashes.iter_mut().enumerate().rev() {
+        let height = start + index as BlockNumber;
+        let hash = match candidates.as_slice() {
+            [] => return Err(Error::Unresolved(height)),
+            [hash] => *hash,
+            _ => {
+                let child = match (child, above) {
+                    (Some(child), _) | (None, Some(child)) => child,
+                    (None, None) => canonical_at(rpc, height + 1).await?,
+                };
+                parent_hash(rpc, child).await?
+            }
+        };
+        *candidates = vec![hash];
+        child = Some(hash);
+    }
+
+    Ok(hashes.into_iter().flatten().collect())
+}
+
+/// The canonical hash at `height`: its only block, else the parent of the canonical block above,
+/// resolving up to the first height with a single block.
+async fn canonical_at<T: Transport>(
+    rpc: &NodeRpc<T>,
+    height: BlockNumber,
+) -> Result<BlockHash, Error> {
+    let mut above = height;
+    let mut hash = loop {
+        let candidates = resolve_all(rpc, above..=above)
+            .await?
+            .pop()
+            .expect("one result per height");
+        match candidates.as_slice() {
+            [] => return Err(Error::Unresolved(above)),
+            [hash] => break *hash,
+            _ => above += 1,
+        }
+    };
+    for _ in height..above {
+        hash = parent_hash(rpc, hash).await?;
+    }
+
+    Ok(hash)
+}
+
+/// Every block hash the node reports at each height.
+async fn resolve_all<T: Transport>(
+    rpc: &NodeRpc<T>,
+    heights: RangeInclusive<BlockNumber>,
+) -> Result<Vec<Vec<BlockHash>>, Error> {
     let _timer = Timer::start(metric::RESOLVE_DURATION);
     let batch = heights.fold(Batch::default(), Batch::hash_by_height);
 
@@ -47,10 +120,7 @@ pub async fn resolve<T: Transport>(
                 }
             })?;
 
-            match <[String; 1]>::try_from(hashes) {
-                Ok([hash]) => block_hash_of(hash).map(Some),
-                Err(_) => Ok(None),
-            }
+            hashes.into_iter().map(block_hash_of).collect()
         })
         .collect()
 }

@@ -61,6 +61,8 @@ pub(crate) struct Chain {
     /// The authority set at each height, as a set number; past the end, each block's own.
     pub(crate) authority_sets: Vec<u8>,
     pub(crate) forks: Vec<BlockNumber>,
+    /// Heights at which the node reports the canonical block and a fork sibling.
+    pub(crate) siblings: Vec<BlockNumber>,
     pub(crate) failing: Vec<BlockNumber>,
     pub(crate) stamped_2_1_from: Option<BlockNumber>,
     pub(crate) state_2_1_from: Option<BlockNumber>,
@@ -103,6 +105,7 @@ impl Chain {
                     1_000_000 => Ok(json!([])),
                     1_000_001 => Ok(json!([hex(hash(n)), hex(fork(n))])),
                     n if self.forks.contains(&n) => Ok(json!([hex(fork(n))])),
+                    n if self.siblings.contains(&n) => Ok(json!([hex(hash(n)), hex(fork(n))])),
                     n => Ok(json!([hex(hash(n))])),
                 }
             }
@@ -196,6 +199,15 @@ impl Chain {
     }
 
     /// The heights of every `archive_v1_hashByHeight` call, in order.
+    /// The number of `archive_v1_header` calls.
+    pub(crate) fn header_calls(&self) -> usize {
+        self.calls
+            .lock()
+            .iter()
+            .filter(|call| call.method == method::ARCHIVE_HEADER)
+            .count()
+    }
+
     pub(crate) fn resolved_heights(&self) -> Vec<BlockNumber> {
         self.calls
             .lock()

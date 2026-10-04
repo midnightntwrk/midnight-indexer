@@ -15,16 +15,16 @@
 //! hashes walked back from the finalized tip, and release the blocks that are confirmed.
 
 use crate::{
-    infra::subxt_node::rpc::{Batch, Transport},
+    domain::BlockRef,
+    infra::subxt_node::rpc::Transport,
     pipeline::{
         metric::{self, Timer},
         sourcing::{
-            Block, Chunk, Error, Producer, Progress, chunk::Planned, decode_header, header_bytes,
-            source::source,
+            Block, Chunk, Error, Producer, Progress, chunk::Planned, parent_hash, source::source,
         },
     },
 };
-use indexer_common::domain::{BlockHash, BlockNumber, ByteArray};
+use indexer_common::domain::{BlockHash, BlockNumber};
 use log::warn;
 use std::ops::RangeInclusive;
 
@@ -49,14 +49,34 @@ impl<T: Transport> Producer<T> {
         let chunk = if linked && anchored {
             chunk
         } else {
-            // Re-source the held blocks and this chunk from hashes walked back from the tip.
+            // Re-source the held blocks and this chunk from hashes walked down parent links: near
+            // the tip from the finalized tip, within the margin; deep from the chunk's last block,
+            // which was resolved from the canonical blocks above it.
             let held_start = progress.held.first().map(Block::height);
             let start = held_start.unwrap_or(*planned.spec.heights.start());
             let end = *planned.spec.heights.end();
-            warn!(start, end; "block hashes do not link, walking parent hashes from the tip");
+            let from = if planned.spec.near {
+                self.finalized
+                    .borrow()
+                    .as_ref()
+                    .map(|finalized| finalized.tip)
+                    .ok_or(Error::FinalizedEnded)?
+            } else {
+                let last = chunk.last().ok_or(Error::Unlinked(start))?;
+                BlockRef {
+                    hash: last.hash(),
+                    height: last.height(),
+                }
+            };
+            warn!(
+                start,
+                end,
+                from = from.height;
+                "block hashes do not link, walking parent hashes down"
+            );
 
             progress.held.clear();
-            let chunk = self.walk_and_source(start, end, run_start).await?;
+            let chunk = self.walk_and_source(from, start, end, run_start).await?;
             let expected_parent = progress.emitted.map(|emitted| emitted.hash);
             if !links(&chunk, &(start..=end), expected_parent, genesis_hash) {
                 return Err(Error::Unlinked(start));
@@ -84,24 +104,18 @@ impl<T: Transport> Producer<T> {
         Ok(confirmed)
     }
 
-    /// Source the blocks at heights `start..=end`, with hashes from walking parent hashes back from
-    /// the finalized tip.
+    /// Source the blocks at heights `start..=end`, with hashes from walking parent hashes down from
+    /// the block `from`, at or above `end`.
     async fn walk_and_source(
         &self,
+        from: BlockRef<BlockNumber>,
         start: BlockNumber,
         end: BlockNumber,
         run_start: BlockNumber,
     ) -> Result<Chunk, Error> {
-        let tip = self
-            .finalized
-            .borrow()
-            .as_ref()
-            .map(|finalized| finalized.tip)
-            .ok_or(Error::FinalizedEnded)?;
-
         let mut hashes = vec![];
-        let mut hash = tip.hash;
-        let mut height = tip.height;
+        let mut hash = from.hash;
+        let mut height = from.height;
         loop {
             if height <= end {
                 hashes.push(hash);
@@ -110,15 +124,7 @@ impl<T: Transport> Producer<T> {
                 break;
             }
 
-            let batch = Batch::default().header(hash);
-            let header = self
-                .rpc
-                .batch(batch)
-                .await?
-                .pop()
-                .expect("one result per call");
-            let header = header_bytes(header, hash)?;
-            hash = ByteArray(decode_header(&header, hash)?.parent_hash.0);
+            hash = parent_hash(&self.rpc, hash).await?;
             height -= 1;
         }
         hashes.reverse();
@@ -126,15 +132,7 @@ impl<T: Transport> Producer<T> {
         let parent = if start == 0 {
             None
         } else {
-            let batch = Batch::default().header(hashes[0]);
-            let header = self
-                .rpc
-                .batch(batch)
-                .await?
-                .pop()
-                .expect("one result per call");
-            let header = header_bytes(header, hashes[0])?;
-            Some(ByteArray(decode_header(&header, hashes[0])?.parent_hash.0))
+            Some(parent_hash(&self.rpc, hashes[0]).await?)
         };
 
         source(
