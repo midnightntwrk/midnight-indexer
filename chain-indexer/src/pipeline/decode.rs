@@ -34,6 +34,7 @@ use rayon::{ThreadPool, ThreadPoolBuildError, ThreadPoolBuilder, prelude::*};
 use std::{num::NonZeroUsize, sync::Arc};
 use subxt::{
     ArcMetadata, Metadata, OfflineClient, SubstrateConfig,
+    client::OfflineClientAtBlock,
     config::substrate::{DigestItem, SpecVersionForRange, SubstrateHeader},
     utils::H256,
 };
@@ -166,7 +167,7 @@ impl TryFrom<sourcing::Block> for node::Block {
                 dust_registration_events.extend(decoder.wrap(
                     runtimes::decode_genesis_cnight_registrations(
                         decoder.node_version,
-                        &decoder.client()?,
+                        &decoder.client,
                         &cnight_mappings,
                     ),
                 )?);
@@ -239,6 +240,8 @@ struct Decoder {
     protocol_version: ProtocolVersion,
     node_version: NodeVersion,
     metadata: ArcMetadata,
+    /// An offline client at this block, decoding against its runtime's metadata.
+    client: OfflineClientAtBlock<SubstrateConfig>,
 }
 
 impl Decoder {
@@ -259,6 +262,23 @@ impl Decoder {
             .map_err(|error| Error::ProtocolVersion(hash, error))?
             .ok_or(Error::MissingProtocolVersion(hash))?;
 
+        let spec_version = u32::from(protocol_version);
+        let config = SubstrateConfig::builder()
+            .set_metadata_for_spec_versions([(spec_version, metadata.clone())])
+            .set_spec_version_for_block_ranges([SpecVersionForRange {
+                block_range: u64::from(height)..u64::from(height) + 1,
+                spec_version,
+                transaction_version: 0,
+            }])
+            .build();
+        let client = OfflineClient::new_with_config(config)
+            .at_block(u64::from(height))
+            .map_err(|error| Error::Decode {
+                hash,
+                height,
+                source: error.into(),
+            })?;
+
         Ok(Self {
             hash,
             height,
@@ -266,24 +286,8 @@ impl Decoder {
             protocol_version,
             node_version: protocol_version.node_version(),
             metadata,
+            client,
         })
-    }
-
-    /// An offline client at this block, decoding against its runtime's metadata.
-    fn client(&self) -> Result<subxt::client::OfflineClientAtBlock<SubstrateConfig>, Error> {
-        let spec_version = u32::from(self.protocol_version);
-        let config = SubstrateConfig::builder()
-            .set_metadata_for_spec_versions([(spec_version, self.metadata.clone())])
-            .set_spec_version_for_block_ranges([SpecVersionForRange {
-                block_range: u64::from(self.height)..u64::from(self.height) + 1,
-                spec_version,
-                transaction_version: 0,
-            }])
-            .build();
-
-        OfflineClient::new_with_config(config)
-            .at_block(u64::from(self.height))
-            .map_err(|error| self.error(error))
     }
 
     fn details(
@@ -291,10 +295,9 @@ impl Decoder {
         extrinsics: Vec<Vec<u8>>,
         events: Vec<u8>,
     ) -> Result<runtimes::BlockDetails, Error> {
-        let client = self.client()?;
         self.wrap(block_on(runtimes::decode_block_details(
             self.node_version,
-            &client,
+            &self.client,
             extrinsics,
             events,
         )))
@@ -303,7 +306,7 @@ impl Decoder {
     fn zswap_merkle_tree_root(&self, result: &[u8]) -> Result<ZswapMerkleTreeRoot, Error> {
         let root = self.wrap(runtimes::decode_zswap_merkle_tree_root(
             self.node_version,
-            &self.client()?,
+            &self.client,
             result,
         ))?;
 
@@ -314,7 +317,7 @@ impl Decoder {
     fn ledger_state_root(&self, result: &[u8]) -> Result<Option<ByteVec>, Error> {
         let root = self.wrap(runtimes::decode_ledger_state_root(
             self.node_version,
-            &self.client()?,
+            &self.client,
             result,
         ))?;
 
@@ -335,15 +338,14 @@ impl Decoder {
             return Ok((None, None));
         };
 
-        let client = self.client()?;
         let d_parameter = self.wrap(runtimes::decode_d_parameter(
             self.node_version,
-            &client,
+            &self.client,
             &d_parameter,
         ))?;
         let terms_and_conditions = self.wrap(runtimes::decode_terms_and_conditions(
             self.node_version,
-            &client,
+            &self.client,
             &terms_and_conditions,
         ))?;
 
