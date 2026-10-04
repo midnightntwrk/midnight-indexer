@@ -27,8 +27,8 @@ use crate::{
 use deserialize::{Deserialized, deserialize};
 use futures::{Stream, StreamExt, TryStreamExt, executor::block_on, stream};
 use indexer_common::domain::{
-    BlockAuthor, BlockHash, BlockNumber, ByteArray, ByteVec, NodeVersion, ProtocolVersion,
-    ProtocolVersionError, TransactionHash,
+    BlockAuthor, BlockHash, BlockNumber, ByteArray, ByteVec, LedgerVersion, NodeVersion,
+    ProtocolVersion, ProtocolVersionError, TransactionHash,
     ledger::{self, ZswapMerkleTreeRoot},
 };
 use parity_scale_codec::Decode;
@@ -148,10 +148,19 @@ pub fn decode<S: Stream<Item = Result<sourcing::Chunk, sourcing::Error>>>(
         .try_flatten()
 }
 
-/// SHA-256 of a transaction's bytes, which are its tagged serialization, as `transaction_hash`
-/// hashes it.
-fn transaction_hash(transaction: &runtimes::Transaction) -> TransactionHash {
-    ByteArray(Sha256::digest(transaction.bytes().as_ref()).into())
+/// A transaction's hash: in every ledger version so far, SHA-256 of its bytes, which are its tagged
+/// serialization, as the ledger's `transaction_hash` hashes it. That holds while deserialization
+/// accepts only the canonical encoding; a new ledger version is added here once that is confirmed
+/// for it.
+fn transaction_hash(
+    transaction: &runtimes::Transaction,
+    ledger_version: LedgerVersion,
+) -> TransactionHash {
+    match ledger_version {
+        LedgerVersion::V8 | LedgerVersion::V9 => {
+            ByteArray(Sha256::digest(transaction.bytes().as_ref()).into())
+        }
+    }
 }
 
 impl TryFrom<sourcing::Block> for node::Block {
@@ -275,7 +284,7 @@ impl Decoder {
             .into_iter()
             .enumerate()
             .map(|(index, transaction)| {
-                let hash = transaction_hash(&transaction);
+                let hash = transaction_hash(&transaction, protocol_version.ledger_version());
                 match transaction {
                     runtimes::Transaction::Regular(raw) => {
                         let Deserialized {
