@@ -29,7 +29,7 @@ use futures::{
 use http::{HeaderMap, HeaderValue, header::USER_AGENT};
 use indexer_common::domain::{BlockHash, BlockNumber, ByteArray, ByteVec, ProtocolVersionError};
 use log::warn;
-use metrics::gauge;
+use metrics::{counter, gauge};
 use parity_scale_codec::Decode;
 use serde::Deserialize;
 use std::{num::NonZeroUsize, sync::Arc, time::Duration};
@@ -40,7 +40,7 @@ use subxt::{
 use thiserror::Error;
 use tokio::{
     select,
-    sync::{mpsc, oneshot, watch},
+    sync::{mpsc, watch},
     task::{self, JoinHandle},
     time::sleep,
 };
@@ -221,8 +221,6 @@ pub enum Error {
     Unlinked(BlockNumber),
     #[error("a finalized event lists {count} hashes up to height {height}")]
     FinalizedHashes { height: BlockNumber, count: usize },
-    #[error("following finalized blocks failed")]
-    Follow(#[source] Box<Error>),
     #[error("following finalized blocks ended")]
     FinalizedEnded,
 }
@@ -251,8 +249,8 @@ pub struct Source<T> {
 }
 
 impl Source<WsTransport> {
-    /// Connect to the node at the given URL, retrying per the config's reconnect policy, and check
-    /// that it serves every required RPC method.
+    /// Connect to the node at the given URL, retrying until it is reachable, and check that it
+    /// serves every required RPC method.
     pub async fn connect(url: &str, config: Config) -> Result<Self, Error> {
         let user_agent = HeaderValue::from_static(concat!(
             env!("CARGO_PKG_NAME"),
@@ -265,7 +263,7 @@ impl Source<WsTransport> {
             Ok(transport) => transport,
             Err(error) => {
                 warn!(error:%; "cannot connect to node, retrying");
-                config.reconnect_policy.retry(error, connect).await?
+                config.reconnect_policy.retry(connect).await
             }
         };
 
@@ -320,15 +318,10 @@ impl<T: Transport> Source<T> {
         watch::Receiver<Option<Finalized>>,
     ) {
         let (finalized_tx, finalized_rx) = watch::channel(None);
-        let (follow_error_tx, follow_error_rx) = oneshot::channel();
         let follow = task::spawn({
             let rpc = self.rpc.clone();
             let recovery_timeout = self.config.recovery_timeout;
-            async move {
-                if let Err(error) = follow_finalized(&rpc, recovery_timeout, &finalized_tx).await {
-                    let _ = follow_error_tx.send(error);
-                }
-            }
+            async move { follow_finalized(&rpc, recovery_timeout, &finalized_tx).await }
         });
 
         let (chunk_tx, mut chunk_rx) = mpsc::channel(self.config.chunks_ahead.get());
@@ -343,7 +336,7 @@ impl<T: Transport> Source<T> {
         };
         let producer = task::spawn(async move {
             let _follow = AbortOnDrop(follow);
-            producer.produce(follow_error_rx).await
+            producer.produce().await
         });
 
         let chunks = stream! {
@@ -402,7 +395,9 @@ impl Progress {
 }
 
 impl<T: Transport> Producer<T> {
-    async fn produce(mut self, mut follow_error: oneshot::Receiver<Error>) {
+    /// Produce chunks until the end or until no finalized blocks follow any more. A sourcing error
+    /// is retried with the reconnect policy's backoff, resuming after the last block emitted.
+    async fn produce(mut self) {
         let start = self.start.map(|start| {
             BlockRef::<BlockNumber>::try_from(start).map_err(|_| Error::BlockNumber(start.height))
         });
@@ -418,33 +413,37 @@ impl<T: Transport> Producer<T> {
             held: vec![],
         };
 
+        let mut failures = 0;
+        let mut failed_at = None;
         loop {
-            match self
-                .produce_until_error(&mut progress, &mut follow_error)
-                .await
-            {
+            match self.produce_until_error(&mut progress).await {
                 Ok(()) => return,
+                // Without finalized blocks nothing can be sourced any more.
+                Err(error @ Error::FinalizedEnded) => {
+                    let _ = self.chunks.send(Err(error)).await;
+                    return;
+                }
                 Err(error) => {
-                    warn!(error:% = error; "block sourcing failed");
-                    // Without finalized blocks nothing can be sourced any more.
-                    let terminal = matches!(error, Error::FinalizedEnded | Error::Follow(_));
-                    if self.chunks.send(Err(error)).await.is_err() || terminal {
-                        return;
-                    }
+                    // Failures in a row, at the same height, back off further.
+                    let next_height = progress.next_height();
+                    failures = if failed_at == Some(next_height) {
+                        failures + 1
+                    } else {
+                        0
+                    };
+                    failed_at = Some(next_height);
+                    counter!(metric::SOURCE_ERROR_COUNT).increment(1);
+                    warn!(error:% = error, height = next_height; "block sourcing failed, retrying");
 
                     // Resume after the last block emitted.
                     progress.held.clear();
-                    sleep(Duration::from_millis(100)).await;
+                    sleep(self.config.reconnect_policy.delay(failures)).await;
                 }
             }
         }
     }
 
-    async fn produce_until_error(
-        &mut self,
-        progress: &mut Progress,
-        follow_error: &mut oneshot::Receiver<Error>,
-    ) -> Result<(), Error> {
+    async fn produce_until_error(&mut self, progress: &mut Progress) -> Result<(), Error> {
         let genesis_hash = self.genesis_hash().await?;
         let run_start = progress.next_height();
         let mut next = run_start;
@@ -479,9 +478,6 @@ impl<T: Transport> Producer<T> {
                     if changed.is_err() {
                         return Err(Error::FinalizedEnded);
                     }
-                }
-                error = &mut *follow_error => {
-                    return Err(error.map_or(Error::FinalizedEnded, |error| Error::Follow(Box::new(error))));
                 }
             }
         }

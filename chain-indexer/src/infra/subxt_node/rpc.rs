@@ -17,10 +17,14 @@
 
 use futures::{StreamExt, TryStreamExt, future::try_join_all};
 use indexer_common::domain::{BlockHash, BlockNumber};
-use log::{debug, warn};
-use metrics::counter;
+use log::{debug, error, info, warn};
+use metrics::{counter, gauge};
 use serde_json::Value;
-use std::{num::NonZeroUsize, sync::Arc, time::Duration};
+use std::{
+    num::NonZeroUsize,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use thiserror::Error;
 use tokio::{
     sync::{Mutex, Semaphore},
@@ -55,6 +59,10 @@ pub mod metric {
     pub const RESPONSE_BYTES: &str = "indexer_rpc_response_bytes";
     pub const BATCH_COUNT: &str = "indexer_rpc_batch_count";
     pub const RECONNECT_COUNT: &str = "indexer_rpc_reconnect_count";
+    /// 1 while connected to the node, 0 while reconnecting.
+    pub const CONNECTED: &str = "indexer_node_connected";
+    /// How long the node has been unreachable, while reconnecting.
+    pub const UNREACHABLE_SECONDS: &str = "indexer_node_unreachable_seconds";
 }
 
 /// Methods of the new JSON-RPC spec this module calls.
@@ -169,34 +177,41 @@ pub struct ReconnectPolicy {
 
 impl ReconnectPolicy {
     /// Exponential backoff from 10 ms, doubling up to `max_delay`.
-    fn delay(&self, attempt: usize) -> Duration {
+    pub(crate) fn delay(&self, attempt: usize) -> Duration {
         let millis = 10u64.saturating_mul(2u64.saturating_pow(attempt as u32));
         Duration::from_millis(millis).min(self.max_delay)
     }
 
-    /// Retry `attempt` after it failed with `error`, waiting before each try, at most
-    /// `max_attempts` times; [Error::Unreachable] with the last error if none succeeds.
+    /// Retry `attempt`, waiting before each try, until it succeeds. After every `max_attempts`
+    /// failed tries the node counts as unreachable and an error is logged.
     pub(crate) async fn retry<T, F: Future<Output = Result<T, TransportError>>>(
         &self,
-        error: TransportError,
         mut attempt: impl FnMut() -> F,
-    ) -> Result<T, Error> {
-        let mut last_error = error;
-        for n in 0..self.max_attempts {
-            sleep(self.delay(n)).await;
+    ) -> T {
+        let lost = Instant::now();
+        let mut attempts = 0;
+
+        loop {
+            sleep(self.delay(attempts)).await;
+            attempts += 1;
             match attempt().await {
                 Ok(value) => {
-                    debug!(attempt = n; "connected to node");
-                    return Ok(value);
+                    debug!(attempts; "connected to node");
+                    return value;
                 }
-                Err(error) => last_error = error,
+                Err(error) => {
+                    gauge!(metric::UNREACHABLE_SECONDS).set(lost.elapsed().as_secs_f64());
+                    if attempts % self.max_attempts.max(1) == 0 {
+                        error!(
+                            error:%,
+                            attempts,
+                            unreachable_for:? = lost.elapsed();
+                            "node unreachable, still retrying"
+                        );
+                    }
+                }
             }
         }
-
-        Err(Error::Unreachable {
-            attempts: self.max_attempts,
-            source: last_error,
-        })
     }
 }
 
@@ -209,18 +224,6 @@ pub enum Error {
     )]
     BatchRejected {
         batch_size: usize,
-        #[source]
-        source: TransportError,
-    },
-    #[error("the node did not answer in time, {attempts} times")]
-    Timeout {
-        attempts: usize,
-        #[source]
-        source: TransportError,
-    },
-    #[error("cannot reach the node after {attempts} reconnect attempts")]
-    Unreachable {
-        attempts: usize,
         #[source]
         source: TransportError,
     },
@@ -286,7 +289,7 @@ impl<T: Transport> NodeRpc<T> {
         batches_in_flight: NonZeroUsize,
         reconnect_policy: ReconnectPolicy,
     ) -> Self {
-        Self {
+        let rpc = Self {
             transport: Arc::new(transport),
             batch_size,
             batches_in_flight,
@@ -295,7 +298,10 @@ impl<T: Transport> NodeRpc<T> {
             reconnect_policy,
             connection: Default::default(),
             counters: Default::default(),
-        }
+        };
+        gauge!(metric::CONNECTED).set(1.0);
+
+        rpc
     }
 
     /// The request and byte counts.
@@ -351,7 +357,7 @@ impl<T: Transport> NodeRpc<T> {
                 self.transport
                     .subscribe(method, params.clone(), unsubscribe)
             })
-            .await?
+            .await
             .map_err(|source| Error::Subscribe { method, source })?;
 
         let request_bytes = params.iter().map(json_size).sum::<usize>() as u64;
@@ -399,7 +405,7 @@ impl<T: Transport> NodeRpc<T> {
 
         let results = self
             .recovering(|| self.transport.batch(calls.clone()))
-            .await?
+            .await
             .map_err(|source| Error::BatchRejected {
                 batch_size: calls.len(),
                 source,
@@ -409,56 +415,48 @@ impl<T: Transport> NodeRpc<T> {
         Ok(results)
     }
 
-    /// Run `attempt` until it succeeds or fails otherwise than recoverably: once more after the
-    /// connection it used is lost and replaced, and after each timeout, with backoff, at most the
-    /// reconnect policy's attempts. The inner error is a failure for the caller to report; a lost
-    /// connection that was freshly made is one, as it is most likely a proxy closing it on the
-    /// request's size.
+    /// Run `attempt` until it succeeds or fails for good. A lost connection is replaced and the
+    /// attempt run again, and so is a timeout, as a half-open connection only times out; losing a
+    /// freshly made connection again fails, most likely a proxy refusing the request's size.
     async fn recovering<R, F: Future<Output = Result<R, TransportError>>>(
         &self,
         mut attempt: impl FnMut() -> F,
-    ) -> Result<Result<R, TransportError>, Error> {
+    ) -> Result<R, TransportError> {
         let mut reconnected = false;
-        let mut timeouts = 0;
 
         loop {
             let connection = *self.connection.lock().await;
             match attempt().await {
-                Ok(value) => return Ok(Ok(value)),
+                Ok(value) => return Ok(value),
                 Err(error @ TransportError::Disconnected(_)) if !reconnected => {
-                    self.reconnect(connection, error).await?;
+                    self.reconnect(connection, error).await;
                     reconnected = true;
                 }
-                Err(error @ TransportError::Timeout(_)) => {
-                    if timeouts == self.reconnect_policy.max_attempts {
-                        return Err(Error::Timeout {
-                            attempts: timeouts + 1,
-                            source: error,
-                        });
-                    }
-                    warn!(error:%; "no answer from the node in time, retrying");
-                    sleep(self.reconnect_policy.delay(timeouts)).await;
-                    timeouts += 1;
-                }
-                Err(error) => return Ok(Err(error)),
+                Err(error @ TransportError::Timeout(_)) => self.reconnect(connection, error).await,
+                Err(error) => return Err(error),
             }
         }
     }
 
     /// Replace the connection of the given generation after it was lost, unless another call has
-    /// already replaced it.
-    async fn reconnect(&self, connection: u64, error: TransportError) -> Result<(), Error> {
+    /// already replaced it; retried until the node is reachable again.
+    async fn reconnect(&self, connection: u64, error: TransportError) {
         let mut current = self.connection.lock().await;
         if *current == connection {
             warn!(error:%; "node connection lost, reconnecting");
             counter!(metric::RECONNECT_COUNT).increment(1);
-            self.reconnect_policy
-                .retry(error, || self.transport.reconnect())
-                .await?;
-            *current += 1;
-        }
+            gauge!(metric::CONNECTED).set(0.0);
+            let lost = Instant::now();
 
-        Ok(())
+            self.reconnect_policy
+                .retry(|| self.transport.reconnect())
+                .await;
+
+            *current += 1;
+            gauge!(metric::CONNECTED).set(1.0);
+            gauge!(metric::UNREACHABLE_SECONDS).set(0.0);
+            info!(after:? = lost.elapsed(); "node connection restored");
+        }
     }
 
     fn count(&self, calls: &[Call], results: &[CallResult]) {

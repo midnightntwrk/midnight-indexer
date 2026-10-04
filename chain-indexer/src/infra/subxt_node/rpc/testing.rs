@@ -42,7 +42,7 @@ pub struct FakeNode {
     disconnects: AtomicUsize,
     connection_lost: AtomicBool,
     timeouts: AtomicUsize,
-    failing_reconnects: AtomicBool,
+    failing_reconnects: AtomicUsize,
     reconnects: AtomicUsize,
     batch_sizes: Mutex<Vec<usize>>,
     in_flight: AtomicUsize,
@@ -67,7 +67,7 @@ impl FakeNode {
             disconnects: AtomicUsize::new(0),
             connection_lost: AtomicBool::new(false),
             timeouts: AtomicUsize::new(0),
-            failing_reconnects: AtomicBool::new(false),
+            failing_reconnects: AtomicUsize::new(0),
             reconnects: AtomicUsize::new(0),
             batch_sizes: Mutex::default(),
             in_flight: AtomicUsize::new(0),
@@ -133,10 +133,10 @@ impl FakeNode {
         }
     }
 
-    /// Fail every reconnect.
-    pub fn with_failing_reconnects(self) -> Self {
+    /// Fail the next `n` reconnects.
+    pub fn with_failing_reconnects(self, n: usize) -> Self {
         Self {
-            failing_reconnects: AtomicBool::new(true),
+            failing_reconnects: AtomicUsize::new(n),
             ..self
         }
     }
@@ -295,7 +295,11 @@ impl Transport for Arc<FakeNode> {
 
     async fn reconnect(&self) -> Result<(), TransportError> {
         self.reconnects.fetch_add(1, Ordering::SeqCst);
-        if self.failing_reconnects.load(Ordering::SeqCst) {
+        let failing = self
+            .failing_reconnects
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+            .is_ok();
+        if failing {
             Err(TransportError::Disconnected(
                 "fake reconnect failure".into(),
             ))

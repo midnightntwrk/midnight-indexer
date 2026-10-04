@@ -192,21 +192,20 @@ async fn test_reconnect() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn test_unreachable() {
+async fn test_reconnect_until_reachable() {
+    // The node stays unreachable well past the policy's three attempts.
     let node = Arc::new(
         FakeNode::new(echo)
             .with_disconnects(1)
-            .with_failing_reconnects(),
+            .with_failing_reconnects(10),
     );
     let rpc = node_rpc(node.clone(), 4, 1);
 
-    let error = rpc
-        .batch(heights(2))
+    rpc.batch(heights(2))
         .await
-        .expect_err("node is unreachable");
+        .expect("batch succeeds once the node is reachable");
 
-    assert!(matches!(error, Error::Unreachable { attempts: 3, .. }));
-    assert_eq!(node.reconnects(), 3);
+    assert_eq!(node.reconnects(), 11);
 }
 
 #[tokio::test(start_paused = true)]
@@ -251,52 +250,25 @@ async fn test_timeout_retried() {
         .await
         .expect("batch succeeds after two timeouts");
 
-    assert_eq!(node.reconnects(), 0);
-}
-
-#[tokio::test(start_paused = true)]
-async fn test_timeouts_exhausted() {
-    let node = Arc::new(FakeNode::new(echo).with_timeouts(10));
-    let rpc = node_rpc(node, 4, 1);
-
-    let error = rpc
-        .batch(heights(2))
-        .await
-        .expect_err("the node never answers in time");
-
-    // The first attempt and the policy's three retries.
-    assert!(matches!(error, Error::Timeout { attempts: 4, .. }));
+    // A timeout may be a half-open connection: each replaces it.
+    assert_eq!(node.reconnects(), 2);
 }
 
 #[tokio::test(start_paused = true)]
 async fn test_retry() {
-    let down = || TransportError::Disconnected("node is down".into());
-
-    // Up after two failed retries.
+    // Up after ten failed tries, past the policy's three.
     let attempts = AtomicUsize::new(0);
     let value = POLICY
-        .retry(down(), || async {
+        .retry(|| async {
             match attempts.fetch_add(1, Ordering::SeqCst) {
-                0 | 1 => Err(down()),
+                0..10 => Err(TransportError::Disconnected("node is down".into())),
                 _ => Ok(7),
             }
         })
-        .await
-        .expect("third retry succeeds");
-    assert_eq!(value, 7);
-    assert_eq!(attempts.load(Ordering::SeqCst), 3);
+        .await;
 
-    // Never up: the policy's retries, then unreachable.
-    let attempts = AtomicUsize::new(0);
-    let error = POLICY
-        .retry(down(), || async {
-            attempts.fetch_add(1, Ordering::SeqCst);
-            Err::<(), _>(down())
-        })
-        .await
-        .expect_err("node stays down");
-    assert!(matches!(error, Error::Unreachable { attempts: 3, .. }));
-    assert_eq!(attempts.load(Ordering::SeqCst), 3);
+    assert_eq!(value, 7);
+    assert_eq!(attempts.load(Ordering::SeqCst), 11);
 }
 
 #[tokio::test(start_paused = true)]

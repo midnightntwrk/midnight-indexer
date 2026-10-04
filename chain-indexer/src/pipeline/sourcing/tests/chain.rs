@@ -198,7 +198,6 @@ impl Chain {
             .collect()
     }
 
-    /// The heights of every `archive_v1_hashByHeight` call, in order.
     /// The number of `archive_v1_header` calls.
     pub(crate) fn header_calls(&self) -> usize {
         self.calls
@@ -206,15 +205,6 @@ impl Chain {
             .iter()
             .filter(|call| call.method == method::ARCHIVE_HEADER)
             .count()
-    }
-
-    pub(crate) fn resolved_heights(&self) -> Vec<BlockNumber> {
-        self.calls
-            .lock()
-            .iter()
-            .filter(|call| call.method == method::ARCHIVE_HASH_BY_HEIGHT)
-            .map(|call| height(&call.params[0]))
-            .collect()
     }
 }
 

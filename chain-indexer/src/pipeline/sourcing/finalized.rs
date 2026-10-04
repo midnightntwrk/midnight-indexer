@@ -15,7 +15,7 @@
 
 use crate::{
     domain::BlockRef,
-    infra::subxt_node::rpc::{self, Batch, NodeRpc, Subscription, Transport, method},
+    infra::subxt_node::rpc::{Batch, NodeRpc, Subscription, Transport, method},
     pipeline::{
         metric,
         sourcing::{Error, Finalized, block_hash_of, block_number, decode_header, header_bytes},
@@ -33,32 +33,33 @@ use tokio::{
     time::{sleep, timeout},
 };
 
-/// How long to wait before resubscribing after the Finalized stage failed.
+/// How long to wait before resubscribing after the Finalized stage first failed; the wait doubles
+/// with each further failure in a row, up to the recovery timeout.
 const RESUBSCRIBE_DELAY: Duration = Duration::from_secs(1);
 
 /// The Finalized stage: follow the node's finalized blocks with `chainHead_v1_follow` and publish
-/// each [Finalized] to `finalized`. Every block the subscription reports is unpinned as soon as it
-/// is reported; nothing else is fetched except one header per subscription, for the tip's height.
-/// The subscription is renewed on `stop`, when it ends, when no event arrives within
-/// `recovery_timeout`, and after any error but an unreachable node. Returns once `finalized` has no
-/// receivers.
+/// each [Finalized] to `finalized`, until it has no receivers. Each reported block is unpinned at
+/// once, and one header per subscription is fetched for the tip's height. The subscription is
+/// renewed on `stop`, when it ends, when silent for `recovery_timeout`, and after any error.
 pub(super) async fn follow_finalized<T: Transport>(
     rpc: &NodeRpc<T>,
     recovery_timeout: Duration,
     finalized: &watch::Sender<Option<Finalized>>,
-) -> Result<(), Error> {
+) {
+    let mut failures = 0;
     while !finalized.is_closed() {
         match follow_once(rpc, recovery_timeout, finalized).await {
-            Ok(()) => {}
-            Err(error @ Error::Rpc(rpc::Error::Unreachable { .. })) => return Err(error),
+            Ok(()) => failures = 0,
             Err(error) => {
-                warn!(error:%; "following finalized blocks failed, resubscribing");
-                sleep(RESUBSCRIBE_DELAY).await;
+                let delay = RESUBSCRIBE_DELAY
+                    .saturating_mul(2u32.saturating_pow(failures))
+                    .min(recovery_timeout);
+                warn!(error:%, delay:?; "following finalized blocks failed, resubscribing");
+                sleep(delay).await;
+                failures += 1;
             }
         }
     }
-
-    Ok(())
 }
 
 /// Follow finalized blocks with one subscription, until it should be renewed or `finalized` has no
@@ -222,8 +223,8 @@ fn block_hashes(hashes: Vec<String>) -> Result<Vec<BlockHash>, Error> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        infra::subxt_node::rpc::{self, Call, NodeRpc, ReconnectPolicy, method, testing::FakeNode},
-        pipeline::sourcing::{Error, Finalized, finalized::follow_finalized},
+        infra::subxt_node::rpc::{Call, NodeRpc, ReconnectPolicy, method, testing::FakeNode},
+        pipeline::sourcing::{Finalized, finalized::follow_finalized},
     };
     use indexer_common::domain::{BlockHash, BlockNumber, ByteArray};
     use parity_scale_codec::Encode;
@@ -234,7 +235,11 @@ mod tests {
         config::substrate::{Digest, SubstrateHeader},
         utils::H256,
     };
-    use tokio::{sync::watch, task, time::sleep};
+    use tokio::{
+        sync::watch,
+        task,
+        time::{Instant, sleep},
+    };
 
     #[tokio::test(start_paused = true)]
     async fn test_signal() {
@@ -303,24 +308,28 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn test_unreachable_ends() {
+    async fn test_resubscribe_backs_off() {
+        // Three failing subscriptions in a row: waits of 1, 2 and 4 s before the next.
         let calls = Arc::new(Mutex::new(vec![]));
-        // The connection is lost on the unpin, which only logs it, and on the tip's header; every
-        // reconnect fails.
-        let node = node(calls)
-            .with_subscriptions(vec![vec![
-                json!({ "event": "initialized", "finalizedBlockHashes": [hex(1)] }),
-            ]])
-            .with_disconnects(2)
-            .with_failing_reconnects();
+        let bad = || vec![json!({ "event": "initialized", "finalizedBlockHashes": ["0xzz"] })];
+        let node = node(calls).with_subscriptions(vec![
+            bad(),
+            bad(),
+            bad(),
+            vec![json!({ "event": "initialized", "finalizedBlockHashes": [hex(2)] })],
+        ]);
         let rpc = node_rpc(Arc::new(node));
-        let (sender, _receiver) = watch::channel(None);
+        let (sender, mut receiver) = watch::channel(None);
+        let started = Instant::now();
 
-        let error = follow_finalized(&rpc, Duration::from_secs(5), &sender)
-            .await
-            .expect_err("an unreachable node ends following");
+        let task =
+            task::spawn(
+                async move { follow_finalized(&rpc, Duration::from_secs(5), &sender).await },
+            );
+        latest(&mut receiver, 2).await;
+        task.abort();
 
-        assert!(matches!(error, Error::Rpc(rpc::Error::Unreachable { .. })));
+        assert_eq!(started.elapsed(), Duration::from_secs(7));
     }
 
     #[tokio::test(start_paused = true)]
@@ -423,7 +432,7 @@ mod tests {
         height: BlockNumber,
     ) -> Finalized {
         let finalized = tokio::time::timeout(
-            Duration::from_secs(5),
+            Duration::from_secs(60),
             finalized.wait_for(|finalized| {
                 finalized
                     .as_ref()

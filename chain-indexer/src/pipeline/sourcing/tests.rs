@@ -156,8 +156,8 @@ async fn test_chunk_overlap() {
 
 #[tokio::test(start_paused = true)]
 async fn test_failing_block_is_not_skipped_and_refetched() {
-    // The block at height 105 cannot be built: the stream yields an error, then resumes after
-    // the last block it yielded, so the very same block is fetched again.
+    // The block at height 105 cannot be built: the pipeline retries it, resuming after the last
+    // block it yielded, and neither skips it nor yields the error.
     let (chain, node) = Chain {
         failing: vec![105],
         ..Default::default()
@@ -167,24 +167,25 @@ async fn test_failing_block_is_not_skipped_and_refetched() {
     let source = Source::new(Arc::new(node), config(2, 1));
     let (chunks, _finalized) = source.run(start(99), None);
 
-    let items = timeout(Duration::from_secs(10), chunks.take(5).collect::<Vec<_>>())
-        .await
-        .expect("items in time");
+    let items = chunks
+        .take_until(sleep(Duration::from_secs(30)))
+        .collect::<Vec<_>>()
+        .await;
 
     let heights = items
-        .iter()
-        .filter_map(|item| item.as_ref().ok())
-        .flatten()
-        .map(Block::height)
+        .into_iter()
+        .flat_map(|item| item.expect("no error is yielded"))
+        .map(|block| block.height())
         .collect::<Vec<_>>();
     assert_eq!(heights, (100..=103).collect::<Vec<_>>());
-    let errors = items.iter().filter(|item| item.is_err()).count();
-    assert_eq!(errors, 2);
-
-    // After the first error, resolving restarts at the parent of the first block not yielded.
-    let resolved = chain.resolved_heights();
-    assert!(resolved.contains(&102));
-    assert!(matches!(items[2], Err(Error::Rpc(_))));
+    let failing_header = json!(format!("0x{}", const_hex::encode(hash(105).0)));
+    let tries = chain
+        .calls
+        .lock()
+        .iter()
+        .filter(|call| call.method == method::ARCHIVE_HEADER && call.params[0] == failing_header)
+        .count();
+    assert!(tries > 2, "{tries} tries");
 }
 
 #[tokio::test(start_paused = true)]

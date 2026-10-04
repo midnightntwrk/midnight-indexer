@@ -23,7 +23,7 @@ use jsonrpsee::{
         },
         params::{ArrayParams, BatchRequestBuilder},
     },
-    ws_client::{WsClient, WsClientBuilder},
+    ws_client::{PingConfig, WsClient, WsClientBuilder},
 };
 use serde_json::Value;
 use std::sync::Arc;
@@ -117,6 +117,7 @@ impl WsTransport {
             .set_headers(headers.to_owned())
             .max_request_size(Self::MAX_MESSAGE_SIZE)
             .max_response_size(Self::MAX_MESSAGE_SIZE)
+            .enable_ws_ping(PingConfig::new())
             .build(url)
             .await
             .map_err(|error| TransportError::Disconnected(error.into()))

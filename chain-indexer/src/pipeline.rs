@@ -56,6 +56,7 @@ pub mod metric {
     pub const VERIFY_DURATION: &str = "indexer_source_verify_duration_seconds";
     pub const EMIT_DURATION: &str = "indexer_source_emit_duration_seconds";
     pub const SOURCED_BLOCK_COUNT: &str = "indexer_source_block_count";
+    pub const SOURCE_ERROR_COUNT: &str = "indexer_source_error_count";
     pub const FOLLOW_SUBSCRIPTION_COUNT: &str = "indexer_source_follow_subscription_count";
     pub const FINALIZED_HEIGHT: &str = "indexer_source_finalized_height";
     pub const PLANNED_HEIGHT: &str = "indexer_source_planned_height";
