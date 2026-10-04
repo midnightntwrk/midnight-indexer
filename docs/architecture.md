@@ -42,16 +42,23 @@ Finalized ─▶ Chunk ─▶ Resolve ─▶ Source ─▶ Verify ─▶ Emit �
 
 - **Finalized** follows the node's finalized blocks with one `chainHead_v1_follow` subscription.
 - **Chunk** splits the heights still to index into chunks of up to `source_chunk_size` blocks;
-  **Resolve** maps their heights to hashes with `archive_v1_hashByHeight`.
+  **Resolve** maps their heights to hashes with `archive_v1_hashByHeight`, taking the canonical
+  block at a height with fork siblings by the parent link from the block above.
 - **Source** fetches each block's header, body, ledger and zswap state roots and storage
   (events, authority-set and system-parameter hashes) with batched `archive_v1_*` calls, up to
   `source_chunks_ahead` chunks at once. Values that rarely change (authority sets, system
   parameters, runtime metadata) are fetched only where their storage hash or the runtime changes.
 - **Verify** checks that every block links to its parent, and that blocks near the finalized tip
-  link to it; anything that doesn't is re-sourced by walking parent hashes back from the tip.
+  link to it; anything that doesn't is re-sourced by walking parent hashes down, from the chunk's
+  last block, or near the tip from the finalized tip.
 - **Emit** hands verified chunks on in height order; **Decode** turns them into blocks on a
   dedicated pool of `decode_cpu_threads` threads, chunks in parallel, blocks in order.
 - Indexing then applies blocks one at a time.
+
+A node outage does not end the indexer: lost connections are replaced, retrying until the node is
+reachable again, and sourcing resumes after the last block emitted. After every
+`reconnect_max_attempts` failed tries the node counts as unreachable and an error is logged;
+`indexer_node_connected` and `indexer_node_unreachable_seconds` show the outage.
 
 The node must run with **`--state-pruning archive`**: the `archive_v1_*` methods exist only on
 archive nodes, and chain-indexer refuses to start without them, naming the missing methods. All

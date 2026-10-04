@@ -198,8 +198,7 @@ fn run() -> anyhow::Result<()> {
         // or unreachable URL only blocks its own component, not the whole
         // runtime startup. The previous shape `task::spawn({ ... .await? ... })`
         // ran the .await synchronously in the outer block_on, holding back the
-        // indexer-api and wallet-indexer spawns for up to
-        // `reconnect_max_attempts × reconnect_max_delay` (≈5 min by default).
+        // indexer-api and wallet-indexer spawns until the node was reachable.
         let chain_indexer = {
             let storage = chain_storage::Storage::new(pool.clone());
             let publisher = pub_sub.publisher();

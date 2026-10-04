@@ -43,6 +43,8 @@ pub struct Config {
     #[serde(with = "humantime_serde")]
     pub reconnect_max_delay: Duration,
 
+    /// Failed reconnect tries after which the node counts as unreachable and an error is logged;
+    /// reconnecting goes on regardless.
     pub reconnect_max_attempts: usize,
 
     /// How long the finalized-block subscription (`chainHead_v1_follow`) may go without an event
