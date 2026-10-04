@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The decode stage: [source::Block]s into [node::Block]s, on a dedicated CPU pool.
+//! The decode stage: [sourcing::Block]s into [node::Block]s, on a dedicated CPU pool.
 
 use crate::{
     domain::node,
@@ -21,7 +21,7 @@ use crate::{
     },
     pipeline::{
         metric::{self, Timer},
-        source::{self, AUTHORITY_SET_ITEMS, Parent, storage_key},
+        sourcing::{self, AUTHORITY_SET_ITEMS, Parent, storage_key},
     },
 };
 use futures::{Stream, StreamExt, TryStreamExt, executor::block_on, stream};
@@ -40,6 +40,9 @@ use subxt::{
 use thiserror::Error;
 use tokio::sync::oneshot;
 
+#[cfg(test)]
+mod tests;
+
 /// `sp_consensus_babe::ConsensusLog::NextEpochData`'s index: a block carrying it opens a new epoch.
 const BABE_NEXT_EPOCH_DATA: u8 = 1;
 
@@ -47,7 +50,7 @@ const BABE_NEXT_EPOCH_DATA: u8 = 1;
 #[derive(Debug, Error)]
 pub enum Error {
     #[error(transparent)]
-    Source(#[from] source::Error),
+    Source(#[from] sourcing::Error),
     #[error("cannot decode block {hash} at height {height}")]
     Decode {
         hash: BlockHash,
@@ -99,7 +102,7 @@ pub fn chunks_in_decode(threads: usize, chunk_size: usize) -> usize {
 
 /// The decode stage: each chunk is one job on the pool, its blocks decoded in parallel; blocks come
 /// out in height order.
-pub fn decode<S: Stream<Item = Result<source::Chunk, source::Error>>>(
+pub fn decode<S: Stream<Item = Result<sourcing::Chunk, sourcing::Error>>>(
     chunks: S,
     pool: Arc<CpuPool>,
     chunk_size: NonZeroUsize,
@@ -131,12 +134,14 @@ pub fn decode<S: Stream<Item = Result<source::Chunk, source::Error>>>(
         .try_flatten()
 }
 
-impl TryFrom<source::Block> for node::Block {
+impl TryFrom<sourcing::Block> for node::Block {
     type Error = Error;
 
-    fn try_from(block: source::Block) -> Result<Self, Self::Error> {
+    fn try_from(block: sourcing::Block) -> Result<Self, Self::Error> {
+        use sourcing::Block::*;
+
         match block {
-            source::Block::Genesis {
+            Genesis {
                 hash,
                 header,
                 zswap_state_root,
@@ -185,7 +190,7 @@ impl TryFrom<source::Block> for node::Block {
                     genesis_ledger_state: Some(ledger_state),
                 })
             }
-            source::Block::Block {
+            Block {
                 hash,
                 height,
                 header,
@@ -359,18 +364,21 @@ impl Decoder {
             babe_supported,
             |item| has_storage(&self.metadata, item),
         )
-        .map_err(|error| match error {
-            AuthoritySetError::Missing {
-                engine,
-                item: (pallet, entry),
-            } => Error::MissingAuthoritySet {
-                hash: self.hash,
-                engine,
-                spec_version: u32::from(self.protocol_version),
-                pallet,
-                entry,
-            },
-            AuthoritySetError::Decode(error) => self.error(error),
+        .map_err(|error| {
+            use AuthoritySetError::*;
+            match error {
+                Missing {
+                    engine,
+                    item: (pallet, entry),
+                } => Error::MissingAuthoritySet {
+                    hash: self.hash,
+                    engine,
+                    spec_version: u32::from(self.protocol_version),
+                    pallet,
+                    entry,
+                },
+                Decode(error) => self.error(error),
+            }
         })?;
         let Some(authorities) = authorities else {
             return Ok(None);
@@ -426,9 +434,10 @@ fn block_authorities(
     babe_supported: bool,
     has_storage: impl Fn(StorageItem) -> bool,
 ) -> Result<Option<Vec<[u8; 32]>>, AuthoritySetError> {
+    use DigestItem::*;
     let engine = header.digest.logs.iter().find_map(|log| match log {
-        DigestItem::PreRuntime(AURA_ENGINE_ID, _) => Some("Aura"),
-        DigestItem::PreRuntime(BABE_ENGINE_ID, _) if babe_supported => Some("BABE"),
+        PreRuntime(AURA_ENGINE_ID, _) => Some("Aura"),
+        PreRuntime(BABE_ENGINE_ID, _) if babe_supported => Some("BABE"),
         _ => None,
     });
 
@@ -483,6 +492,3 @@ fn has_storage(metadata: &Metadata, (pallet, entry): StorageItem) -> bool {
         .and_then(|storage| storage.entry_by_name(entry))
         .is_some()
 }
-
-#[cfg(test)]
-mod tests;

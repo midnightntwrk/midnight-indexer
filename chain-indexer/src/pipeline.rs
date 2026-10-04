@@ -13,24 +13,24 @@
 
 //! Pipeline stages from the node to [node::Block]s.
 
-pub mod decode;
-pub mod source;
-
 use crate::{
     domain::{BlockRef, node},
     infra::subxt_node::rpc::Transport,
     pipeline::{
         decode::CpuPool,
-        source::{Finalized, Source},
+        sourcing::{Finalized, Source},
     },
 };
 use futures::Stream;
 use std::sync::Arc;
 use tokio::sync::watch;
 
+pub mod decode;
+pub mod sourcing;
+
 /// The blocks after `start`, or from genesis, up to and including the block at height `end`, or
 /// without end, sourced and decoded on the pool in height order; and the latest finalized block.
-pub fn blocks<T: Transport>(
+pub fn finalized_blocks<T: Transport>(
     source: &Source<T>,
     pool: Arc<CpuPool>,
     start: Option<BlockRef>,

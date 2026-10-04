@@ -20,7 +20,7 @@
 
 use chain_indexer::{
     infra::subxt_node::rpc::{Batch, NodeRpc, ReconnectPolicy, Transport, hex, method},
-    pipeline::source::{
+    pipeline::sourcing::{
         self, AUTHORITY_SET_ITEMS, SYSTEM_EVENTS_ITEM, Source, resolve, storage_key,
     },
 };
@@ -48,7 +48,7 @@ async fn node_calls() {
     let subscriptions = setting("PROBE_SUBSCRIPTIONS", 256) as usize;
     let batch_size = setting("RPC_BATCH_SIZE", 64) as usize;
     let batches_in_flight = setting("RPC_BATCHES_IN_FLIGHT", 16) as usize;
-    let config = source::Config {
+    let config = sourcing::Config {
         chunk_size: NonZeroUsize::new(64).unwrap(),
         chunks_ahead: NonZeroUsize::new(8).unwrap(),
         rpc_batch_size: NonZeroUsize::new(batch_size).unwrap(),

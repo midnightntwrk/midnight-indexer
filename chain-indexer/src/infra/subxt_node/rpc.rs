@@ -245,10 +245,9 @@ fn array_params(params: Vec<Value>) -> ArrayParams {
 }
 
 fn transport_error(error: ClientError) -> TransportError {
+    use ClientError::*;
     match error {
-        ClientError::RestartNeeded(_) | ClientError::Transport(_) => {
-            TransportError::Disconnected(error.into())
-        }
+        RestartNeeded(_) | Transport(_) => TransportError::Disconnected(error.into()),
         error => TransportError::Other(error.into()),
     }
 }
@@ -678,16 +677,17 @@ fn count_key(call: &Call) -> String {
 
 /// The size of a JSON value as serialized, without serializing it.
 pub fn json_size(value: &Value) -> usize {
+    use Value::*;
     match value {
-        Value::Null => 4,
-        Value::Bool(true) => 4,
-        Value::Bool(false) => 5,
-        Value::Number(number) => number.to_string().len(),
-        Value::String(string) => string.len() + 2,
-        Value::Array(values) => {
+        Null => 4,
+        Bool(true) => 4,
+        Bool(false) => 5,
+        Number(number) => number.to_string().len(),
+        String(string) => string.len() + 2,
+        Array(values) => {
             values.iter().map(json_size).sum::<usize>() + values.len().saturating_sub(1) + 2
         }
-        Value::Object(entries) => {
+        Object(entries) => {
             entries
                 .iter()
                 .map(|(key, value)| key.len() + 3 + json_size(value))

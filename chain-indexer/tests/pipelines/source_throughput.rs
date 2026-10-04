@@ -30,7 +30,7 @@ use chain_indexer::{
     pipeline::{
         decode::{self, CpuPool},
         metric,
-        source::{self, Block, Source, metadata_spec_version, resolve},
+        sourcing::{self, Block, Source, metadata_spec_version, resolve},
     },
 };
 use futures::{StreamExt, TryStreamExt};
@@ -70,7 +70,7 @@ async fn source_throughput() {
     let url = env::var("NODE_URL").expect("NODE_URL is set");
     let from = setting("SOURCE_FROM", 0u64);
     let count = optional_setting::<u64>("SOURCE_COUNT");
-    let config = source::Config {
+    let config = sourcing::Config {
         chunk_size: setting("SOURCE_CHUNK_SIZE", NonZeroUsize::new(64).unwrap()),
         chunks_ahead: setting("SOURCE_CHUNKS_AHEAD", NonZeroUsize::new(8).unwrap()),
         rpc_batch_size: setting("RPC_BATCH_SIZE", NonZeroUsize::new(64).unwrap()),

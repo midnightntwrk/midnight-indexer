@@ -26,7 +26,7 @@ use crate::{
             AuthoritySetError, BABE_NEXT_EPOCH_DATA, CpuPool, block_authorities, chunks_in_decode,
             decode,
         },
-        source::{self, AUTHORITY_SET_ITEMS, MetadataCache, Parent, resolve, storage_key},
+        sourcing::{self, AUTHORITY_SET_ITEMS, MetadataCache, Parent, resolve, storage_key},
     },
 };
 use futures::{TryStreamExt, stream};
@@ -46,249 +46,6 @@ use subxt::{
     config::substrate::{Digest, DigestItem, SubstrateHeader},
     utils::H256,
 };
-
-fn fixtures_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/decode")
-}
-
-fn hex(bytes: impl AsRef<[u8]>) -> Value {
-    const_hex::encode_prefixed(bytes).into()
-}
-
-fn bytes(value: &Value) -> ByteVec {
-    const_hex::decode(value.as_str().expect("hex string"))
-        .expect("hex")
-        .into()
-}
-
-fn block_hash(value: &Value) -> BlockHash {
-    ByteArray(bytes(value).to_vec().try_into().expect("32 bytes"))
-}
-
-fn pairs(pairs: &[(ByteVec, ByteVec)]) -> Value {
-    pairs
-        .iter()
-        .map(|(key, value)| json!([hex(key), hex(value)]))
-        .collect()
-}
-
-fn pairs_of(value: &Value) -> Vec<(ByteVec, ByteVec)> {
-    value
-        .as_array()
-        .expect("pairs")
-        .iter()
-        .map(|pair| (bytes(&pair[0]), bytes(&pair[1])))
-        .collect()
-}
-
-/// A [node::Block], every byte field in full.
-fn render(block: &node::Block) -> Value {
-    let transactions = block
-        .transactions
-        .iter()
-        .map(|transaction| match transaction {
-            runtimes::Transaction::Regular(bytes) => json!({ "regular": hex(bytes) }),
-            runtimes::Transaction::System(bytes) => json!({ "system": hex(bytes) }),
-        })
-        .collect::<Vec<_>>();
-
-    let dust_registration_events = block
-        .dust_registration_events
-        .iter()
-        .map(|event| match event {
-            DustRegistrationEvent::Registration {
-                cardano_stake_key,
-                dust_address,
-            } => json!({ "registration": [hex(cardano_stake_key), hex(dust_address)] }),
-            DustRegistrationEvent::Deregistration {
-                cardano_stake_key,
-                dust_address,
-            } => json!({ "deregistration": [hex(cardano_stake_key), hex(dust_address)] }),
-            DustRegistrationEvent::MappingAdded {
-                cardano_stake_key,
-                dust_address,
-                utxo_id,
-                utxo_index,
-            } => json!({
-                "mapping_added": [hex(cardano_stake_key), hex(dust_address), hex(utxo_id), utxo_index]
-            }),
-            DustRegistrationEvent::MappingRemoved {
-                cardano_stake_key,
-                dust_address,
-                utxo_id,
-                utxo_index,
-            } => json!({
-                "mapping_removed": [hex(cardano_stake_key), hex(dust_address), hex(utxo_id), utxo_index]
-            }),
-        })
-        .collect::<Vec<_>>();
-
-    json!({
-        "hash": hex(block.hash),
-        "height": block.height,
-        "protocol_version": u32::from(block.protocol_version),
-        "parent_hash": hex(block.parent_hash),
-        "author": block.author.map(hex),
-        "timestamp": block.timestamp,
-        "zswap_merkle_tree_root": hex(block.zswap_merkle_tree_root.serialize().expect("root serializes")),
-        "ledger_state_root": block.ledger_state_root.as_ref().map(hex),
-        "transactions": transactions,
-        "dust_registration_events": dust_registration_events,
-        "bridge_events": serde_json::to_value(&block.bridge_events).expect("bridge events serialize"),
-        "d_parameter": block.d_parameter.as_ref().map(|d_parameter| json!([
-            d_parameter.num_permissioned_candidates,
-            d_parameter.num_registered_candidates,
-        ])),
-        "terms_and_conditions": block
-            .terms_and_conditions
-            .as_ref()
-            .map(|terms| json!([hex(terms.hash), terms.url])),
-    })
-}
-
-/// A [source::Block] as fixture JSON; its metadata by hash.
-fn sourced_json(block: &source::Block) -> Value {
-    match block {
-        source::Block::Genesis {
-            hash,
-            header,
-            zswap_state_root,
-            ledger_state_root,
-            system_parameters: (d_parameter, terms_and_conditions),
-            metadata,
-            ledger_state: _,
-            cnight_mappings,
-            extrinsics,
-            events,
-        } => json!({
-            "kind": "genesis",
-            "extrinsics": extrinsics.iter().map(hex).collect::<Vec<_>>(),
-            "events": hex(events),
-            "hash": hex(hash),
-            "header": hex(header),
-            "zswap_state_root": hex(zswap_state_root),
-            "ledger_state_root": hex(ledger_state_root),
-            "system_parameters": [hex(d_parameter), hex(terms_and_conditions)],
-            "metadata_hash": hex(metadata.hasher().hash()),
-            "cnight_mappings": pairs(cnight_mappings),
-        }),
-        source::Block::Block {
-            hash,
-            height,
-            header,
-            zswap_state_root,
-            ledger_state_root,
-            system_parameters,
-            metadata,
-            parent,
-            extrinsics,
-            events,
-        } => json!({
-            "kind": "block",
-            "hash": hex(hash),
-            "height": height,
-            "header": hex(header),
-            "zswap_state_root": hex(zswap_state_root),
-            "ledger_state_root": hex(ledger_state_root),
-            "system_parameters": system_parameters
-                .as_ref()
-                .map(|(d_parameter, terms)| json!([hex(d_parameter), hex(terms)])),
-            "metadata_hash": hex(metadata.hasher().hash()),
-            "parent": {
-                "hash": hex(parent.hash),
-                "authority_set": pairs(&parent.authority_set),
-            },
-            "extrinsics": extrinsics.iter().map(hex).collect::<Vec<_>>(),
-            "events": hex(events),
-        }),
-    }
-}
-
-/// The metadata with the given hash: from the `.node` directory, else from the fixtures.
-fn metadata_with_hash(hash: &Value) -> Metadata {
-    let node_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../.node");
-    let node_metadata = fs::read_dir(&node_dir)
-        .expect(".node can be read")
-        .filter_map(|entry| fs::read(entry.ok()?.path().join("metadata.scale")).ok());
-    let fixture_metadata = fs::read_dir(fixtures_dir().join("metadata"))
-        .into_iter()
-        .flatten()
-        .filter_map(|entry| fs::read(entry.ok()?.path()).ok());
-
-    node_metadata
-        .chain(fixture_metadata)
-        .map(|bytes| Metadata::decode(&mut &bytes[..]).expect("metadata can be decoded"))
-        .find(|metadata| hex(metadata.hasher().hash()) == *hash)
-        .unwrap_or_else(|| panic!("no metadata with hash {hash}"))
-}
-
-fn sourced_of(sourced: &Value) -> source::Block {
-    let metadata = Arc::new(metadata_with_hash(&sourced["metadata_hash"]));
-    let system_parameters = |value: &Value| {
-        value
-            .as_array()
-            .map(|results| (bytes(&results[0]), bytes(&results[1])))
-    };
-
-    match sourced["kind"].as_str() {
-        Some("genesis") => source::Block::Genesis {
-            hash: block_hash(&sourced["hash"]),
-            header: bytes(&sourced["header"]),
-            zswap_state_root: bytes(&sourced["zswap_state_root"]),
-            ledger_state_root: bytes(&sourced["ledger_state_root"]),
-            system_parameters: system_parameters(&sourced["system_parameters"])
-                .expect("genesis system parameters"),
-            metadata,
-            ledger_state: vec![0xab].into(),
-            cnight_mappings: pairs_of(&sourced["cnight_mappings"]),
-            extrinsics: sourced["extrinsics"]
-                .as_array()
-                .expect("extrinsics")
-                .iter()
-                .map(bytes)
-                .collect(),
-            events: bytes(&sourced["events"]),
-        },
-        _ => source::Block::Block {
-            hash: block_hash(&sourced["hash"]),
-            height: sourced["height"].as_u64().expect("height"),
-            header: bytes(&sourced["header"]),
-            zswap_state_root: bytes(&sourced["zswap_state_root"]),
-            ledger_state_root: bytes(&sourced["ledger_state_root"]),
-            system_parameters: system_parameters(&sourced["system_parameters"]),
-            metadata,
-            parent: Parent {
-                hash: block_hash(&sourced["parent"]["hash"]),
-                authority_set: pairs_of(&sourced["parent"]["authority_set"]),
-            },
-            extrinsics: sourced["extrinsics"]
-                .as_array()
-                .expect("extrinsics")
-                .iter()
-                .map(bytes)
-                .collect(),
-            events: bytes(&sourced["events"]),
-        },
-    }
-}
-
-fn fixtures() -> Vec<(String, Value)> {
-    let mut fixtures = fs::read_dir(fixtures_dir())
-        .expect("fixtures can be read")
-        .filter_map(|entry| {
-            let path = entry.ok()?.path();
-            (path.extension()? == "json").then_some(path)
-        })
-        .map(|path| {
-            let name = path.file_stem().unwrap().to_string_lossy().into_owned();
-            let fixture = serde_json::from_slice(&fs::read(&path).expect("fixture can be read"))
-                .expect("fixture is JSON");
-            (name, fixture)
-        })
-        .collect::<Vec<_>>();
-    fixtures.sort_by(|(a, _), (b, _)| a.cmp(b));
-    fixtures
-}
 
 /// Records decode fixtures: for each `label=height` in `FIXTURE_HEIGHTS`, the block at that
 /// height as the block sourcing pipeline sources it, and the [node::Block] the subxt-based node
@@ -346,7 +103,7 @@ async fn record_decode_fixtures() {
             (Some(parent), hashes.next().flatten().expect("hash"))
         };
 
-        let sourced = source::source(&rpc, &metadata, height, &[hash], parent, true)
+        let sourced = sourcing::source(&rpc, &metadata, height, &[hash], parent, true)
             .await
             .expect("block is sourced")
             .pop()
@@ -366,10 +123,9 @@ async fn record_decode_fixtures() {
         };
         assert_eq!(made.hash, hash);
 
+        use sourcing::Block::*;
         let sourced_metadata = match &sourced {
-            source::Block::Genesis { metadata, .. } | source::Block::Block { metadata, .. } => {
-                metadata.clone()
-            }
+            Genesis { metadata, .. } | Block { metadata, .. } => metadata.clone(),
         };
         let metadata_hash = hex(sourced_metadata.hasher().hash());
         if std::panic::catch_unwind(|| metadata_with_hash(&metadata_hash)).is_err() {
@@ -401,27 +157,6 @@ async fn record_decode_fixtures() {
     }
 }
 
-/// The SCALE-encoded `RuntimeMetadataPrefixed` the node serves at the given block.
-async fn fetch_metadata_bytes(rpc: &NodeRpc<WsTransport>, at: BlockHash) -> Vec<u8> {
-    use crate::infra::subxt_node::rpc::Batch;
-
-    let batch = Batch::default().call(at, "Metadata_metadata_at_version", &15u32.encode());
-    let result = rpc
-        .batch(batch)
-        .await
-        .expect("metadata call")
-        .pop()
-        .unwrap();
-    let value = result.expect("metadata call succeeds")["value"]
-        .as_str()
-        .expect("value")
-        .to_owned();
-    let bytes = const_hex::decode(value).expect("hex");
-    Option::<Vec<u8>>::decode(&mut &bytes[..])
-        .expect("optional metadata")
-        .expect("metadata v15")
-}
-
 #[test]
 fn test_decode_round_trip() {
     let fixtures = fixtures();
@@ -444,54 +179,6 @@ fn test_decode_round_trip() {
     }
 }
 
-fn fixture_block(name: &str) -> source::Block {
-    let (_, fixture) = fixtures()
-        .into_iter()
-        .find(|(fixture, _)| fixture == name)
-        .unwrap_or_else(|| panic!("fixture {name}"));
-    sourced_of(&fixture["sourced"])
-}
-
-/// The block with its header's `MNSV` stamp replaced.
-fn restamped(block: source::Block, spec_version: u32) -> source::Block {
-    let source::Block::Block {
-        hash,
-        height,
-        header,
-        zswap_state_root,
-        ledger_state_root,
-        system_parameters,
-        metadata,
-        parent,
-        extrinsics,
-        events,
-    } = block
-    else {
-        panic!("not genesis");
-    };
-    let mut decoded = SubstrateHeader::<H256>::decode(&mut &header[..]).unwrap();
-    for log in decoded.digest.logs.iter_mut() {
-        if let DigestItem::Consensus(engine, data) = log
-            && engine == b"MNSV"
-        {
-            *data = spec_version.encode();
-        }
-    }
-
-    source::Block::Block {
-        hash,
-        height,
-        header: decoded.encode().into(),
-        zswap_state_root,
-        ledger_state_root,
-        system_parameters,
-        metadata,
-        parent,
-        extrinsics,
-        events,
-    }
-}
-
 #[test]
 fn test_unseen_runtime() {
     // A 2.1 spec version without a `.node` entry decodes with the metadata the block carries.
@@ -507,46 +194,6 @@ fn test_unseen_runtime() {
         node::Block::try_from(block),
         Err(super::Error::ProtocolVersion(..))
     ));
-}
-
-fn header_with(logs: Vec<DigestItem>) -> SubstrateHeader<H256> {
-    SubstrateHeader {
-        parent_hash: H256::zero(),
-        number: 1,
-        state_root: H256::zero(),
-        extrinsics_root: H256::zero(),
-        digest: Digest { logs },
-    }
-}
-
-fn babe_pre_digest(authority_index: u32) -> DigestItem {
-    let mut pre_digest = vec![2];
-    pre_digest.extend(authority_index.encode());
-    DigestItem::PreRuntime(BABE_ENGINE_ID, pre_digest)
-}
-
-fn authority_set() -> Vec<(ByteVec, ByteVec)> {
-    let aura = vec![[1u8; 32], [2; 32]].encode();
-    let babe = vec![([3u8; 32], 1u64), ([4; 32], 1)].encode();
-    let next_babe = vec![([5u8; 32], 1u64)].encode();
-    vec![
-        (
-            storage_key(AUTHORITY_SET_ITEMS[0]).to_vec().into(),
-            aura.into(),
-        ),
-        (
-            storage_key(AUTHORITY_SET_ITEMS[1]).to_vec().into(),
-            babe.into(),
-        ),
-        (
-            storage_key(AUTHORITY_SET_ITEMS[2]).to_vec().into(),
-            next_babe.into(),
-        ),
-    ]
-}
-
-fn authorities(header: &SubstrateHeader<H256>) -> Option<Vec<[u8; 32]>> {
-    block_authorities(header, &authority_set(), true, |_| true).expect("authority set")
 }
 
 #[test]
@@ -631,4 +278,359 @@ async fn test_cpu_pool_decode_in_height_order() {
         .expect("blocks decode");
 
     assert_eq!(decoded, expected);
+}
+
+fn authorities(header: &SubstrateHeader<H256>) -> Option<Vec<[u8; 32]>> {
+    block_authorities(header, &authority_set(), true, |_| true).expect("authority set")
+}
+
+fn authority_set() -> Vec<(ByteVec, ByteVec)> {
+    let aura = vec![[1u8; 32], [2; 32]].encode();
+    let babe = vec![([3u8; 32], 1u64), ([4; 32], 1)].encode();
+    let next_babe = vec![([5u8; 32], 1u64)].encode();
+    vec![
+        (
+            storage_key(AUTHORITY_SET_ITEMS[0]).to_vec().into(),
+            aura.into(),
+        ),
+        (
+            storage_key(AUTHORITY_SET_ITEMS[1]).to_vec().into(),
+            babe.into(),
+        ),
+        (
+            storage_key(AUTHORITY_SET_ITEMS[2]).to_vec().into(),
+            next_babe.into(),
+        ),
+    ]
+}
+
+fn babe_pre_digest(authority_index: u32) -> DigestItem {
+    let mut pre_digest = vec![2];
+    pre_digest.extend(authority_index.encode());
+    DigestItem::PreRuntime(BABE_ENGINE_ID, pre_digest)
+}
+
+fn block_hash(value: &Value) -> BlockHash {
+    ByteArray(bytes(value).to_vec().try_into().expect("32 bytes"))
+}
+
+fn bytes(value: &Value) -> ByteVec {
+    const_hex::decode(value.as_str().expect("hex string"))
+        .expect("hex")
+        .into()
+}
+
+/// The SCALE-encoded `RuntimeMetadataPrefixed` the node serves at the given block.
+async fn fetch_metadata_bytes(rpc: &NodeRpc<WsTransport>, at: BlockHash) -> Vec<u8> {
+    use crate::infra::subxt_node::rpc::Batch;
+
+    let batch = Batch::default().call(at, "Metadata_metadata_at_version", &15u32.encode());
+    let result = rpc
+        .batch(batch)
+        .await
+        .expect("metadata call")
+        .pop()
+        .unwrap();
+    let value = result.expect("metadata call succeeds")["value"]
+        .as_str()
+        .expect("value")
+        .to_owned();
+    let bytes = const_hex::decode(value).expect("hex");
+    Option::<Vec<u8>>::decode(&mut &bytes[..])
+        .expect("optional metadata")
+        .expect("metadata v15")
+}
+
+fn fixture_block(name: &str) -> sourcing::Block {
+    let (_, fixture) = fixtures()
+        .into_iter()
+        .find(|(fixture, _)| fixture == name)
+        .unwrap_or_else(|| panic!("fixture {name}"));
+    sourced_of(&fixture["sourced"])
+}
+
+fn fixtures() -> Vec<(String, Value)> {
+    let mut fixtures = fs::read_dir(fixtures_dir())
+        .expect("fixtures can be read")
+        .filter_map(|entry| {
+            let path = entry.ok()?.path();
+            (path.extension()? == "json").then_some(path)
+        })
+        .map(|path| {
+            let name = path.file_stem().unwrap().to_string_lossy().into_owned();
+            let fixture = serde_json::from_slice(&fs::read(&path).expect("fixture can be read"))
+                .expect("fixture is JSON");
+            (name, fixture)
+        })
+        .collect::<Vec<_>>();
+    fixtures.sort_by(|(a, _), (b, _)| a.cmp(b));
+    fixtures
+}
+
+fn fixtures_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/decode")
+}
+
+fn header_with(logs: Vec<DigestItem>) -> SubstrateHeader<H256> {
+    SubstrateHeader {
+        parent_hash: H256::zero(),
+        number: 1,
+        state_root: H256::zero(),
+        extrinsics_root: H256::zero(),
+        digest: Digest { logs },
+    }
+}
+
+fn hex(bytes: impl AsRef<[u8]>) -> Value {
+    const_hex::encode_prefixed(bytes).into()
+}
+
+/// The metadata with the given hash: from the `.node` directory, else from the fixtures.
+fn metadata_with_hash(hash: &Value) -> Metadata {
+    let node_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../.node");
+    let node_metadata = fs::read_dir(&node_dir)
+        .expect(".node can be read")
+        .filter_map(|entry| fs::read(entry.ok()?.path().join("metadata.scale")).ok());
+    let fixture_metadata = fs::read_dir(fixtures_dir().join("metadata"))
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| fs::read(entry.ok()?.path()).ok());
+
+    node_metadata
+        .chain(fixture_metadata)
+        .map(|bytes| Metadata::decode(&mut &bytes[..]).expect("metadata can be decoded"))
+        .find(|metadata| hex(metadata.hasher().hash()) == *hash)
+        .unwrap_or_else(|| panic!("no metadata with hash {hash}"))
+}
+
+fn pairs(pairs: &[(ByteVec, ByteVec)]) -> Value {
+    pairs
+        .iter()
+        .map(|(key, value)| json!([hex(key), hex(value)]))
+        .collect()
+}
+
+fn pairs_of(value: &Value) -> Vec<(ByteVec, ByteVec)> {
+    value
+        .as_array()
+        .expect("pairs")
+        .iter()
+        .map(|pair| (bytes(&pair[0]), bytes(&pair[1])))
+        .collect()
+}
+
+/// A [node::Block], every byte field in full.
+fn render(block: &node::Block) -> Value {
+    use runtimes::Transaction::*;
+    let transactions = block
+        .transactions
+        .iter()
+        .map(|transaction| match transaction {
+            Regular(bytes) => json!({ "regular": hex(bytes) }),
+            System(bytes) => json!({ "system": hex(bytes) }),
+        })
+        .collect::<Vec<_>>();
+
+    use DustRegistrationEvent::*;
+    let dust_registration_events = block
+        .dust_registration_events
+        .iter()
+        .map(|event| match event {
+            Registration {
+                cardano_stake_key,
+                dust_address,
+            } => json!({ "registration": [hex(cardano_stake_key), hex(dust_address)] }),
+            Deregistration {
+                cardano_stake_key,
+                dust_address,
+            } => json!({ "deregistration": [hex(cardano_stake_key), hex(dust_address)] }),
+            MappingAdded {
+                cardano_stake_key,
+                dust_address,
+                utxo_id,
+                utxo_index,
+            } => json!({
+                "mapping_added": [hex(cardano_stake_key), hex(dust_address), hex(utxo_id), utxo_index]
+            }),
+            MappingRemoved {
+                cardano_stake_key,
+                dust_address,
+                utxo_id,
+                utxo_index,
+            } => json!({
+                "mapping_removed": [hex(cardano_stake_key), hex(dust_address), hex(utxo_id), utxo_index]
+            }),
+        })
+        .collect::<Vec<_>>();
+
+    json!({
+        "hash": hex(block.hash),
+        "height": block.height,
+        "protocol_version": u32::from(block.protocol_version),
+        "parent_hash": hex(block.parent_hash),
+        "author": block.author.map(hex),
+        "timestamp": block.timestamp,
+        "zswap_merkle_tree_root": hex(block.zswap_merkle_tree_root.serialize().expect("root serializes")),
+        "ledger_state_root": block.ledger_state_root.as_ref().map(hex),
+        "transactions": transactions,
+        "dust_registration_events": dust_registration_events,
+        "bridge_events": serde_json::to_value(&block.bridge_events).expect("bridge events serialize"),
+        "d_parameter": block.d_parameter.as_ref().map(|d_parameter| json!([
+            d_parameter.num_permissioned_candidates,
+            d_parameter.num_registered_candidates,
+        ])),
+        "terms_and_conditions": block
+            .terms_and_conditions
+            .as_ref()
+            .map(|terms| json!([hex(terms.hash), terms.url])),
+    })
+}
+
+/// The block with its header's `MNSV` stamp replaced.
+fn restamped(block: sourcing::Block, spec_version: u32) -> sourcing::Block {
+    let sourcing::Block::Block {
+        hash,
+        height,
+        header,
+        zswap_state_root,
+        ledger_state_root,
+        system_parameters,
+        metadata,
+        parent,
+        extrinsics,
+        events,
+    } = block
+    else {
+        panic!("not genesis");
+    };
+    let mut decoded = SubstrateHeader::<H256>::decode(&mut &header[..]).unwrap();
+    for log in decoded.digest.logs.iter_mut() {
+        if let DigestItem::Consensus(engine, data) = log
+            && engine == b"MNSV"
+        {
+            *data = spec_version.encode();
+        }
+    }
+
+    sourcing::Block::Block {
+        hash,
+        height,
+        header: decoded.encode().into(),
+        zswap_state_root,
+        ledger_state_root,
+        system_parameters,
+        metadata,
+        parent,
+        extrinsics,
+        events,
+    }
+}
+
+/// A [sourcing::Block] as fixture JSON; its metadata by hash.
+fn sourced_json(block: &sourcing::Block) -> Value {
+    use sourcing::Block::*;
+    match block {
+        Genesis {
+            hash,
+            header,
+            zswap_state_root,
+            ledger_state_root,
+            system_parameters: (d_parameter, terms_and_conditions),
+            metadata,
+            ledger_state: _,
+            cnight_mappings,
+            extrinsics,
+            events,
+        } => json!({
+            "kind": "genesis",
+            "extrinsics": extrinsics.iter().map(hex).collect::<Vec<_>>(),
+            "events": hex(events),
+            "hash": hex(hash),
+            "header": hex(header),
+            "zswap_state_root": hex(zswap_state_root),
+            "ledger_state_root": hex(ledger_state_root),
+            "system_parameters": [hex(d_parameter), hex(terms_and_conditions)],
+            "metadata_hash": hex(metadata.hasher().hash()),
+            "cnight_mappings": pairs(cnight_mappings),
+        }),
+        Block {
+            hash,
+            height,
+            header,
+            zswap_state_root,
+            ledger_state_root,
+            system_parameters,
+            metadata,
+            parent,
+            extrinsics,
+            events,
+        } => json!({
+            "kind": "block",
+            "hash": hex(hash),
+            "height": height,
+            "header": hex(header),
+            "zswap_state_root": hex(zswap_state_root),
+            "ledger_state_root": hex(ledger_state_root),
+            "system_parameters": system_parameters
+                .as_ref()
+                .map(|(d_parameter, terms)| json!([hex(d_parameter), hex(terms)])),
+            "metadata_hash": hex(metadata.hasher().hash()),
+            "parent": {
+                "hash": hex(parent.hash),
+                "authority_set": pairs(&parent.authority_set),
+            },
+            "extrinsics": extrinsics.iter().map(hex).collect::<Vec<_>>(),
+            "events": hex(events),
+        }),
+    }
+}
+
+fn sourced_of(sourced: &Value) -> sourcing::Block {
+    let metadata = Arc::new(metadata_with_hash(&sourced["metadata_hash"]));
+    let system_parameters = |value: &Value| {
+        value
+            .as_array()
+            .map(|results| (bytes(&results[0]), bytes(&results[1])))
+    };
+
+    match sourced["kind"].as_str() {
+        Some("genesis") => sourcing::Block::Genesis {
+            hash: block_hash(&sourced["hash"]),
+            header: bytes(&sourced["header"]),
+            zswap_state_root: bytes(&sourced["zswap_state_root"]),
+            ledger_state_root: bytes(&sourced["ledger_state_root"]),
+            system_parameters: system_parameters(&sourced["system_parameters"])
+                .expect("genesis system parameters"),
+            metadata,
+            ledger_state: vec![0xab].into(),
+            cnight_mappings: pairs_of(&sourced["cnight_mappings"]),
+            extrinsics: sourced["extrinsics"]
+                .as_array()
+                .expect("extrinsics")
+                .iter()
+                .map(bytes)
+                .collect(),
+            events: bytes(&sourced["events"]),
+        },
+        _ => sourcing::Block::Block {
+            hash: block_hash(&sourced["hash"]),
+            height: sourced["height"].as_u64().expect("height"),
+            header: bytes(&sourced["header"]),
+            zswap_state_root: bytes(&sourced["zswap_state_root"]),
+            ledger_state_root: bytes(&sourced["ledger_state_root"]),
+            system_parameters: system_parameters(&sourced["system_parameters"]),
+            metadata,
+            parent: Parent {
+                hash: block_hash(&sourced["parent"]["hash"]),
+                authority_set: pairs_of(&sourced["parent"]["authority_set"]),
+            },
+            extrinsics: sourced["extrinsics"]
+                .as_array()
+                .expect("extrinsics")
+                .iter()
+                .map(bytes)
+                .collect(),
+            events: bytes(&sourced["events"]),
+        },
+    }
 }
