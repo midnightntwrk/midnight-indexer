@@ -31,7 +31,7 @@ Three details are load-bearing, and all three were established empirically:
    including it — so no partially successful transaction is produced.
 
 3. **The ballast keys are primed before the stale pair is built.** Each burn
-   circuit has a matching `prime*` circuit that inserts the same 48 ballast
+   circuit has a matching `prime*` circuit that inserts the same 15 ballast
    keys, and the test applies it, against fresh state, before taking the
    snapshot. Without it the first call of the pair *inserts* those keys and
    grows the contract state between the snapshot the stale call is proven
@@ -146,6 +146,25 @@ ledger v9 shows the split is as intended — only the increment is guaranteed �
 and the node's own log names the cause: the guaranteed transcript ran out of
 its declared gas on the state the first call had grown.
 
-The ballast size is still a hand-picked constant. Ledger v9 partitions it as
-intended today, but a future cost model may not; a calibration-aware fixture
-that derives the split at runtime instead is tracked separately.
+### How much ballast
+
+Each circuit carries 15 ballast writes, the smallest count that works on both
+ledgers. Measured on undeployed by regenerating the contract with N writes per
+circuit (burn and prime alike) and running this suite:
+
+| Writes | Ledger v9 (node 2.1.0-rc.2, compactc 0.33.0-rc.2) | Ledger v8 (node 1.0.300, compactc 0.30.0) |
+|---|---|---|
+| 5 | — | both scenarios rejected (`Transcript`) |
+| 8 | — | `burnWithoutGuaranteed` rejected |
+| 9 | — | 6/6 |
+| 11 | both scenarios rejected (`arithmetic overflow`) | 6/6 |
+| 14 | `burnWithGuaranteed` rejected | — |
+| **15** | **6/6** | **6/6**, also against indexer 4.3.800-rc.2 |
+| 17, 23, 48 | 6/6 | 6/6 (23, 48) |
+
+Below the minimum the decrement stays in the guaranteed phase, the stale call
+underflows there and the node rejects it from the mempool, so no partial
+success is produced. The binding scenario differs per ledger, and v9 sets the
+number. There is no headroom: a cost-model change in a later ledger can move
+it, and the count is a hand-picked constant. A calibration-aware fixture that
+derives the split at runtime instead is tracked separately.

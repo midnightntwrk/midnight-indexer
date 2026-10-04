@@ -133,7 +133,7 @@ describe
      */
     async function submitStalePair(circuitId: string, label: string): Promise<StalePair> {
       // Insert this circuit's ballast keys first, against fresh state. Without
-      // it the first call grows the contract state by 48 map entries, and on
+      // it the first call grows the contract state by 15 map entries, and on
       // ledger v9 the stale call's guaranteed transcript then runs out of its
       // declared gas at apply time, so the node rejects the transaction from
       // the mempool (custom error 104) instead of including it as a partial
