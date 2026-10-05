@@ -1,0 +1,135 @@
+pragma language_version >= 0.16;
+import CompactStandardLibrary;
+
+// Incremented before kernel.checkpoint(): cheap relative (addi) work that
+// re-executes identically whatever the current state is, so the guaranteed
+// transcript always applies.
+export ledger guaranteedMarker: Counter;
+
+// Decremented after kernel.checkpoint(). Each fuse starts at 1, so a second
+// call built against the same (now stale) on-chain state underflows when the
+// ledger re-runs the fallible transcript at apply time.
+export ledger fuseWithGuaranteed: Counter;
+export ledger fuseWithoutGuaranteed: Counter;
+
+// Ballast. The ledger picks the LARGEST guaranteed prefix whose cost fits
+// guaranteed_budget (ledger-8.0.2 construct.rs, step 4c). Without these writes
+// the whole circuit fits and everything lands in the guaranteed phase, so the
+// node rejects the stale call from the mempool instead of producing a
+// PartialSuccess. Making the post-checkpoint section expensive forces the
+// prefix down to "just the pre-checkpoint section".
+export ledger ballast: Map<Bytes<32>, Counter>;
+
+constructor() {
+  fuseWithGuaranteed.increment(1);
+  fuseWithoutGuaranteed.increment(1);
+}
+
+// Call with has_guaranteed_transcript == true whose own fallible segment fails.
+export circuit burnWithGuaranteed(): [] {
+  guaranteedMarker.increment(1);
+  kernel.checkpoint();
+  ballast.insertDefault(pad(32, "g00"));
+  ballast.insertDefault(pad(32, "g01"));
+  ballast.insertDefault(pad(32, "g02"));
+  ballast.insertDefault(pad(32, "g03"));
+  ballast.insertDefault(pad(32, "g04"));
+  ballast.insertDefault(pad(32, "g05"));
+  ballast.insertDefault(pad(32, "g06"));
+  ballast.insertDefault(pad(32, "g07"));
+  ballast.insertDefault(pad(32, "g08"));
+  ballast.insertDefault(pad(32, "g09"));
+  ballast.insertDefault(pad(32, "g10"));
+  ballast.insertDefault(pad(32, "g11"));
+  ballast.insertDefault(pad(32, "g12"));
+  ballast.insertDefault(pad(32, "g13"));
+  ballast.insertDefault(pad(32, "g14"));
+  ballast.insertDefault(pad(32, "g15"));
+  ballast.insertDefault(pad(32, "g16"));
+  ballast.insertDefault(pad(32, "g17"));
+  ballast.insertDefault(pad(32, "g18"));
+  ballast.insertDefault(pad(32, "g19"));
+  ballast.insertDefault(pad(32, "g20"));
+  ballast.insertDefault(pad(32, "g21"));
+  ballast.insertDefault(pad(32, "g22"));
+  ballast.insertDefault(pad(32, "g23"));
+  ballast.insertDefault(pad(32, "g24"));
+  ballast.insertDefault(pad(32, "g25"));
+  ballast.insertDefault(pad(32, "g26"));
+  ballast.insertDefault(pad(32, "g27"));
+  ballast.insertDefault(pad(32, "g28"));
+  ballast.insertDefault(pad(32, "g29"));
+  ballast.insertDefault(pad(32, "g30"));
+  ballast.insertDefault(pad(32, "g31"));
+  ballast.insertDefault(pad(32, "g32"));
+  ballast.insertDefault(pad(32, "g33"));
+  ballast.insertDefault(pad(32, "g34"));
+  ballast.insertDefault(pad(32, "g35"));
+  ballast.insertDefault(pad(32, "g36"));
+  ballast.insertDefault(pad(32, "g37"));
+  ballast.insertDefault(pad(32, "g38"));
+  ballast.insertDefault(pad(32, "g39"));
+  ballast.insertDefault(pad(32, "g40"));
+  ballast.insertDefault(pad(32, "g41"));
+  ballast.insertDefault(pad(32, "g42"));
+  ballast.insertDefault(pad(32, "g43"));
+  ballast.insertDefault(pad(32, "g44"));
+  ballast.insertDefault(pad(32, "g45"));
+  ballast.insertDefault(pad(32, "g46"));
+  ballast.insertDefault(pad(32, "g47"));
+  fuseWithGuaranteed.decrement(1);
+}
+
+// Call with has_guaranteed_transcript == false whose segment fails.
+export circuit burnWithoutGuaranteed(): [] {
+  kernel.checkpoint();
+  ballast.insertDefault(pad(32, "n00"));
+  ballast.insertDefault(pad(32, "n01"));
+  ballast.insertDefault(pad(32, "n02"));
+  ballast.insertDefault(pad(32, "n03"));
+  ballast.insertDefault(pad(32, "n04"));
+  ballast.insertDefault(pad(32, "n05"));
+  ballast.insertDefault(pad(32, "n06"));
+  ballast.insertDefault(pad(32, "n07"));
+  ballast.insertDefault(pad(32, "n08"));
+  ballast.insertDefault(pad(32, "n09"));
+  ballast.insertDefault(pad(32, "n10"));
+  ballast.insertDefault(pad(32, "n11"));
+  ballast.insertDefault(pad(32, "n12"));
+  ballast.insertDefault(pad(32, "n13"));
+  ballast.insertDefault(pad(32, "n14"));
+  ballast.insertDefault(pad(32, "n15"));
+  ballast.insertDefault(pad(32, "n16"));
+  ballast.insertDefault(pad(32, "n17"));
+  ballast.insertDefault(pad(32, "n18"));
+  ballast.insertDefault(pad(32, "n19"));
+  ballast.insertDefault(pad(32, "n20"));
+  ballast.insertDefault(pad(32, "n21"));
+  ballast.insertDefault(pad(32, "n22"));
+  ballast.insertDefault(pad(32, "n23"));
+  ballast.insertDefault(pad(32, "n24"));
+  ballast.insertDefault(pad(32, "n25"));
+  ballast.insertDefault(pad(32, "n26"));
+  ballast.insertDefault(pad(32, "n27"));
+  ballast.insertDefault(pad(32, "n28"));
+  ballast.insertDefault(pad(32, "n29"));
+  ballast.insertDefault(pad(32, "n30"));
+  ballast.insertDefault(pad(32, "n31"));
+  ballast.insertDefault(pad(32, "n32"));
+  ballast.insertDefault(pad(32, "n33"));
+  ballast.insertDefault(pad(32, "n34"));
+  ballast.insertDefault(pad(32, "n35"));
+  ballast.insertDefault(pad(32, "n36"));
+  ballast.insertDefault(pad(32, "n37"));
+  ballast.insertDefault(pad(32, "n38"));
+  ballast.insertDefault(pad(32, "n39"));
+  ballast.insertDefault(pad(32, "n40"));
+  ballast.insertDefault(pad(32, "n41"));
+  ballast.insertDefault(pad(32, "n42"));
+  ballast.insertDefault(pad(32, "n43"));
+  ballast.insertDefault(pad(32, "n44"));
+  ballast.insertDefault(pad(32, "n45"));
+  ballast.insertDefault(pad(32, "n46"));
+  ballast.insertDefault(pad(32, "n47"));
+  fuseWithoutGuaranteed.decrement(1);
+}
