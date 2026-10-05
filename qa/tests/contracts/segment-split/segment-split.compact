@@ -27,19 +27,24 @@ export ledger ballast: Map<Bytes<32>, Counter>;
 constructor() {
   fuseWithGuaranteed.increment(1);
   fuseWithoutGuaranteed.increment(1);
+  // Priming. Without it each burn circuit's first call would INSERT its
+  // ballast keys, growing the contract state between the snapshot the stale
+  // call is proven against and the state it is applied to. Ledger v9 charges
+  // the guaranteed transcript for the state bytes it rewrites and caps that at
+  // the declared gas (cost x 1.2, bytes included), so on the grown state the
+  // stale call's guaranteed increment runs out of gas and the node rejects the
+  // whole transaction from the mempool (custom error 104). Inserting the keys
+  // at deploy time makes every burn call overwrite existing entries, so the
+  // state the guaranteed transcript is proven against and the state it applies
+  // to cost the same to rewrite.
+  ballastWithGuaranteed();
+  ballastWithoutGuaranteed();
 }
 
-// Priming. Each burn circuit's first call would otherwise INSERT its 15
-// ballast keys, growing the contract state between the snapshot the stale
-// call is proven against and the state it is applied to. Ledger v9 charges the
-// guaranteed transcript for the state bytes it rewrites and caps that at the
-// declared gas (cost x 1.2, bytes included), so on the grown state the stale
-// call's guaranteed increment runs out of gas and the node rejects the whole
-// transaction from the mempool (custom error 104). Inserting the keys before
-// the snapshot makes both calls overwrite existing entries, so the state the
-// guaranteed transcript is proven against and the state it applies to cost the
-// same to rewrite.
-export circuit primeWithGuaranteed(): [] {
+// Each burn circuit's ballast, written once here so the constructor's priming
+// and the burn circuit cannot drift apart: a key the constructor misses is
+// inserted by the first burn call, and the stale call is rejected again.
+circuit ballastWithGuaranteed(): [] {
   ballast.insertDefault(pad(32, "g00"));
   ballast.insertDefault(pad(32, "g01"));
   ballast.insertDefault(pad(32, "g02"));
@@ -57,7 +62,7 @@ export circuit primeWithGuaranteed(): [] {
   ballast.insertDefault(pad(32, "g14"));
 }
 
-export circuit primeWithoutGuaranteed(): [] {
+circuit ballastWithoutGuaranteed(): [] {
   ballast.insertDefault(pad(32, "n00"));
   ballast.insertDefault(pad(32, "n01"));
   ballast.insertDefault(pad(32, "n02"));
@@ -79,41 +84,13 @@ export circuit primeWithoutGuaranteed(): [] {
 export circuit burnWithGuaranteed(): [] {
   guaranteedMarker.increment(1);
   kernel.checkpoint();
-  ballast.insertDefault(pad(32, "g00"));
-  ballast.insertDefault(pad(32, "g01"));
-  ballast.insertDefault(pad(32, "g02"));
-  ballast.insertDefault(pad(32, "g03"));
-  ballast.insertDefault(pad(32, "g04"));
-  ballast.insertDefault(pad(32, "g05"));
-  ballast.insertDefault(pad(32, "g06"));
-  ballast.insertDefault(pad(32, "g07"));
-  ballast.insertDefault(pad(32, "g08"));
-  ballast.insertDefault(pad(32, "g09"));
-  ballast.insertDefault(pad(32, "g10"));
-  ballast.insertDefault(pad(32, "g11"));
-  ballast.insertDefault(pad(32, "g12"));
-  ballast.insertDefault(pad(32, "g13"));
-  ballast.insertDefault(pad(32, "g14"));
+  ballastWithGuaranteed();
   fuseWithGuaranteed.decrement(1);
 }
 
 // Call with has_guaranteed_transcript == false whose segment fails.
 export circuit burnWithoutGuaranteed(): [] {
   kernel.checkpoint();
-  ballast.insertDefault(pad(32, "n00"));
-  ballast.insertDefault(pad(32, "n01"));
-  ballast.insertDefault(pad(32, "n02"));
-  ballast.insertDefault(pad(32, "n03"));
-  ballast.insertDefault(pad(32, "n04"));
-  ballast.insertDefault(pad(32, "n05"));
-  ballast.insertDefault(pad(32, "n06"));
-  ballast.insertDefault(pad(32, "n07"));
-  ballast.insertDefault(pad(32, "n08"));
-  ballast.insertDefault(pad(32, "n09"));
-  ballast.insertDefault(pad(32, "n10"));
-  ballast.insertDefault(pad(32, "n11"));
-  ballast.insertDefault(pad(32, "n12"));
-  ballast.insertDefault(pad(32, "n13"));
-  ballast.insertDefault(pad(32, "n14"));
+  ballastWithoutGuaranteed();
   fuseWithoutGuaranteed.decrement(1);
 }

@@ -30,26 +30,28 @@ Three details are load-bearing, and all three were established empirically:
    stale call from the mempool ("guaranteed execution would fail") instead of
    including it — so no partially successful transaction is produced.
 
-3. **The ballast keys are primed before the stale pair is built.** Each burn
-   circuit has a matching `prime*` circuit that inserts the same 15 ballast
-   keys, and the test applies it, against fresh state, before taking the
-   snapshot. Without it the first call of the pair *inserts* those keys and
-   grows the contract state between the snapshot the stale call is proven
-   against and the state it is applied to. A transcript's declared gas is its
-   cost × 1.2 measured at build time, **bytes written and deleted included**,
-   and ledger v9 charges a transcript for the state bytes it rewrites and
-   rejects it with `OutOfGas` above that bound
+3. **The ballast keys already exist when the stale pair is built.** The
+   constructor inserts every ballast key at deploy time, through the same
+   non-exported `ballastWithGuaranteed` / `ballastWithoutGuaranteed` helper
+   circuits the burn circuits call, so the keys it primes cannot drift from the
+   keys a burn writes. Without priming the first call of the pair *inserts*
+   those keys and grows the contract state between the snapshot the stale call
+   is proven against and the state it is applied to. A transcript's declared gas
+   is its cost × 1.2 measured at build time, **bytes written and deleted
+   included**, and ledger v9 charges a transcript for the state bytes it
+   rewrites and rejects it with `OutOfGas` above that bound
    (`onchain-runtime/src/context.rs`, `query`). On the grown state the stale
    call's three-op guaranteed transcript (`idxp`, `addi 1`, `insc 1`) runs out
    of its declared gas, and the node rejects the whole transaction from the
    mempool — `guaranteed execution would fail: ran out of gas budget`, surfaced
-   as `INVALID_TRANSACTION … custom error: 104` — before any partial success
-   can happen. With the keys primed, both calls overwrite existing entries, so
-   the guaranteed transcript costs the same against the snapshot and against
-   the state it applies to. Ledger v8 accepted the unprimed pair; priming is
+   as `INVALID_TRANSACTION … custom error: 104` — before any partial success can
+   happen. With the keys primed, every burn call overwrites existing entries, so
+   the guaranteed transcript costs the same against the snapshot and against the
+   state it applies to. Ledger v8 accepted the unprimed pair; priming is
    harmless there.
 
-The two circuits differ only in where the expensive section sits:
+The two exported circuits differ only in where the expensive section sits
+(the ballast helpers are inlined into them and get no keys of their own):
 
 | Circuit | Pre-checkpoint | Resulting shape |
 |---|---|---|

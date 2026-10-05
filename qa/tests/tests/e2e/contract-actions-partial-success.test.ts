@@ -36,7 +36,7 @@ import type { RegularTransaction } from '@utils/indexer/indexer-types';
 
 // First use also builds the Compact toolchain image and pulls the toolkit image.
 const SETUP_TIMEOUT = 900_000; // 15 minutes
-const CONTRACT_ACTION_TIMEOUT = 600_000; // 10 minutes — the slowest step: a priming call plus two proven calls
+const CONTRACT_ACTION_TIMEOUT = 600_000; // 10 minutes — the slowest step: two proven calls
 const TEST_TIMEOUT = 60_000; // 1 minute
 
 /**
@@ -118,7 +118,10 @@ describe
 
     /**
      * Deploy once and reuse the contract for both scenarios: each scenario burns
-     * its own fuse, so they do not interfere.
+     * its own fuse and overwrites its own ballast keys, so they do not interfere.
+     * The constructor inserts every ballast key, so neither call of a stale pair
+     * grows the contract state — see the fixture README, "Why the contract looks
+     * the way it does".
      */
     beforeAll(async () => {
       deployment = await toolkit.deployCustomContract(SEGMENT_SPLIT, [], fundingSeed);
@@ -132,14 +135,6 @@ describe
      * fallible transcript underflows when the ledger re-runs it at apply time.
      */
     async function submitStalePair(circuitId: string, label: string): Promise<StalePair> {
-      // Insert this circuit's ballast keys first, against fresh state. Without
-      // it the first call grows the contract state by 15 map entries, and on
-      // ledger v9 the stale call's guaranteed transcript then runs out of its
-      // declared gas at apply time, so the node rejects the transaction from
-      // the mempool (custom error 104) instead of including it as a partial
-      // success. See the fixture README, "Why the contract looks the way it does".
-      await primeBallast(circuitId.replace(/^burn/, 'prime'), label);
-
       const stateFile = await toolkit.snapshotContractState(contractAddress, `${label}_state.bin`);
 
       // Each call is built and submitted before the next is built. The staleness
@@ -175,30 +170,6 @@ describe
       const stale = await toolkit.sendCustomContractCall(staleCall);
 
       return { staleDecoded, indexed: await indexedTransaction(stale.txHash) };
-    }
-
-    /** Apply a priming circuit against the current state and wait for it to land. */
-    async function primeBallast(circuitId: string, label: string): Promise<void> {
-      const stateFile = await toolkit.snapshotContractState(
-        contractAddress,
-        `${label}_prime_state.bin`,
-      );
-      const primed = await toolkit.sendCustomContractCall(
-        await toolkit.generateCustomContractCall({
-          circuitId,
-          deploymentResult: deployment,
-          contract: SEGMENT_SPLIT,
-          onchainStateFile: stateFile,
-          label: `${label}_prime`,
-          fundingSeed,
-        }),
-      );
-      if (!primed.blockHash) {
-        throw new Error(
-          `${label}: the priming call (tx ${primed.txHash}) never reached a block, so the ` +
-            'stale pair would grow the contract state and be rejected on ledger v9',
-        );
-      }
     }
 
     /** Fetch the indexed transaction for a hash, failing loudly if it never appears. */
