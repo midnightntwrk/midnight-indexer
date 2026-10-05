@@ -157,7 +157,7 @@ require a runtime no stable compiler emits: toolkit 2.1.x wants compact-runtime
 Usable with the pre-release compiler pin:
 
 ```bash
-NODE_TAG=2.1.0-rc.2 NODE_TOOLKIT_TAG=2.1.0-rc.2 \
+NODE_TAG=2.1.0-rc.4 NODE_TOOLKIT_TAG=2.1.0-rc.4 \
   COMPACT_COMPILER_VERSION=0.33.0-rc.2 TARGET_ENV=undeployed bun run test:e2e
 ```
 
@@ -176,7 +176,10 @@ its declared gas on the state the first call had grown.
 
 Each circuit carries 15 ballast writes, the smallest count that works on both
 ledgers. Measured on undeployed by regenerating the contract with N writes per
-circuit (burn and prime alike) and running this suite:
+circuit and running this suite. These runs primed the keys with separate
+on-chain calls before each stale pair rather than in the constructor; the
+state either way is the same, and the constructor-primed 15-write contract
+was re-run on both ledgers (last row):
 
 | Writes | Ledger v9 (node 2.1.0-rc.2, compactc 0.33.0-rc.2) | Ledger v8 (node 1.0.300, compactc 0.30.0) |
 |---|---|---|
@@ -187,6 +190,7 @@ circuit (burn and prime alike) and running this suite:
 | 14 | `burnWithGuaranteed` rejected | — |
 | **15** | **6/6** | **6/6**, also against indexer 4.3.800-rc.2 |
 | 17, 23, 48 | 6/6 | 6/6 (23, 48) |
+| **15**, constructor-primed | **6/6** on node 2.1.0-rc.4 | **6/6** |
 
 Below the minimum the decrement stays in the guaranteed phase, the stale call
 underflows there and the node rejects it from the mempool, so no partial
