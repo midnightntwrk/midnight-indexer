@@ -22,6 +22,12 @@ import { GenericContainer, StartedTestContainer } from 'testcontainers';
 import { getContractDeploymentHashes, resolveBlockHash } from '../../tests/e2e/test-utils';
 import { ensureToolkitCachePostgres } from './toolkit-cache';
 import { closeMothWallets, generateSingleTxViaMoth } from '../moth/moth-backend';
+import {
+  callCircuitViaMoth,
+  closeMothContractContexts,
+  deployContractViaMoth,
+  updateContractViaMoth,
+} from '../moth/moth-contracts';
 import { z } from 'zod';
 import {
   Coin,
@@ -407,8 +413,9 @@ class ToolkitWrapper {
   }
 
   async stop() {
-    // Release any moth wallet opened by the moth backend. Safe when unused —
-    // it clears an empty set.
+    // Drop the midnight-js providers first: they wrap the wallet facades that
+    // closeMothWallets() is about to stop. Both are safe when unused.
+    closeMothContractContexts();
     await closeMothWallets();
     if (this.startedContainer) {
       // Make /out world-writable before stopping so the host process can delete root-owned
@@ -874,15 +881,35 @@ class ToolkitWrapper {
     rngSeed: string = DEFAULT_RNG_SEED,
     fundingSeed?: string,
   ): Promise<ToolkitTransactionResult> {
-    if (!this.startedContainer) {
-      throw new Error('Container is not started. Call start() first.');
-    }
-
     if (!deploymentResult?.['contract-address-untagged']) {
       log.error('Deployment result is missing or has no contract address.');
       throw new Error(
         'Deployment result with contract-address-untagged is required. Ensure deployContract() succeeded before calling callContract().',
       );
+    }
+
+    // When TX_BACKEND=moth, call the circuit through midnight-js. `callKey` is
+    // the circuit name either way — the committed counter contract exposes
+    // `increment`, which is this method's default.
+    if (env.getTxBackend() === 'moth') {
+      const seed = fundingSeed ?? DEFAULT_FUNDING_SEED;
+      const txHash = await callCircuitViaMoth(
+        seed,
+        deploymentResult['contract-address-untagged'],
+        callKey,
+      );
+      const result: ToolkitTransactionResult = {
+        txHash,
+        blockHash: '',
+        status: 'sent',
+        rawOutput: `moth/midnight-js submitted ${txHash}`,
+      };
+      await resolveBlockHash(result);
+      return result;
+    }
+
+    if (!this.startedContainer) {
+      throw new Error('Container is not started. Call start() first.');
     }
 
     const contractAddressUntagged = deploymentResult['contract-address-untagged'];
@@ -916,6 +943,10 @@ class ToolkitWrapper {
    * Run contract maintenance (update): change contract authority and submit in one toolkit command.
    * Uses execToolkit and parseTransactionOutput; maintenance does not use a separate generate-then-send step.
    *
+   * Under TX_BACKEND=moth the update must use the same funding seed as the
+   * deploy: the contract's signing key lives in that seed's in-process private
+   * state provider, and a different seed has no key to sign the update with.
+   *
    * @param deploymentResult - From deployContract; provides contract-address-untagged.
    * @param fundingSeed - Optional funding seed. When provided, uses --funding-seed (required on preprod/qanet).
    * @param newAuthoritySeed - Seed for the new authority. Defaults to DEFAULT_NEW_AUTHORITY_SEED.
@@ -926,15 +957,35 @@ class ToolkitWrapper {
     fundingSeed?: string,
     newAuthoritySeed: string = DEFAULT_NEW_AUTHORITY_SEED,
   ): Promise<ToolkitTransactionResult> {
-    if (!this.startedContainer) {
-      throw new Error('Container is not started. Call start() first.');
-    }
-
     if (!deploymentResult?.['contract-address-untagged']) {
       log.error('Deployment result is missing or has no contract address.');
       throw new Error(
         'Deployment result with contract-address-untagged is required. Ensure deployContract() succeeded before calling updateContract().',
       );
+    }
+
+    // When TX_BACKEND=moth, replace the authority through midnight-js.
+    // `newAuthoritySeed` is not used on this path: midnight-js takes a signing
+    // key rather than a seed, and no assertion reads who holds the authority
+    // afterwards — only that the update is indexed.
+    if (env.getTxBackend() === 'moth') {
+      const seed = fundingSeed ?? DEFAULT_FUNDING_SEED;
+      const txHash = await updateContractViaMoth(
+        seed,
+        deploymentResult['contract-address-untagged'],
+      );
+      const result: ToolkitTransactionResult = {
+        txHash,
+        blockHash: '',
+        status: 'sent',
+        rawOutput: `moth/midnight-js submitted ${txHash}`,
+      };
+      await resolveBlockHash(result);
+      return result;
+    }
+
+    if (!this.startedContainer) {
+      throw new Error('Container is not started. Call start() first.');
     }
 
     const contractAddressUntagged = deploymentResult['contract-address-untagged'];
@@ -979,6 +1030,27 @@ class ToolkitWrapper {
    * @throws Error if the container is not started or if any step in the deployment process fails.
    */
   async deployContract(fundingSeed?: string): Promise<DeployContractResult> {
+    // When TX_BACKEND=moth, deploy through midnight-js in-process with moth
+    // supplying the wallet, instead of the toolkit container. The contract is
+    // the counter committed under qa/tests/contracts, not the toolkit's
+    // built-in contract-simple, so the address is the only thing the
+    // assertions carry over — which is all they use.
+    if (env.getTxBackend() === 'moth') {
+      const seed = fundingSeed ?? DEFAULT_FUNDING_SEED;
+      const { contractAddress } = await deployContractViaMoth(seed);
+      const { txHash, blockHash } = await getContractDeploymentHashes(contractAddress);
+      return {
+        'contract-address-untagged': contractAddress,
+        // The toolkit reports a bech32m-tagged address and the deploying
+        // wallet's coin public key alongside the deploy. midnight-js returns
+        // neither, and no assertion reads them; left empty rather than faked.
+        'contract-address-tagged': '',
+        'coin-public': '',
+        'deploy-tx-hash': txHash,
+        'deploy-block-hash': blockHash,
+      };
+    }
+
     if (!this.startedContainer) {
       throw new Error('Container is not started. Call start() first.');
     }
