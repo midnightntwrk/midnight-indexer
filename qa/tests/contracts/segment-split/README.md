@@ -64,10 +64,34 @@ never be confused with "the fixture never produced a guaranteed transcript".
 
 ## How it gets compiled
 
-Only two files are committed: `segment-split.compact` and its toolkit-js
-`segment-split.config.ts`. The compiled output — generated JS, ZKIR and prover
-keys, close to a megabyte of binary nobody can review in a diff — is **not** in
-the repository. The test builds it on the fly:
+The two suites that use this contract get its compiled output from different
+places:
+
+- `contract-actions-partial-success.test.ts` (toolkit path) compiles
+  `segment-split.compact` on the fly, with whatever compactc the toolkit under
+  test needs. It never reads `managed/`.
+- `segment-probe-contract-actions.test.ts` (`TX_BACKEND=moth`) loads the
+  committed `managed/` directory, compiled with compactc **0.31.1** for the
+  midnight-js runtime moth bundles.
+
+**`managed/` must be regenerated whenever `segment-split.compact` changes**, or
+the two suites exercise different contracts. With the compile helper below:
+
+```bash
+# from qa/tests
+cat > .regen.ts <<'TS'
+import { compileCompactContract } from '@utils/compact/compact-compiler';
+console.log(await compileCompactContract({
+  sourceDir: `${process.cwd()}/contracts/segment-split`,
+  sourceFile: 'segment-split.compact',
+}));
+TS
+dir=$(COMPACT_COMPILER_VERSION=0.31.1 bun run .regen.ts | tail -1) && rm .regen.ts
+cp -r "$dir/managed/." contracts/segment-split/managed/
+bun run format   # the committed copy is Prettier-formatted, like the rest of qa/tests
+```
+
+The toolkit path builds its copy like this:
 
 1. `utils/compact/compact-compiler.ts` builds `compact-toolchain:<version>-<digest>`
    from `utils/compact/compact-toolchain.Dockerfile` (first use only; a Docker
