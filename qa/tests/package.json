@@ -64,7 +64,7 @@
     "graphql-ws": "^6.0.6",
     "husky": "^9.1.6",
     "jsonc-parser": "^3.3.1",
-    "lint-staged": "^15.2.10",
+    "lint-staged": "^16.4.0",
     "pg": "^8.13.1",
     "pino": "^9.13.1",
     "pino-pretty": "^13.1.1",
