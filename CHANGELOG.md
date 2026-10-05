@@ -7,14 +7,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [4.3.800-rc.2] - 2026-09-25
 
 Security release candidate for the ledger-v8 mainnet line, cut on top of `4.3.800-rc.1`. It fixes a
-transaction that could halt ingestion (GHSA-67mp-mh58-qx5h), a halt after a node 1.0.300 runtime
-upgrade, a ledger-DB root-count crash loop and API worker starvation under ledger query load, clears
-five dependency advisories, and tracks node 1.0.300 with ledger 8.1.2.
+transaction that could halt ingestion (GHSA-67mp-mh58-qx5h), two halts on a block's first regular
+transaction, a ledger-DB root-count crash loop and API worker starvation under ledger query load,
+clears five dependency advisories, and tracks node 1.0.300 with ledger 8.1.2. It also brings
+subscription and unshielded-query performance work, HTTP and WebSocket compression, and secrets
+from files from `main`.
 
-**In-place over `4.3.800-rc.1` or `4.3.7`**: no new migrations and no re-index. Ledger 8.1.0 →
-8.1.2 changes no serialization output and no storage encoding. One config change is required
-before starting rc.2: the ledger DB `cache_size` key is renamed to `cache_max_nodes` (see Bug
-Fixes).
+**In-place over `4.3.800-rc.1` or `4.3.7`**: no re-index. Ledger 8.1.0 → 8.1.2 changes no
+serialization output and no storage encoding. Three index-only migrations apply automatically at
+startup: postgres `007`, sqlite `005` and `009` (see Performance). The postgres index is not built
+`CONCURRENTLY`, so writes to `unshielded_utxos` block while it builds; time it on a mainnet-sized
+copy and plan the upgrade window.
+
+Deployments that mount their own `config.yaml` must make two config changes before starting rc.2:
+
+- Rename the ledger DB `cache_size` key to `cache_max_nodes` (#1385, see Bug Fixes).
+- Add an `infra.api.subscription.progress_cache` block to indexer-api and indexer-standalone
+  (#1234, see Performance).
+
+Rolling back to `4.3.800-rc.1` or `4.3.7` is not binary-only: those builds refuse to start against
+a database carrying migrations they do not know. Delete `_sqlx_migrations` version `7` (postgres)
+or versions `5` and `9` (sqlite) first; the indexes can stay.
 
 Supported nodes: 0.22.0 and 1.0.300. Node 1.0.2 is not supported: it stops the first-transaction
 `tblock` skew at a fixed date (2026-10-31) rather than at the 1.0.300 runtime upgrade. Deploy rc.2
@@ -24,6 +37,20 @@ before the network's `set_code` to the 1.0.300 runtime.
 
 - *(chain-indexer)* Align ledger crates with ledger 8.1.2 (#1532)
 - *(chain-indexer)* Support node 1.0.300 (#1521)
+- *(indexer-common)* Source secrets from files via `APP__*_FILE` environment variables (#1074)
+
+  `APP__X_FILE=/path` sets `APP__X` from the contents of the file at `/path`.
+
+- *(indexer-api)* Compress HTTP responses and subscription WebSockets (#1252)
+
+  HTTP responses are compressed with gzip, brotli or zstd when the client sends `Accept-Encoding`.
+  WebSocket clients can select the `graphql-transport-ws+deflate` subprotocol, which sends payloads
+  of 256 bytes or more as zlib-compressed binary frames. Clients that do neither are unaffected.
+
+- Rehash merkle tree before building collapsed updates (#1266)
+
+  Collapsed updates were built from the cached tree without rehashing, so an update could carry a
+  stale hash for the most recently added leaf.
 
 ### 🐛 Bug Fixes
 
@@ -82,6 +109,54 @@ before the network's `set_code` to the 1.0.300 runtime.
   after a runtime upgrade to 1.0.300 it could reject a transaction the node accepted and halt
   indexing. The offset now applies only to blocks from runtimes 0.22 and 1.0 before 1.0.300, keyed
   on each block's protocol version.
+
+- *(chain-indexer)* Accept the first regular transaction at either tblock (#1610)
+
+  On runtimes that apply the offset, the node verifies the first regular transaction at the parent
+  time plus 12s only when the block author's validation cache holds it, and at the block's own time
+  otherwise. The block does not record which. Preprod block 164460 carries a transaction valid only
+  at block time, which the indexer rejected before halting. The indexer now verifies the first
+  regular transaction at block time and retries at the offset tblock; the applied state is the same
+  either way.
+
+- *(chain-indexer)* Capture contract balances from the ledger state (#1616)
+
+  Contract balances come from the indexer's own ledger state at the end of the block instead of
+  from deserializing the contract state bytes the node serves, so indexing no longer depends on
+  every served state deserializing with the indexer's ledger version. The node's bytes are still
+  stored for the API. A mainnet re-index from genesis produced identical balances for all 42,599
+  contract actions.
+
+### ⚡ Performance
+
+- *(indexer-common)* Add UNIQUE index on blocks.height for sqlite (#1187)
+
+  Migration sqlite `005_blocks_height_idx`.
+
+- *(indexer-api)* Jitter and idle-backoff subscription polling, throttle keep-alive (#1233)
+
+  Progress polling gains ±20% jitter and backs off while idle. The shipped
+  `keep_wallet_alive_interval` rises from `1m` to `10m`, below the wallet-indexer's 30m
+  `active_wallets_ttl`.
+
+- *(indexer-api)* [**breaking**] Cache shielded/unshielded progress across subscribers (#1234)
+
+  Concurrent subscribers for the same wallet or address share one progress query. The new
+  `infra.api.subscription.progress_cache` block (`max_capacity`, `time_to_live`) is required in
+  indexer-api and indexer-standalone config; the shipped config sets `10000` and `"5s"`.
+
+- *(indexer-api)* Drop OR-in-JOIN from unshielded transaction queries (#1133)
+
+  Unshielded transaction queries by address could hold pool connections until the 30s statement
+  timeout under concurrent wallet sync. Owner-leading composite indexes on `unshielded_utxos` back
+  the rewritten queries: migrations postgres `007` and sqlite `009`, numbered as on `release/4.4` so
+  a later upgrade to 4.4 finds them already applied.
+
+### ⚙️ Miscellaneous Tasks
+
+- *(indexer-common)* Log NATS reconnects at info (#1297)
+- Publish images to `ghcr.io/midnightntwrk` alongside `ghcr.io/midnight-ntwrk` and Docker Hub,
+  building each architecture in its own job (#1349, #1391, #1420, #1477)
 
 ### ⚙️ Dependencies
 
