@@ -37,6 +37,7 @@ impl PostgresPool {
             user,
             password,
             sslmode,
+            min_connections,
             max_connections,
             idle_timeout,
             max_lifetime,
@@ -51,6 +52,7 @@ impl PostgresPool {
             .ssl_mode(sslmode);
 
         let inner = PgPoolOptions::new()
+            .min_connections(min_connections)
             .max_connections(max_connections)
             .idle_timeout(Some(idle_timeout))
             .max_lifetime(max_lifetime)
@@ -93,6 +95,10 @@ pub struct Config {
     #[serde_as(as = "DisplayFromStr")]
     pub sslmode: PgSslMode,
 
+    /// Number of connections the pool eagerly opens and keeps alive, defaulting to zero
+    #[serde(default)]
+    pub min_connections: u32,
+
     pub max_connections: u32,
 
     #[serde(with = "humantime_serde")]
@@ -133,6 +139,7 @@ mod tests {
             user: "indexer".to_string(),
             password: env!("APP__INFRA__STORAGE__PASSWORD").into(),
             sslmode: PgSslMode::Prefer,
+            min_connections: 10,
             max_connections: 10,
             idle_timeout: Duration::from_secs(60),
             max_lifetime: Duration::from_secs(5 * 60),
@@ -141,6 +148,9 @@ mod tests {
         let pool = PostgresPool::new(config).await;
         assert!(pool.is_ok());
         let pool = pool.unwrap();
+
+        // With min_connections all connections are opened eagerly and held.
+        assert_eq!(pool.size(), 10);
 
         let result = sqlx::query("CREATE TABLE test (id integer PRIMARY KEY)")
             .execute(&*pool)
