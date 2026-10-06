@@ -26,7 +26,7 @@ use crate::{
 use anyhow::{Context, bail};
 use async_stream::stream;
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
-use futures::{Stream, StreamExt, TryStreamExt, future::ok};
+use futures::{Stream, StreamExt, TryStreamExt, future::ok, stream};
 use indexer_common::{
     domain::{
         BlockIndexed, BridgeEventIndexed, LedgerVersion, NetworkId, Publisher,
@@ -272,30 +272,18 @@ pub async fn run(
             task::spawn_blocking({
                 let node = node.clone();
                 move || {
-                    handle.block_on(async move {
+                    handle.block_on(async {
                         let blocks = node_blocks(highest_block_ref, node);
-                        let mut blocks = pin!(blocks);
-                        loop {
-                            select! {
-                                _ = block_tx.closed() => break,
-
-                                block = blocks.next() => {
-                                    let Some(block) = block else { break };
-                                    if block_tx.send(block).await.is_err() {
-                                        break;
-                                    }
-                                }
+                        let mut blocks = pin!(blocks.take_until(block_tx.closed()));
+                        while let Some(block) = blocks.next().await {
+                            if block_tx.send(block).await.is_err() {
+                                break;
                             }
                         }
                     })
                 }
             });
-            let blocks = stream! {
-                while let Some(block) = block_rx.recv().await {
-                    yield block;
-                }
-            };
-            let mut blocks = pin!(blocks);
+            let mut blocks = stream::poll_fn(move |cx| block_rx.poll_recv(cx));
             let mut caught_up = false;
             let mut parent_block_timestamp = initial_parent_block_timestamp;
             let mut blocks_since_gc = 0;
