@@ -26,12 +26,15 @@ humantime-serde    = { workspace = true }
 indexer-common     = { path = "../indexer-common" }
 indoc              = { workspace = true }
 itertools          = { workspace = true }
+jsonrpsee          = { workspace = true, features = [ "ws-client", "client-ws-transport-tls" ] }
 http               = { workspace = true }
 log                = { workspace = true, features = [ "kv_std" ] }
 metrics            = { workspace = true }
 parity-scale-codec = { workspace = true }
 parking_lot        = { workspace = true }
+rayon              = { workspace = true }
 serde              = { workspace = true, features = [ "derive" ] }
+serde_json         = { workspace = true }
 sqlx               = { workspace = true, features = [ "time" ] }
 subxt              = { workspace = true, features = [ "reconnecting-rpc-client" ] }
 thiserror          = { workspace = true }
@@ -48,9 +51,11 @@ indexer-common = { path = "../indexer-common", features = [ "testing" ] }
 reqwest   = { workspace = true, features = [ "json", "rustls" ] }
 serde     = { workspace = true, features = [ "derive" ] }
 serde_json = { workspace = true }
+sha2      = { workspace = true }
 tempfile  = { workspace = true }
 testcontainers = { workspace = true }
 testcontainers-modules = { workspace = true, features = [ "postgres" ] }
+tokio     = { workspace = true, features = [ "test-util" ] }
 walkdir   = { workspace = true }
 # SPIKE — REMOVE BEFORE MERGE, together with tests/contract_state_arena.rs: the spike reaches
 # into the ledger arena directly, which production chain-indexer code does not.

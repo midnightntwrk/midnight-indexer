@@ -1,5 +1,6 @@
 use anyhow::Context;
 use chain_indexer::{
+    application::make_transaction,
     domain::node::{self, Node},
     infra::subxt_node::{Config, SubxtNode},
 };
@@ -55,6 +56,9 @@ impl Cli {
         while let Some(block) = blocks.try_next().await.context("get next block")? {
             println!("## BLOCK: height={}, hash={}", block.height, block.hash);
             for transaction in block.transactions {
+                let transaction = make_transaction(transaction, block.protocol_version)
+                    .await
+                    .context("make transaction")?;
                 match transaction {
                     node::Transaction::Regular(transaction) => {
                         println!(

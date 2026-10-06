@@ -11,11 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg_attr(docsrs, feature(doc_cfg))]
+//! Tests of the block sourcing and decode pipelines against a node.
 
-pub mod application;
-#[cfg(feature = "cloud")]
-pub mod config;
-pub mod domain;
-pub mod infra;
-pub mod pipeline;
+mod node_calls;
+mod source_throughput;

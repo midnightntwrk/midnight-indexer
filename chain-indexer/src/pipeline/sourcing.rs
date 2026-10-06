@@ -1,0 +1,622 @@
+// This file is part of midnight-indexer.
+// Copyright (C) Midnight Foundation
+// SPDX-License-Identifier: Apache-2.0
+// Licensed under the Apache License, Version 2.0 (the "License");
+// You may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// http://www.apache.org/licenses/LICENSE-2.0
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! The block sourcing pipeline: Finalized → Chunk → Resolve → Source → Verify → Emit. It sources
+//! raw node data through [NodeRpc] and decodes nothing but block headers.
+
+use crate::{
+    domain::BlockRef,
+    infra::subxt_node::rpc::{
+        self, Batch, CallResult, Counters, NodeRpc, ReconnectPolicy, Transport, WsTransport, method,
+    },
+    pipeline::{metric, sourcing::finalized::follow_finalized},
+};
+use async_stream::stream;
+use futures::{
+    StreamExt,
+    stream::{BoxStream, FuturesOrdered},
+};
+use http::{HeaderMap, HeaderValue, header::USER_AGENT};
+use indexer_common::domain::{BlockHash, BlockNumber, ByteArray, ByteVec, ProtocolVersionError};
+use log::{error, warn};
+use metrics::{counter, gauge};
+use parity_scale_codec::Decode;
+use serde::Deserialize;
+use std::{num::NonZeroUsize, sync::Arc, time::Duration};
+use subxt::{
+    ArcMetadata, config::substrate::SubstrateHeader,
+    ext::frame_decode::storage::encode_storage_key_prefix, utils::H256,
+};
+use thiserror::Error;
+use tokio::{
+    select,
+    sync::{mpsc, watch},
+    task::{self, JoinHandle},
+    time::sleep,
+};
+
+mod chunk;
+mod emit;
+mod finalized;
+mod metadata;
+mod resolve;
+mod source;
+mod storage;
+#[cfg(test)]
+mod tests;
+mod verify;
+
+pub(crate) use self::metadata::MetadataCache;
+#[cfg(test)]
+pub(crate) use self::source::source;
+pub use self::{metadata::metadata_spec_version, resolve::resolve};
+
+/// Storage items holding a consensus engine's authority set. An item a runtime lacks is absent from
+/// a block's authority set.
+pub const AUTHORITY_SET_ITEMS: [(&str, &str); 3] = [
+    ("Aura", "Authorities"),
+    ("Babe", "Authorities"),
+    ("Babe", "NextAuthorities"),
+];
+/// The storage item holding a block's events.
+pub const SYSTEM_EVENTS_ITEM: (&str, &str) = ("System", "Events");
+/// Storage items holding the D-Parameter and the terms and conditions.
+pub const SYSTEM_PARAMETERS_ITEMS: [(&str, &str); 2] = [
+    ("SystemParameters", "DParameterStorage"),
+    ("SystemParameters", "TermsAndConditionsStorage"),
+];
+/// Storage maps holding the genesis cNight registrations: `Mappings` up to node 1.0, `Mapping`
+/// from node 2.0.
+pub const CNIGHT_MAPPINGS_ITEMS: [(&str, &str); 2] = [
+    ("CNightObservation", "Mappings"),
+    ("CNightObservation", "Mapping"),
+];
+
+/// The storage key of a plain storage item, or the key prefix of a storage map.
+pub fn storage_key((pallet, entry): (&str, &str)) -> [u8; 32] {
+    encode_storage_key_prefix(pallet, entry)
+}
+
+/// A contiguous, verified run of blocks in ascending height order.
+pub type Chunk = Vec<Block>;
+
+/// Raw node data for one block.
+#[derive(Debug)]
+pub enum Block {
+    /// The genesis block: it has no parent and no author.
+    Genesis {
+        hash: BlockHash,
+        header: ByteVec,
+        zswap_state_root: ByteVec,
+        ledger_state_root: ByteVec,
+        /// SCALE-encoded results of the D-Parameter and terms and conditions runtime calls.
+        system_parameters: (ByteVec, ByteVec),
+        metadata: ArcMetadata,
+        /// The chain spec's serialized genesis ledger state.
+        ledger_state: ByteVec,
+        /// Serialized key-value pairs of the cNight mapping storage.
+        cnight_mappings: Vec<(ByteVec, ByteVec)>,
+        extrinsics: Vec<ByteVec>,
+        /// The serialized `System.Events` value.
+        events: ByteVec,
+    },
+    Block {
+        hash: BlockHash,
+        height: BlockNumber,
+        header: ByteVec,
+        zswap_state_root: ByteVec,
+        ledger_state_root: ByteVec,
+        /// SCALE-encoded results of the D-Parameter and terms and conditions runtime calls; present
+        /// for the first block of a run and where their storage changed.
+        system_parameters: Option<(ByteVec, ByteVec)>,
+        /// Metadata of the runtime that executed this block.
+        metadata: ArcMetadata,
+        parent: Parent,
+        extrinsics: Vec<ByteVec>,
+        /// The serialized `System.Events` value.
+        events: ByteVec,
+    },
+}
+
+impl Block {
+    pub fn hash(&self) -> BlockHash {
+        match self {
+            Self::Genesis { hash, .. } | Self::Block { hash, .. } => *hash,
+        }
+    }
+
+    pub fn height(&self) -> BlockNumber {
+        match self {
+            Self::Genesis { .. } => 0,
+            Self::Block { height, .. } => *height,
+        }
+    }
+}
+
+/// What a block takes from its parent.
+#[derive(Debug)]
+pub struct Parent {
+    pub hash: BlockHash,
+    /// The [AUTHORITY_SET_ITEMS] present in the parent's state, as storage key and value.
+    pub authority_set: Vec<(ByteVec, ByteVec)>,
+}
+
+/// The latest finalized block and the hashes finalized with it, in ascending height order: the
+/// hash at index `i` is at height `tip.height + 1 - hashes.len() + i`.
+#[derive(Debug, Clone)]
+pub struct Finalized {
+    pub hashes: Vec<BlockHash>,
+    pub tip: BlockRef<BlockNumber>,
+}
+
+/// Error of the block sourcing pipeline.
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error(transparent)]
+    Rpc(#[from] rpc::Error),
+    #[error("cannot decode a chainHead_v1_follow event")]
+    FollowEvent(#[source] serde_json::Error),
+    #[error("cannot decode hash {0}")]
+    Hash(String),
+    #[error("node has no header for block {0}")]
+    MissingHeader(BlockHash),
+    #[error("cannot decode the header of block {0}")]
+    Header(
+        BlockHash,
+        #[source] Box<dyn std::error::Error + Send + Sync>,
+    ),
+    #[error("block {0} has no protocol version header")]
+    MissingProtocolVersion(BlockHash),
+    #[error("unsupported protocol version in block {0}")]
+    ProtocolVersion(BlockHash, #[source] ProtocolVersionError),
+    #[error("node has no body for block {0}")]
+    MissingBody(BlockHash),
+    #[error("runtime call {function} at block {hash} failed: {error}")]
+    RuntimeCall {
+        function: &'static str,
+        hash: BlockHash,
+        error: String,
+    },
+    #[error("storage query at block {hash} failed: {error}")]
+    Storage { hash: BlockHash, error: String },
+    #[error("cannot decode the {what} of block {hash}")]
+    Decode {
+        what: &'static str,
+        hash: BlockHash,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+    #[error("no genesis ledger state in the chain spec's properties")]
+    MissingGenesisLedgerState,
+    #[error("block {hash} is at height {header_height}, not {height}")]
+    HeightMismatch {
+        hash: BlockHash,
+        height: BlockNumber,
+        header_height: BlockNumber,
+    },
+    #[error(
+        "no metadata of runtime {spec_version} for block {hash}; the parent's and the block's \
+         state declare {found:?}"
+    )]
+    MetadataVersion {
+        hash: BlockHash,
+        spec_version: u32,
+        found: Vec<Option<u32>>,
+    },
+    #[error("block number {0} is beyond the runtime's BlockNumber")]
+    BlockNumber(u64),
+    #[error("no single block at height {0}")]
+    Unresolved(BlockNumber),
+    #[error("blocks from height {0} do not link to the finalized chain")]
+    Unlinked(BlockNumber),
+    #[error("a finalized event lists {count} hashes up to height {height}")]
+    FinalizedHashes { height: BlockNumber, count: usize },
+    #[error("following finalized blocks ended")]
+    FinalizedEnded,
+}
+
+/// Settings of the block sourcing pipeline.
+#[derive(Debug, Clone, Copy)]
+pub struct Config {
+    /// The most heights per chunk.
+    pub chunk_size: NonZeroUsize,
+    /// The most chunks in progress, and the most chunks sourced but not yet received.
+    pub chunks_ahead: NonZeroUsize,
+    /// The most calls per JSON-RPC batch.
+    pub rpc_batch_size: NonZeroUsize,
+    /// The most JSON-RPC batches in flight.
+    pub rpc_batches_in_flight: NonZeroUsize,
+    /// How long the finalized-block subscription may stay silent before it is renewed.
+    pub recovery_timeout: Duration,
+    pub reconnect_policy: ReconnectPolicy,
+}
+
+/// The block sourcing pipeline over a [Transport].
+pub struct Source<T> {
+    rpc: NodeRpc<T>,
+    config: Config,
+    metadata: Arc<MetadataCache>,
+}
+
+impl Source<WsTransport> {
+    /// Connect to the node at the given URL, retrying until it is reachable, and check that it
+    /// serves every required RPC method.
+    pub async fn connect(url: &str, config: Config) -> Result<Self, Error> {
+        let user_agent = HeaderValue::from_static(concat!(
+            env!("CARGO_PKG_NAME"),
+            "/",
+            env!("CARGO_PKG_VERSION")
+        ));
+        let headers = HeaderMap::from_iter([(USER_AGENT, user_agent)]);
+        let connect = || WsTransport::new(url, headers.clone());
+        let transport = match connect().await {
+            Ok(transport) => transport,
+            Err(error) => {
+                warn!(error:%; "cannot connect to node, retrying");
+                config.reconnect_policy.retry(connect).await
+            }
+        };
+
+        let source = Self::new(transport, config);
+        source.rpc.check_methods().await?;
+
+        Ok(source)
+    }
+}
+
+impl<T: Transport> Source<T> {
+    pub fn new(transport: T, config: Config) -> Self {
+        let rpc = NodeRpc::new(
+            transport,
+            config.rpc_batch_size,
+            config.rpc_batches_in_flight,
+            config.reconnect_policy,
+        );
+
+        Self {
+            rpc,
+            config,
+            metadata: Default::default(),
+        }
+    }
+
+    pub fn config(&self) -> &Config {
+        &self.config
+    }
+
+    pub fn rpc(&self) -> &NodeRpc<T> {
+        &self.rpc
+    }
+
+    /// The request and byte counts of every RPC call made.
+    pub fn counters(&self) -> &Counters {
+        self.rpc.counters()
+    }
+
+    /// Run the pipeline from the block after `start`, or from genesis, up to and including the block
+    /// at height `end`, or without end. Returns the verified chunks in height order, and the latest
+    /// finalized block.
+    ///
+    /// After an error, the stream yields it and, if polled again, resumes after the last block it
+    /// yielded. Dropping the stream stops every task of the pipeline.
+    pub fn run(
+        &self,
+        start: Option<BlockRef>,
+        end: Option<BlockNumber>,
+    ) -> (
+        BoxStream<'static, Result<Chunk, Error>>,
+        watch::Receiver<Option<Finalized>>,
+    ) {
+        let (finalized_tx, finalized_rx) = watch::channel(None);
+        let follow = task::spawn({
+            let rpc = self.rpc.clone();
+            let recovery_timeout = self.config.recovery_timeout;
+            async move { follow_finalized(&rpc, recovery_timeout, &finalized_tx).await }
+        });
+
+        let (chunk_tx, mut chunk_rx) = mpsc::channel(self.config.chunks_ahead.get());
+        let producer = Producer {
+            rpc: self.rpc.clone(),
+            metadata: self.metadata.clone(),
+            config: self.config,
+            finalized: finalized_rx.clone(),
+            chunks: chunk_tx,
+            start,
+            end,
+        };
+        let producer = task::spawn(async move {
+            let _follow = AbortOnDrop(follow);
+            producer.produce().await
+        });
+
+        let chunks = stream! {
+            let _producer = AbortOnDrop(producer);
+            while let Some(chunk) = chunk_rx.recv().await {
+                gauge!(metric::BUFFERED_CHUNK_COUNT).set(chunk_rx.len() as f64);
+                yield chunk;
+            }
+        };
+
+        (chunks.boxed(), finalized_rx)
+    }
+}
+
+/// Aborts the task when dropped.
+struct AbortOnDrop<O>(JoinHandle<O>);
+
+impl<O> Drop for AbortOnDrop<O> {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// The task sourcing, verifying and emitting chunks.
+struct Producer<T> {
+    rpc: NodeRpc<T>,
+    metadata: Arc<MetadataCache>,
+    config: Config,
+    finalized: watch::Receiver<Option<Finalized>>,
+    chunks: mpsc::Sender<Result<Chunk, Error>>,
+    start: Option<BlockRef>,
+    end: Option<BlockNumber>,
+}
+
+/// The producer's progress: the last block emitted, and the verified blocks Verify holds back
+/// until they are confirmed.
+#[derive(Default)]
+struct Progress {
+    emitted: Option<BlockRef<BlockNumber>>,
+    held: Vec<Block>,
+}
+
+impl Progress {
+    /// The hash the next chunk's first block must have as its parent.
+    fn last_hash(&self) -> Option<BlockHash> {
+        self.held
+            .last()
+            .map(Block::hash)
+            .or(self.emitted.map(|emitted| emitted.hash))
+    }
+
+    /// The height of the first block not yet emitted.
+    fn next_height(&self) -> BlockNumber {
+        self.emitted.map(|emitted| emitted.height + 1).unwrap_or(0)
+    }
+}
+
+/// Sourcing failures in a row at the same height.
+#[derive(Debug, Default)]
+struct Failures {
+    height: Option<BlockNumber>,
+    count: usize,
+}
+
+impl Failures {
+    /// Record a failure at `height`: the number in a row there, from 1.
+    fn record(&mut self, height: BlockNumber) -> usize {
+        if self.height != Some(height) {
+            *self = Self {
+                height: Some(height),
+                count: 0,
+            };
+        }
+        self.count += 1;
+        self.count
+    }
+}
+
+impl<T: Transport> Producer<T> {
+    /// Produce chunks until the end or until no finalized blocks follow any more. A sourcing error
+    /// is retried with the reconnect policy's backoff, resuming after the last block emitted.
+    async fn produce(mut self) {
+        let start = self.start.map(|start| {
+            BlockRef::<BlockNumber>::try_from(start).map_err(|_| Error::BlockNumber(start.height))
+        });
+        let emitted = match start.transpose() {
+            Ok(emitted) => emitted,
+            Err(error) => {
+                let _ = self.chunks.send(Err(error)).await;
+                return;
+            }
+        };
+        let mut progress = Progress {
+            emitted,
+            held: vec![],
+        };
+
+        let mut failures = Failures::default();
+        loop {
+            match self.produce_until_error(&mut progress).await {
+                Ok(()) => return,
+                // Without finalized blocks nothing can be sourced any more.
+                Err(error @ Error::FinalizedEnded) => {
+                    let _ = self.chunks.send(Err(error)).await;
+                    return;
+                }
+                Err(error) => {
+                    // Failures in a row at the same height back off further, and every
+                    // reconnect_max_attempts of them is an error.
+                    let height = progress.next_height();
+                    let in_a_row = failures.record(height);
+                    counter!(metric::SOURCE_ERROR_COUNT).increment(1);
+                    let policy = self.config.reconnect_policy;
+                    if in_a_row % policy.max_attempts.max(1) == 0 {
+                        error!(
+                            error:%,
+                            height,
+                            failures = in_a_row;
+                            "block sourcing keeps failing at the same height, retrying"
+                        );
+                    } else {
+                        warn!(error:%, height; "block sourcing failed, retrying");
+                    }
+
+                    // Resume after the last block emitted.
+                    progress.held.clear();
+                    sleep(policy.delay(in_a_row - 1)).await;
+                }
+            }
+        }
+    }
+
+    async fn produce_until_error(&mut self, progress: &mut Progress) -> Result<(), Error> {
+        let genesis_hash = self.genesis_hash().await?;
+        let run_start = progress.next_height();
+        let mut next = run_start;
+        let mut in_progress = FuturesOrdered::new();
+
+        loop {
+            if self.end.is_some_and(|end| next > end) && in_progress.is_empty() {
+                let held = std::mem::take(&mut progress.held);
+                self.emit(progress, held).await;
+                return Ok(());
+            }
+
+            // Plan as many chunks as allowed and possible.
+            while in_progress.len() < self.config.chunks_ahead.get()
+                && self.end.is_none_or(|end| next <= end)
+                && let Some(planned) = self.plan(next, run_start)
+            {
+                next = planned.spec.heights.end() + 1;
+                gauge!(metric::PLANNED_HEIGHT).set((next - 1) as f64);
+                in_progress.push_back(self.source_planned(planned));
+            }
+
+            select! {
+                Some(sourced) = in_progress.next() => {
+                    let (planned, chunk) = sourced?;
+                    let confirmed = self
+                        .verify(progress, planned, chunk, genesis_hash, run_start)
+                        .await?;
+                    self.emit(progress, confirmed).await;
+                }
+                changed = self.finalized.changed(), if in_progress.is_empty() => {
+                    if changed.is_err() {
+                        return Err(Error::FinalizedEnded);
+                    }
+                }
+            }
+        }
+    }
+
+    /// The genesis hash, for verifying block 0, if the run starts there.
+    async fn genesis_hash(&self) -> Result<Option<BlockHash>, Error> {
+        if self.start.is_some() {
+            return Ok(None);
+        }
+
+        let batch = Batch::default().genesis_hash();
+        let hash = self
+            .rpc
+            .batch(batch)
+            .await?
+            .pop()
+            .expect("one result per call")
+            .map_err(|source| rpc::Error::Call {
+                method: method::ARCHIVE_GENESIS_HASH,
+                source,
+            })?;
+        let hash = serde_json::from_value::<String>(hash).map_err(|source| rpc::Error::Decode {
+            method: method::ARCHIVE_GENESIS_HASH,
+            source,
+        })?;
+
+        block_hash_of(hash).map(Some)
+    }
+}
+
+fn header_bytes(header: CallResult, hash: BlockHash) -> Result<ByteVec, Error> {
+    let header = header.map_err(|source| rpc::Error::Call {
+        method: method::ARCHIVE_HEADER,
+        source,
+    })?;
+    let header = header.as_str().ok_or(Error::MissingHeader(hash))?;
+
+    const_hex::decode(header)
+        .map(Into::into)
+        .map_err(|error| Error::Header(hash, error.into()))
+}
+
+fn decode_header(header: &[u8], hash: BlockHash) -> Result<SubstrateHeader<H256>, Error> {
+    SubstrateHeader::<H256>::decode(&mut &*header)
+        .map_err(|error| Error::Header(hash, error.into()))
+}
+
+/// The parent hash of the given block, from its header.
+async fn parent_hash<T: Transport>(rpc: &NodeRpc<T>, hash: BlockHash) -> Result<BlockHash, Error> {
+    let batch = Batch::default().header(hash);
+    let header = rpc.batch(batch).await?.pop().expect("one result per call");
+    let header = header_bytes(header, hash)?;
+
+    Ok(ByteArray(decode_header(&header, hash)?.parent_hash.0))
+}
+
+/// A header's block number as the runtime's [BlockNumber].
+fn block_number(number: u64) -> Result<BlockNumber, Error> {
+    BlockNumber::try_from(number).map_err(|_| Error::BlockNumber(number))
+}
+
+fn block_hash_of(hash: String) -> Result<BlockHash, Error> {
+    const_hex::decode_to_array(&hash)
+        .map(ByteArray)
+        .map_err(|_| Error::Hash(hash))
+}
+
+/// The SCALE-encoded result of an `archive_v1_call`.
+fn call_value(
+    result: CallResult,
+    function: &'static str,
+    hash: BlockHash,
+) -> Result<ByteVec, Error> {
+    #[derive(Deserialize)]
+    struct CallOutcome {
+        success: bool,
+        value: Option<String>,
+        error: Option<String>,
+    }
+
+    let outcome = result.map_err(|source| rpc::Error::Call {
+        method: method::ARCHIVE_CALL,
+        source,
+    })?;
+    let outcome = serde_json::from_value::<Option<CallOutcome>>(outcome).map_err(|source| {
+        rpc::Error::Decode {
+            method: method::ARCHIVE_CALL,
+            source,
+        }
+    })?;
+
+    match outcome {
+        Some(CallOutcome {
+            success: true,
+            value: Some(value),
+            ..
+        }) => const_hex::decode(value)
+            .map(ByteVec::from)
+            .map_err(|error| Error::Decode {
+                what: "runtime call result",
+                hash,
+                source: error.into(),
+            }),
+        Some(CallOutcome { error, .. }) => Err(Error::RuntimeCall {
+            function,
+            hash,
+            error: error.unwrap_or_default(),
+        }),
+        None => Err(Error::RuntimeCall {
+            function,
+            hash,
+            error: "block not found".to_owned(),
+        }),
+    }
+}

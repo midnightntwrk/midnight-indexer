@@ -11,13 +11,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod header;
-mod runtimes;
+pub(crate) mod header;
+pub mod rpc;
+pub(crate) mod runtimes;
 
 use crate::{
     domain::{
         BlockRef,
-        node::{Block, Node, RegularTransaction, SystemTransaction, Transaction},
+        node::{Block, Node},
     },
     infra::subxt_node::{header::SubstrateHeaderExt, runtimes::BlockDetails},
 };
@@ -142,15 +143,15 @@ async fn finish_block(
     Ok(block)
 }
 
-const AURA_ENGINE_ID: ConsensusEngineId = [b'a', b'u', b'r', b'a'];
-const BABE_ENGINE_ID: ConsensusEngineId = [b'B', b'A', b'B', b'E'];
+pub(crate) const AURA_ENGINE_ID: ConsensusEngineId = [b'a', b'u', b'r', b'a'];
+pub(crate) const BABE_ENGINE_ID: ConsensusEngineId = [b'B', b'A', b'B', b'E'];
 
 /// Name of the node runtime API reporting the active block-production engine, declared in
 /// `midnight-primitives-consensus-engine` and implemented alongside the pallet driving the
 /// Aura→BABE transition. Its presence in a block's runtime guarantees the correctness of Aura
 /// and BABE pre-runtime digests during the transition, so BABE digests are only trusted for
 /// author derivation where it exists.
-const CONSENSUS_ENGINE_RUNTIME_API: &str = "ConsensusEngineApi";
+pub(crate) const CONSENSUS_ENGINE_RUNTIME_API: &str = "ConsensusEngineApi";
 const CATCH_UP_LOG_INTERVAL: u64 = 1_000;
 
 /// One GRANDPA session worth of blocks. Blocks within this distance of the finalized tip are
@@ -388,10 +389,11 @@ impl SubxtNode {
             None
         };
 
-        let transactions = stream::iter(transactions)
-            .then(|t| make_transaction(t, protocol_version))
-            .try_collect::<Vec<_>>()
-            .await?;
+        // The genesis ledger state, if there is a ledger state root to compare it with.
+        let genesis_ledger_state = match ledger_state_root {
+            Some(_) => Some(self.fetch_genesis_ledger_state().await?),
+            None => None,
+        };
 
         // System parameters live in this block's state; fetching them here lets the lookups
         // ride the concurrent block prefetch instead of the sequential indexing path. Both are
@@ -422,6 +424,7 @@ impl SubxtNode {
                 bridge_events,
                 d_parameter: Some(d_parameter),
                 terms_and_conditions,
+                genesis_ledger_state,
             },
             client: block,
         })
@@ -780,6 +783,9 @@ pub enum SubxtNodeError {
     #[error("cannot get ledger state root")]
     GetLedgerStateRoot(#[source] BoxError),
 
+    #[error("cannot decode storage")]
+    DecodeStorage(#[source] BoxError),
+
     #[error("cannot fetch system properties")]
     FetchSystemProperties(#[source] subxt::rpcs::Error),
 
@@ -829,7 +835,7 @@ where
 /// digests are only recognized if `babe_supported`, i.e. if the block's runtime guarantees
 /// their correctness (see [CONSENSUS_ENGINE_RUNTIME_API]); otherwise they are skipped like any
 /// unrecognized engine.
-fn author_from_digest_logs(
+pub(crate) fn author_from_digest_logs(
     logs: &[DigestItem],
     authorities: &[[u8; 32]],
     content_node_version: NodeVersion,
@@ -893,67 +899,6 @@ fn decode_babe_authority_index(mut pre_digest: &[u8]) -> Result<u32, SubxtNodeEr
     }
 
     Ok(u32::decode(&mut pre_digest)?)
-}
-
-async fn make_transaction(
-    transaction: runtimes::Transaction,
-    protocol_version: ProtocolVersion,
-) -> Result<Transaction, SubxtNodeError> {
-    match transaction {
-        runtimes::Transaction::Regular(transaction) => {
-            make_regular_transaction(transaction, protocol_version).await
-        }
-
-        runtimes::Transaction::System(transaction) => {
-            make_system_transaction(transaction, protocol_version).await
-        }
-    }
-}
-
-async fn make_regular_transaction(
-    transaction: ByteVec,
-    protocol_version: ProtocolVersion,
-) -> Result<Transaction, SubxtNodeError> {
-    let ledger_transaction =
-        ledger::Transaction::deserialize(&transaction, protocol_version.ledger_version())?;
-
-    let hash = ledger_transaction.hash();
-
-    let identifiers = ledger_transaction.identifiers()?;
-
-    let contract_actions = ledger_transaction
-        .contract_actions()?
-        .into_iter()
-        .map(Into::into)
-        .collect();
-
-    let transaction = RegularTransaction {
-        hash,
-        protocol_version,
-        identifiers,
-        contract_actions,
-        raw: transaction,
-    };
-
-    Ok(Transaction::Regular(transaction))
-}
-
-async fn make_system_transaction(
-    transaction: ByteVec,
-    protocol_version: ProtocolVersion,
-) -> Result<Transaction, SubxtNodeError> {
-    let ledger_transaction =
-        ledger::SystemTransaction::deserialize(&transaction, protocol_version.ledger_version())?;
-
-    let hash = ledger_transaction.hash();
-
-    let transaction = SystemTransaction {
-        hash,
-        protocol_version,
-        raw: transaction,
-    };
-
-    Ok(Transaction::System(transaction))
 }
 
 #[trace]

@@ -10,3 +10,9 @@ fail-fast = false
 # Terminate tests that take longer than 480s (240s * 2) to prevent indefinite hangs.
 # The e2e test depends on block production which can stall; this ensures cleanup.
 slow-timeout = { period = "240s", terminate-after = 2 }
+
+# The pipeline harness sources as many blocks as asked, the whole chain by default, which can take
+# far longer; it is never terminated.
+[[profile.default.overrides]]
+filter = "binary(pipelines)"
+slow-timeout = { period = "240s" }

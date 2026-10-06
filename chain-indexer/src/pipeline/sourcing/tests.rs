@@ -1,0 +1,271 @@
+// This file is part of midnight-indexer.
+// Copyright (C) Midnight Foundation
+// SPDX-License-Identifier: Apache-2.0
+// Licensed under the Apache License, Version 2.0 (the "License");
+// You may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// http://www.apache.org/licenses/LICENSE-2.0
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use crate::{
+    domain::BlockRef,
+    infra::subxt_node::rpc::{method, testing::FakeNode},
+    pipeline::sourcing::{
+        Block, Chunk, Error, Failures, Source, call_value,
+        tests::chain::{Chain, bytes_of, config, follow, hash, height_of, start},
+    },
+};
+use futures::{StreamExt, TryStreamExt};
+use indexer_common::domain::{BlockNumber, ByteArray};
+use serde_json::{Value, json};
+use std::{sync::Arc, time::Duration};
+use tokio::time::{sleep, timeout};
+
+pub(crate) mod chain;
+
+#[tokio::test(start_paused = true)]
+async fn test_genesis_catch_up() {
+    // Finalized at 10 when following starts; the tip keeps moving to 20 while catching up.
+    let (_, node) = Chain::default().node();
+    let node = Arc::new(
+        node.with_notification_interval(Duration::from_millis(5))
+            .with_subscriptions(vec![follow(10, 20)]),
+    );
+    let source = Source::new(node.clone(), config(4, 2));
+
+    let blocks = run_to_end(&source, None, 20).await;
+
+    assert!(matches!(blocks[0], Block::Genesis { .. }));
+    assert_canonical(&blocks, 0..=20);
+    let follows = node
+        .subscribed()
+        .into_iter()
+        .filter(|method| *method == method::CHAIN_HEAD_FOLLOW)
+        .count();
+    assert_eq!(follows, 1, "no resubscription while the tip moves");
+}
+
+#[tokio::test(start_paused = true)]
+async fn test_ordering() {
+    // Chunks of lower heights answer slower, so later chunks complete first.
+    let (_, node) = Chain::default().node();
+    let node = node
+        .with_subscriptions(vec![follow(1_000, 1_000)])
+        .with_delay_for(|calls| {
+            let first_height = calls
+                .iter()
+                .find(|call| call.method == method::ARCHIVE_HEADER)
+                .map(|call| height_of(&bytes_of(&call.params[0])))
+                .unwrap_or(0);
+            Duration::from_millis(u64::from(160 - first_height.min(160)))
+        });
+    let source = Source::new(Arc::new(node), config(10, 4));
+
+    let blocks = run_to_end(&source, start(99), 150).await;
+
+    assert_canonical(&blocks, 100..=150);
+}
+
+#[tokio::test(start_paused = true)]
+async fn test_anchoring_deep_fork_falls_back_to_parent_walk() {
+    // A fork sibling resolves at the last height of a deep chunk; its child exposes it.
+    let (chain, node) = Chain {
+        forks: vec![109],
+        ..Default::default()
+    }
+    .node();
+    let node = node.with_subscriptions(vec![follow(1_000, 1_000)]);
+    let source = Source::new(Arc::new(node), config(10, 2));
+
+    let blocks = run_to_end(&source, start(99), 130).await;
+
+    assert_canonical(&blocks, 100..=130);
+    // The walk starts at the next chunk's last block, not 900 blocks up at the finalized tip: the
+    // 31 blocks' headers, the 11 walked and the 11 sourced again.
+    assert!(
+        chain.header_calls() <= 60,
+        "{} headers",
+        chain.header_calls()
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn test_fork_siblings_resolve_by_parent() {
+    // The node reports a fork sibling beside the canonical block mid-chunk, at a chunk's last height
+    // and at the next chunk's first.
+    let (chain, node) = Chain {
+        siblings: vec![105, 109, 110],
+        ..Default::default()
+    }
+    .node();
+    let node = node.with_subscriptions(vec![follow(1_000, 1_000)]);
+    let source = Source::new(Arc::new(node), config(10, 2));
+
+    let blocks = run_to_end(&source, start(99), 130).await;
+
+    assert_canonical(&blocks, 100..=130);
+    // Each sibling takes one or two parent lookups, and nothing is walked or sourced again.
+    assert!(
+        chain.header_calls() <= 40,
+        "{} headers",
+        chain.header_calls()
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn test_anchoring_near_fork_falls_back_to_parent_walk() {
+    // A fork sibling resolves mid-chunk within the margin.
+    let (_, node) = Chain {
+        forks: vec![955],
+        ..Default::default()
+    }
+    .node();
+    let node = node.with_subscriptions(vec![follow(1_000, 1_000)]);
+    let source = Source::new(Arc::new(node), config(20, 2));
+
+    let blocks = run_to_end(&source, start(949), 1_000).await;
+
+    assert_canonical(&blocks, 950..=1_000);
+}
+
+#[tokio::test(start_paused = true)]
+async fn test_chunk_overlap() {
+    let (_, node) = Chain::default().node();
+    let node = Arc::new(
+        node.with_subscriptions(vec![follow(1_000, 1_000)])
+            .with_delay(Duration::from_millis(10)),
+    );
+    let source = Source::new(node.clone(), config(10, 2));
+    let (mut chunks, _finalized) = source.run(start(99), Some(200));
+
+    chunks
+        .next()
+        .await
+        .expect("first chunk")
+        .expect("first chunk is sourced");
+    let batches = node.batch_sizes().len();
+
+    // While the consumer sleeps on the first chunk, the next chunks are sourced.
+    sleep(Duration::from_millis(200)).await;
+    assert!(node.batch_sizes().len() > batches);
+}
+
+#[tokio::test(start_paused = true)]
+async fn test_failing_block_is_not_skipped_and_refetched() {
+    // The block at height 105 cannot be built: the pipeline retries it, resuming after the last
+    // block it yielded, and neither skips it nor yields the error.
+    let (chain, node) = Chain {
+        failing: vec![105],
+        ..Default::default()
+    }
+    .node();
+    let node = node.with_subscriptions(vec![follow(1_000, 1_000)]);
+    let source = Source::new(Arc::new(node), config(2, 1));
+    let (chunks, _finalized) = source.run(start(99), None);
+
+    let items = chunks
+        .take_until(sleep(Duration::from_secs(30)))
+        .collect::<Vec<_>>()
+        .await;
+
+    let heights = items
+        .into_iter()
+        .flat_map(|item| item.expect("no error is yielded"))
+        .map(|block| block.height())
+        .collect::<Vec<_>>();
+    assert_eq!(heights, (100..=103).collect::<Vec<_>>());
+    let failing_header = json!(format!("0x{}", const_hex::encode(hash(105).0)));
+    let tries = chain
+        .calls
+        .lock()
+        .iter()
+        .filter(|call| call.method == method::ARCHIVE_HEADER && call.params[0] == failing_header)
+        .count();
+    assert!(tries > 2, "{tries} tries");
+}
+
+#[tokio::test(start_paused = true)]
+async fn test_shutdown() {
+    let (_, node) = Chain::default().node();
+    let node = Arc::new(node.with_subscriptions(vec![follow(1_000, 1_000)]));
+    let source = Source::new(node.clone(), config(10, 2));
+    let (mut chunks, _finalized) = source.run(start(99), None);
+
+    chunks
+        .next()
+        .await
+        .expect("first chunk")
+        .expect("first chunk is sourced");
+    assert!(node.live_subscriptions() > 0);
+
+    drop(chunks);
+    sleep(Duration::from_millis(100)).await;
+
+    assert_eq!(node.live_subscriptions(), 0);
+}
+
+#[test]
+fn test_call_value() {
+    let hash = ByteArray([1; 32]);
+
+    let value = call_value(Ok(json!({ "success": true, "value": "0x0102" })), "F", hash)
+        .expect("a successful call has a value");
+    assert_eq!(*value, [1, 2]);
+
+    let error = call_value(
+        Ok(json!({ "success": false, "error": "trapped" })),
+        "F",
+        hash,
+    )
+    .expect_err("a failed call fails");
+    assert!(matches!(error, Error::RuntimeCall { ref error, .. } if error == "trapped"));
+
+    let error = call_value(Ok(Value::Null), "F", hash).expect_err("a missing block fails");
+    assert!(matches!(error, Error::RuntimeCall { ref error, .. } if error == "block not found"));
+}
+
+#[test]
+fn test_failures_in_a_row_at_a_height() {
+    let mut failures = Failures::default();
+
+    assert_eq!(failures.record(105), 1);
+    assert_eq!(failures.record(105), 2);
+    assert_eq!(failures.record(105), 3);
+    // Progress moved the failing height: counting starts over.
+    assert_eq!(failures.record(107), 1);
+    assert_eq!(failures.record(107), 2);
+}
+
+/// The heights and hashes of the blocks, and whether each block's parent is its predecessor.
+fn assert_canonical(blocks: &[Block], heights: std::ops::RangeInclusive<BlockNumber>) {
+    assert_eq!(
+        blocks.iter().map(Block::height).collect::<Vec<_>>(),
+        heights.clone().collect::<Vec<_>>()
+    );
+    assert_eq!(
+        blocks.iter().map(Block::hash).collect::<Vec<_>>(),
+        heights.map(hash).collect::<Vec<_>>()
+    );
+    for block in blocks {
+        if let Block::Block { height, parent, .. } = block {
+            assert_eq!(parent.hash, hash(height - 1));
+        }
+    }
+}
+
+/// Run the pipeline to `end` and collect its blocks.
+async fn run_to_end(
+    source: &Source<Arc<FakeNode>>,
+    start: Option<BlockRef>,
+    end: BlockNumber,
+) -> Chunk {
+    let (chunks, _finalized) = source.run(start, Some(end));
+    timeout(Duration::from_secs(10), chunks.try_concat())
+        .await
+        .expect("pipeline finishes in time")
+        .expect("pipeline succeeds")
+}

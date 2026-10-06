@@ -14,19 +14,24 @@
 use crate::{
     domain::{DParameter, DustRegistrationEvent, TermsAndConditions},
     infra::subxt_node::{
-        ContentSource, OnlineClientAtBlock, SubxtNodeError,
-        runtimes::{BlockDetails, Transaction},
+        OnlineClientAtBlock, SubxtNodeError,
+        runtimes::{BlockDetails, Transaction, decode_call_result, decode_storage_value},
     },
 };
 use futures::TryStreamExt;
 use indexer_common::domain::{ByteVec, DustPublicKey, TermsAndConditionsHash};
 use itertools::Itertools;
 use parity_scale_codec::Decode;
-use subxt::error::RuntimeApiError;
+use subxt::{
+    SubstrateConfig,
+    client::{ClientAtBlock, OfflineClientAtBlockT},
+    error::RuntimeApiError,
+};
 
-pub async fn make_block_details(
-    block: &OnlineClientAtBlock,
-    content: Option<&ContentSource>,
+pub async fn decode_block_details<C: OfflineClientAtBlockT<SubstrateConfig>>(
+    client: &ClientAtBlock<SubstrateConfig, C>,
+    extrinsics: Vec<Vec<u8>>,
+    events: Vec<u8>,
 ) -> Result<BlockDetails, SubxtNodeError> {
     use super::runtime_1_0_300::{
         Call, Event,
@@ -41,22 +46,7 @@ pub async fn make_block_details(
         timestamp,
     };
 
-    let extrinsics = match content {
-        // Enactment block: decode this block's raw extrinsic bytes against the parent
-        // (old-runtime) client. `from_bytes` is async but infallible.
-        Some(content) => {
-            content
-                .client
-                .extrinsics()
-                .from_bytes(content.extrinsic_bodies.clone())
-                .await
-        }
-        None => block
-            .extrinsics()
-            .fetch()
-            .await
-            .map_err(|error| SubxtNodeError::FetchExtrinsics(error.into()))?,
-    };
+    let extrinsics = client.extrinsics().from_bytes(extrinsics).await;
 
     let calls = extrinsics
         .iter()
@@ -99,25 +89,7 @@ pub async fn make_block_details(
     let mut dust_registration_events = vec![];
     let mut system_transactions_from_events = vec![];
 
-    let events = match content {
-        // Enactment block: raw event bytes are metadata-independent, so fetch them from this
-        // block and re-decode against the parent (old-runtime) client. `from_bytes` is sync.
-        Some(content) => {
-            let raw = block
-                .events()
-                .fetch()
-                .await
-                .map_err(|error| SubxtNodeError::FetchEvents(error.into()))?
-                .bytes()
-                .to_vec();
-            content.client.events().from_bytes(raw)
-        }
-        None => block
-            .events()
-            .fetch()
-            .await
-            .map_err(|error| SubxtNodeError::FetchEvents(error.into()))?,
-    };
+    let events = client.events().from_bytes(events);
 
     for event in events.iter() {
         let event = event
@@ -253,6 +225,19 @@ pub async fn get_zswap_merkle_tree_root(
         .map_err(|error| SubxtNodeError::GetZswapStateRoot(format!("{error:?}").into()))
 }
 
+pub fn decode_zswap_merkle_tree_root<C: OfflineClientAtBlockT<SubstrateConfig>>(
+    client: &ClientAtBlock<SubstrateConfig, C>,
+    result: &[u8],
+) -> Result<Vec<u8>, SubxtNodeError> {
+    let get_zswap_state_root = super::runtime_1_0_300::runtime_apis()
+        .midnight_runtime_api()
+        .get_zswap_state_root();
+
+    decode_call_result(client, &get_zswap_state_root, result)
+        .map_err(SubxtNodeError::GetZswapStateRoot)?
+        .map_err(|error| SubxtNodeError::GetZswapStateRoot(format!("{error:?}").into()))
+}
+
 pub async fn get_ledger_state_root(
     block: &OnlineClientAtBlock,
 ) -> Result<Option<Vec<u8>>, SubxtNodeError> {
@@ -270,6 +255,21 @@ pub async fn get_ledger_state_root(
     Ok(Some(root))
 }
 
+pub fn decode_ledger_state_root<C: OfflineClientAtBlockT<SubstrateConfig>>(
+    client: &ClientAtBlock<SubstrateConfig, C>,
+    result: &[u8],
+) -> Result<Option<Vec<u8>>, SubxtNodeError> {
+    let get_ledger_state_root = super::runtime_1_0_300::runtime_apis()
+        .midnight_runtime_api()
+        .get_ledger_state_root();
+
+    let root = decode_call_result(client, &get_ledger_state_root, result)
+        .map_err(SubxtNodeError::GetLedgerStateRoot)?
+        .map_err(|error| SubxtNodeError::GetLedgerStateRoot(format!("{error:?}").into()))?;
+
+    Ok(Some(root))
+}
+
 pub async fn get_d_parameter(block: &OnlineClientAtBlock) -> Result<DParameter, SubxtNodeError> {
     let get_d_param = super::runtime_1_0_300::runtime_apis()
         .system_parameters_api()
@@ -280,6 +280,23 @@ pub async fn get_d_parameter(block: &OnlineClientAtBlock) -> Result<DParameter, 
         .call(get_d_param)
         .await
         .map_err(|error| SubxtNodeError::GetDParameter(error.into()))?;
+
+    Ok(DParameter {
+        num_permissioned_candidates: d_parameter.num_permissioned_candidates,
+        num_registered_candidates: d_parameter.num_registered_candidates,
+    })
+}
+
+pub fn decode_d_parameter<C: OfflineClientAtBlockT<SubstrateConfig>>(
+    client: &ClientAtBlock<SubstrateConfig, C>,
+    result: &[u8],
+) -> Result<DParameter, SubxtNodeError> {
+    let get_d_param = super::runtime_1_0_300::runtime_apis()
+        .system_parameters_api()
+        .get_d_parameter();
+
+    let d_parameter =
+        decode_call_result(client, &get_d_param, result).map_err(SubxtNodeError::GetDParameter)?;
 
     Ok(DParameter {
         num_permissioned_candidates: d_parameter.num_permissioned_candidates,
@@ -341,6 +358,50 @@ pub async fn fetch_genesis_cnight_registrations(
         })
 }
 
+pub fn decode_genesis_cnight_registrations<C: OfflineClientAtBlockT<SubstrateConfig>>(
+    client: &ClientAtBlock<SubstrateConfig, C>,
+    mappings: &[(Vec<u8>, Vec<u8>)],
+) -> Result<Vec<DustRegistrationEvent>, SubxtNodeError> {
+    let address = super::runtime_1_0_300::storage()
+        .c_night_observation()
+        .mappings();
+    mappings
+        .iter()
+        .try_fold(vec![], |mut events, (_, mapping)| {
+            let mapping = decode_storage_value(client, &address, mapping)
+                .map_err(SubxtNodeError::DecodeStorage)?;
+
+            let these_events = mapping
+                .first()
+                .map(|mapping| {
+                    let cardano_stake_key = mapping.cardano_reward_address.0.into();
+                    let dust_address = DustPublicKey::from(mapping.dust_public_key.0.0.clone());
+                    let utxo_id = mapping.utxo_tx_hash.0.as_ref().into();
+                    let utxo_index = mapping.utxo_index.into();
+
+                    let events = vec![
+                        DustRegistrationEvent::Registration {
+                            cardano_stake_key,
+                            dust_address: dust_address.clone(),
+                        },
+                        DustRegistrationEvent::MappingAdded {
+                            cardano_stake_key,
+                            dust_address,
+                            utxo_id,
+                            utxo_index,
+                        },
+                    ];
+
+                    events
+                })
+                .unwrap_or_default();
+
+            events.extend(these_events);
+
+            Ok(events)
+        })
+}
+
 pub async fn get_terms_and_conditions(
     block: &OnlineClientAtBlock,
 ) -> Result<Option<TermsAndConditions>, SubxtNodeError> {
@@ -353,6 +414,24 @@ pub async fn get_terms_and_conditions(
         .call(get_tc)
         .await
         .map_err(|error| SubxtNodeError::GetTermsAndConditions(error.into()))?;
+
+    Ok(tc.map(|response| {
+        let hash = TermsAndConditionsHash::from(response.hash.0);
+        let url = String::from_utf8_lossy(&response.url).to_string();
+        TermsAndConditions { hash, url }
+    }))
+}
+
+pub fn decode_terms_and_conditions<C: OfflineClientAtBlockT<SubstrateConfig>>(
+    client: &ClientAtBlock<SubstrateConfig, C>,
+    result: &[u8],
+) -> Result<Option<TermsAndConditions>, SubxtNodeError> {
+    let get_tc = super::runtime_1_0_300::runtime_apis()
+        .system_parameters_api()
+        .get_terms_and_conditions();
+
+    let tc = decode_call_result(client, &get_tc, result)
+        .map_err(SubxtNodeError::GetTermsAndConditions)?;
 
     Ok(tc.map(|response| {
         let hash = TermsAndConditionsHash::from(response.hash.0);
