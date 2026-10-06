@@ -14,7 +14,7 @@ split by `kernel.checkpoint()`. Segment 0 is all-or-nothing; a fallible segment
 rolls back on its own. So a Call can legitimately have had a real effect on
 chain (its guaranteed transcript applied) while its own fallible segment failed.
 
-Two details are load-bearing, and both were established empirically:
+Three details are load-bearing, and all three were established empirically:
 
 1. **The failure must happen at ledger-apply time, not proof time.** A circuit
    that fails while being proved never reaches a block, so there is no
@@ -30,7 +30,28 @@ Two details are load-bearing, and both were established empirically:
    stale call from the mempool ("guaranteed execution would fail") instead of
    including it — so no partially successful transaction is produced.
 
-The two circuits differ only in where the expensive section sits:
+3. **The ballast keys already exist when the stale pair is built.** The
+   constructor inserts every ballast key at deploy time, through the same
+   non-exported `ballastWithGuaranteed` / `ballastWithoutGuaranteed` helper
+   circuits the burn circuits call, so the keys it primes cannot drift from the
+   keys a burn writes. Without priming the first call of the pair *inserts*
+   those keys and grows the contract state between the snapshot the stale call
+   is proven against and the state it is applied to. A transcript's declared gas
+   is its cost × 1.2 measured at build time, **bytes written and deleted
+   included**, and ledger v9 charges a transcript for the state bytes it
+   rewrites and rejects it with `OutOfGas` above that bound
+   (`onchain-runtime/src/context.rs`, `query`). On the grown state the stale
+   call's three-op guaranteed transcript (`idxp`, `addi 1`, `insc 1`) runs out
+   of its declared gas, and the node rejects the whole transaction from the
+   mempool — `guaranteed execution would fail: ran out of gas budget`, surfaced
+   as `INVALID_TRANSACTION … custom error: 104` — before any partial success can
+   happen. With the keys primed, every burn call overwrites existing entries, so
+   the guaranteed transcript costs the same against the snapshot and against the
+   state it applies to. Ledger v8 accepted the unprimed pair; priming is
+   harmless there.
+
+The two exported circuits differ only in where the expensive section sits
+(the ballast helpers are inlined into them and get no keys of their own):
 
 | Circuit | Pre-checkpoint | Resulting shape |
 |---|---|---|
@@ -43,10 +64,34 @@ never be confused with "the fixture never produced a guaranteed transcript".
 
 ## How it gets compiled
 
-Only two files are committed: `segment-split.compact` and its toolkit-js
-`segment-split.config.ts`. The compiled output — generated JS, ZKIR and prover
-keys, close to a megabyte of binary nobody can review in a diff — is **not** in
-the repository. The test builds it on the fly:
+The two suites that use this contract get its compiled output from different
+places:
+
+- `contract-actions-partial-success.test.ts` (toolkit path) compiles
+  `segment-split.compact` on the fly, with whatever compactc the toolkit under
+  test needs. It never reads `managed/`.
+- `segment-probe-contract-actions.test.ts` (`TX_BACKEND=moth`) loads the
+  committed `managed/` directory, compiled with compactc **0.31.1** for the
+  midnight-js runtime moth bundles.
+
+**`managed/` must be regenerated whenever `segment-split.compact` changes**, or
+the two suites exercise different contracts. With the compile helper below:
+
+```bash
+# from qa/tests
+cat > .regen.ts <<'TS'
+import { compileCompactContract } from '@utils/compact/compact-compiler';
+console.log(await compileCompactContract({
+  sourceDir: `${process.cwd()}/contracts/segment-split`,
+  sourceFile: 'segment-split.compact',
+}));
+TS
+dir=$(COMPACT_COMPILER_VERSION=0.31.1 bun run .regen.ts | tail -1) && rm .regen.ts
+cp -r "$dir/managed/." contracts/segment-split/managed/
+bun run format   # the committed copy is Prettier-formatted, like the rest of qa/tests
+```
+
+The toolkit path builds its copy like this:
 
 1. `utils/compact/compact-compiler.ts` builds `compact-toolchain:<version>-<digest>`
    from `utils/compact/compact-toolchain.Dockerfile` (first use only; a Docker
@@ -109,19 +154,47 @@ require a runtime no stable compiler emits: toolkit 2.1.x wants compact-runtime
 
 ### Status on toolkit 2.1.x
 
-Not yet usable for the `burnWithGuaranteed` scenario, though it gets close:
+Usable with the pre-release compiler pin:
 
 ```bash
-NODE_TAG=2.1.0-beta.1 NODE_TOOLKIT_TAG=2.1.0-beta.1 \
+NODE_TAG=2.1.0-rc.4 NODE_TOOLKIT_TAG=2.1.0-rc.4 \
   COMPACT_COMPILER_VERSION=0.33.0-rc.2 TARGET_ENV=undeployed bun run test:e2e
 ```
 
-deploys the contract and runs the `burnWithoutGuaranteed` scenario green, but
-the node rejects the stale `burnWithGuaranteed` call from the mempool with
-`INVALID_TRANSACTION ... custom error: 104`. That is the ballast doing its job
-against the wrong ledger: the sizes above are tuned so the **ledger v8**
-partition leaves part of the circuit in the fallible phase, and ledger v9
-prices the circuit differently, so the whole thing lands in the guaranteed
-phase again and mempool validation refuses it — the exact failure mode the
-ballast exists to avoid. Retuning it for ledger v9 is separate work; until
-then run this suite on node and toolkit `1.0.0`.
+runs both scenarios green. The default pin (0.30.0) does not work there: it
+emits a ledger-v8 intent, and the 2.1.x toolkit refuses to read it
+(`expected header tag 'midnight:intent[v9](…)', got 'midnight:intent[v6](…)'`).
+
+Before the ballast was primed (detail 3 above), `burnWithGuaranteed` failed on
+2.1.x with `custom error: 104`. That was first put down to the ballast being
+tuned for the ledger-v8 guaranteed budget, but decoding the stale call on
+ledger v9 shows the split is as intended — only the increment is guaranteed —
+and the node's own log names the cause: the guaranteed transcript ran out of
+its declared gas on the state the first call had grown.
+
+### How much ballast
+
+Each circuit carries 15 ballast writes, the smallest count that works on both
+ledgers. Measured on undeployed by regenerating the contract with N writes per
+circuit and running this suite. These runs primed the keys with separate
+on-chain calls before each stale pair rather than in the constructor; the
+state either way is the same, and the constructor-primed 15-write contract
+was re-run on both ledgers (last row):
+
+| Writes | Ledger v9 (node 2.1.0-rc.2, compactc 0.33.0-rc.2) | Ledger v8 (node 1.0.300, compactc 0.30.0) |
+|---|---|---|
+| 5 | — | both scenarios rejected (`Transcript`) |
+| 8 | — | `burnWithoutGuaranteed` rejected |
+| 9 | — | 6/6 |
+| 11 | both scenarios rejected (`arithmetic overflow`) | 6/6 |
+| 14 | `burnWithGuaranteed` rejected | — |
+| **15** | **6/6** | **6/6**, also against indexer 4.3.800-rc.2 |
+| 17, 23, 48 | 6/6 | 6/6 (23, 48) |
+| **15**, constructor-primed | **6/6** on node 2.1.0-rc.4 | **6/6** |
+
+Below the minimum the decrement stays in the guaranteed phase, the stale call
+underflows there and the node rejects it from the mempool, so no partial
+success is produced. The binding scenario differs per ledger, and v9 sets the
+number. There is no headroom: a cost-model change in a later ledger can move
+it, and the count is a hand-picked constant. A calibration-aware fixture that
+derives the split at runtime instead is tracked separately.
