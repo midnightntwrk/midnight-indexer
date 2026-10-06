@@ -16,7 +16,8 @@ mod metrics;
 use crate::{
     application::metrics::Metrics,
     domain::{
-        Block, BlockRef, LedgerState, SystemParametersChange, Transaction,
+        Block, BlockRef, DParameter, LedgerState, SystemParametersChange, TermsAndConditions,
+        Transaction,
         node::{self, Node},
         should_bump_first_regular_tblock,
         storage::Storage,
@@ -25,7 +26,7 @@ use crate::{
 use anyhow::{Context, bail};
 use async_stream::stream;
 use fastrace::{Span, future::FutureExt, prelude::SpanContext, trace};
-use futures::{Stream, StreamExt, TryStreamExt, future::ok};
+use futures::{Stream, StreamExt, TryStreamExt, future::ok, stream};
 use indexer_common::{
     domain::{
         BlockIndexed, BridgeEventIndexed, LedgerVersion, NetworkId, Publisher,
@@ -39,15 +40,16 @@ use serde::Deserialize;
 use std::{
     collections::{HashSet, VecDeque},
     error::Error as StdError,
-    future::ready,
     num::{NonZeroU32, NonZeroUsize},
     pin::pin,
     sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::{
+    runtime::Handle,
     select,
     signal::unix::Signal,
+    sync::mpsc,
     task::{self},
     time::sleep,
 };
@@ -256,10 +258,32 @@ pub async fn run(
         let node = node.clone();
 
         async move {
-            let blocks = node_blocks(highest_block_ref, node.clone())
-                .map(ready)
-                .buffered(blocks_buffer);
-            let mut blocks = pin!(blocks);
+            // Stream combinators only make progress while the consumer polls them, so a
+            // `buffered` adapter cannot fetch ahead while a block is being processed. Run the
+            // block stream on its own task feeding a bounded channel so fetching the next
+            // blocks overlaps indexing, with at most `blocks_buffer` blocks in flight.
+            //
+            // Making a block deserializes its transactions into the ledger arena, whose lock gc and
+            // persist hold across `block_in_place(block_on(..))`. On a runtime worker this task can
+            // then deadlock the runtime (#1627), so it runs on the blocking pool. A blocking task
+            // cannot be aborted, so it ends when the receiver is dropped, i.e. with this task.
+            let (block_tx, mut block_rx) = mpsc::channel(blocks_buffer.max(1));
+            let handle = Handle::current();
+            task::spawn_blocking({
+                let node = node.clone();
+                move || {
+                    handle.block_on(async {
+                        let blocks = node_blocks(highest_block_ref, node);
+                        let mut blocks = pin!(blocks.take_until(block_tx.closed()));
+                        while let Some(block) = blocks.next().await {
+                            if block_tx.send(block).await.is_err() {
+                                break;
+                            }
+                        }
+                    })
+                }
+            });
+            let mut blocks = stream::poll_fn(move |cx| block_rx.poll_recv(cx));
             let mut caught_up = false;
             let mut parent_block_timestamp = initial_parent_block_timestamp;
             let mut blocks_since_gc = 0;
@@ -432,7 +456,9 @@ where
     E: StdError + Send + Sync + 'static,
     N: Node,
 {
+    let index_wait_started = Instant::now();
     let block = get_next_block(blocks).await?;
+    metrics.record_index_wait(index_wait_started.elapsed());
 
     let result = index_block(
         caught_up_max_distance,
@@ -486,12 +512,21 @@ async fn index_block<N>(
 where
     N: Node,
 {
+    let index_block_started = Instant::now();
+
     // Capture the node's zswap merkle tree root (domain type) before `try_into` serializes it, to
     // compare against the zswap merkle tree root in the ledger state below.
     let zswap_merkle_tree_root = block.zswap_merkle_tree_root;
 
-    let (mut block, transactions) = block.try_into().context("convert node block into domain")?;
+    // System parameters ride on the node block; capture them before the conversion consumes it.
+    let d_parameter = block.d_parameter.clone();
+    let terms_and_conditions = block.terms_and_conditions.clone();
 
+    let index_convert_started = Instant::now();
+    let (mut block, transactions) = block.try_into().context("convert node block into domain")?;
+    metrics.record_index_convert(index_convert_started.elapsed());
+
+    let index_ledger_update_started = Instant::now();
     let ledger_version = block.protocol_version.ledger_version();
     ledger_state = if block.height == 0 {
         // The genesis block establishes the chain's ledger version. The inherited
@@ -624,6 +659,7 @@ where
             local_zswap_merkle_tree_root,
         );
     }
+    metrics.record_index_ledger_update(index_ledger_update_started.elapsed());
 
     // Capture the ledger-arena key and balances of each contract action's contract state. This
     // happens once per block, deliberately after the root validations above and after the genesis
@@ -669,16 +705,22 @@ where
     }
 
     // Persist ledger state.
+    let index_ledger_persist_started = Instant::now();
     let (new_ledger_state, ledger_state_key) =
         ledger_state.0.persist().context("persist ledger state")?;
     ledger_state = new_ledger_state.into();
+    metrics.record_index_ledger_persist(index_ledger_persist_started.elapsed());
 
     // Determine system parameters change if any.
-    let system_parameters_change = determine_system_parameters_change(&block, storage, node)
-        .await
-        .context("determine system parameters change")?;
+    let index_system_parameters_started = Instant::now();
+    let system_parameters_change =
+        determine_system_parameters_change(&block, d_parameter, terms_and_conditions, storage)
+            .await
+            .context("determine system parameters change")?;
+    metrics.record_index_system_parameters(index_system_parameters_started.elapsed());
 
     // Save the block with its related data and system parameters atomically.
+    let index_storage_started = Instant::now();
     let max_transaction_id = storage
         .save_block(
             &block,
@@ -689,8 +731,10 @@ where
         )
         .await
         .context("save block")?;
+    metrics.record_index_storage(index_storage_started.elapsed());
 
     // Publish BlockIndexed.
+    let index_publish_started = Instant::now();
     publisher
         .publish(&BlockIndexed {
             height: block.height,
@@ -732,6 +776,7 @@ where
             .await
             .context("publish BridgeEventIndexed event")?;
     }
+    metrics.record_index_publish(index_publish_started.elapsed());
 
     // Update metrics.
     metrics.update(&block, &transactions, node_block_height, *caught_up);
@@ -746,30 +791,19 @@ where
         "block indexed"
     );
 
+    metrics.record_index_block(index_block_started.elapsed());
+
     Ok((ledger_state, ledger_state_key))
 }
 
-/// Fetch system parameters from the node and determine if they changed.
+/// Determine whether the system parameters carried on the block differ from the stored ones.
 #[trace]
-async fn determine_system_parameters_change<N>(
+async fn determine_system_parameters_change(
     block: &Block,
+    d_parameter: Option<DParameter>,
+    terms_and_conditions: Option<TermsAndConditions>,
     storage: &mut impl Storage,
-    node: &N,
-) -> anyhow::Result<Option<SystemParametersChange>>
-where
-    N: Node,
-{
-    // Fetch current system parameters from the node.
-    let current = node
-        .fetch_system_parameters(
-            block.hash,
-            block.height,
-            block.timestamp,
-            block.protocol_version.node_version(),
-        )
-        .await
-        .map_err(|error| anyhow::anyhow!("fetch system parameters: {error}"))?;
-
+) -> anyhow::Result<Option<SystemParametersChange>> {
     // Get the latest stored parameters.
     let stored_d_param = storage
         .get_latest_d_parameter()
@@ -781,14 +815,14 @@ where
         .context("get latest terms and conditions")?;
 
     // Determine what has changed.
-    let d_param_changed = current.d_parameter.as_ref().is_some_and(|current_d| {
+    let d_param_changed = d_parameter.as_ref().is_some_and(|current_d| {
         stored_d_param.as_ref().is_none_or(|stored_d| {
             current_d.num_permissioned_candidates != stored_d.num_permissioned_candidates
                 || current_d.num_registered_candidates != stored_d.num_registered_candidates
         })
     });
 
-    let tc_changed = match (&current.terms_and_conditions, &stored_tc) {
+    let tc_changed = match (&terms_and_conditions, &stored_tc) {
         (Some(current_tc), Some(stored_tc)) => {
             current_tc.hash != stored_tc.hash || current_tc.url != stored_tc.url
         }
@@ -802,13 +836,9 @@ where
             block_height: block.height,
             block_hash: block.hash,
             timestamp: block.timestamp,
-            d_parameter: if d_param_changed {
-                current.d_parameter
-            } else {
-                None
-            },
+            d_parameter: if d_param_changed { d_parameter } else { None },
             terms_and_conditions: if tc_changed {
-                current.terms_and_conditions
+                terms_and_conditions
             } else {
                 None
             },
@@ -832,17 +862,14 @@ mod tests {
     use crate::{
         application::node_blocks,
         domain::{
-            BlockRef, SystemParametersChange,
+            BlockRef,
             node::{self, Node},
         },
     };
     use fake::{Fake, Faker};
     use futures::{Stream, StreamExt, TryStreamExt, stream};
     use indexer_common::{
-        domain::{
-            BlockHash, ByteArray, ByteVec, NodeVersion, ProtocolVersion,
-            ledger::ZswapMerkleTreeRoot,
-        },
+        domain::{BlockHash, ByteArray, ByteVec, ProtocolVersion, ledger::ZswapMerkleTreeRoot},
         error::BoxError,
     };
     use std::{
@@ -912,22 +939,6 @@ mod tests {
                 .map(|block| Ok(block.to_owned()))
         }
 
-        async fn fetch_system_parameters(
-            &self,
-            block_hash: BlockHash,
-            block_height: u64,
-            timestamp: u64,
-            _node_version: NodeVersion,
-        ) -> Result<SystemParametersChange, Self::Error> {
-            Ok(SystemParametersChange {
-                block_height,
-                block_hash,
-                timestamp,
-                d_parameter: None,
-                terms_and_conditions: None,
-            })
-        }
-
         async fn fetch_genesis_ledger_state(&self) -> Result<ByteVec, Self::Error> {
             Ok(Default::default())
         }
@@ -945,6 +956,8 @@ mod tests {
         transactions: Default::default(),
         dust_registration_events: Default::default(),
         bridge_events: Default::default(),
+        d_parameter: None,
+        terms_and_conditions: None,
     });
 
     static BLOCK_1: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -959,6 +972,8 @@ mod tests {
         transactions: Default::default(),
         dust_registration_events: Default::default(),
         bridge_events: Default::default(),
+        d_parameter: None,
+        terms_and_conditions: None,
     });
 
     static BLOCK_2: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -973,6 +988,8 @@ mod tests {
         transactions: Default::default(),
         dust_registration_events: Default::default(),
         bridge_events: Default::default(),
+        d_parameter: None,
+        terms_and_conditions: None,
     });
 
     static BLOCK_3: LazyLock<node::Block> = LazyLock::new(|| node::Block {
@@ -987,6 +1004,8 @@ mod tests {
         transactions: Default::default(),
         dust_registration_events: Default::default(),
         bridge_events: Default::default(),
+        d_parameter: None,
+        terms_and_conditions: None,
     });
 
     const ZERO_HASH: BlockHash = ByteArray([0; 32]);
@@ -1036,22 +1055,6 @@ mod tests {
             };
 
             stream::iter(blocks)
-        }
-
-        async fn fetch_system_parameters(
-            &self,
-            block_hash: BlockHash,
-            block_height: u64,
-            timestamp: u64,
-            _node_version: NodeVersion,
-        ) -> Result<SystemParametersChange, Self::Error> {
-            Ok(SystemParametersChange {
-                block_height,
-                block_hash,
-                timestamp,
-                d_parameter: None,
-                terms_and_conditions: None,
-            })
         }
 
         async fn fetch_genesis_ledger_state(&self) -> Result<ByteVec, Self::Error> {

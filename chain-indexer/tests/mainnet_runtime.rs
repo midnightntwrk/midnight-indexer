@@ -91,6 +91,7 @@ async fn test_finalized_blocks_node_1_0() -> anyhow::Result<()> {
         reconnect_max_delay: Duration::from_secs(1),
         reconnect_max_attempts: 1,
         subscription_recovery_timeout: Duration::from_secs(30),
+        fetch_concurrency: 8,
     };
     let mut node = SubxtNode::new(config).await.context("create SubxtNode")?;
 
@@ -131,6 +132,7 @@ async fn test_mainnet_runtime_upgrade_boundary() -> anyhow::Result<()> {
         reconnect_max_delay: Duration::from_secs(1),
         reconnect_max_attempts: 3,
         subscription_recovery_timeout: Duration::from_secs(30),
+        fetch_concurrency: 8,
     };
     let mut node = SubxtNode::new(config).await.context("create SubxtNode")?;
 
