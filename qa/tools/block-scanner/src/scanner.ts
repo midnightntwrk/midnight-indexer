@@ -17,7 +17,10 @@ import fs from "fs";
 import path from "path";
 import { TARGET_ENV, INDEXER_WS_URL, INDEXER_HTTP_URL } from "./env.js";
 import { Block, RegularTransaction } from "./indexer-types.js";
-import { updateTestDataFiles } from "./test-data-handler.js";
+import {
+  completeLinesLength,
+  updateTestDataFiles,
+} from "./test-data-handler.js";
 
 // Configuration constants
 const CONFIG = {
@@ -106,20 +109,35 @@ function repairTruncatedBlocksFile(filePath: string): void {
     const tailBuffer = Buffer.alloc(tailSize);
     fs.readSync(fd, tailBuffer, 0, tailSize, size - tailSize);
 
-    if (tailBuffer[tailSize - 1] === 0x0a /* "\n" */) return; // last write completed
+    const completeTail = completeLinesLength(tailBuffer);
+    if (completeTail === tailSize) return; // last write completed
 
-    const lastNewlineInTail = tailBuffer.lastIndexOf(0x0a);
-    const truncateAt =
-      lastNewlineInTail === -1
-        ? size - tailSize // no newline in the tail at all; drop the whole tail
-        : size - tailSize + lastNewlineInTail + 1;
-
+    // No newline in the tail at all drops the whole tail.
+    const truncateAt = size - tailSize + completeTail;
     fs.ftruncateSync(fd, truncateAt);
     console.warn(
       `[WARN ] - Repaired ${filePath}: dropped a truncated trailing line from a previous abrupt exit (${size - truncateAt} bytes)`,
     );
   } finally {
     fs.closeSync(fd);
+  }
+}
+
+/**
+ * `fs.writeSync` may write fewer bytes than asked, so a single call can leave
+ * a partial line behind; this loops until every byte is on disk or throws.
+ */
+function writeAllSync(fd: number, text: string): void {
+  const bytes = Buffer.from(text);
+  let offset = 0;
+  while (offset < bytes.length) {
+    const written = fs.writeSync(fd, bytes, offset, bytes.length - offset);
+    if (written === 0) {
+      throw new Error(
+        `short write: ${bytes.length - offset} of ${bytes.length} bytes left unwritten`,
+      );
+    }
+    offset += written;
   }
 }
 
@@ -193,23 +211,53 @@ repairTruncatedBlocksFile(getBlocksFilePath());
  *
  * A signal only *requests* a shutdown: `main()` keeps running until its next
  * checkpoint boundary, flushes whatever is buffered, and only then exits.
- * A second signal forces an immediate exit for anyone who doesn't want to wait.
+ * A second signal skips that wait but still persists a final synchronous
+ * checkpoint and regenerates the test data files before exiting; only a third
+ * signal exits with no writes at all.
  */
 let shutdownSignal: string | null = null;
 let notifyShutdownRequested: (() => void) | undefined;
 
+// Registered by main() once the blocks file is open, so forceExit() can
+// persist buffered blocks without going through the async checkpoint.
+let forceSyncCheckpoint: (() => void) | undefined;
+let forcedExitStarted = false;
+
 function requestShutdown(signal: string): void {
   if (shutdownSignal) {
-    console.info(
-      `\n[INFO ] - Received ${signal} again, forcing immediate exit.`,
-    );
-    process.exit(1);
+    forceExit(signal);
+    return;
   }
   shutdownSignal = signal;
   console.info(
     `\n[INFO ] - Received ${signal}. Finishing the current checkpoint and shutting down (press again to force)...`,
   );
   notifyShutdownRequested?.();
+}
+
+/**
+ * Forced exit (second signal): the graceful wait is abandoned, but the test
+ * data files are still written from everything persisted so far, so a forced
+ * Ctrl+C never silently discards a long scan.
+ *
+ * The checkpoint is synchronous because nothing else runs after it; the
+ * local write runs and the process exits with status 1 as soon as it
+ * settles, whatever the graceful path was doing.
+ */
+function forceExit(signal: string): void {
+  if (forcedExitStarted) process.exit(1);
+  forcedExitStarted = true;
+  console.info(
+    `\n[INFO ] - Received ${signal} again, forcing exit after a final test data write...`,
+  );
+  try {
+    forceSyncCheckpoint?.();
+  } catch (error) {
+    console.error(
+      `[ERROR] - Failed to persist buffered blocks during forced exit: ${(error as Error).message}`,
+    );
+  }
+  finalizeTestData().finally(() => process.exit(1));
 }
 
 process.on("SIGINT", () => requestShutdown("SIGINT"));
@@ -548,15 +596,16 @@ function parseStartBlockHeight(): number | undefined {
 
 /**
  * Regenerates the qa/tests/data/static/${TARGET_ENV} test data files
- * (blocks.jsonc, transactions.jsonc, contract-actions.jsonc) from whatever is
+ * (contract-actions.jsonc and unshielded-token-types.jsonc) from whatever is
  * currently in tmp_scan/${TARGET_ENV}_blocks.jsonl.
  *
  * Called from a `finally` block in main() so it always runs when the process
  * exits under its own control - success, an early return, a thrown error, a
- * subscription failure, or a graceful SIGINT/SIGTERM shutdown - not only on
- * the happy path. It must never throw itself: a failure here should be
- * logged, not allowed to mask the scan's own outcome. (It still can't run
- * after an unstoppable `kill -9`, since no JS runs at all in that case.)
+ * subscription failure, or a graceful SIGINT/SIGTERM shutdown - and from
+ * forceExit() so even a forced (repeated-signal) exit writes the files. It
+ * must never throw itself: a failure here should be logged, not allowed to
+ * mask the scan's own outcome. (It still can't run after an unstoppable
+ * `kill -9`, since no JS runs at all in that case.)
  */
 async function finalizeTestData(): Promise<void> {
   if (!testDataFolder) return;
@@ -681,8 +730,8 @@ async function main(): Promise<boolean> {
     let contractActionsFound = 0;
 
     // Blocks with transactions, serialized but not yet written to disk. Flushed
-    // to blocksFile every CHECKPOINT_INTERVAL_MS by checkpoint() below, instead
-    // of one disk write per block.
+    // to the blocks file every CHECKPOINT_INTERVAL_MS by checkpoint() below,
+    // instead of one disk write per block.
     let pendingLines: string[] = [];
 
     // Spinner for progress indication
@@ -769,9 +818,9 @@ async function main(): Promise<boolean> {
     const isResume =
       startBlockHeightEnv === undefined && previousStats !== null;
     const blocksFilePath = getBlocksFilePath();
-    const blocksFile = fs.createWriteStream(blocksFilePath, {
-      flags: isResume ? "a" : "w",
-    });
+    // Written synchronously: a signal handler can then never find a flush
+    // half-way through, so the forced exit appends without losing a block.
+    const blocksFd = fs.openSync(blocksFilePath, isResume ? "a" : "w");
 
     /**
      * Builds the stats snapshot for the current progress (used both by the
@@ -831,11 +880,7 @@ async function main(): Promise<boolean> {
 
       if (linesToFlush.length > 0) {
         try {
-          await new Promise<void>((resolve, reject) => {
-            blocksFile.write(linesToFlush.join(""), (err) =>
-              err ? reject(err) : resolve(),
-            );
-          });
+          writeAllSync(blocksFd, linesToFlush.join(""));
         } catch (error) {
           pendingLines = [...linesToFlush, ...pendingLines];
           console.error(
@@ -848,6 +893,16 @@ async function main(): Promise<boolean> {
       const elapsedSeconds = Math.round((Date.now() - startTime) / 1000);
       writeStats(buildMergedStats(elapsedSeconds));
     }
+
+    // The forced-exit checkpoint: the same write as above, on the same file
+    // descriptor, so whatever is buffered lands after what is already flushed.
+    forceSyncCheckpoint = () => {
+      if (pendingLines.length > 0) {
+        writeAllSync(blocksFd, pendingLines.join(""));
+        pendingLines = [];
+      }
+      writeStats(buildMergedStats(Math.round((Date.now() - startTime) / 1000)));
+    };
 
     // Periodically flush buffered blocks + advance the resume marker, so a
     // kill/Ctrl+C loses at most CHECKPOINT_INTERVAL_MS of progress instead of
@@ -923,6 +978,8 @@ async function main(): Promise<boolean> {
       // instead of discarding it.
       stopCheckpointLoop();
       await checkpoint().catch(() => {});
+      forceSyncCheckpoint = undefined;
+      fs.closeSync(blocksFd);
 
       // Clean up and exit without throwing
       await cleanupResources(indexerWs, handlersMap);
@@ -950,7 +1007,8 @@ async function main(): Promise<boolean> {
     // printed below and the persisted stats agree.
     stopCheckpointLoop();
     await checkpoint();
-    blocksFile.end();
+    forceSyncCheckpoint = undefined;
+    fs.closeSync(blocksFd);
 
     const scanDurationSeconds = Math.round((Date.now() - startTime) / 1000);
 
@@ -973,6 +1031,8 @@ async function main(): Promise<boolean> {
 
 await main()
   .then((success) => {
+    // A forced exit owns the exit status even if the graceful run got here.
+    if (forcedExitStarted) process.exit(1);
     if (success) {
       console.info("[INFO ] - Process completed successfully");
       process.exit(0);
