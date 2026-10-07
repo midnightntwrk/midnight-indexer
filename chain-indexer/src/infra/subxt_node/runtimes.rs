@@ -397,22 +397,19 @@ fn successful_transaction(
     }
 }
 
-/// Report what no outcome accounted for: a regular transaction without one, and any top-level
-/// system transaction, which is `Root`-only and so cannot have been applied.
+/// Report every regular transaction that no outcome accounted for. A top-level system transaction
+/// left over is not reported: it is `Root`-only, so in an executed block it can only have failed,
+/// like any other failed call, and one that applied would be taken from its
+/// `SystemTransactionApplied` event.
 fn unaccounted(block: BlockRef, extrinsics: BTreeMap<ExtrinsicIndex, Transaction>) {
-    use Transaction::*;
-
     extrinsics
         .iter()
-        .for_each(|(index, transaction)| match transaction {
-            Regular(_) => divergence(
+        .filter(|(_, transaction)| matches!(transaction, Transaction::Regular(_)))
+        .for_each(|(index, _)| {
+            divergence(
                 block,
                 format_args!("Midnight extrinsic {index} has no outcome"),
-            ),
-            System(_) => divergence(
-                block,
-                format_args!("top-level MidnightSystem extrinsic {index} in an executed block"),
-            ),
+            )
         });
 }
 
@@ -1072,12 +1069,9 @@ mod tests {
     }
 
     // Top-level `MidnightSystem` extrinsics are `Root`-only, so in an executed block one can only
-    // have failed. It is never a transaction; it is a divergence.
+    // have failed, like any other failed call: it is not a transaction and not a divergence, so
+    // this also passes with `divergence-halt`.
     #[tokio::test]
-    #[cfg_attr(
-        feature = "divergence-halt",
-        should_panic(expected = "top-level MidnightSystem extrinsic 1")
-    )]
     async fn top_level_midnight_system_extrinsic_is_not_a_transaction() {
         for (dir, spec_version) in RUNTIMES {
             let synthetic = Synthetic(metadata(dir));
