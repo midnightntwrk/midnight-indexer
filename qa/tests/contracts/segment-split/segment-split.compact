@@ -18,17 +18,33 @@ export ledger fuseWithoutGuaranteed: Counter;
 // node rejects the stale call from the mempool instead of producing a
 // PartialSuccess. Making the post-checkpoint section expensive forces the
 // prefix down to "just the pre-checkpoint section".
+//
+// 15 writes per circuit is the measured minimum: 14 leaves the underflow in
+// the guaranteed phase on ledger v9 (burnWithGuaranteed), 8 does so on ledger
+// v8 (burnWithoutGuaranteed). See the README, "How much ballast".
 export ledger ballast: Map<Bytes<32>, Counter>;
 
 constructor() {
   fuseWithGuaranteed.increment(1);
   fuseWithoutGuaranteed.increment(1);
+  // Priming. Without it each burn circuit's first call would INSERT its
+  // ballast keys, growing the contract state between the snapshot the stale
+  // call is proven against and the state it is applied to. Ledger v9 charges
+  // the guaranteed transcript for the state bytes it rewrites and caps that at
+  // the declared gas (cost x 1.2, bytes included), so on the grown state the
+  // stale call's guaranteed increment runs out of gas and the node rejects the
+  // whole transaction from the mempool (custom error 104). Inserting the keys
+  // at deploy time makes every burn call overwrite existing entries, so the
+  // state the guaranteed transcript is proven against and the state it applies
+  // to cost the same to rewrite.
+  ballastWithGuaranteed();
+  ballastWithoutGuaranteed();
 }
 
-// Call with has_guaranteed_transcript == true whose own fallible segment fails.
-export circuit burnWithGuaranteed(): [] {
-  guaranteedMarker.increment(1);
-  kernel.checkpoint();
+// Each burn circuit's ballast, written once here so the constructor's priming
+// and the burn circuit cannot drift apart: a key the constructor misses is
+// inserted by the first burn call, and the stale call is rejected again.
+circuit ballastWithGuaranteed(): [] {
   ballast.insertDefault(pad(32, "g00"));
   ballast.insertDefault(pad(32, "g01"));
   ballast.insertDefault(pad(32, "g02"));
@@ -44,45 +60,9 @@ export circuit burnWithGuaranteed(): [] {
   ballast.insertDefault(pad(32, "g12"));
   ballast.insertDefault(pad(32, "g13"));
   ballast.insertDefault(pad(32, "g14"));
-  ballast.insertDefault(pad(32, "g15"));
-  ballast.insertDefault(pad(32, "g16"));
-  ballast.insertDefault(pad(32, "g17"));
-  ballast.insertDefault(pad(32, "g18"));
-  ballast.insertDefault(pad(32, "g19"));
-  ballast.insertDefault(pad(32, "g20"));
-  ballast.insertDefault(pad(32, "g21"));
-  ballast.insertDefault(pad(32, "g22"));
-  ballast.insertDefault(pad(32, "g23"));
-  ballast.insertDefault(pad(32, "g24"));
-  ballast.insertDefault(pad(32, "g25"));
-  ballast.insertDefault(pad(32, "g26"));
-  ballast.insertDefault(pad(32, "g27"));
-  ballast.insertDefault(pad(32, "g28"));
-  ballast.insertDefault(pad(32, "g29"));
-  ballast.insertDefault(pad(32, "g30"));
-  ballast.insertDefault(pad(32, "g31"));
-  ballast.insertDefault(pad(32, "g32"));
-  ballast.insertDefault(pad(32, "g33"));
-  ballast.insertDefault(pad(32, "g34"));
-  ballast.insertDefault(pad(32, "g35"));
-  ballast.insertDefault(pad(32, "g36"));
-  ballast.insertDefault(pad(32, "g37"));
-  ballast.insertDefault(pad(32, "g38"));
-  ballast.insertDefault(pad(32, "g39"));
-  ballast.insertDefault(pad(32, "g40"));
-  ballast.insertDefault(pad(32, "g41"));
-  ballast.insertDefault(pad(32, "g42"));
-  ballast.insertDefault(pad(32, "g43"));
-  ballast.insertDefault(pad(32, "g44"));
-  ballast.insertDefault(pad(32, "g45"));
-  ballast.insertDefault(pad(32, "g46"));
-  ballast.insertDefault(pad(32, "g47"));
-  fuseWithGuaranteed.decrement(1);
 }
 
-// Call with has_guaranteed_transcript == false whose segment fails.
-export circuit burnWithoutGuaranteed(): [] {
-  kernel.checkpoint();
+circuit ballastWithoutGuaranteed(): [] {
   ballast.insertDefault(pad(32, "n00"));
   ballast.insertDefault(pad(32, "n01"));
   ballast.insertDefault(pad(32, "n02"));
@@ -98,38 +78,19 @@ export circuit burnWithoutGuaranteed(): [] {
   ballast.insertDefault(pad(32, "n12"));
   ballast.insertDefault(pad(32, "n13"));
   ballast.insertDefault(pad(32, "n14"));
-  ballast.insertDefault(pad(32, "n15"));
-  ballast.insertDefault(pad(32, "n16"));
-  ballast.insertDefault(pad(32, "n17"));
-  ballast.insertDefault(pad(32, "n18"));
-  ballast.insertDefault(pad(32, "n19"));
-  ballast.insertDefault(pad(32, "n20"));
-  ballast.insertDefault(pad(32, "n21"));
-  ballast.insertDefault(pad(32, "n22"));
-  ballast.insertDefault(pad(32, "n23"));
-  ballast.insertDefault(pad(32, "n24"));
-  ballast.insertDefault(pad(32, "n25"));
-  ballast.insertDefault(pad(32, "n26"));
-  ballast.insertDefault(pad(32, "n27"));
-  ballast.insertDefault(pad(32, "n28"));
-  ballast.insertDefault(pad(32, "n29"));
-  ballast.insertDefault(pad(32, "n30"));
-  ballast.insertDefault(pad(32, "n31"));
-  ballast.insertDefault(pad(32, "n32"));
-  ballast.insertDefault(pad(32, "n33"));
-  ballast.insertDefault(pad(32, "n34"));
-  ballast.insertDefault(pad(32, "n35"));
-  ballast.insertDefault(pad(32, "n36"));
-  ballast.insertDefault(pad(32, "n37"));
-  ballast.insertDefault(pad(32, "n38"));
-  ballast.insertDefault(pad(32, "n39"));
-  ballast.insertDefault(pad(32, "n40"));
-  ballast.insertDefault(pad(32, "n41"));
-  ballast.insertDefault(pad(32, "n42"));
-  ballast.insertDefault(pad(32, "n43"));
-  ballast.insertDefault(pad(32, "n44"));
-  ballast.insertDefault(pad(32, "n45"));
-  ballast.insertDefault(pad(32, "n46"));
-  ballast.insertDefault(pad(32, "n47"));
+}
+
+// Call with has_guaranteed_transcript == true whose own fallible segment fails.
+export circuit burnWithGuaranteed(): [] {
+  guaranteedMarker.increment(1);
+  kernel.checkpoint();
+  ballastWithGuaranteed();
+  fuseWithGuaranteed.decrement(1);
+}
+
+// Call with has_guaranteed_transcript == false whose segment fails.
+export circuit burnWithoutGuaranteed(): [] {
+  kernel.checkpoint();
+  ballastWithoutGuaranteed();
   fuseWithoutGuaranteed.decrement(1);
 }
