@@ -119,13 +119,13 @@ impl<D: DB> ContractState<D> {
         }
     }
 
-    /// Get the unshielded token balances for this contract.
+    /// Get the positive unshielded token balances for this contract.
     ///
     /// Shielded and DUST keys can also appear in the balance map, but they are not unshielded
-    /// balances and their tagged encodings do not fit [TokenType](crate::domain::TokenType), so they are skipped rather than
-    /// failing the whole block.
-    pub fn balances(&self) -> Result<Vec<ContractBalance>, Error> {
-        let balances = match self {
+    /// balances and their tagged encodings do not fit [TokenType](crate::domain::TokenType), so
+    /// they are skipped rather than failing the whole block.
+    pub fn balances(&self) -> Vec<ContractBalance> {
+        match self {
             Self::V3(contract_state) => contract_state
                 .balance
                 .iter()
@@ -135,6 +135,7 @@ impl<D: DB> ContractState<D> {
                     let (token_type, amount) = &*entry;
                     let (token_type, amount) = (**token_type, **amount);
 
+                    // Exhaustive, so a new token type variant has to be handled explicitly.
                     match token_type {
                         MidnightTokenType::Unshielded(unshielded) if amount > 0 => {
                             Some(ContractBalance {
@@ -143,7 +144,9 @@ impl<D: DB> ContractState<D> {
                             })
                         }
 
-                        _ => None,
+                        MidnightTokenType::Unshielded(_)
+                        | MidnightTokenType::Shielded(_)
+                        | MidnightTokenType::Dust => None,
                     }
                 })
                 .collect(),
@@ -157,6 +160,7 @@ impl<D: DB> ContractState<D> {
                     let (token_type, amount) = &*entry;
                     let (token_type, amount) = (**token_type, **amount);
 
+                    // Exhaustive, so a new token type variant has to be handled explicitly.
                     match token_type {
                         MidnightTokenTypeV9::Unshielded(unshielded) if amount > 0 => {
                             Some(ContractBalance {
@@ -165,13 +169,13 @@ impl<D: DB> ContractState<D> {
                             })
                         }
 
-                        _ => None,
+                        MidnightTokenTypeV9::Unshielded(_)
+                        | MidnightTokenTypeV9::Shielded(_)
+                        | MidnightTokenTypeV9::Dust => None,
                     }
                 })
                 .collect(),
-        };
-
-        Ok(balances)
+        }
     }
 
     /// Get the maintenance authority for this contract.
@@ -367,7 +371,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::domain::{
-        ByteArray, LedgerVersion, TokenType,
+        ByteArray, ContractBalance, LedgerVersion, TokenType,
         ledger::{
             DefaultContractState, TaggedSerializableExt, contract_state::ContractStateArenaKey,
         },
@@ -382,104 +386,88 @@ mod tests {
     };
     use midnight_onchain_runtime_v3::state::ContractState as ContractStateV3;
     use midnight_onchain_runtime_v4::state::ContractState as ContractStateV4;
-    use midnight_storage_core_v1::DefaultDB;
+    use midnight_storage_core_v1::{DefaultDB, arena::Sp};
+    use std::fmt::Debug;
 
     #[test]
     fn test_balances_v8() {
-        let mut contract_state = ContractStateV3::<DefaultDB>::default();
-        contract_state.balance = contract_state.balance.insert(
-            MidnightTokenType::Unshielded(UnshieldedTokenType(HashOutput(TOKEN_TYPE.0))),
-            AMOUNT,
-        );
-        let contract_state = contract_state
-            .tagged_serialize()
-            .expect("contract state can be serialized");
+        let unshielded =
+            MidnightTokenType::Unshielded(UnshieldedTokenType(HashOutput(TOKEN_TYPE.0)));
+        let shielded = MidnightTokenType::Shielded(ShieldedTokenType(HashOutput([8; 32])));
+        let dust = MidnightTokenType::Dust;
 
-        let balances = DefaultContractState::deserialize(contract_state, LedgerVersion::V8)
-            .expect("contract state can be deserialized")
-            .balances()
-            .expect("balances can be extracted");
+        let cases = [
+            (vec![], vec![]),
+            (vec![(unshielded, AMOUNT)], vec![AMOUNT]),
+            (vec![(unshielded, 0)], vec![]),
+            (vec![(shielded, AMOUNT)], vec![]),
+            (vec![(dust, AMOUNT)], vec![]),
+            (
+                vec![(unshielded, AMOUNT), (shielded, AMOUNT), (dust, AMOUNT)],
+                vec![AMOUNT],
+            ),
+        ];
 
-        assert_eq!(balances.len(), 1);
-        assert_eq!(balances[0].token_type, TOKEN_TYPE);
-        assert_eq!(balances[0].amount, AMOUNT);
+        for (entries, expected) in cases {
+            let mut contract_state = ContractStateV3::<DefaultDB>::default();
+            contract_state.balance = entries
+                .iter()
+                .fold(contract_state.balance, |balance, (token_type, amount)| {
+                    balance.insert(*token_type, *amount)
+                });
+
+            let balances = DefaultContractState::V3(Sp::new(contract_state)).balances();
+
+            assert_balances(&balances, &expected, &entries);
+        }
     }
 
     #[test]
     fn test_balances_v9() {
-        let mut contract_state = ContractStateV4::<DefaultDB>::default();
-        contract_state.balance = contract_state.balance.insert(
-            MidnightTokenTypeV9::Unshielded(UnshieldedTokenTypeV9(HashOutput(TOKEN_TYPE.0))),
-            AMOUNT,
+        let unshielded =
+            MidnightTokenTypeV9::Unshielded(UnshieldedTokenTypeV9(HashOutput(TOKEN_TYPE.0)));
+        let shielded = MidnightTokenTypeV9::Shielded(ShieldedTokenTypeV9(HashOutput([8; 32])));
+        let dust = MidnightTokenTypeV9::Dust;
+
+        let cases = [
+            (vec![], vec![]),
+            (vec![(unshielded, AMOUNT)], vec![AMOUNT]),
+            (vec![(unshielded, 0)], vec![]),
+            (vec![(shielded, AMOUNT)], vec![]),
+            (vec![(dust, AMOUNT)], vec![]),
+            (
+                vec![(unshielded, AMOUNT), (shielded, AMOUNT), (dust, AMOUNT)],
+                vec![AMOUNT],
+            ),
+        ];
+
+        for (entries, expected) in cases {
+            let mut contract_state = ContractStateV4::<DefaultDB>::default();
+            contract_state.balance = entries
+                .iter()
+                .fold(contract_state.balance, |balance, (token_type, amount)| {
+                    balance.insert(*token_type, *amount)
+                });
+
+            let balances = DefaultContractState::V4(Sp::new(contract_state)).balances();
+
+            assert_balances(&balances, &expected, &entries);
+        }
+    }
+
+    /// Every expected balance is for [TOKEN_TYPE], so only the amounts need listing.
+    fn assert_balances(balances: &[ContractBalance], expected: &[u128], entries: &impl Debug) {
+        let amounts = balances
+            .iter()
+            .map(|balance| balance.amount)
+            .collect::<Vec<_>>();
+        assert_eq!(amounts, expected, "amounts for {entries:?}");
+        assert!(
+            balances
+                .iter()
+                .all(|balance| balance.token_type == TOKEN_TYPE),
+            "token types for {entries:?}"
         );
-        let contract_state = contract_state
-            .tagged_serialize()
-            .expect("contract state can be serialized");
-
-        let balances = DefaultContractState::deserialize(contract_state, LedgerVersion::V9)
-            .expect("contract state can be deserialized")
-            .balances()
-            .expect("balances can be extracted");
-
-        assert_eq!(balances.len(), 1);
-        assert_eq!(balances[0].token_type, TOKEN_TYPE);
-        assert_eq!(balances[0].amount, AMOUNT);
-    }
-
-    #[test]
-    fn test_balances_skip_shielded_and_dust_v8() {
-        let mut contract_state = ContractStateV3::<DefaultDB>::default();
-        contract_state.balance = contract_state
-            .balance
-            .insert(
-                MidnightTokenType::Unshielded(UnshieldedTokenType(HashOutput(TOKEN_TYPE.0))),
-                AMOUNT,
-            )
-            .insert(
-                MidnightTokenType::Shielded(ShieldedTokenType(HashOutput([8; 32]))),
-                AMOUNT,
-            )
-            .insert(MidnightTokenType::Dust, AMOUNT);
-        let contract_state = contract_state
-            .tagged_serialize()
-            .expect("contract state can be serialized");
-
-        let balances = DefaultContractState::deserialize(contract_state, LedgerVersion::V8)
-            .expect("contract state can be deserialized")
-            .balances()
-            .expect("balances can be extracted");
-
-        assert_eq!(balances.len(), 1);
-        assert_eq!(balances[0].token_type, TOKEN_TYPE);
-        assert_eq!(balances[0].amount, AMOUNT);
-    }
-
-    #[test]
-    fn test_balances_skip_shielded_and_dust_v9() {
-        let mut contract_state = ContractStateV4::<DefaultDB>::default();
-        contract_state.balance = contract_state
-            .balance
-            .insert(
-                MidnightTokenTypeV9::Unshielded(UnshieldedTokenTypeV9(HashOutput(TOKEN_TYPE.0))),
-                AMOUNT,
-            )
-            .insert(
-                MidnightTokenTypeV9::Shielded(ShieldedTokenTypeV9(HashOutput([8; 32]))),
-                AMOUNT,
-            )
-            .insert(MidnightTokenTypeV9::Dust, AMOUNT);
-        let contract_state = contract_state
-            .tagged_serialize()
-            .expect("contract state can be serialized");
-
-        let balances = DefaultContractState::deserialize(contract_state, LedgerVersion::V9)
-            .expect("contract state can be deserialized")
-            .balances()
-            .expect("balances can be extracted");
-
-        assert_eq!(balances.len(), 1);
-        assert_eq!(balances[0].token_type, TOKEN_TYPE);
-        assert_eq!(balances[0].amount, AMOUNT);
     }
 
     /// Round-tripping a state through the in-memory arena must reproduce the exact input bytes;

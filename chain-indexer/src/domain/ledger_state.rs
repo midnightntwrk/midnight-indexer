@@ -328,17 +328,7 @@ impl LedgerState {
                         // the ~860 KB deserialize per action the indexing path used to do with one
                         // read per address off a pointer that is already in hand.
                         let captured_state = match contract_state {
-                            Some((key, contract_state)) => {
-                                let balances = contract_state.balances().map_err(|error| {
-                                    Error::GetContractBalances(
-                                        transaction.hash,
-                                        contract_action.address.clone(),
-                                        error,
-                                    )
-                                })?;
-
-                                (Some(key), balances)
-                            }
+                            Some((key, contract_state)) => (Some(key), contract_state.balances()),
 
                             None => (None, vec![]),
                         };
@@ -642,13 +632,6 @@ pub enum Error {
         "transaction {0} is missing a result for logical segment {1} required by a contract action"
     )]
     MissingContractActionSegmentResult(TransactionHash, u16),
-
-    #[error("cannot get contract balances for transaction {0} and contract address {1}")]
-    GetContractBalances(
-        TransactionHash,
-        SerializedContractAddress,
-        #[source] indexer_common::domain::ledger::Error,
-    ),
 }
 
 /// The ledger result of an applied regular transaction must be how it was applied on chain; a
