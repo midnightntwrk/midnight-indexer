@@ -11,7 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{ContractAction, RegularTransaction, SystemTransaction, Transaction, node};
+use crate::domain::{
+    ContractAction, RegularTransaction, SystemTransaction, Transaction,
+    extrinsic::{Applied, Phase},
+    node,
+};
 use derive_more::derive::{Deref, From};
 use fastrace::trace;
 use indexer_common::domain::{
@@ -170,7 +174,7 @@ impl LedgerState {
     #[trace(properties = { "parent_block_hash": "{parent_block_hash}" })]
     pub fn apply_transactions(
         &mut self,
-        transactions: impl IntoIterator<Item = node::Transaction>,
+        transactions: impl IntoIterator<Item = (Phase, node::Transaction, Result<Applied, String>)>,
         parent_block_hash: BlockHash,
         block_timestamp: u64,
         parent_block_timestamp: u64,
@@ -191,7 +195,7 @@ impl LedgerState {
         let mut no_regular_transaction_applied = true;
         let transactions = transactions
             .into_iter()
-            .map(|transaction| match transaction {
+            .map(|(_phase, transaction, _outcome)| match transaction {
                 node::Transaction::Regular(transaction) => {
                     let well_formed_timestamp = (no_regular_transaction_applied
                         && bump_first_regular_tblock)
@@ -679,7 +683,11 @@ mod tblock_skew_tests {
 #[cfg(all(test, any(feature = "cloud", feature = "standalone")))]
 mod apply_transactions_tblock_tests {
     use super::should_bump_first_regular_tblock;
-    use crate::domain::{LedgerState, Transaction, node};
+    use crate::domain::{
+        LedgerState, Transaction,
+        extrinsic::{Applied, Phase},
+        node,
+    };
     use indexer_common::{
         domain::{
             BlockHash, LedgerVersion, ProtocolVersion, SerializedTransaction, TransactionHash,
@@ -999,13 +1007,19 @@ mod apply_transactions_tblock_tests {
             .iter()
             .map(|&raw| {
                 let transaction = ledger::Transaction::deserialize(raw, ledger_version)?;
-                Ok(node::Transaction::Regular(node::RegularTransaction {
-                    hash: transaction.hash(),
+                let tx_hash = transaction.hash();
+                let transaction = node::Transaction::Regular(node::RegularTransaction {
+                    hash: tx_hash,
                     protocol_version,
                     raw: raw.clone(),
                     identifiers: transaction.identifiers()?,
                     contract_actions: vec![],
-                }))
+                });
+                Ok((
+                    Phase::ApplyExtrinsic(1),
+                    transaction,
+                    Ok(Applied::Fully { tx_hash }),
+                ))
             })
             .collect::<Result<Vec<_>, BoxError>>()?;
 

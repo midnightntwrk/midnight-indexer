@@ -11,120 +11,110 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use super::runtime_1_0_300 as runtime;
 use crate::{
-    domain::{DParameter, DustRegistrationEvent, TermsAndConditions},
+    domain::{
+        BlockRef, DParameter, DustRegistrationEvent, TermsAndConditions,
+        extrinsic::{Applied, EventIndex, Phase},
+    },
     infra::subxt_node::{
         OnlineClientAtBlock, SubxtNodeError,
-        runtimes::{AtBlock, BlockDetails, Transaction},
+        runtimes::{
+            AtBlock, BlockDetails, CallExt, EventExt, SystemTransaction, Transaction, transactions,
+        },
     },
 };
 use futures::TryStreamExt;
-use indexer_common::domain::{ByteVec, DustPublicKey, TermsAndConditionsHash};
-use itertools::Itertools;
+use indexer_common::domain::{ByteVec, DustPublicKey, TermsAndConditionsHash, TransactionHash};
 use parity_scale_codec::Decode;
+use runtime::runtime_types::{
+    frame_system::pallet::Event::{ExtrinsicFailed, ExtrinsicSuccess},
+    midnight_node_runtime::{RuntimeCall, RuntimeEvent},
+    pallet_midnight::pallet::{
+        Call::{send_mn_transaction, set_tx_size_weight},
+        Event::{TxApplied, TxPartialSuccess},
+    },
+    pallet_midnight_system::pallet::{
+        Call::send_mn_system_transaction, Event::SystemTransactionApplied,
+    },
+};
 use subxt::{SubstrateConfig, client::OfflineClientAtBlockT, error::RuntimeApiError};
 
 pub async fn make_block_details(
     authorities: &mut Option<Vec<[u8; 32]>>,
     client: &AtBlock<impl OfflineClientAtBlockT<SubstrateConfig>>,
+    block: BlockRef,
     extrinsics: Vec<Vec<u8>>,
     events: Vec<u8>,
 ) -> Result<BlockDetails, SubxtNodeError> {
-    use super::runtime_1_0_300::{
+    use runtime::{
         Call, Event,
         runtime_types::{
             pallet_cnight_observation::pallet::Event as CnightObservationEvent,
-            pallet_midnight::pallet::Call::send_mn_transaction,
-            pallet_midnight_system::pallet::{
-                Call::send_mn_system_transaction, Event::SystemTransactionApplied,
-            },
             pallet_partner_chains_session::pallet::Event::NewSession,
         },
-        timestamp,
     };
 
-    let extrinsics = client.extrinsics().from_bytes(extrinsics).await;
-
-    let calls = extrinsics
+    let calls = client
+        .extrinsics()
+        .from_bytes(extrinsics)
+        .await
         .iter()
         .map(|extrinsic| {
-            let call = extrinsic
+            extrinsic
                 .map_err(|error| SubxtNodeError::GetNextExtrinsic(error.into()))?
                 .decode_call_data_as::<Call>()
-                .map_err(|error| SubxtNodeError::DecodeExtrinsicAsCall(error.into()))?;
-            Ok(call)
+                .map_err(|error| SubxtNodeError::DecodeExtrinsicAsCall(error.into()))
         })
-        .filter_ok(|call| {
-            matches!(
-                call,
-                Call::Timestamp(_) | Call::Midnight(_) | Call::MidnightSystem(_)
-            )
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let events = client
+        .events()
+        .from_bytes(events)
+        .iter()
+        .enumerate()
+        .map(|(index, event)| {
+            let event = event.map_err(|error| SubxtNodeError::GetNextEvent(error.into()))?;
+            let phase = Phase::from(event.phase());
+            let event = event
+                .decode_as::<Event>()
+                .map_err(|error| SubxtNodeError::DecodeEvent(error.into()))?;
+            Ok((phase, index as EventIndex, event))
         })
         .collect::<Result<Vec<_>, SubxtNodeError>>()?;
 
-    let timestamp = calls.iter().find_map(|call| match call {
-        Call::Timestamp(timestamp::Call::set { now }) => Some(*now),
-        _ => None,
-    });
-
-    let transactions = calls
-        .into_iter()
-        .filter_map(|call| match call {
-            Call::Midnight(send_mn_transaction { midnight_tx }) => {
-                Some(Transaction::Regular(midnight_tx.into()))
-            }
-
-            Call::MidnightSystem(send_mn_system_transaction { midnight_system_tx }) => {
-                Some(Transaction::System(midnight_system_tx.into()))
-            }
-
-            _ => None,
-        })
-        .collect::<Vec<_>>();
+    let timestamp = calls.iter().find_map(CallExt::timestamp);
+    let transactions = transactions(block, calls, &events);
 
     let mut dust_registration_events = vec![];
-    let mut system_transactions_from_events = vec![];
 
-    let events = client.events().from_bytes(events);
-
-    for event in events.iter() {
-        let event = event
-            .map_err(|error| SubxtNodeError::GetNextEvent(error.into()))?
-            .decode_as::<Event>()
-            .map_err(|error| SubxtNodeError::DecodeEvent(error.into()))?;
+    for (phase, index, event) in events {
+        let mut push_dust_registration =
+            |event| dust_registration_events.push((phase, index, event));
 
         match event {
             Event::Session(NewSession { .. }) => {
                 *authorities = None;
             }
 
-            // System transaction created by the node (not from extrinsics).
-            // These come from inherents which execute BEFORE regular transactions,
-            // so they must be prepended to maintain correct execution order.
-            Event::MidnightSystem(SystemTransactionApplied(transaction_applied)) => {
-                system_transactions_from_events.push(Transaction::System(ByteVec::from(
-                    transaction_applied.serialized_system_transaction,
-                )));
-            }
-
             // DUST registration events from NativeTokenObservation pallet.
             Event::CNightObservation(native_token_event) => match native_token_event {
                 CnightObservationEvent::Registration(event) => {
-                    dust_registration_events.push(DustRegistrationEvent::Registration {
+                    push_dust_registration(DustRegistrationEvent::Registration {
                         cardano_stake_key: event.cardano_reward_address.0.into(),
                         dust_address: event.dust_public_key.0.0.into(),
                     });
                 }
 
                 CnightObservationEvent::Deregistration(event) => {
-                    dust_registration_events.push(DustRegistrationEvent::Deregistration {
+                    push_dust_registration(DustRegistrationEvent::Deregistration {
                         cardano_stake_key: event.cardano_reward_address.0.into(),
                         dust_address: event.dust_public_key.0.0.into(),
                     });
                 }
 
                 CnightObservationEvent::MappingAdded(event) => {
-                    dust_registration_events.push(DustRegistrationEvent::MappingAdded {
+                    push_dust_registration(DustRegistrationEvent::MappingAdded {
                         cardano_stake_key: event.cardano_reward_address.0.into(),
                         dust_address: event.dust_public_key.0.0.into(),
                         utxo_id: event.utxo_tx_hash.0.as_ref().into(),
@@ -133,7 +123,7 @@ pub async fn make_block_details(
                 }
 
                 CnightObservationEvent::MappingRemoved(event) => {
-                    dust_registration_events.push(DustRegistrationEvent::MappingRemoved {
+                    push_dust_registration(DustRegistrationEvent::MappingRemoved {
                         cardano_stake_key: event.cardano_reward_address.0.into(),
                         dust_address: event.dust_public_key.0.0.into(),
                         utxo_id: event.utxo_tx_hash.0.as_ref().into(),
@@ -151,17 +141,95 @@ pub async fn make_block_details(
         }
     }
 
-    // Prepend system transactions from events (inherents) before regular transactions.
-    // In Substrate, inherents execute before regular transactions in a block.
-    system_transactions_from_events.extend(transactions);
-    let transactions = system_transactions_from_events;
-
     Ok(BlockDetails {
         timestamp,
         transactions,
         dust_registration_events,
         bridge_events: vec![],
     })
+}
+
+impl CallExt for runtime::Call {
+    fn transaction(self) -> Option<Transaction> {
+        use RuntimeCall::*;
+
+        // Exhaustive, so that a new pallet or call does not compile until it is handled.
+        match self {
+            Midnight(send_mn_transaction { midnight_tx }) => {
+                Some(Transaction::Regular(midnight_tx.into()))
+            }
+            MidnightSystem(send_mn_system_transaction { midnight_system_tx }) => {
+                Some(Transaction::System(midnight_system_tx.into()))
+            }
+            Midnight(set_tx_size_weight { .. })
+            | Timestamp(_)
+            | CNightObservation(_)
+            | System(_)
+            | Grandpa(_)
+            | SessionCommitteeManagement(_)
+            | Preimage(_)
+            | MultiBlockMigrations(_)
+            | PalletSession(_)
+            | Scheduler(_)
+            | TxPause(_)
+            | Beefy(_)
+            | Bridge(_)
+            | Council(_)
+            | CouncilMembership(_)
+            | TechnicalCommittee(_)
+            | TechnicalCommitteeMembership(_)
+            | FederatedAuthority(_)
+            | FederatedAuthorityObservation(_)
+            | SystemParameters(_) => None,
+        }
+    }
+
+    fn timestamp(&self) -> Option<u64> {
+        use RuntimeCall::Timestamp;
+
+        match self {
+            Timestamp(runtime::timestamp::Call::set { now }) => Some(*now),
+            _ => None,
+        }
+    }
+}
+
+impl EventExt for runtime::Event {
+    fn outcome(&self) -> Option<Result<Applied, String>> {
+        use RuntimeEvent::*;
+
+        match self {
+            Midnight(TxApplied(details)) => Some(Ok(Applied::Fully {
+                tx_hash: details.tx_hash.into(),
+            })),
+            Midnight(TxPartialSuccess(details)) => Some(Ok(Applied::Partially {
+                tx_hash: details.tx_hash.into(),
+            })),
+            System(ExtrinsicFailed { dispatch_error, .. }) => {
+                Some(Err(format!("{dispatch_error:?}")))
+            }
+            _ => None,
+        }
+    }
+
+    fn is_success(&self) -> bool {
+        matches!(self, RuntimeEvent::System(ExtrinsicSuccess { .. }))
+    }
+}
+
+impl SystemTransaction for runtime::Event {
+    fn transaction(&self) -> Option<(ByteVec, TransactionHash)> {
+        match self {
+            RuntimeEvent::MidnightSystem(SystemTransactionApplied(transaction_applied)) => Some((
+                transaction_applied
+                    .serialized_system_transaction
+                    .clone()
+                    .into(),
+                transaction_applied.hash.into(),
+            )),
+            _ => None,
+        }
+    }
 }
 
 pub async fn fetch_authorities(

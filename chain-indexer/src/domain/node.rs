@@ -13,11 +13,13 @@
 
 use crate::domain::{
     self, BlockRef, ContractAction, DustRegistrationEvent, SystemParametersChange,
+    extrinsic::{Applied, EventIndex, Phase},
 };
 use futures::Stream;
 use indexer_common::domain::{
     BlockAuthor, BlockHash, ByteVec, NodeVersion, ProtocolVersion, SerializedTransaction,
     SerializedTransactionIdentifier, TransactionHash,
+    bridge::BridgeEvent,
     ledger::{self, ZswapMerkleTreeRoot},
 };
 use std::{error::Error as StdError, fmt::Debug};
@@ -67,18 +69,38 @@ pub struct Block {
     pub timestamp: u64,
     pub zswap_merkle_tree_root: ZswapMerkleTreeRoot,
     pub ledger_state_root: Option<ByteVec>,
-    pub transactions: Vec<Transaction>,
-    pub dust_registration_events: Vec<DustRegistrationEvent>,
-    pub bridge_events: Vec<indexer_common::domain::bridge::BridgeEvent>,
+    /// Transactions in execution order, each with its phase and how it was applied or why it was
+    /// rejected.
+    pub transactions: Vec<(Phase, Transaction, Result<Applied, String>)>,
+    /// DUST registration events in execution order, each with its phase and event index.
+    pub dust_registration_events: Vec<(Phase, EventIndex, DustRegistrationEvent)>,
+    /// c2m-bridge events in execution order, each with its phase and event index.
+    pub bridge_events: Vec<(Phase, EventIndex, BridgeEvent)>,
 }
 
-impl TryFrom<Block> for (domain::Block, Vec<Transaction>) {
+impl TryFrom<Block>
+    for (
+        domain::Block,
+        Vec<(Phase, Transaction, Result<Applied, String>)>,
+    )
+{
     type Error = ledger::Error;
 
-    fn try_from(block: Block) -> Result<(domain::Block, Vec<Transaction>), Self::Error> {
+    fn try_from(block: Block) -> Result<Self, Self::Error> {
         let zswap_merkle_tree_root = block.zswap_merkle_tree_root.serialize()?;
 
         let transactions = block.transactions;
+        // Phase and event index are not persisted; the order is kept.
+        let dust_registration_events = block
+            .dust_registration_events
+            .into_iter()
+            .map(|(_, _, event)| event)
+            .collect();
+        let bridge_events = block
+            .bridge_events
+            .into_iter()
+            .map(|(_, _, event)| event)
+            .collect();
 
         let block = domain::Block {
             hash: block.hash,
@@ -89,8 +111,8 @@ impl TryFrom<Block> for (domain::Block, Vec<Transaction>) {
             timestamp: block.timestamp,
             zswap_merkle_tree_root,
             ledger_state_root: block.ledger_state_root,
-            dust_registration_events: block.dust_registration_events,
-            bridge_events: block.bridge_events,
+            dust_registration_events,
+            bridge_events,
             ledger_parameters: Default::default(),
             zswap_end_index: 0,
             dust_commitment_end_index: 0,
