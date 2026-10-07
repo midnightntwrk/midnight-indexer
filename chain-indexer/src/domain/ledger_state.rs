@@ -962,7 +962,7 @@ mod apply_transactions_tblock_tests {
                 }
                 let transactions = transactions
                     .iter()
-                    .map(|transaction| (transaction, fully as fn(_) -> _))
+                    .map(|transaction| (transaction, fully_applied as fn(_) -> _))
                     .collect::<Vec<_>>();
 
                 assert_eq!(
@@ -1016,7 +1016,7 @@ mod apply_transactions_tblock_tests {
             apply(
                 "preprod",
                 PROTOCOL_VERSION,
-                &[(&transaction, fully)],
+                &[(&transaction, fully_applied)],
                 BLOCK_TIME,
                 PARENT_BLOCK_TIME,
                 should_bump_first_regular_tblock(BLOCK_HEIGHT, PROTOCOL_VERSION),
@@ -1054,7 +1054,7 @@ mod apply_transactions_tblock_tests {
             apply(
                 "mainnet",
                 PROTOCOL_VERSION,
-                &[(&transaction, fully)],
+                &[(&transaction, fully_applied)],
                 BLOCK_TIME,
                 PARENT_BLOCK_TIME,
                 should_bump_first_regular_tblock(BLOCK_HEIGHT, PROTOCOL_VERSION),
@@ -1092,7 +1092,7 @@ mod apply_transactions_tblock_tests {
             let result = apply(
                 "preview",
                 protocol_version,
-                &[(&transaction, fully)],
+                &[(&transaction, fully_applied)],
                 BLOCK_TIME,
                 PARENT_BLOCK_TIME,
                 should_bump_first_regular_tblock(BLOCK_HEIGHT, protocol_version),
@@ -1131,7 +1131,7 @@ mod apply_transactions_tblock_tests {
             let transactions = apply(
                 NETWORK_ID,
                 protocol_version,
-                &[(&transaction, failed), (&transaction, fully)],
+                &[(&transaction, failed), (&transaction, fully_applied)],
                 NOW,
                 NOW - 6,
                 true,
@@ -1200,7 +1200,7 @@ mod apply_transactions_tblock_tests {
             let transactions = apply(
                 NETWORK_ID,
                 protocol_version,
-                &[(&first, failed), (&second, fully)],
+                &[(&first, failed), (&second, fully_applied)],
                 NOW,
                 NOW - 6,
                 true,
@@ -1237,7 +1237,7 @@ mod apply_transactions_tblock_tests {
         let transactions = apply(
             NETWORK_ID,
             protocol_version,
-            &[(&transaction, fully)],
+            &[(&transaction, fully_applied)],
             NOW,
             NOW - 18,
             true,
@@ -1267,7 +1267,7 @@ mod apply_transactions_tblock_tests {
         let transactions = apply(
             NETWORK_ID,
             protocol_version,
-            &[(&transaction, partially)],
+            &[(&transaction, partially_applied)],
             NOW,
             NOW - 6,
             true,
@@ -1324,7 +1324,7 @@ mod apply_transactions_tblock_tests {
         let transactions = apply(
             NETWORK_ID,
             protocol_version,
-            &[(&raw, fully)],
+            &[(&raw, fully_applied)],
             NOW,
             NOW - 6,
             true,
@@ -1366,11 +1366,11 @@ mod apply_transactions_tblock_tests {
         }
     }
 
-    fn fully(tx_hash: TransactionHash) -> Result<Applied, String> {
+    fn fully_applied(tx_hash: TransactionHash) -> Result<Applied, String> {
         Ok(Applied::Fully { tx_hash })
     }
 
-    fn partially(tx_hash: TransactionHash) -> Result<Applied, String> {
+    fn partially_applied(tx_hash: TransactionHash) -> Result<Applied, String> {
         Ok(Applied::Partially { tx_hash })
     }
 
