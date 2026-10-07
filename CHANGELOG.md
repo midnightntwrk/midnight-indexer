@@ -4,17 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [4.3.800-rc.2] - 2026-09-25
+## [4.3.800-rc.2] - 2026-10-07
 
 Security release candidate for the ledger-v8 mainnet line, cut on top of `4.3.800-rc.1`. It fixes a
 transaction that could halt ingestion (GHSA-67mp-mh58-qx5h), two halts on a block's first regular
 transaction, a ledger-DB root-count crash loop and API worker starvation under ledger query load,
-clears five dependency advisories, and tracks node 1.0.300 with ledger 8.1.2. It also brings
+clears five dependency advisories, and tracks node 1.0.400 with ledger 8.1.3. It also brings
 subscription and unshielded-query performance work, HTTP and WebSocket compression, and secrets
 from files from `main`.
 
-**In-place over `4.3.800-rc.1` or `4.3.7`**: no re-index. Ledger 8.1.0 → 8.1.2 changes no
-serialization output and no storage encoding. Three index-only migrations apply automatically at
+**In-place over `4.3.800-rc.1` or `4.3.7`**: no re-index. Ledger 8.1.0 → 8.1.3 changes no
+serialization output and no storage encoding. Ledger 8.1.3 rejects non-canonical values when
+decoding a transaction; a replay of mainnet and preprod history from genesis indexed every block to
+the tip. Three index-only migrations apply automatically at
 startup: postgres `007`, sqlite `005` and `009` (see Performance). The postgres index is not built
 `CONCURRENTLY`, so writes to `unshielded_utxos` block while it builds; time it on a mainnet-sized
 copy and plan the upgrade window.
@@ -29,7 +31,8 @@ Rolling back to `4.3.800-rc.1` or `4.3.7` is not binary-only: those builds refus
 a database carrying migrations they do not know. Delete `_sqlx_migrations` version `7` (postgres)
 or versions `5` and `9` (sqlite) first; the indexes can stay.
 
-Supported nodes: 0.22.0 and 1.0.300. Node 1.0.2 is not supported: it stops the first-transaction
+Supported nodes: 0.22.0 and 1.0.400. Node 1.0.400 runs runtime 1.0.300, and its metadata is
+byte-identical to node 1.0.300's. Node 1.0.2 is not supported: it stops the first-transaction
 `tblock` skew at a fixed date (2026-10-31) rather than at the 1.0.300 runtime upgrade. Deploy rc.2
 before the network's `set_code` to the 1.0.300 runtime.
 
@@ -37,6 +40,7 @@ before the network's `set_code` to the 1.0.300 runtime.
 
 - *(chain-indexer)* Align ledger crates with ledger 8.1.2 (#1532)
 - *(chain-indexer)* Support node 1.0.300 (#1521)
+- *(chain-indexer)* Support node 1.0.400 (#1651)
 - *(indexer-common)* Source secrets from files via `APP__*_FILE` environment variables (#1074)
 
   `APP__X_FILE=/path` sets `APP__X` from the contents of the file at `/path`.
@@ -162,9 +166,11 @@ before the network's `set_code` to the 1.0.300 runtime.
 
 - Bump crossbeam-epoch to 0.9.20 for RUSTSEC-2026-0204 (#1315)
 - Bump h2 to 0.4.17 for RUSTSEC-2026-0258 (#1449)
-- Node: 1.0.0 → 1.0.300 (#1521). Runtime 1.0.300 shares 1.0.0's metadata, so decoding does not
-  change. The 1.0.0 snapshot remains for mainnet tests.
-- Ledger: 8.1.0 → 8.1.2 (#1532), a security patch hardening low-level deserialization.
+- Node: 1.0.0 → 1.0.300 (#1521) → 1.0.400 (#1651). Runtime 1.0.300 shares 1.0.0's metadata, and
+  node 1.0.400 ships no new runtime, so decoding does not change. The 1.0.0 snapshot remains for
+  mainnet tests.
+- Ledger: 8.1.0 → 8.1.2 (#1532) → 8.1.3 (#1651). Both are security patches hardening low-level
+  deserialization; 8.1.3 rejects contract call transcripts embedding non-canonical field values.
 
 ## [4.3.800-rc.1] - 2026-08-25
 
