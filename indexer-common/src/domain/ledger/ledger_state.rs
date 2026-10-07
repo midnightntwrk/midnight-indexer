@@ -3390,7 +3390,7 @@ mod tests {
                 .starts_with(b"midnight:contract-state[v8]:"),
             "the translated state must serialize with the ledger-9 tag"
         );
-        let balances = translated.balances()?;
+        let balances = translated.balances();
         assert_eq!(balances.len(), 1);
         assert_eq!(
             balances[0].amount, AMOUNT,
@@ -3525,7 +3525,7 @@ mod tests {
         );
 
         // Field reads must survive the lazy reload too, not just the byte-level walk.
-        let balances = reloaded.balances()?;
+        let balances = reloaded.balances();
         assert_eq!(balances.len(), 1);
         assert_eq!(balances[0].amount, AMOUNT);
 
