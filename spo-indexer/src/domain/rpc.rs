@@ -118,11 +118,16 @@ pub struct CandidateRegistration {
     pub invalid_reasons: Option<InvalidReasons>,
 }
 
+/// The node returns whatever keys the registrant put in the Cardano datum, and a registration
+/// lacking `aura` or `gran` is still returned (marked invalid), so both must be optional.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct CandidateKeys {
-    pub gran: String,
-    pub aura: String,
+    #[serde(default)]
+    pub gran: Option<String>,
+
+    #[serde(default)]
+    pub aura: Option<String>,
 }
 
 impl Display for CandidateRegistration {
@@ -135,8 +140,16 @@ impl Display for CandidateRegistration {
         )?;
         writeln!(f, "      Mainchain Pub Key: {}", self.mainchain_pub_key)?;
         writeln!(f, "      Cross Chain Pub Key: {}", self.cross_chain_pub_key)?;
-        writeln!(f, "      Aura Pub Key: {}", self.keys.aura)?;
-        writeln!(f, "      Grandpa Pub Key: {}", self.keys.gran)?;
+        writeln!(
+            f,
+            "      Aura Pub Key: {}",
+            self.keys.aura.as_deref().unwrap_or("<missing>")
+        )?;
+        writeln!(
+            f,
+            "      Grandpa Pub Key: {}",
+            self.keys.gran.as_deref().unwrap_or("<missing>")
+        )?;
         writeln!(f, "      Sidechain Signature: {}", self.sidechain_signature)?;
         writeln!(f, "      Mainchain Signature: {}", self.mainchain_signature)?;
         writeln!(
@@ -279,15 +292,15 @@ pub struct TimestampExtrinsic {
 #[cfg(test)]
 mod tests {
     use crate::domain::rpc::{CandidateRegistration, InvalidReasons};
-    use serde_json::json;
+    use serde_json::{Value, json};
 
-    fn registration(invalid_reasons: serde_json::Value) -> serde_json::Value {
-        json!({
+    fn registration(keys: Value, invalid_reasons: Option<Value>) -> Value {
+        let mut registration = json!({
             "sidechainPubKey": "0x01",
             "sidechainAccountId": "account",
             "mainchainPubKey": "0x02",
             "crossChainPubKey": "0x03",
-            "keys": { "gran": "0x04", "aura": "0x05" },
+            "keys": keys,
             "sidechainSignature": "0x06",
             "mainchainSignature": "0x07",
             "crossChainSignature": "0x08",
@@ -298,17 +311,27 @@ mod tests {
                 "slotNumber": 3,
                 "txIndexWithinBlock": 0
             },
-            "isValid": false,
-            "invalidReasons": invalid_reasons
-        })
+            "isValid": invalid_reasons.is_none()
+        });
+
+        // The node omits `invalidReasons` for valid registrations.
+        if let Some(invalid_reasons) = invalid_reasons {
+            registration["invalidReasons"] = invalid_reasons;
+        }
+
+        registration
+    }
+
+    fn deserialize(registration: Value) -> CandidateRegistration {
+        serde_json::from_value(registration).expect("registration can be deserialized")
     }
 
     #[test]
     fn test_invalid_reasons_stake_error() {
-        let registration = serde_json::from_value::<CandidateRegistration>(registration(
-            json!({ "StakeError": "insufficient stake" }),
-        ))
-        .expect("registration can be deserialized");
+        let keys = json!({ "gran": "0x04", "aura": "0x05" });
+        let reason = json!({ "StakeError": "insufficient stake" });
+
+        let registration = deserialize(registration(keys, Some(reason)));
 
         assert!(matches!(
             registration.invalid_reasons,
@@ -317,16 +340,65 @@ mod tests {
     }
 
     #[test]
+    fn test_invalid_reasons_absent_or_null() {
+        let keys = json!({ "gran": "0x04", "aura": "0x05" });
+
+        for invalid_reasons in [None, Some(Value::Null)] {
+            let registration = deserialize(registration(keys.clone(), invalid_reasons));
+            assert!(registration.invalid_reasons.is_none());
+        }
+    }
+
+    #[test]
     fn test_invalid_reasons_unmodeled() {
-        let reason = json!({ "InvalidRegistrationData": "invalid mainchain signature" });
+        let keys = json!({ "gran": "0x04", "aura": "0x05" });
+        let reasons = [
+            json!({ "InvalidRegistrationData": "invalid mainchain signature" }),
+            json!({ "StakeError": 42 }),
+            json!({}),
+            json!("InvalidAccountKeys"),
+            json!(42),
+            json!(true),
+            json!(["InvalidMainchainSignature", "InvalidSidechainSignature"]),
+        ];
 
-        let registration =
-            serde_json::from_value::<CandidateRegistration>(registration(reason.clone()))
-                .expect("registration can be deserialized");
+        for reason in reasons {
+            let registration = deserialize(registration(keys.clone(), Some(reason.clone())));
 
-        assert!(matches!(
-            registration.invalid_reasons,
-            Some(InvalidReasons::Other(other)) if other == reason
-        ));
+            assert!(
+                matches!(
+                    &registration.invalid_reasons,
+                    Some(InvalidReasons::Other(other)) if *other == reason
+                ),
+                "{reason} should decode as InvalidReasons::Other"
+            );
+        }
+    }
+
+    #[test]
+    fn test_keys() {
+        let cases = [
+            (
+                json!({ "gran": "0x04", "aura": "0x05" }),
+                Some("0x04"),
+                Some("0x05"),
+            ),
+            (json!({ "gran": "0x04" }), Some("0x04"), None),
+            (json!({ "aura": "0x05" }), None, Some("0x05")),
+            (json!({}), None, None),
+            (
+                json!({ "gran": "0x04", "aura": "0x05", "beef": "0x06" }),
+                Some("0x04"),
+                Some("0x05"),
+            ),
+        ];
+
+        for (keys, gran, aura) in cases {
+            let reason = json!({ "InvalidRegistrationData": "InvalidAccountKeys" });
+            let registration = deserialize(registration(keys.clone(), Some(reason)));
+
+            assert_eq!(registration.keys.gran.as_deref(), gran, "gran for {keys}");
+            assert_eq!(registration.keys.aura.as_deref(), aura, "aura for {keys}");
+        }
     }
 }
