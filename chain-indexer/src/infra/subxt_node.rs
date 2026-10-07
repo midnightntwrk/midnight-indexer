@@ -308,8 +308,8 @@ impl SubxtNode {
                 let genesis_registrations =
                     runtimes::fetch_genesis_cnight_registrations(state_node_version, &block)
                         .await?;
-                // Registrations read from storage are part of the genesis state, which is set before
-                // any extrinsic; their index is their position in the read.
+                // Registrations read from storage are part of the genesis state, which is set
+                // before any extrinsic; their index is their position in the read.
                 dust_registration_events.extend(genesis_registrations.into_iter().enumerate().map(
                     |(position, event)| (Phase::Initialization, position as EventIndex, event),
                 ));

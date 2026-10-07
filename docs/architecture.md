@@ -64,12 +64,12 @@ transactions; every other call is ignored whatever its outcome:
 
 | Call | What the indexer does |
 |---|---|
-| `Midnight::send_mn_transaction` | A regular transaction. Applied if it was applied on chain, recorded as `FAILURE` (zero fees, no effects, ledger state untouched) if it was rejected at dispatch |
+| `Midnight::send_mn_transaction` | A regular transaction. Applied if it was applied on chain, recorded as `FAILURE` (zero fees, no effects, ledger state untouched) if it failed at dispatch |
 | `MidnightSystem::send_mn_system_transaction` (top level) | Never a transaction after genesis: it is `Root`-only, so in an executed block it can only have failed, and is ignored like any other failed call. One that applied would be taken from its `SystemTransactionApplied` event |
 
 **Outcomes come from events that only the extrinsic's own dispatch emits**, under its phase
 `ApplyExtrinsic(i)`: `Midnight::TxApplied` (applied), `Midnight::TxPartialSuccess` (partially
-applied) and `System::ExtrinsicFailed` (rejected, for example `CallFiltered` in safe mode). Each
+applied) and `System::ExtrinsicFailed` (failed, for example `CallFiltered` in safe mode). Each
 `Midnight` extrinsic gets exactly one. The hash in the `TxApplied` and `TxPartialSuccess` events,
 and the result the indexer's own ledger computes, must agree with the outcome on chain. A
 disagreement, a missing or repeated outcome, or an outcome for an extrinsic that is not a

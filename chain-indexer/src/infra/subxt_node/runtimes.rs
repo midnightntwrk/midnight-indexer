@@ -37,8 +37,8 @@ pub type AtBlock<C> = subxt::client::ClientAtBlock<SubstrateConfig, C>;
 /// Runtime specific block details.
 pub struct BlockDetails {
     pub timestamp: Option<u64>,
-    /// Transactions in execution order, each with its phase and how it was applied or why it was
-    /// rejected.
+    /// Transactions in execution order, each with its phase and how it was applied or why it
+    /// failed.
     pub transactions: Vec<(Phase, Transaction, Result<Applied, String>)>,
     /// DUST registration events in execution order, each with its phase and event index.
     pub dust_registration_events: Vec<(Phase, EventIndex, DustRegistrationEvent)>,
@@ -274,7 +274,7 @@ pub async fn get_terms_and_conditions(
 }
 
 /// The block's transactions in execution order, each with its phase and how it was applied or why
-/// it was rejected.
+/// it failed.
 fn transactions(
     block: BlockRef,
     calls: Vec<impl CallExt>,
@@ -531,7 +531,7 @@ mod tests {
                     Ok(Applied::Partially { tx_hash }) => {
                         format!("partially {}", const_hex::encode(&tx_hash.as_ref()[..4]))
                     }
-                    Err(error) => format!("rejected {error}"),
+                    Err(error) => format!("failed {error}"),
                 };
                 format!(
                     "{kind} {} {}..{} {phase:?} {outcome}",
@@ -914,7 +914,7 @@ mod tests {
     ];
 
     #[tokio::test]
-    async fn rejected_midnight_extrinsic_keeps_its_place() {
+    async fn failed_midnight_extrinsic_keeps_its_place() {
         for (dir, spec_version) in RUNTIMES {
             let synthetic = Synthetic(metadata(dir));
             let extrinsics = vec![synthetic.timestamp(), synthetic.midnight(&[7; 8])];
@@ -925,7 +925,7 @@ mod tests {
                 .unwrap();
 
             let [(phase, transaction, Err(error))] = details.transactions.as_slice() else {
-                panic!("{dir}: one rejected transaction expected");
+                panic!("{dir}: one failed transaction expected");
             };
             assert_eq!(*phase, Phase::ApplyExtrinsic(1), "{dir}");
             assert_eq!(*transaction, Transaction::Regular(bytes(7)), "{dir}");

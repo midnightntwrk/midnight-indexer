@@ -69,8 +69,8 @@ pub struct Block {
     pub timestamp: u64,
     pub zswap_merkle_tree_root: ZswapMerkleTreeRoot,
     pub ledger_state_root: Option<ByteVec>,
-    /// Transactions in execution order, each with its phase and how it was applied or why it was
-    /// rejected.
+    /// Transactions in execution order, each with its phase and how it was applied or why it
+    /// failed.
     pub transactions: Vec<(Phase, Transaction, Result<Applied, String>)>,
     /// DUST registration events in execution order, each with its phase and event index.
     pub dust_registration_events: Vec<(Phase, EventIndex, DustRegistrationEvent)>,

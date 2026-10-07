@@ -200,18 +200,18 @@ impl LedgerState {
                 use node::Transaction::*;
 
                 match (transaction, outcome) {
-                    // Rejected at dispatch: the state is unchanged, so the transaction is recorded
-                    // as failed and never passed to the ledger. It does not count as applied for
-                    // the first-regular-`tblock` rule.
+                    // Failed at dispatch: the state is unchanged, so the transaction is never
+                    // passed to the ledger. It does not count as applied for the
+                    // first-regular-`tblock` rule.
                     (Regular(transaction), Err(error)) => {
                         debug!(
                             transaction_hash:% = transaction.hash,
                             phase:?,
                             error:%;
-                            "regular transaction rejected at dispatch"
+                            "regular transaction failed at dispatch"
                         );
 
-                        self.record_rejected_regular_transaction(transaction)
+                        self.failed_regular_transaction(transaction)
                             .map(|transaction| Transaction::Regular(transaction.into()))
                     }
 
@@ -252,7 +252,7 @@ impl LedgerState {
                             Err(error) => divergence(
                                 block,
                                 format_args!(
-                                    "system transaction {} in {phase:?}: rejected on chain \
+                                    "system transaction {} in {phase:?}: failed on chain \
                                      ({error}), but it is applied",
                                     transaction.hash()
                                 ),
@@ -357,10 +357,11 @@ impl LedgerState {
         Ok(captured.values().filter(|(key, _)| key.is_none()).count())
     }
 
-    // Records a regular transaction that was rejected at dispatch as a failed one. It never
-    // reaches the ledger, whose state it leaves unchanged: no fees, no UTXOs, no ledger events, no
-    // contract actions, and the state indices and root are the current ones.
-    fn record_rejected_regular_transaction(
+    // Converts a regular transaction that failed at dispatch into a domain regular transaction
+    // with a `Failure` result. It never reaches the ledger, whose state it leaves unchanged: no
+    // fees, no UTXOs, no ledger events, no contract actions, and the state indices and root are the
+    // current ones.
+    fn failed_regular_transaction(
         &self,
         transaction: node::RegularTransaction,
     ) -> Result<RegularTransaction, Error> {
@@ -1106,11 +1107,11 @@ mod apply_transactions_tblock_tests {
         }
     }
 
-    // A transaction rejected at dispatch is never applied: it is recorded as failed with no fees and
-    // no effects, and it leaves the ledger state, and the indices recorded for the next one,
-    // untouched.
+    // A transaction that failed at dispatch is never applied: it is recorded as failed with no
+    // fees and no effects, and it leaves the ledger state, and the indices recorded for the next
+    // one, untouched.
     #[tokio::test(flavor = "multi_thread")]
-    async fn rejected_transaction_is_recorded_as_failure_and_leaves_the_state_untouched()
+    async fn failed_transaction_is_recorded_as_failure_and_leaves_the_state_untouched()
     -> Result<(), BoxError> {
         let _ledger_db = init_ledger_db().await?;
 
@@ -1121,52 +1122,52 @@ mod apply_transactions_tblock_tests {
             let transactions = apply_with_outcomes(
                 NETWORK_ID,
                 protocol_version,
-                &[(&transaction, rejected), (&transaction, fully)],
+                &[(&transaction, failed), (&transaction, fully)],
                 NOW,
                 NOW - 6,
                 true,
             )?
             .unwrap();
-            let [rejected, applied] = transactions.as_slice() else {
+            let [failed, applied] = transactions.as_slice() else {
                 panic!("{ledger_version}: two transactions expected");
             };
-            let (rejected, applied) = (regular(rejected), regular(applied));
+            let (failed, applied) = (regular(failed), regular(applied));
 
             // Were it applied, this transaction would succeed, as it does second.
             assert_eq!(
-                rejected.transaction_result,
+                failed.transaction_result,
                 TransactionResult::Failure,
                 "{ledger_version}"
             );
             assert_eq!(applied.transaction_result, TransactionResult::Success);
-            assert_eq!(rejected.hash, applied.hash);
-            assert_eq!((rejected.paid_fees, rejected.estimated_fees), (0, 0));
-            assert!(rejected.created_unshielded_utxos.is_empty());
-            assert!(rejected.spent_unshielded_utxos.is_empty());
-            assert!(rejected.ledger_events.is_empty());
-            assert!(rejected.contract_actions.is_empty());
-            assert_eq!(rejected.zswap_start_index, rejected.zswap_end_index);
+            assert_eq!(failed.hash, applied.hash);
+            assert_eq!((failed.paid_fees, failed.estimated_fees), (0, 0));
+            assert!(failed.created_unshielded_utxos.is_empty());
+            assert!(failed.spent_unshielded_utxos.is_empty());
+            assert!(failed.ledger_events.is_empty());
+            assert!(failed.contract_actions.is_empty());
+            assert_eq!(failed.zswap_start_index, failed.zswap_end_index);
             assert_eq!(
-                rejected.dust_commitment_start_index,
-                rejected.dust_commitment_end_index
+                failed.dust_commitment_start_index,
+                failed.dust_commitment_end_index
             );
             assert_eq!(
-                rejected.dust_generation_start_index,
-                rejected.dust_generation_end_index
+                failed.dust_generation_start_index,
+                failed.dust_generation_end_index
             );
 
-            // The state did not move: the next transaction starts where the rejected one stood.
-            assert_eq!(rejected.zswap_end_index, applied.zswap_start_index);
+            // The state did not move: the next transaction starts where the failed one stood.
+            assert_eq!(failed.zswap_end_index, applied.zswap_start_index);
             assert_eq!(
-                rejected.dust_commitment_end_index,
+                failed.dust_commitment_end_index,
                 applied.dust_commitment_start_index
             );
             assert_eq!(
-                rejected.dust_generation_end_index,
+                failed.dust_generation_end_index,
                 applied.dust_generation_start_index
             );
             assert_eq!(
-                rejected.zswap_merkle_tree_root,
+                failed.zswap_merkle_tree_root,
                 applied.zswap_merkle_tree_root
             );
         }
@@ -1174,11 +1175,11 @@ mod apply_transactions_tblock_tests {
         Ok(())
     }
 
-    // A rejected transaction does not count as applied for the first-regular-`tblock` rule, so
+    // A failed transaction does not count as applied for the first-regular-`tblock` rule, so
     // the next regular transaction is still the first: its dust `ctime` of `NOW + 4s` is only
     // valid at the adjusted `tblock` `NOW + 6s`.
     #[tokio::test(flavor = "multi_thread")]
-    async fn rejected_transaction_does_not_use_up_the_first_regular_tblock_bump()
+    async fn failed_transaction_does_not_use_up_the_first_regular_tblock_bump()
     -> Result<(), BoxError> {
         let _ledger_db = init_ledger_db().await?;
 
@@ -1190,7 +1191,7 @@ mod apply_transactions_tblock_tests {
             let transactions = apply_with_outcomes(
                 NETWORK_ID,
                 protocol_version,
-                &[(&first, rejected), (&second, fully)],
+                &[(&first, failed), (&second, fully)],
                 NOW,
                 NOW - 6,
                 true,
@@ -1302,7 +1303,8 @@ mod apply_transactions_tblock_tests {
         );
     }
 
-    // The chain's hash and outcome agreeing with the ledger is not a divergence, also with the feature.
+    // The chain's hash and outcome agreeing with the ledger is not a divergence, also with the
+    // feature.
     #[tokio::test(flavor = "multi_thread")]
     async fn chain_and_ledger_agreeing_is_not_a_divergence() -> Result<(), BoxError> {
         let _ledger_db = init_ledger_db().await?;
@@ -1401,8 +1403,8 @@ mod apply_transactions_tblock_tests {
         Ok(Applied::Partially { tx_hash })
     }
 
-    // Rejected at dispatch with `CallFiltered`, as in safe mode.
-    fn rejected(_: TransactionHash) -> Result<Applied, String> {
+    // Failed at dispatch with `CallFiltered`, as in safe mode.
+    fn failed(_: TransactionHash) -> Result<Applied, String> {
         Err("Module(ModuleError { index: 0, error: [5, 0, 0, 0] })".to_string())
     }
 
