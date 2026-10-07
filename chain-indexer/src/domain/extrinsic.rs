@@ -13,9 +13,11 @@
 
 //! How a block's extrinsics were executed: the [`Phase`] of block execution an item is recorded
 //! under, the [`ExtrinsicIndex`] and [`EventIndex`] it comes from, and how a transaction was
-//! [`Applied`].
+//! [`Applied`]. [`divergence`] reports where the indexer disagrees with the chain.
 
 use indexer_common::domain::TransactionHash;
+use log::error;
+use std::fmt;
 
 /// The index of an extrinsic in the block body.
 pub type ExtrinsicIndex = u32;
@@ -52,9 +54,19 @@ impl Applied {
     }
 }
 
+/// Report a divergence of the indexer from the chain: log it at error level and carry on. With
+/// the non-default `divergence-halt` feature, which is for local trial runs over chain snapshots
+/// only, panic instead so that indexing stops at that block.
+pub fn divergence(args: fmt::Arguments<'_>) {
+    error!("divergence from the chain: {args}");
+
+    #[cfg(feature = "divergence-halt")]
+    panic!("divergence from the chain: {args}");
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Applied, Phase::*};
+    use super::{Applied, Phase::*, divergence};
 
     #[test]
     fn phase_orders_by_execution() {
@@ -83,5 +95,18 @@ mod tests {
 
         assert_eq!(Applied::Fully { tx_hash }.tx_hash(), tx_hash);
         assert_eq!(Applied::Partially { tx_hash }.tx_hash(), tx_hash);
+    }
+
+    #[test]
+    #[cfg(not(feature = "divergence-halt"))]
+    fn divergence_only_logs_by_default() {
+        divergence(format_args!("a divergence"));
+    }
+
+    #[test]
+    #[cfg(feature = "divergence-halt")]
+    #[should_panic(expected = "divergence from the chain: a divergence")]
+    fn divergence_halts_with_the_feature() {
+        divergence(format_args!("a divergence"));
     }
 }

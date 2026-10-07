@@ -87,3 +87,6 @@ subxt              = { workspace = true }
 [features]
 cloud      = [ "indexer-common/cloud" ]
 standalone = [ "indexer-common/standalone" ]
+
+# Local trial runs only, never in release builds: panic at the first divergence from the chain.
+divergence-halt = []
