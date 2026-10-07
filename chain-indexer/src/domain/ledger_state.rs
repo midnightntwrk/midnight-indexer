@@ -367,16 +367,16 @@ impl LedgerState {
     ) -> Result<RegularTransaction, Error> {
         let mut transaction = RegularTransaction::from(transaction);
 
-        transaction.transaction_result = TransactionResult::Failure;
-        transaction.paid_fees = 0;
-        transaction.estimated_fees = 0;
-        transaction.contract_actions.clear();
         self.set_state_range(
             &mut transaction,
             self.zswap_first_free(),
             self.dust_commitments_first_free(),
             self.dust_generations_first_free(),
         )?;
+        transaction.transaction_result = TransactionResult::Failure;
+        transaction.paid_fees = 0;
+        transaction.estimated_fees = 0;
+        transaction.contract_actions.clear();
 
         Ok(transaction)
     }
