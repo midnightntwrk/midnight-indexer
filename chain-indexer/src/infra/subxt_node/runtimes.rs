@@ -28,7 +28,7 @@ use crate::{
 };
 use indexer_common::domain::{ByteVec, NodeVersion, TransactionHash, bridge::BridgeEvent};
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, fmt};
+use std::collections::BTreeMap;
 use subxt::{SubstrateConfig, client::OfflineClientAtBlockT};
 
 /// A client at a block, online or offline.
@@ -357,7 +357,7 @@ fn regular_transaction(
     match (transaction, outcome) {
         (Some(transaction), outcome) => Some((phase, transaction, outcome)),
         (None, Ok(applied)) => {
-            divergence_in(
+            divergence(
                 block,
                 format_args!("{applied:?} under {phase:?}, which has no Midnight transaction"),
             );
@@ -382,7 +382,7 @@ fn successful_transaction(
 
     match extrinsics.get(&index) {
         Some(Transaction::Regular(_)) => {
-            divergence_in(
+            divergence(
                 block,
                 format_args!(
                     "Midnight extrinsic {index} succeeded without TxApplied or TxPartialSuccess"
@@ -405,22 +405,15 @@ fn unaccounted(block: BlockRef, extrinsics: BTreeMap<ExtrinsicIndex, Transaction
     extrinsics
         .iter()
         .for_each(|(index, transaction)| match transaction {
-            Regular(_) => divergence_in(
+            Regular(_) => divergence(
                 block,
                 format_args!("Midnight extrinsic {index} has no outcome"),
             ),
-            System(_) => divergence_in(
+            System(_) => divergence(
                 block,
                 format_args!("top-level MidnightSystem extrinsic {index} in an executed block"),
             ),
         });
-}
-
-fn divergence_in(block: BlockRef, args: fmt::Arguments<'_>) {
-    divergence(format_args!(
-        "block {} at height {}: {args}",
-        block.hash, block.height
-    ));
 }
 
 #[cfg(test)]

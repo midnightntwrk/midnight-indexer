@@ -15,6 +15,7 @@
 //! under, the [`ExtrinsicIndex`] and [`EventIndex`] it comes from, and how a transaction was
 //! [`Applied`]. [`divergence`] reports where the indexer disagrees with the chain.
 
+use crate::domain::BlockRef;
 use indexer_common::domain::TransactionHash;
 use log::error;
 use std::fmt;
@@ -54,19 +55,28 @@ impl Applied {
     }
 }
 
-/// Report a divergence of the indexer from the chain: log it at error level and carry on. With
-/// the non-default `divergence-halt` feature, which is for local trial runs over chain snapshots
-/// only, panic instead so that indexing stops at that block.
-pub fn divergence(args: fmt::Arguments<'_>) {
-    error!("divergence from the chain: {args}");
+/// Report a divergence of the indexer from the chain in the given block: log it at error level
+/// and carry on. With the non-default `divergence-halt` feature, which is for local trial runs over
+/// chain snapshots only, panic instead so that indexing stops at that block.
+pub fn divergence(block: BlockRef, args: fmt::Arguments<'_>) {
+    let BlockRef { hash, height } = block;
+    error!("divergence from the chain in block {hash} at height {height}: {args}");
 
     #[cfg(feature = "divergence-halt")]
-    panic!("divergence from the chain: {args}");
+    panic!("divergence from the chain in block {hash} at height {height}: {args}");
 }
 
 #[cfg(test)]
 mod tests {
     use super::{Applied, Phase::*, divergence};
+    use crate::domain::BlockRef;
+
+    fn block() -> BlockRef {
+        BlockRef {
+            hash: [0xb1; 32].into(),
+            height: 5,
+        }
+    }
 
     #[test]
     fn phase_orders_by_execution() {
@@ -100,13 +110,13 @@ mod tests {
     #[test]
     #[cfg(not(feature = "divergence-halt"))]
     fn divergence_only_logs_by_default() {
-        divergence(format_args!("a divergence"));
+        divergence(block(), format_args!("a divergence"));
     }
 
     #[test]
     #[cfg(feature = "divergence-halt")]
-    #[should_panic(expected = "divergence from the chain: a divergence")]
+    #[should_panic(expected = "divergence from the chain in block b1b1")]
     fn divergence_halts_with_the_feature() {
-        divergence(format_args!("a divergence"));
+        divergence(block(), format_args!("a divergence"));
     }
 }

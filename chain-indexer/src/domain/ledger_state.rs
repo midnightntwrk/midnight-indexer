@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::domain::{
-    ContractAction, RegularTransaction, SystemTransaction, Transaction,
+    BlockRef, ContractAction, RegularTransaction, SystemTransaction, Transaction,
     extrinsic::{Applied, Phase, divergence},
     node,
 };
@@ -175,6 +175,7 @@ impl LedgerState {
     pub fn apply_transactions(
         &mut self,
         transactions: impl IntoIterator<Item = (Phase, node::Transaction, Result<Applied, String>)>,
+        block: BlockRef,
         parent_block_hash: BlockHash,
         block_timestamp: u64,
         parent_block_timestamp: u64,
@@ -230,11 +231,11 @@ impl LedgerState {
                             matches!(transaction.transaction_result, TransactionResult::Failure);
 
                         check_regular_transaction(
+                            block,
                             &transaction,
                             failure_reason,
                             &applied,
                             phase,
-                            parent_block_hash,
                         );
 
                         Ok(Transaction::Regular(transaction.into()))
@@ -246,16 +247,16 @@ impl LedgerState {
 
                         // Only applied system transactions are ever passed in.
                         match outcome {
-                            Ok(applied) => {
-                                check_hash(transaction.hash(), &applied, phase, parent_block_hash)
-                            }
+                            Ok(applied) => check_hash(block, transaction.hash(), &applied, phase),
 
-                            Err(error) => divergence(format_args!(
-                                "system transaction {} in {phase:?} of the block with parent \
-                                 {parent_block_hash}: rejected on chain ({error}), but \
-                                 it is applied",
-                                transaction.hash()
-                            )),
+                            Err(error) => divergence(
+                                block,
+                                format_args!(
+                                    "system transaction {} in {phase:?}: rejected on chain \
+                                     ({error}), but it is applied",
+                                    transaction.hash()
+                                ),
+                            ),
                         }
 
                         Ok(transaction)
@@ -600,11 +601,11 @@ pub enum Error {
 /// The ledger result of an applied regular transaction must be how it was applied on chain; a
 /// disagreement is a divergence.
 fn check_regular_transaction(
+    block: BlockRef,
     transaction: &RegularTransaction,
     failure_reason: Option<String>,
     applied: &Applied,
     phase: Phase,
-    parent_block_hash: BlockHash,
 ) {
     use {Applied::*, TransactionResult::*};
 
@@ -616,29 +617,26 @@ fn check_regular_transaction(
         let reason = failure_reason
             .map(|reason| format!(": {reason}"))
             .unwrap_or_default();
-        divergence(format_args!(
-            "transaction {} in {phase:?} of the block with parent {parent_block_hash}: {applied:?} \
-             on chain, {:?} in the ledger{reason}",
-            transaction.hash, transaction.transaction_result
-        ));
+        divergence(
+            block,
+            format_args!(
+                "transaction {} in {phase:?}: {applied:?} on chain, {:?} in the ledger{reason}",
+                transaction.hash, transaction.transaction_result
+            ),
+        );
     }
 
-    check_hash(transaction.hash, applied, phase, parent_block_hash);
+    check_hash(block, transaction.hash, applied, phase);
 }
 
 /// The hash recorded on chain for an applied transaction must be the indexer's.
-fn check_hash(
-    hash: TransactionHash,
-    applied: &Applied,
-    phase: Phase,
-    parent_block_hash: BlockHash,
-) {
+fn check_hash(block: BlockRef, hash: TransactionHash, applied: &Applied, phase: Phase) {
     let tx_hash = applied.tx_hash();
     if tx_hash != hash {
-        divergence(format_args!(
-            "transaction {hash} in {phase:?} of the block with parent {parent_block_hash}: hash \
-             {tx_hash} on chain",
-        ));
+        divergence(
+            block,
+            format_args!("transaction {hash} in {phase:?}: hash {tx_hash} on chain"),
+        );
     }
 }
 
@@ -817,7 +815,7 @@ mod tblock_skew_tests {
 mod apply_transactions_tblock_tests {
     use super::should_bump_first_regular_tblock;
     use crate::domain::{
-        LedgerState, Transaction,
+        BlockRef, LedgerState, Transaction,
         extrinsic::{Applied, Phase},
         node,
     };
@@ -1442,6 +1440,10 @@ mod apply_transactions_tblock_tests {
 
         match ledger_state.apply_transactions(
             transactions,
+            BlockRef {
+                hash: [1; 32].into(),
+                height: 1,
+            },
             BlockHash::from([0; 32]),
             block_time * 1_000,
             parent_block_time * 1_000,
