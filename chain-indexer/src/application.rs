@@ -73,6 +73,13 @@ pub struct Config {
     /// per-block passes.
     pub gc_interval: NonZeroU32,
 
+    /// `gc_interval` while not caught up. A completed pass marks the whole live set and scans the
+    /// whole ledger DB, so its cost grows with the arena rather than with the garbage since the
+    /// last pass: fewer, longer passes sync much faster and still keep the arena bounded. The
+    /// longer pauses only matter at the tip, where `gc_interval` applies.
+    #[serde(default = "gc_catch_up_interval_default")]
+    pub gc_catch_up_interval: NonZeroU32,
+
     /// Sample the arena size metrics every N blocks, or never if `0`. Each sample counts the rows in
     /// `ledger_db_nodes`, which is a full scan proportional to the size of the arena, so this is
     /// deliberately opt-in and deliberately not tied to the gc interval.
@@ -82,6 +89,10 @@ pub struct Config {
     /// is unpersisted. Must comfortably exceed indexer-api's block-hash snapshot reads, e.g.
     /// the dust generations subscription's max_snapshot_age, or those reads hit culled state.
     pub ledger_state_retention: NonZeroUsize,
+}
+
+pub fn gc_catch_up_interval_default() -> NonZeroU32 {
+    NonZeroU32::new(500).expect("500 is not zero")
 }
 
 pub async fn run(
@@ -98,6 +109,7 @@ pub async fn run(
         caught_up_leeway,
         gc_bound,
         gc_interval,
+        gc_catch_up_interval,
         arena_metrics_interval,
         ledger_state_retention,
     } = config;
@@ -304,6 +316,11 @@ pub async fn run(
 
                 // Run a time-bounded mark-and-sweep pass every gc_interval blocks, with the budget
                 // for all of them; skip when disabled.
+                let gc_interval = if caught_up {
+                    gc_interval
+                } else {
+                    gc_catch_up_interval
+                };
                 if !gc_bound.is_zero() && blocks_since_gc >= gc_interval.get() {
                     let started = Instant::now();
                     let nodes_culled = LedgerState::gc(gc_bound * blocks_since_gc);
