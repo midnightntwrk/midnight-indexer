@@ -12,6 +12,7 @@ name: rust-security-scan
 # This is acceptable because fork PRs still get security scanning via cargo-deny.
 
 permissions:
+  actions: read # required for SARIF upload in a private repo
   contents: read
   security-events: write # required for SARIF upload
 
