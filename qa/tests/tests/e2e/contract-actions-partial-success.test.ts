@@ -36,7 +36,7 @@ import type { RegularTransaction } from '@utils/indexer/indexer-types';
 
 // First use also builds the Compact toolchain image and pulls the toolkit image.
 const SETUP_TIMEOUT = 900_000; // 15 minutes
-const CONTRACT_ACTION_TIMEOUT = 600_000; // 10 minutes — deploy plus four proven calls
+const CONTRACT_ACTION_TIMEOUT = 600_000; // 10 minutes — the slowest step: two proven calls
 const TEST_TIMEOUT = 60_000; // 1 minute
 
 /**
@@ -118,7 +118,10 @@ describe
 
     /**
      * Deploy once and reuse the contract for both scenarios: each scenario burns
-     * its own fuse, so they do not interfere.
+     * its own fuse and overwrites its own ballast keys, so they do not interfere.
+     * The constructor inserts every ballast key, so neither call of a stale pair
+     * grows the contract state — see the fixture README, "Why the contract looks
+     * the way it does".
      */
     beforeAll(async () => {
       deployment = await toolkit.deployCustomContract(SEGMENT_SPLIT, [], fundingSeed);
