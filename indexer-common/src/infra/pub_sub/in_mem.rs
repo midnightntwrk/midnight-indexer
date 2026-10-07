@@ -97,16 +97,16 @@ const fn capacity(topic: Topic) -> usize {
     // message, measured from `size_of` and string capacities. `size_of` of the message type itself
     // is given for comparison.
     match topic {
-        // ≈ 265 B a slot, ≈ 265 KiB a ring; `BlockIndexed` is 32 B.
-        BlockIndexed => 1024,
-        // ≈ 165 B a slot, ≈ 165 KiB a ring; `WalletIndexed` is 16 B.
-        WalletIndexed => 1024,
-        // ≈ 195 B a slot, ≈ 195 KiB a ring; `UnshieldedUtxoIndexed` is 32 B.
-        UnshieldedUtxoIndexed => 1024,
-        // ≈ 736 B a slot, ≈ 736 KiB a ring; `BridgeEventIndexed` is 112 B plus a recipient of up
+        // ≈ 265 B a slot, ≈ 16.6 MiB a ring; `BlockIndexed` is 32 B.
+        BlockIndexed => 65_536,
+        // ≈ 165 B a slot, ≈ 10.3 MiB a ring; `WalletIndexed` is 16 B.
+        WalletIndexed => 65_536,
+        // ≈ 195 B a slot, ≈ 12.2 MiB a ring; `UnshieldedUtxoIndexed` is 32 B.
+        UnshieldedUtxoIndexed => 65_536,
+        // ≈ 736 B a slot, ≈ 46 MiB a ring; `BridgeEventIndexed` is 112 B plus a recipient of up
         // to 32 B. `UnapprovedTransfer` is the largest variant as a `Value`, its tag being the
         // longest of the two variants that carry every field.
-        BridgeEventIndexed => 1024,
+        BridgeEventIndexed => 65_536,
     }
 }
 
