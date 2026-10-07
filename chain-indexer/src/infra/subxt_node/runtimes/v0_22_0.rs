@@ -98,6 +98,7 @@ pub async fn make_block_details(
 
     let mut dust_registration_events = vec![];
     let mut system_transactions_from_events = vec![];
+    let mut system_parameters_updated = false;
 
     let events = match content {
         // Enactment block: raw event bytes are metadata-independent, so fetch them from this
@@ -126,6 +127,10 @@ pub async fn make_block_details(
             .map_err(|error| SubxtNodeError::DecodeEvent(error.into()))?;
 
         match event {
+            Event::SystemParameters(_) => {
+                system_parameters_updated = true;
+            }
+
             Event::Session(NewSession { .. }) => {
                 *authorities = None;
             }
@@ -187,6 +192,7 @@ pub async fn make_block_details(
 
     Ok(BlockDetails {
         timestamp,
+        system_parameters_updated,
         transactions,
         dust_registration_events,
         bridge_events: vec![],
