@@ -296,6 +296,7 @@ fn transactions(
     let transactions = events
         .iter()
         .filter_map(|(phase, _, event)| {
+            // A system transaction, which no call carries, derived from the event that applied it.
             if let Some((bytes, tx_hash)) = event.transaction() {
                 Some((
                     *phase,
