@@ -296,13 +296,8 @@ impl SubxtNode {
             transactions,
             mut dust_registration_events,
             bridge_events,
-        } = runtimes::make_block_details(
-            authorities,
-            content_node_version,
-            &block,
-            content_source.as_ref(),
-        )
-        .await?;
+        } = runtimes::make_block_details(authorities, content_node_version, &block, content_source)
+            .await?;
 
         // At genesis, Substrate does not emit events (Parity PR #5463). Fetch cNight
         // registrations from pallet storage instead.

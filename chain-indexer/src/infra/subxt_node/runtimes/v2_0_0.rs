@@ -14,8 +14,8 @@
 use crate::{
     domain::{DParameter, DustRegistrationEvent, TermsAndConditions},
     infra::subxt_node::{
-        ContentSource, OnlineClientAtBlock, SubxtNodeError,
-        runtimes::{BlockDetails, Transaction},
+        OnlineClientAtBlock, SubxtNodeError,
+        runtimes::{AtBlock, BlockDetails, Transaction},
     },
 };
 use futures::TryStreamExt;
@@ -25,12 +25,13 @@ use indexer_common::domain::{
 };
 use itertools::Itertools;
 use parity_scale_codec::Decode;
-use subxt::error::RuntimeApiError;
+use subxt::{SubstrateConfig, client::OfflineClientAtBlockT, error::RuntimeApiError};
 
 pub async fn make_block_details(
     authorities: &mut Option<Vec<[u8; 32]>>,
-    block: &OnlineClientAtBlock,
-    content: Option<&ContentSource>,
+    client: &AtBlock<impl OfflineClientAtBlockT<SubstrateConfig>>,
+    extrinsics: Vec<Vec<u8>>,
+    events: Vec<u8>,
 ) -> Result<BlockDetails, SubxtNodeError> {
     use super::runtime_2_0_0::{
         Call, Event,
@@ -46,22 +47,7 @@ pub async fn make_block_details(
         timestamp,
     };
 
-    let extrinsics = match content {
-        // Enactment block: decode this block's raw extrinsic bytes against the parent
-        // (old-runtime) client. `from_bytes` is async but infallible.
-        Some(content) => {
-            content
-                .client
-                .extrinsics()
-                .from_bytes(content.extrinsic_bodies.clone())
-                .await
-        }
-        None => block
-            .extrinsics()
-            .fetch()
-            .await
-            .map_err(|error| SubxtNodeError::FetchExtrinsics(error.into()))?,
-    };
+    let extrinsics = client.extrinsics().from_bytes(extrinsics).await;
 
     let calls = extrinsics
         .iter()
@@ -104,25 +90,7 @@ pub async fn make_block_details(
     let mut system_transactions_from_events = vec![];
     let mut bridge_events = vec![];
 
-    let events = match content {
-        // Enactment block: raw event bytes are metadata-independent, so fetch them from this
-        // block and re-decode against the parent (old-runtime) client. `from_bytes` is sync.
-        Some(content) => {
-            let raw = block
-                .events()
-                .fetch()
-                .await
-                .map_err(|error| SubxtNodeError::FetchEvents(error.into()))?
-                .bytes()
-                .to_vec();
-            content.client.events().from_bytes(raw)
-        }
-        None => block
-            .events()
-            .fetch()
-            .await
-            .map_err(|error| SubxtNodeError::FetchEvents(error.into()))?,
-    };
+    let events = client.events().from_bytes(events);
 
     for event in events.iter() {
         let event = event
