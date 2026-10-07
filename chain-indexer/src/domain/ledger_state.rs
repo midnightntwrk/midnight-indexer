@@ -960,7 +960,10 @@ mod apply_transactions_tblock_tests {
                 for &(ttl, ctime) in case.transactions {
                     transactions.push(dust_registration(ledger_version, ttl, ctime).await?);
                 }
-                let transactions = transactions.iter().collect::<Vec<_>>();
+                let transactions = transactions
+                    .iter()
+                    .map(|transaction| (transaction, fully as fn(_) -> _))
+                    .collect::<Vec<_>>();
 
                 assert_eq!(
                     apply(
@@ -970,7 +973,13 @@ mod apply_transactions_tblock_tests {
                         NOW,
                         case.parent_block_time,
                         case.bump_first_regular_tblock,
-                    )?,
+                    )?
+                    .map(|transactions| {
+                        transactions
+                            .iter()
+                            .map(|transaction| regular(transaction).transaction_result.clone())
+                            .collect::<Vec<_>>()
+                    }),
                     case.expected,
                     "{ledger_version}: {}",
                     case.name
@@ -1007,7 +1016,7 @@ mod apply_transactions_tblock_tests {
             apply(
                 "preprod",
                 PROTOCOL_VERSION,
-                &[&transaction],
+                &[(&transaction, fully)],
                 BLOCK_TIME,
                 PARENT_BLOCK_TIME,
                 should_bump_first_regular_tblock(BLOCK_HEIGHT, PROTOCOL_VERSION),
@@ -1045,7 +1054,7 @@ mod apply_transactions_tblock_tests {
             apply(
                 "mainnet",
                 PROTOCOL_VERSION,
-                &[&transaction],
+                &[(&transaction, fully)],
                 BLOCK_TIME,
                 PARENT_BLOCK_TIME,
                 should_bump_first_regular_tblock(BLOCK_HEIGHT, PROTOCOL_VERSION),
@@ -1083,7 +1092,7 @@ mod apply_transactions_tblock_tests {
             let result = apply(
                 "preview",
                 protocol_version,
-                &[&transaction],
+                &[(&transaction, fully)],
                 BLOCK_TIME,
                 PARENT_BLOCK_TIME,
                 should_bump_first_regular_tblock(BLOCK_HEIGHT, protocol_version),
@@ -1119,7 +1128,7 @@ mod apply_transactions_tblock_tests {
             let protocol_version = skewing_protocol_version(ledger_version);
             let transaction = dust_registration(ledger_version, NOW + 60, NOW).await?;
 
-            let transactions = apply_with_outcomes(
+            let transactions = apply(
                 NETWORK_ID,
                 protocol_version,
                 &[(&transaction, failed), (&transaction, fully)],
@@ -1188,7 +1197,7 @@ mod apply_transactions_tblock_tests {
             let first = dust_registration(ledger_version, NOW + 60, NOW).await?;
             let second = dust_registration(ledger_version, NOW + 60, NOW + 4).await?;
 
-            let transactions = apply_with_outcomes(
+            let transactions = apply(
                 NETWORK_ID,
                 protocol_version,
                 &[(&first, failed), (&second, fully)],
@@ -1225,7 +1234,7 @@ mod apply_transactions_tblock_tests {
         let transaction = dust_registration(ledger_version, NOW - 5, NOW - 18)
             .await
             .unwrap();
-        let transactions = apply_with_outcomes(
+        let transactions = apply(
             NETWORK_ID,
             protocol_version,
             &[(&transaction, fully)],
@@ -1255,7 +1264,7 @@ mod apply_transactions_tblock_tests {
         let transaction = dust_registration(ledger_version, NOW + 60, NOW)
             .await
             .unwrap();
-        let transactions = apply_with_outcomes(
+        let transactions = apply(
             NETWORK_ID,
             protocol_version,
             &[(&transaction, partially)],
@@ -1282,7 +1291,7 @@ mod apply_transactions_tblock_tests {
         let transaction = dust_registration(ledger_version, NOW + 60, NOW)
             .await
             .unwrap();
-        let transactions = apply_with_outcomes(
+        let transactions = apply(
             NETWORK_ID,
             protocol_version,
             &[(&transaction, |_| {
@@ -1312,7 +1321,7 @@ mod apply_transactions_tblock_tests {
         let protocol_version = skewing_protocol_version(ledger_version);
 
         let raw = dust_registration(ledger_version, NOW + 60, NOW).await?;
-        let transactions = apply_with_outcomes(
+        let transactions = apply(
             NETWORK_ID,
             protocol_version,
             &[(&raw, fully)],
@@ -1357,44 +1366,6 @@ mod apply_transactions_tblock_tests {
         }
     }
 
-    // Applies `transactions` as one block to a fresh ledger state of `network_id`; the outer error
-    // is a test setup failure, the inner one the reason the ledger rejects a transaction. Times
-    // are in seconds. Every transaction is taken to be applied on chain.
-    fn apply(
-        network_id: &str,
-        protocol_version: ProtocolVersion,
-        transactions: &[&SerializedTransaction],
-        block_time: u64,
-        parent_block_time: u64,
-        bump_first_regular_tblock: bool,
-    ) -> Result<Result<Vec<TransactionResult>, Malformed>, BoxError> {
-        let transactions = transactions
-            .iter()
-            .map(|&raw| (raw, fully as NodeOutcome))
-            .collect::<Vec<_>>();
-
-        Ok(apply_with_outcomes(
-            network_id,
-            protocol_version,
-            &transactions,
-            block_time,
-            parent_block_time,
-            bump_first_regular_tblock,
-        )?
-        .map(|transactions| {
-            transactions
-                .into_iter()
-                .filter_map(|transaction| match transaction {
-                    Transaction::Regular(transaction) => Some(transaction.transaction_result),
-                    Transaction::System(_) => None,
-                })
-                .collect()
-        }))
-    }
-
-    // How a transaction was applied on chain, given the indexer's hash for it.
-    type NodeOutcome = fn(TransactionHash) -> Result<Applied, String>;
-
     fn fully(tx_hash: TransactionHash) -> Result<Applied, String> {
         Ok(Applied::Fully { tx_hash })
     }
@@ -1408,11 +1379,17 @@ mod apply_transactions_tblock_tests {
         Err("Module(ModuleError { index: 0, error: [5, 0, 0, 0] })".to_string())
     }
 
-    // Like `apply`, with how each transaction was applied on chain, returning the transactions.
-    fn apply_with_outcomes(
+    // Applies `transactions` as one block to a fresh ledger state of `network_id`, each with how it
+    // was applied on chain, given the indexer's hash for it; the outer error is a test setup
+    // failure, the inner one the reason the ledger rejects a transaction. Times are in seconds.
+    #[allow(clippy::type_complexity)]
+    fn apply(
         network_id: &str,
         protocol_version: ProtocolVersion,
-        transactions: &[(&SerializedTransaction, NodeOutcome)],
+        transactions: &[(
+            &SerializedTransaction,
+            fn(TransactionHash) -> Result<Applied, String>,
+        )],
         block_time: u64,
         parent_block_time: u64,
         bump_first_regular_tblock: bool,
