@@ -150,25 +150,25 @@ pub async fn decode_block_details(
 
 /// A runtime's decoded call.
 trait CallExt {
-    /// The transaction the call carries. Exhaustive, so that a new pallet or call does not compile
-    /// until it is handled.
+    /// The transaction the call carries, if any.
     fn transaction(self) -> Option<Transaction>;
-    /// The time set by `Timestamp::set`.
+    /// The block time the call sets, if any.
     fn timestamp(&self) -> Option<u64>;
 }
 
 /// A runtime's decoded event.
 trait EventExt {
-    /// `TxApplied`, `TxPartialSuccess` or `ExtrinsicFailed`: the outcome of the extrinsic whose
-    /// phase the event is recorded under.
+    /// How the extrinsic the event is recorded under was applied, or why it failed, if the event
+    /// decides that.
     fn outcome(&self) -> Option<Result<Applied, String>>;
-    /// `ExtrinsicSuccess`, which ends every successful dispatch.
+    /// Whether the event reports that the extrinsic it is recorded under was dispatched
+    /// successfully.
     fn is_success(&self) -> bool;
 }
 
 /// An applied system transaction.
 trait SystemTransaction {
-    /// The applied system transaction's bytes and hash, if any.
+    /// Its bytes and hash, if any.
     fn transaction(&self) -> Option<(ByteVec, TransactionHash)>;
 }
 
@@ -296,18 +296,23 @@ fn transactions(
     let transactions = events
         .iter()
         .filter_map(|(phase, _, event)| {
-            // A system transaction, which no call carries, derived from the event that applied it.
             if let Some((bytes, tx_hash)) = event.transaction() {
+                // A system transaction, which no call carries, from the event that applied it.
                 Some((
                     *phase,
                     Transaction::System(bytes),
                     Ok(Applied::Fully { tx_hash }),
                 ))
             } else if let Some(outcome) = event.outcome() {
-                regular_transaction(block, &mut extrinsics, *phase, outcome)
+                // The outcome of the extrinsic the event is recorded under, attributed to its
+                // regular transaction.
+                attribute_outcome(block, &mut extrinsics, *phase, outcome)
             } else if event.is_success() {
-                successful_transaction(block, &mut extrinsics, *phase)
+                // The successful dispatch of the extrinsic the event is recorded under, for a
+                // regular transaction no outcome was attributed to.
+                attribute_success(block, &mut extrinsics, *phase)
             } else {
+                // Any other event has nothing to do with transactions.
                 None
             }
         })
@@ -336,10 +341,10 @@ fn genesis_transactions(
         .collect()
 }
 
-/// Take the regular transaction of extrinsic `i` for an outcome under `ApplyExtrinsic(i)`, so that
-/// a second outcome finds none. An applied outcome with nothing to take is a divergence; a failure
-/// with nothing to take is that of another extrinsic and is ignored.
-fn regular_transaction(
+/// Attribute an outcome under `ApplyExtrinsic(i)` to extrinsic `i` by taking its regular
+/// transaction, so that a second outcome finds none. An applied outcome with nothing to take is a
+/// divergence; a failure with nothing to take is that of another extrinsic and is ignored.
+fn attribute_outcome(
     block: BlockRef,
     extrinsics: &mut BTreeMap<ExtrinsicIndex, Transaction>,
     phase: Phase,
@@ -368,11 +373,11 @@ fn regular_transaction(
     }
 }
 
-/// Take the regular transaction of extrinsic `i` still left when `ExtrinsicSuccess` under
-/// `ApplyExtrinsic(i)` ends its dispatch: it succeeded without `TxApplied` or `TxPartialSuccess`,
-/// which is a divergence. It is still taken as applied, with the hash computed from its bytes, so
-/// that it is indexed as it was before outcomes were followed.
-fn successful_transaction(
+/// Attribute a successful dispatch under `ApplyExtrinsic(i)` to extrinsic `i`: a regular
+/// transaction still left there succeeded without an outcome being attributed to it, which is a
+/// divergence. It is still taken as applied, with the hash computed from its bytes, so that it is
+/// indexed as it was before outcomes were followed.
+fn attribute_success(
     block: BlockRef,
     extrinsics: &mut BTreeMap<ExtrinsicIndex, Transaction>,
     phase: Phase,
@@ -701,7 +706,7 @@ mod tests {
         let mut extrinsics = BTreeMap::from([(1, Transaction::Regular(bytes(1)))]);
 
         assert_eq!(
-            regular_transaction(
+            attribute_outcome(
                 block(),
                 &mut extrinsics,
                 Phase::ApplyExtrinsic(1),
@@ -723,7 +728,7 @@ mod tests {
             Phase::Finalization,
         ] {
             assert_eq!(
-                regular_transaction(block(), &mut extrinsics, phase, Err("failed".into())),
+                attribute_outcome(block(), &mut extrinsics, phase, Err("failed".into())),
                 None
             );
         }
@@ -750,7 +755,7 @@ mod tests {
             Phase::Initialization,
         ] {
             assert_eq!(
-                regular_transaction(block(), &mut extrinsics, phase, Ok(fully(1))),
+                attribute_outcome(block(), &mut extrinsics, phase, Ok(fully(1))),
                 None
             );
         }
