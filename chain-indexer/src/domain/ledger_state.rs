@@ -219,7 +219,7 @@ impl LedgerState {
                             && bump_first_regular_tblock)
                             .then_some(parent_block_timestamp + MEMPOOL_TBLOCK_BUMP_MILLIS);
 
-                        let transaction = self.apply_regular_transaction(
+                        let (transaction, failure_reason) = self.apply_regular_transaction(
                             transaction,
                             parent_block_hash,
                             block_timestamp,
@@ -229,7 +229,13 @@ impl LedgerState {
                         no_regular_transaction_applied &=
                             matches!(transaction.transaction_result, TransactionResult::Failure);
 
-                        check_regular_transaction(&transaction, &applied, phase, parent_block_hash);
+                        check_regular_transaction(
+                            &transaction,
+                            failure_reason,
+                            &applied,
+                            phase,
+                            parent_block_hash,
+                        );
 
                         Ok(Transaction::Regular(transaction.into()))
                     }
@@ -396,7 +402,8 @@ impl LedgerState {
         Ok(())
     }
 
-    // Applies one regular transaction and converts it into a domain regular transaction.
+    // Applies one regular transaction and converts it into a domain regular transaction, with the
+    // ledger's reason if it fails.
     //
     // `well_formed_timestamp` is a second `tblock`, in milliseconds, to verify the transaction at
     // if it is malformed at `block_timestamp`. It is the adjusted `tblock` for a regular
@@ -414,7 +421,7 @@ impl LedgerState {
         block_timestamp: u64,
         parent_block_timestamp: u64,
         well_formed_timestamp: Option<u64>,
-    ) -> Result<RegularTransaction, Error> {
+    ) -> Result<(RegularTransaction, Option<String>), Error> {
         let mut transaction = RegularTransaction::from(transaction);
 
         // Apply transaction.
@@ -456,6 +463,7 @@ impl LedgerState {
             spent_unshielded_utxos,
             ledger_events,
             fees,
+            failure_reason,
             bridge_claim,
         } = outcome
             .map_err(|error| Error::ApplyRegularTransaction(Some(transaction.hash), error))?;
@@ -498,7 +506,7 @@ impl LedgerState {
             contract_action.zswap_state_key = Some(zswap_state_key);
         }
 
-        Ok(transaction)
+        Ok((transaction, failure_reason))
     }
 
     #[trace(properties = {
@@ -593,6 +601,7 @@ pub enum Error {
 /// disagreement is a divergence.
 fn check_regular_transaction(
     transaction: &RegularTransaction,
+    failure_reason: Option<String>,
     applied: &Applied,
     phase: Phase,
     parent_block_hash: BlockHash,
@@ -604,9 +613,12 @@ fn check_regular_transaction(
         (Fully { .. }, Success) | (Partially { .. }, PartialSuccess(_))
     );
     if !agrees {
+        let reason = failure_reason
+            .map(|reason| format!(": {reason}"))
+            .unwrap_or_default();
         divergence(format_args!(
             "transaction {} in {phase:?} of the block with parent {parent_block_hash}: {applied:?} \
-             on chain, {:?} in the ledger",
+             on chain, {:?} in the ledger{reason}",
             transaction.hash, transaction.transaction_result
         ));
     }
@@ -1203,7 +1215,7 @@ mod apply_transactions_tblock_tests {
     #[tokio::test(flavor = "multi_thread")]
     #[cfg_attr(
         feature = "divergence-halt",
-        should_panic(expected = "Failure in the ledger")
+        should_panic(expected = "Failure in the ledger: ")
     )]
     async fn applied_on_chain_but_failed_in_the_ledger_is_a_divergence() {
         let _ledger_db = init_ledger_db().await.unwrap();
