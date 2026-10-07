@@ -80,7 +80,7 @@ pub async fn make_block_details(
     // Enactment block: decode this block's raw extrinsic bytes against the parent (old-runtime)
     // client. Raw event bytes are metadata-independent, so they are fetched from this block and
     // re-decoded against the same client.
-    let (content_client, extrinsics) = match content {
+    let (client, extrinsics) = match content {
         Some(ContentSource {
             client,
             extrinsic_bodies,
@@ -101,7 +101,7 @@ pub async fn make_block_details(
             (None, extrinsics)
         }
     };
-    let client = content_client.as_ref().unwrap_or(block);
+    let client = client.as_ref().unwrap_or(block);
 
     let events = block
         .events()
