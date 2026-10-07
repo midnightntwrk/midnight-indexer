@@ -404,7 +404,9 @@ docker run \
     send
 
 # Wait for enough blocks to be finalized so that the pre-populated chain data
-# contains sufficient blocks for e2e tests (MAX_HEIGHT = 32 in e2e.rs).
+# contains sufficient blocks for e2e tests (MAX_HEIGHT = 40 in e2e.rs). Every
+# transaction above must land at or below MAX_HEIGHT, or the e2e subscriptions
+# return events the collected blocks lack.
 readonly min_finalized_height=40
 echo "Waiting for finalized height >= $min_finalized_height..."
 timeout=360
