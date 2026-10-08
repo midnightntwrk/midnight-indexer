@@ -317,13 +317,13 @@ impl LedgerState {
     #[trace]
     pub fn contract_state_translations(
         &self,
-        latest_actions: Vec<LatestContractAction>,
+        latest_actions: Vec<(u64, LatestContractAction)>,
         contracts_in_block: &HashSet<SerializedContractAddress>,
-    ) -> Result<Vec<ContractStateTranslation>, Error> {
+    ) -> Result<Vec<(u64, ContractStateTranslation)>, Error> {
         latest_actions
             .into_iter()
-            .filter(|action| !contracts_in_block.contains(&action.address))
-            .map(|action| {
+            .filter(|(_, action)| !contracts_in_block.contains(&action.address))
+            .map(|(id, action)| {
                 if let Some(key) = &action.state_key
                     && self
                         .0
@@ -341,10 +341,7 @@ impl LedgerState {
                     .map_err(|error| Error::GetContractStateAtFork(action.address.clone(), error))?
                     .ok_or_else(|| Error::ContractStateMissingAtFork(action.address.clone()))?;
 
-                Ok(Some(ContractStateTranslation {
-                    contract_action_id: action.id,
-                    state_key,
-                }))
+                Ok(Some((id, ContractStateTranslation(state_key))))
             })
             .filter_map(Result::transpose)
             .collect()
@@ -1154,21 +1151,27 @@ mod contract_state_translation_tests {
         let c_current_key = v8_key(&v9, &b_serialized);
 
         let latest = vec![
-            LatestContractAction {
-                id: 1,
-                address: a_serialized.clone(),
-                state_key: Some(a_v8_key),
-            },
-            LatestContractAction {
-                id: 2,
-                address: b_serialized.clone(),
-                state_key: Some(b_v8_key),
-            },
-            LatestContractAction {
-                id: 3,
-                address: c_serialized,
-                state_key: Some(c_current_key),
-            },
+            (
+                1,
+                LatestContractAction {
+                    address: a_serialized.clone(),
+                    state_key: Some(a_v8_key),
+                },
+            ),
+            (
+                2,
+                LatestContractAction {
+                    address: b_serialized.clone(),
+                    state_key: Some(b_v8_key),
+                },
+            ),
+            (
+                3,
+                LatestContractAction {
+                    address: c_serialized,
+                    state_key: Some(c_current_key),
+                },
+            ),
         ];
         let in_block = HashSet::from([b_serialized.clone()]);
 
@@ -1179,10 +1182,10 @@ mod contract_state_translation_tests {
             1,
             "A only: B is in the block, C is current"
         );
-        assert_eq!(translations[0].contract_action_id, 1);
-        assert_eq!(translations[0].state_key, v8_key(&v9, &a_serialized));
+        assert_eq!(translations[0].0, 1);
+        assert_eq!(translations[0].1.0, v8_key(&v9, &a_serialized));
         assert!(
-            v9.contract_state_key_in_current_encoding(&translations[0].state_key)?,
+            v9.contract_state_key_in_current_encoding(&translations[0].1.0)?,
             "the translation is in the ledger-9 encoding"
         );
 
@@ -1197,17 +1200,19 @@ mod contract_state_translation_tests {
         let v9 = v8_state_with(&[a]).translate(LedgerVersion::V9)?;
 
         let translations = v9.contract_state_translations(
-            vec![LatestContractAction {
-                id: 7,
-                address: a_serialized.clone(),
-                state_key: None,
-            }],
+            vec![(
+                7,
+                LatestContractAction {
+                    address: a_serialized.clone(),
+                    state_key: None,
+                },
+            )],
             &HashSet::new(),
         )?;
 
         assert_eq!(translations.len(), 1);
-        assert_eq!(translations[0].contract_action_id, 7);
-        assert_eq!(translations[0].state_key, v8_key(&v9, &a_serialized));
+        assert_eq!(translations[0].0, 7);
+        assert_eq!(translations[0].1.0, v8_key(&v9, &a_serialized));
 
         Ok(())
     }
@@ -1223,11 +1228,13 @@ mod contract_state_translation_tests {
         let v9 = v8.translate(LedgerVersion::V9)?;
 
         let result = v9.contract_state_translations(
-            vec![LatestContractAction {
-                id: 9,
-                address: d_serialized.clone(),
-                state_key: Some(a_v8_key),
-            }],
+            vec![(
+                9,
+                LatestContractAction {
+                    address: d_serialized.clone(),
+                    state_key: Some(a_v8_key),
+                },
+            )],
             &HashSet::new(),
         );
 

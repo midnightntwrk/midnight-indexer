@@ -73,7 +73,7 @@ impl domain::storage::Storage for Storage {
         dust_registration_events: &[DustRegistrationEvent],
         ledger_state_key: &SerializedLedgerStateKey,
         system_parameters_change: Option<&SystemParametersChange>,
-        contract_state_translations: &[ContractStateTranslation],
+        contract_state_translations: &[(u64, ContractStateTranslation)],
     ) -> Result<Option<u64>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
 
@@ -211,7 +211,9 @@ impl domain::storage::Storage for Storage {
     }
 
     #[trace]
-    async fn get_latest_contract_actions(&self) -> Result<Vec<LatestContractAction>, sqlx::Error> {
+    async fn get_latest_contract_actions(
+        &self,
+    ) -> Result<Vec<(u64, LatestContractAction)>, sqlx::Error> {
         #[cfg(feature = "cloud")]
         let query = indoc! {"
             SELECT DISTINCT ON (address) id, address, state_key
@@ -237,11 +239,7 @@ impl domain::storage::Storage for Storage {
         .fetch_all(&*self.pool)
         .await?
         .into_iter()
-        .map(|(id, address, state_key)| LatestContractAction {
-            id: id as u64,
-            address,
-            state_key,
-        })
+        .map(|(id, address, state_key)| (id as u64, LatestContractAction { address, state_key }))
         .collect();
 
         Ok(actions)
@@ -377,7 +375,7 @@ async fn save_block(
     transactions: &[Transaction],
     dust_registration_events: &[DustRegistrationEvent],
     ledger_state_key: &SerializedLedgerStateKey,
-    contract_state_translations: &[ContractStateTranslation],
+    contract_state_translations: &[(u64, ContractStateTranslation)],
     tx: &mut SqlxTransaction,
 ) -> Result<Option<u64>, sqlx::Error> {
     let query = indoc! {"
@@ -637,7 +635,7 @@ const CONTRACT_STATE_TRANSLATION_CHUNK: usize = 1_000;
 /// statement. Fewer rows affected than given is an error.
 #[trace(properties = { "block_id": "{block_id}" })]
 async fn save_contract_state_translations(
-    contract_state_translations: &[ContractStateTranslation],
+    contract_state_translations: &[(u64, ContractStateTranslation)],
     block_id: i64,
     chunk_size: usize,
     tx: &mut SqlxTransaction,
@@ -657,10 +655,10 @@ async fn save_contract_state_translations(
     let mut inserted = 0;
     for chunk in contract_state_translations.chunks(chunk_size.max(1)) {
         inserted += QueryBuilder::new(query)
-            .push_values(chunk.iter(), |mut q, translation| {
-                q.push_bind(translation.contract_action_id as i64)
+            .push_values(chunk.iter(), |mut q, (contract_action_id, translation)| {
+                q.push_bind(*contract_action_id as i64)
                     .push_bind(block_id)
-                    .push_bind(&translation.state_key);
+                    .push_bind(&translation.0);
             })
             .build()
             .execute(&mut **tx)
@@ -1967,21 +1965,25 @@ mod contract_state_translation_tests {
             .get_latest_contract_actions()
             .await
             .expect("get latest contract actions");
-        latest.sort_by_key(|action| action.id);
+        latest.sort_by_key(|(id, _)| *id);
 
         assert_eq!(
             latest,
             vec![
-                LatestContractAction {
-                    id: a_latest as u64,
-                    address: a.to_vec().into(),
-                    state_key: Some(vec![0xa2].into()),
-                },
-                LatestContractAction {
-                    id: b_latest as u64,
-                    address: b.to_vec().into(),
-                    state_key: None,
-                },
+                (
+                    a_latest as u64,
+                    LatestContractAction {
+                        address: a.to_vec().into(),
+                        state_key: Some(vec![0xa2].into()),
+                    },
+                ),
+                (
+                    b_latest as u64,
+                    LatestContractAction {
+                        address: b.to_vec().into(),
+                        state_key: None,
+                    },
+                ),
             ]
         );
     }
@@ -1995,10 +1997,10 @@ mod contract_state_translation_tests {
         let mut translations = Vec::new();
         for i in 0..5u8 {
             let action = insert_contract_action(&pool, tx_id, &[i; 32], Some(&[0x60])).await;
-            translations.push(ContractStateTranslation {
-                contract_action_id: action as u64,
-                state_key: vec![0x80, i].into(),
-            });
+            translations.push((
+                action as u64,
+                ContractStateTranslation(vec![0x80, i].into()),
+            ));
         }
         let fork_block = insert_block(&pool, 2).await;
 
