@@ -911,7 +911,14 @@ async fn test_contract_actions_subscription(
                 .await
                 .context("subscribe to contract actions")?
                 .take(expected_contract_actions.len())
-                .map_ok(|data| data.contract_actions.to_json_value())
+                .map_ok(|data| {
+                    let action = data.contract_actions;
+                    assert_eq!(
+                        action.state_at, action.transaction.block.height,
+                        "an ordinary stream item's stateAt is its own block height"
+                    );
+                    action.to_json_value()
+                })
                 .try_collect::<Vec<_>>()
                 .await
                 .context("collect blocks from contract action subscription")?;
@@ -929,7 +936,14 @@ async fn test_contract_actions_subscription(
                 .await
                 .context("subscribe to contract actions")?
                 .take(expected_contract_actions.len())
-                .map_ok(|data| data.contract_actions.to_json_value())
+                .map_ok(|data| {
+                    let action = data.contract_actions;
+                    assert_eq!(
+                        action.state_at, action.transaction.block.height,
+                        "an ordinary stream item's stateAt is its own block height"
+                    );
+                    action.to_json_value()
+                })
                 .try_collect::<Vec<_>>()
                 .await
                 .context("collect blocks from contract action subscription")?;

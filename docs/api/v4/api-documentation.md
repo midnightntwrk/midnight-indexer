@@ -9,7 +9,7 @@ The Midnight Indexer API exposes a GraphQL API that enables clients to query and
 Fields and types marked `@beta` in the schema are in-flight and may change without notice; stability is signalled by *removal* of the directive (a field losing `@beta` is a promise it has stabilised). Throughout this document, operations and fields that carry the directive are flagged with a *(@beta)* marker.
 
 The `@beta` surface in this version (driven by the dust API mid-redesign—see tickets #1181 and #1173):
-- **Queries:** `dustCommitmentMerkleTreeUpdate`, `dustGenerationMerkleTreeUpdate`.
+- **Queries:** `dustCommitmentMerkleTreeUpdate`, `dustGenerationMerkleTreeUpdate`, and `contract` with its `Contract` type (ticket #1275).
 - **Subscriptions:** `dustGenerations`, and its event types `DustGenerationsItem`, `DustGenerationsProgress`, `DustGenerationDtimeUpdateItem`.
 - **Fields:** the dust end indices and Merkle roots on `Block` (`dustCommitmentEndIndex`, `dustGenerationEndIndex`, `dustCommitmentMerkleTreeRoot`, `dustGenerationMerkleTreeRoot`), the dust start/end indices on `RegularTransaction`, and the nullifier-transaction fields (`DustNullifierTransaction.nullifierLeBytes` / `.commitmentLeBytes` / `.transaction`, and `ShieldedNullifierTransaction.transaction`).
 
@@ -247,7 +247,7 @@ query {
 
 ### contractAction(address: HexEncoded!, offset: ContractActionOffset): ContractAction
 
-Retrieve the latest known contract action at a given offset (by block or transaction). If no offset is provided, returns the latest state.
+Retrieve a contract action for an address: with an offset, the last action in that block or transaction; without one, the address's latest action. Without an offset, `state` is the contract's current state, in the current encoding even if the action predates a ledger hard fork. See [Contract state across a ledger hard fork](#contract-state-across-a-ledger-hard-fork).
 
 **Example (latest):**
 
@@ -258,6 +258,7 @@ query {
     ... on ContractDeploy {
       address
       state
+      stateAt
       zswapState
       unshieldedBalances {
         tokenType
@@ -267,6 +268,7 @@ query {
     ... on ContractCall {
       address
       state
+      stateAt
       zswapState
       entryPoint
       unshieldedBalances {
@@ -277,6 +279,7 @@ query {
     ... on ContractUpdate {
       address
       state
+      stateAt
       zswapState
       unshieldedBalances {
         tokenType
@@ -299,6 +302,7 @@ query {
     ... on ContractDeploy {
       address
       state
+      stateAt
       zswapState
       unshieldedBalances {
         tokenType
@@ -308,6 +312,7 @@ query {
     ... on ContractCall {
       address
       state
+      stateAt
       zswapState
       entryPoint
       unshieldedBalances {
@@ -318,12 +323,51 @@ query {
     ... on ContractUpdate {
       address
       state
+      stateAt
       zswapState
       unshieldedBalances {
         tokenType
         amount
       }
     }
+  }
+}
+```
+
+### contract(address: HexEncoded!, offset: BlockOffset): Contract *(@beta)*
+
+The contract as of a block (`offset`, a block hash or height; the latest block if omitted): its
+`state`, `stateAt`, `maintenanceAuthority`, and a bounded list of recent `actions`. Null if the
+contract has no action at or before that block. `state` is in that block's encoding, as the node's
+`midnight_contractState` returns it.
+
+**Example (latest):**
+
+```graphql
+query {
+  contract(address: "3031323...") {
+    address
+    state
+    stateAt
+    maintenanceAuthority {
+      threshold
+      counter
+    }
+    actions(limit: 5) {
+      __typename
+      stateAt
+    }
+  }
+}
+```
+
+**Example (as of a block height):**
+
+```graphql
+query {
+  contract(address: "3031323...", offset: { height: 10 }) {
+    state
+    stateAt
   }
 }
 ```
@@ -473,6 +517,7 @@ For the exact field set of each SPO type (`SpoIdentity`, `Spo`, `PoolMetadata`, 
 All ContractAction types (ContractDeploy, ContractCall, ContractUpdate) implement the ContractAction interface with these common fields:
 - `address`: The contract address (HexEncoded)
 - `state`: The contract state (HexEncoded)
+- `stateAt`: The height of the block at which `state` last changed (Int): the action's block, or the fork block at which the state was translated
 - `zswapState`: The contract-specific zswap state at this action (HexEncoded)
 - `transaction`: The transaction that contains this action
 
@@ -482,6 +527,21 @@ megabyte. Select them only when you need them, especially on the queries that
 return many actions (`Contract.actions`, `Transaction.contractActions`) and on the
 `contractActions` subscription. Both resolve to the empty string for an action
 whose transaction failed.
+
+#### Contract state across a ledger hard fork
+
+A ledger hard fork can change the encoding of contract state (ledger 8 → 9: `contract-state[v6]`
+→ `contract-state[v8]`). The node translates every contract's state in the fork block. `state` is
+served in the encoding of the block the query is anchored to: the latest block without an offset,
+the offset block with one, and the block a stream is at.
+
+- `contract(address)` and `contractAction(address)`: the current encoding.
+- `contract(address, offset)`: the offset block's encoding.
+- Individual actions (`contractAction` with an offset, `Transaction.contractActions`,
+  `Contract.actions`): their own block's encoding.
+
+Every action on one contract in one block reports the same `state` and `stateAt`. Where `stateAt`
+differs from `transaction.block.height`, the state was translated at block `stateAt`.
 
 Contract actions can be one of three types:
 - **ContractDeploy**: Initial contract deployment
@@ -664,7 +724,7 @@ When a new block is indexed, the client receives a `next` message.
 
 `contractActions(address: HexEncoded!, offset: BlockOffset): ContractAction!`
 
-Subscribes to contract actions for a particular address. New contract actions (calls, updates) are pushed as they occur.
+Subscribes to contract actions for a particular address: the existing actions from the offset block on, then new ones as they are indexed. Without an offset the stream starts at the latest block and replays nothing.
 
 **Example:**
 
@@ -673,7 +733,7 @@ Subscribes to contract actions for a particular address. New contract actions (c
   "id": "2",
   "type": "start",
   "payload": {
-    "query": "subscription { contractActions(address:\"3031323...\", offset: { height: 1 }) { __typename ... on ContractDeploy { address state zswapState unshieldedBalances { tokenType amount } } ... on ContractCall { address state zswapState entryPoint unshieldedBalances { tokenType amount } } ... on ContractUpdate { address state zswapState unshieldedBalances { tokenType amount } } } }"
+    "query": "subscription { contractActions(address:\"3031323...\", offset: { height: 1 }) { __typename ... on ContractDeploy { address state stateAt zswapState unshieldedBalances { tokenType amount } } ... on ContractCall { address state stateAt zswapState entryPoint unshieldedBalances { tokenType amount } } ... on ContractUpdate { address state stateAt zswapState unshieldedBalances { tokenType amount } } } }"
   }
 }
 ```
