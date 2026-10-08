@@ -151,6 +151,36 @@ mod tests {
         Ok(())
     }
 
+    /// The fork translations table and its index exist after migrating.
+    #[tokio::test]
+    async fn test_contract_action_translations_table_exists() -> Result<(), Box<dyn StdError>> {
+        let temp_dir = tempfile::tempdir().context("create tempdir")?;
+        let pool = new_pool(&temp_dir).await?;
+
+        run(&pool).await.context("run migrations")?;
+
+        let columns = sqlx::query_scalar::<_, String>(
+            "SELECT name FROM pragma_table_info('contract_action_translations')",
+        )
+        .fetch_all(&*pool)
+        .await?;
+        assert_eq!(columns, ["contract_action_id", "block_id", "state_key"]);
+
+        let indexes = sqlx::query_scalar::<_, String>(
+            "SELECT name FROM pragma_index_list('contract_action_translations')",
+        )
+        .fetch_all(&*pool)
+        .await?;
+        assert!(
+            indexes
+                .iter()
+                .any(|name| name == "contract_action_translations_block_id_idx"),
+            "{indexes:?}"
+        );
+
+        Ok(())
+    }
+
     /// A database whose contract actions still carry blobs must be refused, and refused *without*
     /// the migration having dropped anything - that is the whole point of checking first.
     #[tokio::test]

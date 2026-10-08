@@ -139,6 +139,7 @@ mod tests {
                         height: 123,
                         max_transaction_id: None,
                         caught_up: false,
+                        protocol_version: 1_000_000,
                     };
                     assert_publish_subscribe(&pub_sub, event).await?
                 }
