@@ -3246,6 +3246,13 @@ mod tests {
             .contract_state(&serialized_address)?
             .expect("the contract survives the translation");
         assert_ne!(v9_key, v8_key, "the translated state is a different node");
+        // The tag, then a by-reference key: one discriminant byte and the 32-byte hash.
+        assert!(
+            v9_key
+                .as_ref()
+                .starts_with(b"midnight:storage-key(contract-state[v8]):")
+        );
+        assert_eq!(v9_key.as_ref().len(), 41 + 1 + 32);
         assert!(state.contract_state_key_in_current_encoding(&v9_key)?);
         assert!(
             !state.contract_state_key_in_current_encoding(&v8_key)?,
@@ -3339,6 +3346,13 @@ mod tests {
         let (key, captured) = state
             .contract_state(&serialized_address)?
             .expect("the contract is in the ledger state");
+
+        // The tag, then a by-reference key: one discriminant byte and the 32-byte hash.
+        assert!(
+            key.as_ref()
+                .starts_with(b"midnight:storage-key(contract-state[v6]):")
+        );
+        assert_eq!(key.as_ref().len(), 41 + 1 + 32);
 
         // Anything derived from the state comes off the pointer the accessor hands back, without a
         // second arena lookup for a node that is rooted but not yet flushed.
