@@ -25,8 +25,7 @@ pub trait Storage
 where
     Self: Clone + Send + Sync + 'static,
 {
-    /// Save the given block with parameters and its contract state translations, and return the max
-    /// regular transaction ID.
+    /// Save the given block with parameters and return the max regular transaction ID.
     async fn save_block(
         &mut self,
         block: &Block,
