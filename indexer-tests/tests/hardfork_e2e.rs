@@ -52,6 +52,8 @@
 //!
 //! - `midnight-node:1.0.0` -- ledger-8 chain-spec source.
 //! - `midnight-node:2.1.0-rc.4` + matching toolkit -- the migration node.
+//! - `midnight-node-toolkit:1.0.0` -- ledger-8 toolkit for the pre-fork contract deploy
+//!   (`FROM_TOOLKIT_TAG`, paired with `FROM_NODE_TAG` unless overridden).
 //!
 //! Ignored by default: it pulls/boots containers and takes a few minutes. It runs
 //! the release build of `indexer-standalone`. Run it with
@@ -82,7 +84,10 @@ use std::{
     time::{Duration, Instant},
 };
 use tempfile::TempDir;
-use tokio::{task::JoinHandle, time::sleep};
+use tokio::{
+    task::JoinHandle,
+    time::{sleep, timeout},
+};
 
 /// Ledger-8 node whose `dev` preset provides the fork-from chain-spec.
 const FROM_NODE_TAG: &str = "1.0.0";
@@ -113,6 +118,29 @@ const UNSHIELDED_PROGRESS_SUBSCRIPTION: &str = "
             ... on UnshieldedTransactionsProgress {
                 highestTransactionId
                 protocolVersion
+            }
+        }
+    }
+";
+
+/// The contract actions of one address from a block height on, with every field compared across the
+/// fork.
+const CONTRACT_ACTIONS_SUBSCRIPTION: &str = "
+    subscription ContractActions($a: HexEncoded!, $h: Int!) {
+        contractActions(address: $a, offset: { height: $h }) {
+            address
+            state
+            stateAt
+            zswapState
+            transaction {
+                hash
+                block {
+                    height
+                }
+            }
+            unshieldedBalances {
+                tokenType
+                amount
             }
         }
     }
@@ -149,6 +177,39 @@ fn toolkit_tag() -> anyhow::Result<String> {
         Ok(tag) => Ok(tag),
         Err(_) => to_node_tag(),
     }
+}
+
+/// The toolkit tag for the pre-fork deploy, `FROM_NODE_TAG` unless overridden; a ledger-9 toolkit
+/// cannot build a ledger-8 transaction.
+fn from_toolkit_tag() -> String {
+    env::var("FROM_TOOLKIT_TAG").unwrap_or_else(|_| FROM_NODE_TAG.to_string())
+}
+
+/// The version tag of a hex-encoded tagged contract state, e.g. `v6` or `v8`.
+fn state_tag(hex: &str) -> anyhow::Result<String> {
+    const PREFIX: &str = "midnight:contract-state[";
+
+    let hex = hex.strip_prefix("0x").unwrap_or(hex);
+    let prefix_len = (PREFIX.len() + 8).min(hex.len() / 2);
+    let bytes = (0..prefix_len)
+        .map(|i| u8::from_str_radix(&hex[2 * i..2 * i + 2], 16))
+        .collect::<Result<Vec<_>, _>>()
+        .context("hex-decode contract state prefix")?;
+    let text = String::from_utf8_lossy(&bytes);
+    let tag = text
+        .strip_prefix(PREFIX)
+        .with_context(|| format!("contract state does not start with {PREFIX}: {text}"))?
+        .split(']')
+        .next()
+        .context("unterminated contract state tag")?
+        .to_owned();
+
+    Ok(tag)
+}
+
+/// Hex without `0x`, lowercase.
+fn normalise_hex(hex: &str) -> String {
+    hex.strip_prefix("0x").unwrap_or(hex).to_ascii_lowercase()
 }
 
 fn free_port() -> anyhow::Result<u16> {
@@ -240,6 +301,23 @@ impl Harness {
         docker(&full)
     }
 
+    /// As [`Self::toolkit`], with `out_dir` mounted at `/out`.
+    fn toolkit_with_out(&self, tag: &str, out_dir: &Path, args: &[&str]) -> anyhow::Result<String> {
+        let image = format!("{}/midnight-node-toolkit:{tag}", image_registry());
+        let mount = format!("{}:/out", out_dir.display());
+        let mut full = vec![
+            "run",
+            "--rm",
+            "--network",
+            &self.network,
+            "-v",
+            &mount,
+            &image,
+        ];
+        full.extend_from_slice(args);
+        docker(&full)
+    }
+
     async fn graphql(&self, query: &str, variables: Value) -> anyhow::Result<Value> {
         let body = json!({ "query": query, "variables": variables });
         let response = reqwest::Client::new()
@@ -258,6 +336,29 @@ impl Harness {
             .get("data")
             .cloned()
             .context("GraphQL response has no data")
+    }
+
+    /// `state` and `stateAt` of the object at JSON `pointer` under `data`; `None` if null or
+    /// absent.
+    async fn state_and_state_at(
+        &self,
+        query: &str,
+        variables: Value,
+        pointer: &str,
+    ) -> anyhow::Result<Option<(String, u64)>> {
+        let data = self.graphql(query, variables).await?;
+        match data.pointer(pointer) {
+            None | Some(Value::Null) => Ok(None),
+            Some(object) => Ok(Some((
+                object["state"]
+                    .as_str()
+                    .with_context(|| format!("{pointer} has no state"))?
+                    .to_owned(),
+                object["stateAt"]
+                    .as_u64()
+                    .with_context(|| format!("{pointer} has no stateAt"))?,
+            ))),
+        }
     }
 
     async fn spec_version(&self) -> anyhow::Result<u64> {
@@ -291,6 +392,29 @@ impl Harness {
             .context("no number in header")?;
         u64::from_str_radix(number.trim_start_matches("0x"), 16)
             .with_context(|| format!("parse block number {number}"))
+    }
+
+    /// The node's current state of a contract, hex-encoded with its tag, via
+    /// `midnight_contractState`.
+    async fn node_contract_state(&self, address: &str) -> anyhow::Result<String> {
+        let response = reqwest::Client::new()
+            .post(&self.node_rpc)
+            .json(&json!({
+                "id": 1,
+                "jsonrpc": "2.0",
+                "method": "midnight_contractState",
+                "params": [address],
+            }))
+            .send()
+            .await
+            .context("midnight_contractState")?
+            .json::<Value>()
+            .await
+            .context("decode contract state")?;
+        response["result"]
+            .as_str()
+            .map(str::to_owned)
+            .with_context(|| format!("no result in midnight_contractState response: {response}"))
     }
 
     /// `dustGenerationEndIndex` at `height`, i.e. the ledger's dust generation
@@ -882,6 +1006,103 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
             .sum::<usize>()
     );
 
+    // --- 4c. Deploy a contract on the ledger-8 side ---------------------------
+    //
+    // A contract with no action after the fork, whose state the indexer must serve translated.
+    // Deployed with the ledger-8 toolkit in two steps, write then send, through a mounted
+    // directory, and indexed before the upgrade.
+    let from_toolkit = from_toolkit_tag();
+    let out_dir = harness.temp_dir.path().join("toolkit-out");
+    fs::create_dir_all(&out_dir).context("create toolkit output dir")?;
+    println!("[4c] deploying a contract with toolkit {from_toolkit}");
+    harness
+        .toolkit_with_out(
+            &from_toolkit,
+            &out_dir,
+            &[
+                "generate-txs",
+                "--src-url",
+                "ws://node:9944",
+                "--dest-file",
+                "/out/deploy_tx.mn",
+                "contract-simple",
+                "deploy",
+                "--funding-seed",
+                SOURCE_SEED,
+            ],
+        )
+        .context("build the contract deploy transaction")?;
+    harness
+        .toolkit_with_out(
+            &from_toolkit,
+            &out_dir,
+            &[
+                "generate-txs",
+                "--src-file",
+                "/out/deploy_tx.mn",
+                "send",
+                "-d",
+                "ws://node:9944",
+            ],
+        )
+        .context("send the contract deploy transaction")?;
+    let contract_address = harness
+        .toolkit_with_out(
+            &from_toolkit,
+            &out_dir,
+            &["contract-address", "--src-file", "/out/deploy_tx.mn"],
+        )
+        .context("read the contract address")?
+        .trim()
+        .trim_start_matches("0x")
+        .to_owned();
+    let (deploy_height, deploy_tx_hash, deploy_state) = wait_for(
+        "contract deploy indexed",
+        Duration::from_secs(120),
+        || async {
+            let data = harness
+                .graphql(
+                    "query($a: HexEncoded!) { contractAction(address: $a) { state stateAt \
+                     transaction { hash block { height } } } }",
+                    json!({ "a": contract_address }),
+                )
+                .await?;
+            let action = &data["contractAction"];
+            if action.is_null() {
+                return Ok(None);
+            }
+            let height = action["transaction"]["block"]["height"]
+                .as_u64()
+                .context("no deploy block height")?;
+            assert_eq!(
+                action["stateAt"].as_u64(),
+                Some(height),
+                "before the fork, the deploy's stateAt is its own block"
+            );
+            Ok(Some((
+                height,
+                action["transaction"]["hash"]
+                    .as_str()
+                    .context("no deploy transaction hash")?
+                    .to_owned(),
+                action["state"]
+                    .as_str()
+                    .context("no deploy state")?
+                    .to_owned(),
+            )))
+        },
+    )
+    .await?;
+    assert_eq!(
+        state_tag(&deploy_state)?,
+        "v6",
+        "a contract deployed on the ledger-8 runtime must be indexed with a ledger-8 ([v6]) state"
+    );
+    println!(
+        "[4c] contract {contract_address} deployed at height {deploy_height} (tx \
+         {deploy_tx_hash}), state [v6]"
+    );
+
     // --- 5. Governance runtime upgrade --------------------------------------
     println!("[5] driving the governance runtime upgrade");
     // Not via `Harness::toolkit`: this one call needs the WASM bind-mounted.
@@ -1360,6 +1581,215 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
     } else {
         println!("[9b] no post-fork traffic landed, nothing to report");
     }
+
+    // --- 9c. Contract state across the boundary -------------------------------
+    //
+    // `[v6]` before the fork block, `[v8]` from it on: the current view byte-equal to the node's,
+    // as-of views in their block's encoding, records untouched, and the stream re-emitting the
+    // deploy at the fork block.
+    let mut fork_height = None;
+    for height in pre_fork_height..=final_height {
+        let data = harness
+            .graphql(
+                "query($h: Int!) { block(offset: { height: $h }) { protocolVersion } }",
+                json!({ "h": height }),
+            )
+            .await?;
+        let protocol_version = data["block"]["protocolVersion"]
+            .as_u64()
+            .with_context(|| format!("block {height} has no protocolVersion"))?;
+        if protocol_version >= LEDGER_9_SPEC_VERSION {
+            fork_height = Some(height);
+            break;
+        }
+    }
+    let fork_height =
+        fork_height.context("no indexed block carries a ledger-9 protocol version")?;
+    assert!(
+        deploy_height < fork_height,
+        "the contract must have been deployed before the fork block {fork_height}, not at \
+         {deploy_height}"
+    );
+
+    let node_state = normalise_hex(&harness.node_contract_state(&contract_address).await?);
+    assert_eq!(
+        state_tag(&node_state)?,
+        "v8",
+        "the node serves the translated [v8] state after the fork"
+    );
+
+    // Current views: the node's bytes, amended at the fork block.
+    let by_address = json!({ "a": contract_address });
+    let (current, current_at) = harness
+        .state_and_state_at(
+            "query($a: HexEncoded!) { contract(address: $a) { state stateAt } }",
+            by_address.clone(),
+            "/contract",
+        )
+        .await?
+        .context("contract(address) is null")?;
+    assert_eq!(
+        normalise_hex(&current),
+        node_state,
+        "contract(address).state must equal the node's midnight_contractState byte for byte"
+    );
+    assert_eq!(
+        current_at, fork_height,
+        "contract(address).stateAt is the fork block"
+    );
+    let (current_action, current_action_at) = harness
+        .state_and_state_at(
+            "query($a: HexEncoded!) { contractAction(address: $a) { state stateAt } }",
+            by_address.clone(),
+            "/contractAction",
+        )
+        .await?
+        .context("contractAction(address) is null")?;
+    assert_eq!(
+        normalise_hex(&current_action),
+        node_state,
+        "contractAction(address).state must equal contract(address).state"
+    );
+    assert_eq!(
+        current_action_at, fork_height,
+        "contractAction(address).stateAt is the fork block"
+    );
+
+    // As-of views: in the encoding of the block asked about.
+    for (height, expected_tag, expected_at) in [
+        (deploy_height, "v6", deploy_height),
+        (fork_height - 1, "v6", deploy_height),
+        (fork_height, "v8", fork_height),
+        (final_height, "v8", fork_height),
+    ] {
+        let (state, state_at) = harness
+            .state_and_state_at(
+                "query($a: HexEncoded!, $h: Int!) { contract(address: $a, offset: { height: $h }) \
+                 { state stateAt } }",
+                json!({ "a": contract_address, "h": height }),
+                "/contract",
+            )
+            .await?
+            .with_context(|| format!("contract(address, offset: {height}) is null"))?;
+        assert_eq!(
+            state_tag(&state)?,
+            expected_tag,
+            "contract(address, offset: {{height: {height}}}).state must be in that block's encoding"
+        );
+        assert_eq!(
+            state_at, expected_at,
+            "contract(address, offset: {{height: {height}}}).stateAt"
+        );
+    }
+
+    // Records: the deploy as its block held it.
+    let (record, record_at) = harness
+        .state_and_state_at(
+            "query($a: HexEncoded!, $h: Int!) { contractAction(address: $a, offset: { blockOffset: \
+             { height: $h } }) { state stateAt } }",
+            json!({ "a": contract_address, "h": deploy_height }),
+            "/contractAction",
+        )
+        .await?
+        .context("the deploy record is null")?;
+    assert_eq!(
+        state_tag(&record)?,
+        "v6",
+        "the deploy record keeps the encoding of its own block"
+    );
+    assert_eq!(
+        record_at, deploy_height,
+        "the deploy record's stateAt is its own block"
+    );
+    let (in_transaction, in_transaction_at) = harness
+        .state_and_state_at(
+            "query($hash: HexEncoded!) { transactions(offset: { hash: $hash }) { contractActions \
+             { state stateAt } } }",
+            json!({ "hash": deploy_tx_hash }),
+            "/transactions/0/contractActions/0",
+        )
+        .await?
+        .context("the deploy transaction has no contract action")?;
+    assert_eq!(
+        state_tag(&in_transaction)?,
+        "v6",
+        "Transaction.contractActions keeps the encoding of its own block"
+    );
+    assert_eq!(in_transaction_at, deploy_height);
+
+    let events = graphql_ws_client::subscribe_raw(
+        &harness.ws_api_url(),
+        "ContractActions",
+        CONTRACT_ACTIONS_SUBSCRIPTION,
+        json!({ "a": contract_address, "h": deploy_height }),
+    )
+    .await
+    .context("subscribe to contract actions")?;
+    let mut events = pin!(events);
+    let mut items = Vec::new();
+    for _ in 0..2 {
+        let item = timeout(Duration::from_secs(60), events.next())
+            .await
+            .context("timed out waiting for a contract action item")?
+            .context("the contract actions stream ended")??;
+        items.push(item["contractActions"].clone());
+    }
+    let item_state = |index: usize| -> anyhow::Result<&str> {
+        items[index]["state"]
+            .as_str()
+            .with_context(|| format!("stream item {index} has no state"))
+    };
+    assert_eq!(
+        state_tag(item_state(0)?)?,
+        "v6",
+        "the first stream item is the deploy as its block held it"
+    );
+    assert_eq!(
+        state_tag(item_state(1)?)?,
+        "v8",
+        "the second stream item is the deploy re-emitted in the ledger-9 encoding"
+    );
+    assert_eq!(
+        normalise_hex(item_state(1)?),
+        node_state,
+        "the re-emitted state is the node's current state"
+    );
+    assert_eq!(
+        items[0]["transaction"]["hash"], items[1]["transaction"]["hash"],
+        "the re-emission is the deploy itself, not a new action"
+    );
+    for field in ["address", "zswapState", "unshieldedBalances"] {
+        assert_eq!(
+            items[0][field], items[1][field],
+            "{field} must not change between the deploy and its re-emission"
+        );
+    }
+    assert_eq!(
+        items[1]["transaction"]["block"]["height"].as_u64(),
+        Some(deploy_height),
+        "the re-emission still names the block that produced the state"
+    );
+    assert_eq!(
+        items[0]["stateAt"].as_u64(),
+        Some(deploy_height),
+        "the deploy item's stateAt is its own block"
+    );
+    assert_eq!(
+        items[1]["stateAt"].as_u64(),
+        Some(fork_height),
+        "the re-emission's stateAt is the fork block"
+    );
+    assert!(
+        timeout(Duration::from_secs(5), events.next())
+            .await
+            .is_err(),
+        "a contract with one action gets exactly one re-emission; the stream must then go quiet"
+    );
+    println!(
+        "[9c] contract state across the boundary: node [v8] == contract(address).state; as-of \
+         views in their block's encoding; the stream re-emitted the deploy as [v8] at block \
+         {fork_height}"
+    );
 
     // --- 10. No gap anywhere, boundary and replay window included -----------
     //
