@@ -1813,10 +1813,16 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
 /// Start `indexer-standalone` as a child process, logging to `dir/indexer.log`.
 fn start_indexer(dir: &Path, node_rpc_port: u16, api_port: u16) -> anyhow::Result<Child> {
     let target_dir = env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| format!("{WS_DIR}/target"));
+    let binary = format!("{target_dir}/release/indexer-standalone");
+    if !Path::new(&binary).exists() {
+        bail!(
+            "{binary} not found; build it with `cargo build --release -p indexer-standalone --features standalone`"
+        );
+    }
     let log = fs::File::create(dir.join("indexer.log")).context("create indexer log")?;
     let errors = log.try_clone().context("clone indexer log handle")?;
 
-    Command::new(format!("{target_dir}/release/indexer-standalone"))
+    Command::new(&binary)
         .env(
             "RUST_LOG",
             "indexer_standalone=info,chain_indexer=info,indexer_api=info,error",
