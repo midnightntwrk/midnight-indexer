@@ -141,8 +141,8 @@ where
         contract_action_id: u64,
     ) -> Result<Vec<ContractBalance>, sqlx::Error>;
 
-    /// The ID of the first contract action in a block at or after the given height, else one past
-    /// the highest ID, else `0`.
+    /// The ID of the first contract action from the given block height on, else one past the
+    /// highest ID, else `0`.
     async fn get_contract_action_id_by_block_height(
         &self,
         block_height: u32,
