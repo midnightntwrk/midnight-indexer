@@ -700,17 +700,14 @@ mod tests {
     };
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    static DB_COUNTER: AtomicUsize = AtomicUsize::new(0);
+    static TRANSACTION_SEED: AtomicUsize = AtomicUsize::new(0);
 
-    /// A migrated SQLite database and a `Storage` over it.
-    async fn storage() -> (SqlitePool, Storage) {
-        let path = std::env::temp_dir().join(format!(
-            "indexer-api-contract-action-{}-{}.sqlite",
-            std::process::id(),
-            DB_COUNTER.fetch_add(1, Ordering::Relaxed)
-        ));
-        let _ = std::fs::remove_file(&path);
-        let pool = SqlitePool::new(sqlite::Config::with_url(path.display().to_string()))
+    /// A migrated SQLite database in a temporary directory, removed on drop, and a `Storage` over
+    /// it.
+    async fn storage() -> (tempfile::TempDir, SqlitePool, Storage) {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let url = dir.path().join("indexer.sqlite").display().to_string();
+        let pool = SqlitePool::new(sqlite::Config::with_url(url))
             .await
             .expect("create pool");
         migrations::sqlite::run(&pool)
@@ -718,7 +715,7 @@ mod tests {
             .expect("run migrations");
         let storage = Storage::new(ChaCha20Poly1305::new(&[0; 32].into()), pool.clone());
 
-        (pool, storage)
+        (dir, pool, storage)
     }
 
     /// A block hash derived from the height.
@@ -759,7 +756,9 @@ mod tests {
             RETURNING id
         "})
         .bind(block_id)
-        .bind(block_hash(DB_COUNTER.fetch_add(1, Ordering::Relaxed) as u32))
+        .bind(block_hash(
+            TRANSACTION_SEED.fetch_add(1, Ordering::Relaxed) as u32
+        ))
         .fetch_one(&**pool)
         .await
         .expect("insert transaction")
@@ -795,7 +794,7 @@ mod tests {
     /// table.
     #[tokio::test]
     async fn start_id_is_first_action_at_or_after_height_else_past_every_action() {
-        let (pool, storage) = storage().await;
+        let (_dir, pool, storage) = storage().await;
         assert_eq!(start_id(&storage, 0).await, 0, "empty table");
 
         insert_block(&pool, 0, 1_000_000).await;
@@ -844,6 +843,7 @@ mod tests {
     /// Contract A, deployed at block 100 with key `k6` and translated at block 500 to `k8`; blocks
     /// 499 and 600 exist.
     struct Fork {
+        _dir: tempfile::TempDir,
         pool: SqlitePool,
         storage: Storage,
         address: Vec<u8>,
@@ -852,7 +852,7 @@ mod tests {
 
     impl Fork {
         async fn before_the_call() -> Self {
-            let (pool, storage) = storage().await;
+            let (dir, pool, storage) = storage().await;
             let address = vec![0xa; 32];
             let block_100 = insert_block(&pool, 100, 1_000_000).await;
             insert_block(&pool, 499, 1_000_000).await;
@@ -863,6 +863,7 @@ mod tests {
             insert_translation(&pool, deploy, fork_block, b"k8").await;
 
             Self {
+                _dir: dir,
                 pool,
                 storage,
                 address,
