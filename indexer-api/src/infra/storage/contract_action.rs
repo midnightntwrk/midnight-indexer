@@ -12,7 +12,9 @@
 // limitations under the License.
 
 use crate::{
-    domain::{ContractAction, storage::contract_action::ContractActionStorage},
+    domain::{
+        ContractAction, ContractActionAtBlock, storage::contract_action::ContractActionStorage,
+    },
     infra::storage::Storage,
 };
 use async_stream::try_stream;
@@ -61,6 +63,8 @@ impl ContractActionStorage for Storage {
         Ok(action)
     }
 
+    // The view queries below serve the newest translation of the action recorded at or before the
+    // anchor block, else the action's own key.
     #[trace(properties = { "address": "{address}" })]
     async fn get_latest_contract_action_by_address(
         &self,
@@ -70,10 +74,28 @@ impl ContractActionStorage for Storage {
             SELECT
                 contract_actions.id,
                 address,
-                state_key,
+                COALESCE(
+                    (
+                        SELECT t.state_key
+                        FROM contract_action_translations t
+                        JOIN blocks b ON b.id = t.block_id
+                        WHERE t.contract_action_id = contract_actions.id
+                        ORDER BY b.height DESC
+                        LIMIT 1
+                    ),
+                    state_key
+                ) AS state_key,
                 attributes,
                 zswap_state_key,
-                transaction_id
+                transaction_id,
+                (
+                    SELECT b.height
+                    FROM contract_action_translations t
+                    JOIN blocks b ON b.id = t.block_id
+                    WHERE t.contract_action_id = contract_actions.id
+                    ORDER BY b.height DESC
+                    LIMIT 1
+                ) AS translated_at
             FROM contract_actions
             WHERE address = $1
             ORDER BY id DESC
@@ -158,10 +180,30 @@ impl ContractActionStorage for Storage {
             SELECT
                 contract_actions.id,
                 address,
-                state_key,
+                COALESCE(
+                    (
+                        SELECT t.state_key
+                        FROM contract_action_translations t
+                        JOIN blocks b ON b.id = t.block_id
+                        WHERE t.contract_action_id = contract_actions.id
+                        AND b.height <= (SELECT height FROM blocks WHERE hash = $2)
+                        ORDER BY b.height DESC
+                        LIMIT 1
+                    ),
+                    state_key
+                ) AS state_key,
                 attributes,
                 zswap_state_key,
-                transaction_id
+                transaction_id,
+                (
+                    SELECT b.height
+                    FROM contract_action_translations t
+                    JOIN blocks b ON b.id = t.block_id
+                    WHERE t.contract_action_id = contract_actions.id
+                    AND b.height <= (SELECT height FROM blocks WHERE hash = $2)
+                    ORDER BY b.height DESC
+                    LIMIT 1
+                ) AS translated_at
             FROM contract_actions
             INNER JOIN transactions ON transactions.id = transaction_id
             INNER JOIN blocks ON blocks.id = transactions.block_id
@@ -210,14 +252,35 @@ impl ContractActionStorage for Storage {
         address: &SerializedContractAddress,
         block_height: u32,
     ) -> Result<Option<ContractAction>, sqlx::Error> {
+        // A height above the tip bounds nothing out, so it resolves to the tip.
         let query = indoc! {"
             SELECT
                 contract_actions.id,
                 address,
-                state_key,
+                COALESCE(
+                    (
+                        SELECT t.state_key
+                        FROM contract_action_translations t
+                        JOIN blocks b ON b.id = t.block_id
+                        WHERE t.contract_action_id = contract_actions.id
+                        AND b.height <= $2
+                        ORDER BY b.height DESC
+                        LIMIT 1
+                    ),
+                    state_key
+                ) AS state_key,
                 attributes,
                 zswap_state_key,
-                transaction_id
+                transaction_id,
+                (
+                    SELECT b.height
+                    FROM contract_action_translations t
+                    JOIN blocks b ON b.id = t.block_id
+                    WHERE t.contract_action_id = contract_actions.id
+                    AND b.height <= $2
+                    ORDER BY b.height DESC
+                    LIMIT 1
+                ) AS translated_at
             FROM contract_actions
             INNER JOIN transactions ON transactions.id = transaction_id
             INNER JOIN blocks ON blocks.id = transactions.block_id
@@ -399,7 +462,7 @@ impl ContractActionStorage for Storage {
         address: &SerializedContractAddress,
         mut contract_action_id: u64,
         batch_size: NonZeroU32,
-    ) -> impl Stream<Item = Result<ContractAction, sqlx::Error>> + Send {
+    ) -> impl Stream<Item = Result<ContractActionAtBlock, sqlx::Error>> + Send {
         let chunks = try_stream! {
             loop {
                 let actions = self
@@ -407,7 +470,7 @@ impl ContractActionStorage for Storage {
                     .await?;
 
                 match actions.last() {
-                    Some(action) => contract_action_id = action.id + 1,
+                    Some(action) => contract_action_id = action.action.id + 1,
                     None => break,
                 }
 
@@ -416,6 +479,70 @@ impl ContractActionStorage for Storage {
         };
 
         flatten_chunks(chunks)
+    }
+
+    #[trace(properties = { "address": "{address}" })]
+    async fn get_contract_state_translations_by_address(
+        &self,
+        address: &SerializedContractAddress,
+    ) -> Result<Vec<ContractAction>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT
+                contract_actions.id,
+                address,
+                t.state_key AS state_key,
+                attributes,
+                zswap_state_key,
+                transaction_id,
+                b.height AS translated_at
+            FROM contract_action_translations t
+            INNER JOIN contract_actions ON contract_actions.id = t.contract_action_id
+            INNER JOIN blocks b ON b.id = t.block_id
+            WHERE address = $1
+            ORDER BY b.height, contract_actions.id
+        "};
+
+        sqlx::query_as(query)
+            .bind(address)
+            .fetch_all(&*self.pool)
+            .await
+    }
+
+    #[trace(properties = {
+        "address": "{address}",
+        "after_height": "{after_height}",
+        "through_height": "{through_height}"
+    })]
+    async fn get_contract_state_translations_between(
+        &self,
+        address: &SerializedContractAddress,
+        after_height: u32,
+        through_height: u32,
+    ) -> Result<Vec<ContractAction>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT
+                contract_actions.id,
+                address,
+                t.state_key AS state_key,
+                attributes,
+                zswap_state_key,
+                transaction_id,
+                b.height AS translated_at
+            FROM blocks b
+            INNER JOIN contract_action_translations t ON t.block_id = b.id
+            INNER JOIN contract_actions ON contract_actions.id = t.contract_action_id
+            WHERE b.height > $2
+            AND b.height <= $3
+            AND address = $1
+            ORDER BY b.height, contract_actions.id
+        "};
+
+        sqlx::query_as(query)
+            .bind(address)
+            .bind(after_height as i64)
+            .bind(through_height as i64)
+            .fetch_all(&*self.pool)
+            .await
     }
 
     #[trace(properties = { "contract_action_id": "{contract_action_id}" })]
@@ -477,7 +604,7 @@ impl Storage {
         address: &SerializedContractAddress,
         contract_action_id: u64,
         batch_size: NonZeroU32,
-    ) -> Result<Vec<ContractAction>, sqlx::Error> {
+    ) -> Result<Vec<ContractActionAtBlock>, sqlx::Error> {
         let query = indoc! {"
             SELECT
                 contract_actions.id,
@@ -485,7 +612,8 @@ impl Storage {
                 state_key,
                 attributes,
                 zswap_state_key,
-                transaction_id
+                transaction_id,
+                blocks.height AS block_height
             FROM contract_actions
             INNER JOIN transactions ON transactions.id = transaction_id
             INNER JOIN blocks ON blocks.id = transactions.block_id
@@ -500,7 +628,6 @@ impl Storage {
             .bind(contract_action_id as i64)
             .bind(batch_size.get() as i64)
             .fetch(&*self.pool)
-            .map_ok(ContractAction::from)
             .try_collect::<Vec<_>>()
             .await
     }
@@ -564,9 +691,12 @@ impl Storage {
 mod tests {
     use super::*;
     use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
-    use indexer_common::infra::{
-        migrations,
-        pool::sqlite::{self, SqlitePool},
+    use indexer_common::{
+        domain::SerializedContractStateKey,
+        infra::{
+            migrations,
+            pool::sqlite::{self, SqlitePool},
+        },
     };
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -696,5 +826,229 @@ mod tests {
             .get_contract_action_id_by_block_height(height)
             .await
             .expect("get start id")
+    }
+
+    async fn insert_translation(pool: &SqlitePool, action_id: i64, block_id: i64, key: &[u8]) {
+        sqlx::query(indoc! {"
+            INSERT INTO contract_action_translations (contract_action_id, block_id, state_key)
+            VALUES ($1, $2, $3)
+        "})
+        .bind(action_id)
+        .bind(block_id)
+        .bind(key)
+        .execute(&**pool)
+        .await
+        .expect("insert translation");
+    }
+
+    /// Contract A, deployed at block 100 with key `k6` and translated at block 500 to `k8`; blocks
+    /// 499 and 600 exist.
+    struct Fork {
+        pool: SqlitePool,
+        storage: Storage,
+        address: Vec<u8>,
+        deploy: u64,
+    }
+
+    impl Fork {
+        async fn before_the_call() -> Self {
+            let (pool, storage) = storage().await;
+            let address = vec![0xa; 32];
+            let block_100 = insert_block(&pool, 100, 1_000_000).await;
+            insert_block(&pool, 499, 1_000_000).await;
+            let fork_block = insert_block(&pool, 500, 2_000_000).await;
+            insert_block(&pool, 600, 2_000_000).await;
+            let deploy_tx = insert_transaction(&pool, block_100).await;
+            let deploy = insert_contract_action(&pool, deploy_tx, &address, Some(b"k6")).await;
+            insert_translation(&pool, deploy, fork_block, b"k8").await;
+
+            Self {
+                pool,
+                storage,
+                address,
+                deploy: deploy as u64,
+            }
+        }
+
+        /// Adds a call at block 700 with key `k8b`; returns its id.
+        async fn with_the_call(&self) -> u64 {
+            let block_700 = insert_block(&self.pool, 700, 2_000_000).await;
+            let call_tx = insert_transaction(&self.pool, block_700).await;
+            insert_contract_action(&self.pool, call_tx, &self.address, Some(b"k8b")).await as u64
+        }
+
+        fn address(&self) -> SerializedContractAddress {
+            self.address.clone().into()
+        }
+
+        async fn as_of(&self, height: u32) -> ContractAction {
+            self.storage
+                .get_contract_action_by_address_as_of_block_height(&self.address(), height)
+                .await
+                .expect("as of height")
+                .expect("the contract has an action by then")
+        }
+
+        async fn as_of_hash(&self, height: u32) -> ContractAction {
+            self.storage
+                .get_contract_action_by_address_as_of_block_hash(
+                    &self.address(),
+                    BlockHash::try_from(block_hash(height).as_slice()).expect("32 bytes"),
+                )
+                .await
+                .expect("as of hash")
+                .expect("the contract has an action by then")
+        }
+    }
+
+    fn key(bytes: &[u8]) -> Option<SerializedContractStateKey> {
+        Some(bytes.to_vec().into())
+    }
+
+    fn view(action: &ContractAction) -> (u64, Option<SerializedContractStateKey>, Option<u32>) {
+        (action.id, action.state_key.clone(), action.translated_at)
+    }
+
+    /// The latest view serves the translation until a newer action exists.
+    #[tokio::test]
+    async fn latest_view_serves_the_translation_until_a_newer_action_exists() {
+        let fork = Fork::before_the_call().await;
+        let latest = || async {
+            fork.storage
+                .get_latest_contract_action_by_address(&fork.address())
+                .await
+                .expect("latest")
+                .expect("the contract has an action")
+        };
+
+        assert_eq!(view(&latest().await), (fork.deploy, key(b"k8"), Some(500)));
+
+        let call = fork.with_the_call().await;
+        assert_eq!(view(&latest().await), (call, key(b"k8b"), None));
+    }
+
+    /// As-of views apply the translation from the fork block on; a height above the tip is the tip.
+    #[tokio::test]
+    async fn as_of_views_apply_the_translation_from_the_fork_block_on() {
+        let fork = Fork::before_the_call().await;
+
+        assert_eq!(
+            view(&fork.as_of(499).await),
+            (fork.deploy, key(b"k6"), None)
+        );
+        assert_eq!(
+            view(&fork.as_of(500).await),
+            (fork.deploy, key(b"k8"), Some(500))
+        );
+        assert_eq!(
+            view(&fork.as_of(600).await),
+            (fork.deploy, key(b"k8"), Some(500))
+        );
+        assert_eq!(
+            view(&fork.as_of(10_000).await),
+            (fork.deploy, key(b"k8"), Some(500))
+        );
+
+        let call = fork.with_the_call().await;
+        assert_eq!(view(&fork.as_of(10_000).await), (call, key(b"k8b"), None));
+        assert_eq!(
+            view(&fork.as_of(650).await),
+            (fork.deploy, key(b"k8"), Some(500))
+        );
+
+        assert!(
+            fork.storage
+                .get_contract_action_by_address_as_of_block_height(&fork.address(), 99)
+                .await
+                .expect("as of height")
+                .is_none(),
+            "before the deploy there is no contract"
+        );
+    }
+
+    /// The by-hash view resolves the hash to a height and bounds the same way.
+    #[tokio::test]
+    async fn as_of_block_hash_view_is_bounded_by_that_block() {
+        let fork = Fork::before_the_call().await;
+
+        assert_eq!(
+            view(&fork.as_of_hash(499).await),
+            (fork.deploy, key(b"k6"), None)
+        );
+        assert_eq!(
+            view(&fork.as_of_hash(600).await),
+            (fork.deploy, key(b"k8"), Some(500))
+        );
+    }
+
+    /// Translations read as their actions with the translated key and height.
+    #[tokio::test]
+    async fn translations_read_as_reemittable_rows() {
+        let fork = Fork::before_the_call().await;
+        fork.with_the_call().await;
+
+        let rows = fork
+            .storage
+            .get_contract_state_translations_by_address(&fork.address())
+            .await
+            .expect("by address");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(view(&rows[0]), (fork.deploy, key(b"k8"), Some(500)));
+
+        let between = async |after, through| {
+            fork.storage
+                .get_contract_state_translations_between(&fork.address(), after, through)
+                .await
+                .expect("between")
+        };
+        assert_eq!(between(499, 500).await, rows, "the fork block alone");
+        assert_eq!(
+            between(498, 501).await,
+            rows,
+            "a range spanning a lost fork block"
+        );
+        assert!(
+            between(500, 501).await.is_empty(),
+            "the lower bound is exclusive"
+        );
+        assert!(
+            between(400, 499).await.is_empty(),
+            "a range ending before the fork"
+        );
+        assert!(
+            fork.storage
+                .get_contract_state_translations_by_address(&vec![0xb; 32].into())
+                .await
+                .expect("by address")
+                .is_empty(),
+            "another address has none"
+        );
+    }
+
+    /// Stream rows carry their own keys and block heights.
+    #[tokio::test]
+    async fn stream_rows_are_records_with_their_block_height() {
+        let fork = Fork::before_the_call().await;
+        fork.with_the_call().await;
+
+        let rows = fork
+            .storage
+            .get_contract_actions_by_address(&fork.address(), 0, NonZeroU32::new(10).unwrap())
+            .await
+            .expect("stream rows");
+        let summary = rows
+            .iter()
+            .map(|row| {
+                (
+                    row.block_height,
+                    row.action.state_key.clone(),
+                    row.action.translated_at,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            summary,
+            vec![(100, key(b"k6"), None), (700, key(b"k8b"), None)]
+        );
     }
 }
