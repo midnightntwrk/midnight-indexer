@@ -94,8 +94,8 @@ where
                     format!("get next contract action for ID {contract_action_id}")
                 })?
             {
-                contract_action_id = contract_action.id + 1;
-                yield contract_action.into();
+                contract_action_id = contract_action.action.id + 1;
+                yield contract_action.action.into();
             }
 
             // Stream live contract actions.
@@ -121,8 +121,8 @@ where
                         format!("get next contract action for ID {contract_action_id}")
                     })?
                 {
-                    contract_action_id = contract_action.id + 1;
-                    yield contract_action.into();
+                    contract_action_id = contract_action.action.id + 1;
+                    yield contract_action.action.into();
                 }
             }
 
@@ -134,8 +134,8 @@ where
 }
 
 async fn get_next_contract_action<E>(
-    contract_actions: &mut (impl Stream<Item = Result<domain::ContractAction, E>> + Unpin),
-) -> Result<Option<domain::ContractAction>, E> {
+    contract_actions: &mut (impl Stream<Item = Result<domain::ContractActionAtBlock, E>> + Unpin),
+) -> Result<Option<domain::ContractActionAtBlock>, E> {
     contract_actions
         .try_next()
         .in_span(Span::root(
