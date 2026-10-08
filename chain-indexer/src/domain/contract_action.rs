@@ -47,17 +47,13 @@ pub struct ContractAction {
 /// The latest action of a contract.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LatestContractAction {
-    pub id: u64,
     pub address: SerializedContractAddress,
     pub state_key: Option<SerializedContractStateKey>,
 }
 
-/// The state of a contract action, translated to the ledger version of a later block.
+/// The state key of a contract action, translated to the ledger version of a later block.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ContractStateTranslation {
-    pub contract_action_id: u64,
-    pub state_key: SerializedContractStateKey,
-}
+pub struct ContractStateTranslation(pub SerializedContractStateKey);
 
 impl From<indexer_common::domain::ContractAction> for ContractAction {
     fn from(contract_action: indexer_common::domain::ContractAction) -> Self {
