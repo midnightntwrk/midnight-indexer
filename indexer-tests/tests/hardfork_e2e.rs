@@ -185,26 +185,23 @@ fn from_toolkit_tag() -> String {
     env::var("FROM_TOOLKIT_TAG").unwrap_or_else(|_| FROM_NODE_TAG.to_string())
 }
 
-/// The version tag of a hex-encoded tagged contract state, e.g. `v6` or `v8`.
-fn state_tag(hex: &str) -> anyhow::Result<String> {
-    const PREFIX: &str = "midnight:contract-state[";
+/// The tagged-serialization prefix of a ledger-8 contract state.
+const V6_STATE: &str = "midnight:contract-state[v6]:";
+/// The tagged-serialization prefix of a ledger-9 contract state.
+const V8_STATE: &str = "midnight:contract-state[v8]:";
 
-    let hex = hex.strip_prefix("0x").unwrap_or(hex);
-    let prefix_len = (PREFIX.len() + 8).min(hex.len() / 2);
-    let bytes = (0..prefix_len)
-        .map(|i| u8::from_str_radix(&hex[2 * i..2 * i + 2], 16))
-        .collect::<Result<Vec<_>, _>>()
-        .context("hex-decode contract state prefix")?;
-    let text = String::from_utf8_lossy(&bytes);
-    let tag = text
-        .strip_prefix(PREFIX)
-        .with_context(|| format!("contract state does not start with {PREFIX}: {text}"))?
-        .split(']')
-        .next()
-        .context("unterminated contract state tag")?
-        .to_owned();
-
-    Ok(tag)
+/// Assert that a hex-encoded contract state starts with the given tagged-serialization prefix.
+fn assert_state_prefix(state: &str, prefix: &str, message: &str) {
+    let state = normalise_hex(state);
+    let expected = prefix
+        .bytes()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    assert!(
+        state.starts_with(&expected),
+        "{message}: expected {prefix}, state starts {}",
+        &state[..state.len().min(expected.len())]
+    );
 }
 
 /// Hex without `0x`, lowercase.
@@ -1082,10 +1079,10 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
         },
     )
     .await?;
-    assert_eq!(
-        state_tag(&deploy_state)?,
-        "v6",
-        "a contract deployed on the ledger-8 runtime must be indexed with a ledger-8 ([v6]) state"
+    assert_state_prefix(
+        &deploy_state,
+        V6_STATE,
+        "a contract deployed on the ledger-8 runtime must be indexed with a ledger-8 ([v6]) state",
     );
     println!(
         "[4c] contract {contract_address} deployed at height {deploy_height} (tx \
@@ -1603,10 +1600,10 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
     );
 
     let node_state = normalise_hex(&harness.node_contract_state(&contract_address).await?);
-    assert_eq!(
-        state_tag(&node_state)?,
-        "v8",
-        "the node serves the translated [v8] state after the fork"
+    assert_state_prefix(
+        &node_state,
+        V8_STATE,
+        "the node serves the translated [v8] state after the fork",
     );
 
     // Current views: the node's bytes, amended at the fork block.
@@ -1647,11 +1644,11 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
     );
 
     // As-of views: in the encoding of the block asked about.
-    for (height, expected_tag, expected_at) in [
-        (deploy_height, "v6", deploy_height),
-        (fork_height - 1, "v6", deploy_height),
-        (fork_height, "v8", fork_height),
-        (final_height, "v8", fork_height),
+    for (height, expected_prefix, expected_at) in [
+        (deploy_height, V6_STATE, deploy_height),
+        (fork_height - 1, V6_STATE, deploy_height),
+        (fork_height, V8_STATE, fork_height),
+        (final_height, V8_STATE, fork_height),
     ] {
         let (state, state_at) = harness
             .state_and_state_at(
@@ -1662,10 +1659,13 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
             )
             .await?
             .with_context(|| format!("contract(address, offset: {height}) is null"))?;
-        assert_eq!(
-            state_tag(&state)?,
-            expected_tag,
-            "contract(address, offset: {{height: {height}}}).state must be in that block's encoding"
+        assert_state_prefix(
+            &state,
+            expected_prefix,
+            &format!(
+                "contract(address, offset: {{height: {height}}}).state must be in that block's \
+                 encoding"
+            ),
         );
         assert_eq!(
             state_at, expected_at,
@@ -1683,10 +1683,10 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
         )
         .await?
         .context("the deploy record is null")?;
-    assert_eq!(
-        state_tag(&record)?,
-        "v6",
-        "the deploy record keeps the encoding of its own block"
+    assert_state_prefix(
+        &record,
+        V6_STATE,
+        "the deploy record keeps the encoding of its own block",
     );
     assert_eq!(
         record_at, deploy_height,
@@ -1701,10 +1701,10 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
         )
         .await?
         .context("the deploy transaction has no contract action")?;
-    assert_eq!(
-        state_tag(&in_transaction)?,
-        "v6",
-        "Transaction.contractActions keeps the encoding of its own block"
+    assert_state_prefix(
+        &in_transaction,
+        V6_STATE,
+        "Transaction.contractActions keeps the encoding of its own block",
     );
     assert_eq!(in_transaction_at, deploy_height);
 
@@ -1730,15 +1730,15 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
             .as_str()
             .with_context(|| format!("stream item {index} has no state"))
     };
-    assert_eq!(
-        state_tag(item_state(0)?)?,
-        "v6",
-        "the first stream item is the deploy as its block held it"
+    assert_state_prefix(
+        item_state(0)?,
+        V6_STATE,
+        "the first stream item is the deploy as its block held it",
     );
-    assert_eq!(
-        state_tag(item_state(1)?)?,
-        "v8",
-        "the second stream item is the deploy re-emitted in the ledger-9 encoding"
+    assert_state_prefix(
+        item_state(1)?,
+        V8_STATE,
+        "the second stream item is the deploy re-emitted in the ledger-9 encoding",
     );
     assert_eq!(
         normalise_hex(item_state(1)?),
