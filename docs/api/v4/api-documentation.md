@@ -258,7 +258,7 @@ query {
     ... on ContractDeploy {
       address
       state
-      stateAt
+      stateAt { height hash protocolVersion }
       zswapState
       unshieldedBalances {
         tokenType
@@ -268,7 +268,7 @@ query {
     ... on ContractCall {
       address
       state
-      stateAt
+      stateAt { height hash protocolVersion }
       zswapState
       entryPoint
       unshieldedBalances {
@@ -279,7 +279,7 @@ query {
     ... on ContractUpdate {
       address
       state
-      stateAt
+      stateAt { height hash protocolVersion }
       zswapState
       unshieldedBalances {
         tokenType
@@ -302,7 +302,7 @@ query {
     ... on ContractDeploy {
       address
       state
-      stateAt
+      stateAt { height hash protocolVersion }
       zswapState
       unshieldedBalances {
         tokenType
@@ -312,7 +312,7 @@ query {
     ... on ContractCall {
       address
       state
-      stateAt
+      stateAt { height hash protocolVersion }
       zswapState
       entryPoint
       unshieldedBalances {
@@ -323,7 +323,7 @@ query {
     ... on ContractUpdate {
       address
       state
-      stateAt
+      stateAt { height hash protocolVersion }
       zswapState
       unshieldedBalances {
         tokenType
@@ -348,14 +348,14 @@ query {
   contract(address: "3031323...") {
     address
     state
-    stateAt
+    stateAt { height hash protocolVersion }
     maintenanceAuthority {
       threshold
       counter
     }
     actions(limit: 5) {
       __typename
-      stateAt
+      stateAt { height hash protocolVersion }
     }
   }
 }
@@ -367,7 +367,7 @@ query {
 query {
   contract(address: "3031323...", offset: { height: 10 }) {
     state
-    stateAt
+    stateAt { height hash protocolVersion }
   }
 }
 ```
@@ -517,7 +517,7 @@ For the exact field set of each SPO type (`SpoIdentity`, `Spo`, `PoolMetadata`, 
 All ContractAction types (ContractDeploy, ContractCall, ContractUpdate) implement the ContractAction interface with these common fields:
 - `address`: The contract address (HexEncoded)
 - `state`: The contract state (HexEncoded)
-- `stateAt`: The height of the block at which `state` last changed (Int): the action's block, or the fork block at which the state was translated
+- `stateAt`: The block at which `state` last changed (BlockReference: `height`, `hash`, `protocolVersion`): the action's block, or the fork block at which the state was translated
 - `zswapState`: The contract-specific zswap state at this action (HexEncoded)
 - `transaction`: The transaction that contains this action
 
@@ -540,8 +540,10 @@ the offset block with one, and the block a stream is at.
 - Individual actions (`contractAction` with an offset, `Transaction.contractActions`,
   `Contract.actions`): their own block's encoding.
 
-Every action on one contract in one block reports the same `state` and `stateAt`. Where `stateAt`
-differs from `transaction.block.height`, the state was translated at block `stateAt`.
+Every action on one contract in one block reports the same `state` and `stateAt`. Where
+`stateAt.hash` differs from `transaction.block.hash`, the state was translated at block `stateAt`
+and can be in a newer encoding than `transaction.protocolVersion`. Decode `state` by
+`stateAt.protocolVersion`.
 
 Contract actions can be one of three types:
 - **ContractDeploy**: Initial contract deployment
@@ -726,7 +728,7 @@ When a new block is indexed, the client receives a `next` message.
 
 Subscribes to contract actions for a particular address: the existing actions from the offset block on, then new ones as they are indexed. Without an offset the stream starts at the latest block and replays nothing.
 
-At a ledger hard fork, a contract without an action in the fork block has its latest action re-emitted there: the same action, with `state` in the new encoding and `stateAt` set to the fork block's height. Items before the fork are in the old encoding, items from it on in the new one. Block offsets are inclusive, so resuming at a saved `stateAt` redelivers that block's items.
+At a ledger hard fork, a contract without an action in the fork block has its latest action re-emitted there: the same action, with `state` in the new encoding and `stateAt` set to the fork block. The item keeps the original `transaction`, so a client that tracks its position or removes duplicates by transaction must use `stateAt` instead. Items before the fork are in the old encoding, items from it on in the new one. Block offsets are inclusive, so resuming at a saved `stateAt.height` redelivers that block's items.
 
 **Example:**
 
@@ -735,7 +737,7 @@ At a ledger hard fork, a contract without an action in the fork block has its la
   "id": "2",
   "type": "start",
   "payload": {
-    "query": "subscription { contractActions(address:\"3031323...\", offset: { height: 1 }) { __typename ... on ContractDeploy { address state stateAt zswapState unshieldedBalances { tokenType amount } } ... on ContractCall { address state stateAt zswapState entryPoint unshieldedBalances { tokenType amount } } ... on ContractUpdate { address state stateAt zswapState unshieldedBalances { tokenType amount } } } }"
+    "query": "subscription { contractActions(address:\"3031323...\", offset: { height: 1 }) { __typename ... on ContractDeploy { address state stateAt { height } zswapState unshieldedBalances { tokenType amount } } ... on ContractCall { address state stateAt { height } zswapState entryPoint unshieldedBalances { tokenType amount } } ... on ContractUpdate { address state stateAt { height } zswapState unshieldedBalances { tokenType amount } } } }"
   }
 }
 ```

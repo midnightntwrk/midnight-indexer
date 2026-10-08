@@ -77,27 +77,30 @@ impl<S: Storage> Loader<u64> for TransactionByIdLoader<S> {
 }
 
 #[derive(Deref)]
-pub(crate) struct BlockHeightByTransactionIdLoader<S>(S);
+pub(crate) struct BlockReferenceByTransactionIdLoader<S>(S);
 
-impl<S: Storage> BlockHeightByTransactionIdLoader<S> {
+impl<S: Storage> BlockReferenceByTransactionIdLoader<S> {
     pub(crate) fn new(storage: S) -> Self {
         Self(storage)
     }
 }
 
-impl<S: Storage> Loader<u64> for BlockHeightByTransactionIdLoader<S> {
-    type Value = u32;
+impl<S: Storage> Loader<u64> for BlockReferenceByTransactionIdLoader<S> {
+    type Value = domain::BlockReference;
     type Error = Arc<sqlx::Error>;
 
-    async fn load(&self, keys: &[u64]) -> Result<HashMap<u64, u32>, Arc<sqlx::Error>> {
-        let heights = self
-            .get_block_heights_by_transaction_ids(keys)
+    async fn load(
+        &self,
+        keys: &[u64],
+    ) -> Result<HashMap<u64, domain::BlockReference>, Arc<sqlx::Error>> {
+        let block_references = self
+            .get_block_references_by_transaction_ids(keys)
             .await
             .map_err(Arc::new)?
             .into_iter()
             .collect();
 
-        Ok(heights)
+        Ok(block_references)
     }
 }
 

@@ -30,7 +30,10 @@ query BlockQuery($block_offset: BlockOffset) {
             contractActions {
                 address
                 state
-                stateAt
+                stateAt {
+                    hash
+                    height
+                }
                 zswapState
                 transaction {
                     hash
@@ -191,7 +194,10 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
         contractActions {
             address
             state
-            stateAt
+            stateAt {
+                hash
+                height
+            }
             zswapState
             transaction {
                 hash
@@ -348,7 +354,10 @@ query ContractActionQuery(
     contractAction(address: $address, offset: $contract_action_offset) {
         address
         state
-        stateAt
+        stateAt {
+            hash
+            height
+        }
         zswapState
         transaction {
             hash
@@ -425,7 +434,10 @@ subscription BlockSubscription($block_offset: BlockOffset) {
             contractActions {
                 address
                 state
-                stateAt
+                stateAt {
+                    hash
+                    height
+                }
                 zswapState
                 transaction {
                     hash
@@ -586,7 +598,10 @@ subscription ContractActionSubscription(
     ) {
         address
         state
-        stateAt
+        stateAt {
+            hash
+            height
+        }
         zswapState
         transaction {
             hash

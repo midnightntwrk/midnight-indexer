@@ -100,60 +100,6 @@ impl Storage {
 
 impl TransactionStorage for Storage {
     #[trace(properties = { "ids": "{ids:?}" })]
-    async fn get_block_heights_by_transaction_ids(
-        &self,
-        ids: &[u64],
-    ) -> Result<Vec<(u64, u32)>, sqlx::Error> {
-        if ids.is_empty() {
-            return Ok(vec![]);
-        }
-
-        #[cfg(feature = "cloud")]
-        let rows = {
-            let query = indoc! {"
-                SELECT transactions.id, blocks.height
-                FROM transactions
-                INNER JOIN blocks ON blocks.id = transactions.block_id
-                WHERE transactions.id = ANY($1)
-            "};
-
-            sqlx::query_as::<_, (i64, i64)>(query)
-                .bind(ids.iter().map(|id| *id as i64).collect::<Vec<_>>())
-                .fetch_all(&*self.pool)
-                .await?
-        };
-
-        #[cfg(feature = "standalone")]
-        let rows = {
-            let mut query = QueryBuilder::<Sqlite>::new("WITH ids(id) AS (VALUES (");
-            let mut ids_separated = query.separated("), (");
-            for id in ids {
-                ids_separated.push_bind(*id as i64);
-            }
-            query.push(indoc! {"
-                ))
-                SELECT transactions.id, blocks.height
-                FROM transactions
-                INNER JOIN blocks ON blocks.id = transactions.block_id
-                WHERE transactions.id IN (SELECT id FROM ids)
-            "});
-
-            query
-                .build_query_as::<(i64, i64)>()
-                .fetch_all(&*self.pool)
-                .await?
-        };
-
-        rows.into_iter()
-            .map(|(id, height)| {
-                let height =
-                    u32::try_from(height).map_err(|error| sqlx::Error::Decode(error.into()))?;
-                Ok((id as u64, height))
-            })
-            .collect()
-    }
-
-    #[trace(properties = { "ids": "{ids:?}" })]
     async fn get_transactions_by_ids(&self, ids: &[u64]) -> Result<Vec<Transaction>, sqlx::Error> {
         if ids.is_empty() {
             return Ok(vec![]);

@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::domain::BlockReference;
 use indexer_common::{
     domain::{
         ContractAttributes, SerializedContractAddress, SerializedContractStateKey,
@@ -45,18 +46,18 @@ pub struct ContractAction {
     #[sqlx(try_from = "i64")]
     pub transaction_id: u64,
 
-    /// The height of the block at which the state was translated to a new ledger version, if it
-    /// was.
+    /// The height of the block at which the state was translated to a new ledger version, if a
+    /// current or as-of view applied a translation. `None` on every other query.
     #[sqlx(try_from = "SqlxOption<i64>", default)]
     pub(crate) translated_at: Option<u32>,
 }
 
-/// A contract action with the height of its block.
+/// A contract action with a reference to its block.
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 pub struct ContractActionAtBlock {
     #[sqlx(flatten)]
     pub(crate) action: ContractAction,
 
-    #[sqlx(try_from = "i64")]
-    pub(crate) block_height: u32,
+    #[sqlx(flatten)]
+    pub(crate) block: BlockReference,
 }

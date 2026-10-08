@@ -50,7 +50,7 @@ where
     /// latest block if the offset is omitted.
     ///
     /// At a ledger hard fork, a contract without an action in the fork block has its latest action
-    /// re-emitted with the translated `state` and `stateAt` set to the fork block's height.
+    /// re-emitted with the translated `state` and `stateAt` set to the fork block.
     async fn contract_actions<'a>(
         &self,
         cx: &'a Context<'a>,
@@ -117,9 +117,9 @@ where
                 .map_err_into_server_error(|| {
                     format!("get next contract action for ID {contract_action_id}")
                 })?
-                .filter(|contract_action| contract_action.block_height <= seen.height)
+                .filter(|contract_action| contract_action.block.height <= seen.height)
             {
-                for translation in due(&mut replay_translations, contract_action.block_height) {
+                for translation in due(&mut replay_translations, contract_action.block.height) {
                     yield translation.into();
                 }
                 contract_action_id = contract_action.action.id + 1;
@@ -164,7 +164,7 @@ where
                     &address,
                     contract_action_id,
                     batch_size,
-                );
+                    );
                 let mut contract_actions = pin!(contract_actions);
 
                 while let Some(contract_action) = get_next_contract_action(&mut contract_actions)
@@ -172,9 +172,9 @@ where
                     .map_err_into_server_error(|| {
                         format!("get next contract action for ID {contract_action_id}")
                     })?
-                    .filter(|contract_action| contract_action.block_height <= height)
+                    .filter(|contract_action| contract_action.block.height <= height)
                 {
-                    for translation in due(&mut live_translations, contract_action.block_height) {
+                    for translation in due(&mut live_translations, contract_action.block.height) {
                         yield translation.into();
                     }
                     contract_action_id = contract_action.action.id + 1;
@@ -215,25 +215,24 @@ impl Seen {
 
 /// The translations recorded at or after `start_height`, oldest first.
 fn pending_translations(
-    translations: Vec<domain::ContractAction>,
+    translations: Vec<domain::ContractActionAtBlock>,
     start_height: u32,
-) -> VecDeque<domain::ContractAction> {
+) -> VecDeque<domain::ContractActionAtBlock> {
     translations
         .into_iter()
-        .filter(|translation| {
-            translation
-                .translated_at
-                .is_some_and(|at| at >= start_height)
-        })
+        .filter(|translation| translation.block.height >= start_height)
         .collect()
 }
 
 /// Remove and return the pending translations recorded at or before `height`, in order.
-fn due(pending: &mut VecDeque<domain::ContractAction>, height: u32) -> Vec<domain::ContractAction> {
+fn due(
+    pending: &mut VecDeque<domain::ContractActionAtBlock>,
+    height: u32,
+) -> Vec<domain::ContractActionAtBlock> {
     let mut due = Vec::new();
     while pending
         .front()
-        .is_some_and(|translation| translation.translated_at.is_some_and(|at| at <= height))
+        .is_some_and(|translation| translation.block.height <= height)
     {
         due.extend(pending.pop_front());
     }
@@ -255,25 +254,30 @@ async fn get_next_contract_action<E>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use indexer_common::domain::ContractAttributes;
+    use indexer_common::domain::{ContractAttributes, ProtocolVersion};
 
-    fn translation(id: u64, translated_at: u32) -> domain::ContractAction {
-        domain::ContractAction {
-            id,
-            address: vec![0xa; 32].into(),
-            state_key: Some(vec![0x80].into()),
-            attributes: ContractAttributes::Deploy,
-            zswap_state_key: None,
-            transaction_id: id,
-            translated_at: Some(translated_at),
+    fn translation(id: u64, translated_at: u32) -> domain::ContractActionAtBlock {
+        domain::ContractActionAtBlock {
+            action: domain::ContractAction {
+                id,
+                address: vec![0xa; 32].into(),
+                state_key: Some(vec![0x80].into()),
+                attributes: ContractAttributes::Deploy,
+                zswap_state_key: None,
+                transaction_id: id,
+                translated_at: None,
+            },
+            block: domain::BlockReference {
+                height: translated_at,
+                hash: [0; 32].into(),
+                protocol_version: ProtocolVersion::try_from(2_000_000_u32)
+                    .expect("a known protocol version"),
+            },
         }
     }
 
-    fn heights(actions: &[domain::ContractAction]) -> Vec<u32> {
-        actions
-            .iter()
-            .map(|action| action.translated_at.expect("a translation"))
-            .collect()
+    fn heights(actions: &[domain::ContractActionAtBlock]) -> Vec<u32> {
+        actions.iter().map(|action| action.block.height).collect()
     }
 
     /// Translations interleave with actions by height.

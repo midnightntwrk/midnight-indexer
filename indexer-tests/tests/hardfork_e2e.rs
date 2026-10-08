@@ -130,7 +130,10 @@ const CONTRACT_ACTIONS_SUBSCRIPTION: &str = "
         contractActions(address: $a, offset: { height: $h }) {
             address
             state
-            stateAt
+            stateAt {
+                height
+                protocolVersion
+            }
             zswapState
             transaction {
                 hash
@@ -340,7 +343,7 @@ impl Harness {
                     .as_str()
                     .with_context(|| format!("{pointer} has no state"))?
                     .to_owned(),
-                object["stateAt"]
+                object["stateAt"]["height"]
                     .as_u64()
                     .with_context(|| format!("{pointer} has no stateAt"))?,
             ))),
@@ -1048,7 +1051,7 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
         || async {
             let data = harness
                 .graphql(
-                    "query($a: HexEncoded!) { contractAction(address: $a) { state stateAt \
+                    "query($a: HexEncoded!) { contractAction(address: $a) { state stateAt { height } \
                      transaction { hash block { height } } } }",
                     json!({ "a": contract_address }),
                 )
@@ -1061,7 +1064,7 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
                 .as_u64()
                 .context("no deploy block height")?;
             assert_eq!(
-                action["stateAt"].as_u64(),
+                action["stateAt"]["height"].as_u64(),
                 Some(height),
                 "before the fork, the deploy's stateAt is its own block"
             );
@@ -1610,7 +1613,7 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
     let by_address = json!({ "a": contract_address });
     let (current, current_at) = harness
         .state_and_state_at(
-            "query($a: HexEncoded!) { contract(address: $a) { state stateAt } }",
+            "query($a: HexEncoded!) { contract(address: $a) { state stateAt { height } } }",
             by_address.clone(),
             "/contract",
         )
@@ -1627,7 +1630,7 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
     );
     let (current_action, current_action_at) = harness
         .state_and_state_at(
-            "query($a: HexEncoded!) { contractAction(address: $a) { state stateAt } }",
+            "query($a: HexEncoded!) { contractAction(address: $a) { state stateAt { height } } }",
             by_address.clone(),
             "/contractAction",
         )
@@ -1653,7 +1656,7 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
         let (state, state_at) = harness
             .state_and_state_at(
                 "query($a: HexEncoded!, $h: Int!) { contract(address: $a, offset: { height: $h }) \
-                 { state stateAt } }",
+                 { state stateAt { height } } }",
                 json!({ "a": contract_address, "h": height }),
                 "/contract",
             )
@@ -1677,7 +1680,7 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
     let (record, record_at) = harness
         .state_and_state_at(
             "query($a: HexEncoded!, $h: Int!) { contractAction(address: $a, offset: { blockOffset: \
-             { height: $h } }) { state stateAt } }",
+             { height: $h } }) { state stateAt { height } } }",
             json!({ "a": contract_address, "h": deploy_height }),
             "/contractAction",
         )
@@ -1695,7 +1698,7 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
     let (in_transaction, in_transaction_at) = harness
         .state_and_state_at(
             "query($hash: HexEncoded!) { transactions(offset: { hash: $hash }) { contractActions \
-             { state stateAt } } }",
+             { state stateAt { height } } } }",
             json!({ "hash": deploy_tx_hash }),
             "/transactions/0/contractActions/0",
         )
@@ -1761,14 +1764,18 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
         "the re-emission still names the block that produced the state"
     );
     assert_eq!(
-        items[0]["stateAt"].as_u64(),
+        items[0]["stateAt"]["height"].as_u64(),
         Some(deploy_height),
         "the deploy item's stateAt is its own block"
     );
     assert_eq!(
-        items[1]["stateAt"].as_u64(),
+        items[1]["stateAt"]["height"].as_u64(),
         Some(fork_height),
         "the re-emission's stateAt is the fork block"
+    );
+    assert_ne!(
+        items[1]["stateAt"]["protocolVersion"], items[0]["stateAt"]["protocolVersion"],
+        "the re-emission's stateAt carries the post-fork protocol version"
     );
     assert!(
         timeout(Duration::from_secs(5), events.next())

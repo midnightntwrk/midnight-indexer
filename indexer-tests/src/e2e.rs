@@ -914,8 +914,8 @@ async fn test_contract_actions_subscription(
                 .map_ok(|data| {
                     let action = data.contract_actions;
                     assert_eq!(
-                        action.state_at, action.transaction.block.height,
-                        "an ordinary stream item's stateAt is its own block height"
+                        action.state_at.hash, action.transaction.block.hash,
+                        "an ordinary stream item's stateAt is its own block"
                     );
                     action.to_json_value()
                 })
@@ -939,8 +939,8 @@ async fn test_contract_actions_subscription(
                 .map_ok(|data| {
                     let action = data.contract_actions;
                     assert_eq!(
-                        action.state_at, action.transaction.block.height,
-                        "an ordinary stream item's stateAt is its own block height"
+                        action.state_at.hash, action.transaction.block.hash,
+                        "an ordinary stream item's stateAt is its own block"
                     );
                     action.to_json_value()
                 })

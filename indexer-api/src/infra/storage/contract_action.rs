@@ -485,7 +485,7 @@ impl ContractActionStorage for Storage {
     async fn get_contract_state_translations_by_address(
         &self,
         address: &SerializedContractAddress,
-    ) -> Result<Vec<ContractAction>, sqlx::Error> {
+    ) -> Result<Vec<ContractActionAtBlock>, sqlx::Error> {
         let query = indoc! {"
             SELECT
                 contract_actions.id,
@@ -494,7 +494,9 @@ impl ContractActionStorage for Storage {
                 attributes,
                 zswap_state_key,
                 transaction_id,
-                b.height AS translated_at
+                b.height,
+                b.hash,
+                b.protocol_version
             FROM contract_action_translations t
             INNER JOIN contract_actions ON contract_actions.id = t.contract_action_id
             INNER JOIN blocks b ON b.id = t.block_id
@@ -518,7 +520,7 @@ impl ContractActionStorage for Storage {
         address: &SerializedContractAddress,
         after_height: u32,
         through_height: u32,
-    ) -> Result<Vec<ContractAction>, sqlx::Error> {
+    ) -> Result<Vec<ContractActionAtBlock>, sqlx::Error> {
         let query = indoc! {"
             SELECT
                 contract_actions.id,
@@ -527,7 +529,9 @@ impl ContractActionStorage for Storage {
                 attributes,
                 zswap_state_key,
                 transaction_id,
-                b.height AS translated_at
+                b.height,
+                b.hash,
+                b.protocol_version
             FROM blocks b
             INNER JOIN contract_action_translations t ON t.block_id = b.id
             INNER JOIN contract_actions ON contract_actions.id = t.contract_action_id
@@ -618,7 +622,9 @@ impl Storage {
                 attributes,
                 zswap_state_key,
                 transaction_id,
-                blocks.height AS block_height
+                blocks.height,
+                blocks.hash,
+                blocks.protocol_version
             FROM contract_actions
             INNER JOIN transactions ON transactions.id = transaction_id
             INNER JOIN blocks ON blocks.id = transactions.block_id
@@ -695,6 +701,7 @@ impl Storage {
 #[cfg(all(test, feature = "standalone"))]
 mod tests {
     use super::*;
+    use crate::domain::storage::block::BlockStorage;
     use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
     use indexer_common::{
         domain::SerializedContractStateKey,
@@ -823,34 +830,6 @@ mod tests {
             "the tip holds no action"
         );
         assert_eq!(start_id(&storage, 100).await, last + 1, "above the tip");
-    }
-
-    /// Block heights are read for the given transactions only, each with its transaction id.
-    #[tokio::test]
-    async fn block_heights_by_transaction_ids() {
-        use crate::domain::storage::transaction::TransactionStorage;
-
-        let (_dir, pool, storage) = storage().await;
-        let block_7 = insert_block(&pool, 7, 1_000_000).await;
-        let block_9 = insert_block(&pool, 9, 1_000_000).await;
-        let a = insert_transaction(&pool, block_7).await as u64;
-        let b = insert_transaction(&pool, block_9).await as u64;
-        insert_transaction(&pool, block_9).await;
-
-        let mut heights = storage
-            .get_block_heights_by_transaction_ids(&[a, b, 999])
-            .await
-            .expect("get block heights");
-        heights.sort();
-        assert_eq!(heights, [(a, 7), (b, 9)]);
-
-        assert!(
-            storage
-                .get_block_heights_by_transaction_ids(&[])
-                .await
-                .expect("get block heights")
-                .is_empty()
-        );
     }
 
     async fn start_id(storage: &Storage, height: u32) -> u64 {
@@ -1015,7 +994,8 @@ mod tests {
         );
     }
 
-    /// Translations read as their actions with the translated key and height.
+    /// Translations read as their actions with the translated key and the block they were translated
+    /// at.
     #[tokio::test]
     async fn translations_read_as_reemittable_rows() {
         let fork = Fork::before_the_call().await;
@@ -1027,7 +1007,12 @@ mod tests {
             .await
             .expect("by address");
         assert_eq!(rows.len(), 1);
-        assert_eq!(view(&rows[0]), (fork.deploy, key(b"k8"), Some(500)));
+        assert_eq!(view(&rows[0].action), (fork.deploy, key(b"k8"), None));
+        assert_eq!(
+            (rows[0].block.height, rows[0].block.hash.as_ref()),
+            (500, block_hash(500).as_slice()),
+            "the row references the block it was translated at"
+        );
 
         let between = async |after, through| {
             fork.storage
@@ -1059,9 +1044,9 @@ mod tests {
         );
     }
 
-    /// Stream rows carry their own keys and block heights.
+    /// Stream rows carry their own keys and a reference to their block.
     #[tokio::test]
-    async fn stream_rows_are_records_with_their_block_height() {
+    async fn stream_rows_are_records_with_their_block_reference() {
         let fork = Fork::before_the_call().await;
         fork.with_the_call().await;
 
@@ -1074,7 +1059,9 @@ mod tests {
             .iter()
             .map(|row| {
                 (
-                    row.block_height,
+                    row.block.height,
+                    row.block.hash.as_ref().to_vec(),
+                    u32::from(row.block.protocol_version),
                     row.action.state_key.clone(),
                     row.action.translated_at,
                 )
@@ -1082,7 +1069,56 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             summary,
-            vec![(100, key(b"k6"), None), (700, key(b"k8b"), None)]
+            vec![
+                (100, block_hash(100), 1_000_000, key(b"k6"), None),
+                (700, block_hash(700), 2_000_000, key(b"k8b"), None)
+            ]
+        );
+    }
+
+    /// Block references are read for the given transactions only, each with its transaction ID, and
+    /// by height.
+    #[tokio::test]
+    async fn block_references_by_transaction_ids_and_height() {
+        let (_dir, pool, storage) = storage().await;
+        let block_1 = insert_block(&pool, 1, 1_000_000).await;
+        let block_2 = insert_block(&pool, 2, 2_000_000).await;
+        let first = insert_transaction(&pool, block_1).await as u64;
+        let second = insert_transaction(&pool, block_2).await as u64;
+        insert_transaction(&pool, block_2).await;
+
+        let mut block_references =
+            BlockStorage::get_block_references_by_transaction_ids(&storage, &[first, second, 999])
+                .await
+                .expect("block references by transaction ids")
+                .into_iter()
+                .map(|(id, block)| (id, block.height, u32::from(block.protocol_version)))
+                .collect::<Vec<_>>();
+        block_references.sort();
+        assert_eq!(
+            block_references,
+            [(first, 1, 1_000_000), (second, 2, 2_000_000)]
+        );
+
+        assert!(
+            BlockStorage::get_block_references_by_transaction_ids(&storage, &[])
+                .await
+                .expect("no ids")
+                .is_empty()
+        );
+
+        let block_2 = storage
+            .get_block_reference_by_height(2)
+            .await
+            .expect("block reference by height")
+            .expect("block 2 exists");
+        assert_eq!(block_2.hash.as_ref(), block_hash(2).as_slice());
+        assert!(
+            storage
+                .get_block_reference_by_height(3)
+                .await
+                .expect("block reference by height")
+                .is_none()
         );
     }
 }
