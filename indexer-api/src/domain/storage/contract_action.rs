@@ -111,7 +111,7 @@ where
     ) -> Result<Vec<ContractAction>, sqlx::Error>;
 
     /// Get a stream of contract actions for the given address starting at the given contract_action
-    /// ID, ordered by transaction ID, each with the height of its block.
+    /// ID, ordered by transaction ID, each with a reference to its block.
     fn get_contract_actions_by_address(
         &self,
         address: &SerializedContractAddress,
@@ -120,11 +120,11 @@ where
     ) -> impl Stream<Item = Result<ContractActionAtBlock, sqlx::Error>> + Send;
 
     /// The contract state translations of the given address, ordered by block height, each as its
-    /// action with the translated state key and `translated_at` set.
+    /// action with the translated state key and a reference to the block it was translated at.
     async fn get_contract_state_translations_by_address(
         &self,
         address: &SerializedContractAddress,
-    ) -> Result<Vec<ContractAction>, sqlx::Error>;
+    ) -> Result<Vec<ContractActionAtBlock>, sqlx::Error>;
 
     /// As [Self::get_contract_state_translations_by_address], for blocks with heights in
     /// `(after_height, through_height]`.
@@ -133,7 +133,7 @@ where
         address: &SerializedContractAddress,
         after_height: u32,
         through_height: u32,
-    ) -> Result<Vec<ContractAction>, sqlx::Error>;
+    ) -> Result<Vec<ContractActionAtBlock>, sqlx::Error>;
 
     /// Get unshielded token balances for a contract action.
     async fn get_unshielded_balances_by_contract_action_id(
@@ -256,7 +256,7 @@ impl ContractActionStorage for NoopStorage {
     async fn get_contract_state_translations_by_address(
         &self,
         address: &SerializedContractAddress,
-    ) -> Result<Vec<ContractAction>, sqlx::Error> {
+    ) -> Result<Vec<ContractActionAtBlock>, sqlx::Error> {
         unimplemented!()
     }
 
@@ -265,7 +265,7 @@ impl ContractActionStorage for NoopStorage {
         address: &SerializedContractAddress,
         after_height: u32,
         through_height: u32,
-    ) -> Result<Vec<ContractAction>, sqlx::Error> {
+    ) -> Result<Vec<ContractActionAtBlock>, sqlx::Error> {
         unimplemented!()
     }
 

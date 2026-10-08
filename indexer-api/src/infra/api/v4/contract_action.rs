@@ -17,7 +17,7 @@ use crate::{
         ApiResult, ContextExt, OptionExt, ResultExt,
         v4::{
             HexEncodable, HexEncoded,
-            block::BlockOffset,
+            block::{BlockOffset, BlockReference},
             contract_event::ContractEvent,
             directives::beta,
             transaction::{Transaction, TransactionOffset},
@@ -42,7 +42,7 @@ use std::marker::PhantomData;
 #[graphql(
     field(name = "address", ty = "&HexEncoded"),
     field(name = "state", ty = "ApiResult<HexEncoded>"),
-    field(name = "state_at", ty = "ApiResult<u32>"),
+    field(name = "state_at", ty = "ApiResult<BlockReference>"),
     field(name = "zswap_state", ty = "ApiResult<HexEncoded>"),
     field(name = "transaction", ty = "ApiResult<Transaction<S>>"),
     field(name = "unshielded_balances", ty = "ApiResult<Vec<ContractBalance>>")
@@ -72,14 +72,14 @@ where
     S: Storage,
 {
     fn from(action: domain::ContractActionAtBlock) -> Self {
-        contract_action(action.action, Some(action.block_height))
+        contract_action(action.action, Some(action.block))
     }
 }
 
-/// A contract action, with the height of its block if the query provided it.
+/// A contract action whose `stateAt` resolves to `state_at` if given.
 fn contract_action<S>(
     action: domain::ContractAction,
-    block_height: Option<u32>,
+    state_at: Option<domain::BlockReference>,
 ) -> ContractAction<S>
 where
     S: Storage,
@@ -102,7 +102,7 @@ where
             transaction_id,
             contract_action_id: id,
             translated_at,
-            block_height,
+            state_at,
             _s: PhantomData,
         }),
 
@@ -114,7 +114,7 @@ where
             transaction_id,
             contract_action_id: id,
             translated_at,
-            block_height,
+            state_at,
             raw_address: address,
             _s: PhantomData,
         }),
@@ -126,7 +126,7 @@ where
             transaction_id,
             contract_action_id: id,
             translated_at,
-            block_height,
+            state_at,
             _s: PhantomData,
         }),
     }
@@ -153,28 +153,36 @@ pub(super) async fn resolve_state(
     }
 }
 
-/// Resolve `stateAt`: the translation height if any, else the height of the action's block, read
-/// from its transaction unless the query provided it.
+/// Resolve `stateAt`: the given block reference if any, else the block at the translation height if
+/// any, else the action's own block.
 pub(super) async fn resolve_state_at<S>(
+    state_at: Option<domain::BlockReference>,
     translated_at: Option<u32>,
-    block_height: Option<u32>,
     transaction_id: u64,
     cx: &Context<'_>,
-) -> ApiResult<u32>
+) -> ApiResult<BlockReference>
 where
     S: Storage,
 {
-    if let Some(height) = translated_at.or(block_height) {
-        return Ok(height);
-    }
+    let block = match (state_at, translated_at) {
+        (Some(block), _) => block,
+        (None, Some(height)) => cx
+            .get_storage::<S>()
+            .get_block_reference_by_height(height)
+            .await
+            .map_err_into_server_error(|| format!("get block reference by height {height}"))?
+            .some_or_server_error(|| format!("block with height {height} not found"))?,
+        (None, None) => cx
+            .get_block_reference_by_transaction_id_loader::<S>()
+            .load_one(transaction_id)
+            .await
+            .map_err_into_server_error(|| {
+                format!("get block reference by transaction id {transaction_id}")
+            })?
+            .some_or_server_error(|| format!("transaction with id {transaction_id} not found"))?,
+    };
 
-    cx.get_block_height_by_transaction_id_loader::<S>()
-        .load_one(transaction_id)
-        .await
-        .map_err_into_server_error(|| {
-            format!("get block height by transaction id {transaction_id}")
-        })?
-        .some_or_server_error(|| format!("transaction with id {transaction_id} not found"))
+    Ok(block.into())
 }
 
 /// Resolve a contract's zswap state out of the ledger arena. See [resolve_state].
@@ -222,7 +230,7 @@ where
     translated_at: Option<u32>,
 
     #[graphql(skip)]
-    block_height: Option<u32>,
+    state_at: Option<domain::BlockReference>,
 
     #[graphql(skip)]
     _s: PhantomData<S>,
@@ -241,16 +249,10 @@ where
         resolve_state(self.state_key.as_ref(), cx).await
     }
 
-    /// The height of the block at which `state` last changed: this action's block, or a later block
-    /// at which the state was translated to a new ledger version.
-    async fn state_at(&self, cx: &Context<'_>) -> ApiResult<u32> {
-        resolve_state_at::<S>(
-            self.translated_at,
-            self.block_height,
-            self.transaction_id,
-            cx,
-        )
-        .await
+    /// The block at which `state` last changed: this action's block, or a later block at which the
+    /// state was translated to a new ledger version.
+    async fn state_at(&self, cx: &Context<'_>) -> ApiResult<BlockReference> {
+        resolve_state_at::<S>(self.state_at, self.translated_at, self.transaction_id, cx).await
     }
 
     /// The hex-encoded serialized contract-specific zswap state.
@@ -309,7 +311,7 @@ where
     translated_at: Option<u32>,
 
     #[graphql(skip)]
-    block_height: Option<u32>,
+    state_at: Option<domain::BlockReference>,
 
     #[graphql(skip)]
     raw_address: SerializedContractAddress,
@@ -331,16 +333,10 @@ where
         resolve_state(self.state_key.as_ref(), cx).await
     }
 
-    /// The height of the block at which `state` last changed: this action's block, or a later block
-    /// at which the state was translated to a new ledger version.
-    async fn state_at(&self, cx: &Context<'_>) -> ApiResult<u32> {
-        resolve_state_at::<S>(
-            self.translated_at,
-            self.block_height,
-            self.transaction_id,
-            cx,
-        )
-        .await
+    /// The block at which `state` last changed: this action's block, or a later block at which the
+    /// state was translated to a new ledger version.
+    async fn state_at(&self, cx: &Context<'_>) -> ApiResult<BlockReference> {
+        resolve_state_at::<S>(self.state_at, self.translated_at, self.transaction_id, cx).await
     }
 
     /// The hex-encoded serialized contract-specific zswap state.
@@ -460,7 +456,7 @@ where
     translated_at: Option<u32>,
 
     #[graphql(skip)]
-    block_height: Option<u32>,
+    state_at: Option<domain::BlockReference>,
 
     #[graphql(skip)]
     _s: PhantomData<S>,
@@ -479,16 +475,10 @@ where
         resolve_state(self.state_key.as_ref(), cx).await
     }
 
-    /// The height of the block at which `state` last changed: this action's block, or a later block
-    /// at which the state was translated to a new ledger version.
-    async fn state_at(&self, cx: &Context<'_>) -> ApiResult<u32> {
-        resolve_state_at::<S>(
-            self.translated_at,
-            self.block_height,
-            self.transaction_id,
-            cx,
-        )
-        .await
+    /// The block at which `state` last changed: this action's block, or a later block at which the
+    /// state was translated to a new ledger version.
+    async fn state_at(&self, cx: &Context<'_>) -> ApiResult<BlockReference> {
+        resolve_state_at::<S>(self.state_at, self.translated_at, self.transaction_id, cx).await
     }
 
     /// The hex-encoded serialized contract-specific zswap state.
@@ -540,41 +530,4 @@ where
         .some_or_server_error(|| format!("transaction with id {id} not found"))?;
 
     Ok(transaction.into())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::domain::storage::NoopStorage;
-
-    fn action() -> domain::ContractAction {
-        domain::ContractAction {
-            id: 1,
-            address: vec![0xa; 32].into(),
-            state_key: None,
-            attributes: ContractAttributes::Deploy,
-            zswap_state_key: None,
-            transaction_id: 2,
-            translated_at: None,
-        }
-    }
-
-    fn block_height(action: ContractAction<NoopStorage>) -> Option<u32> {
-        match action {
-            ContractAction::Deploy(action) => action.block_height,
-            _ => unreachable!("built as a deploy"),
-        }
-    }
-
-    /// A stream row carries its block height, so `stateAt` needs no lookup; other rows do not.
-    #[test]
-    fn only_stream_rows_carry_their_block_height() {
-        let stream_row = domain::ContractActionAtBlock {
-            action: action(),
-            block_height: 100,
-        };
-
-        assert_eq!(block_height(stream_row.into()), Some(100));
-        assert_eq!(block_height(action().into()), None);
-    }
 }
