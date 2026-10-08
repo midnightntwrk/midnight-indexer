@@ -567,7 +567,12 @@ impl ContractActionStorage for Storage {
         &self,
         block_height: u32,
     ) -> Result<u64, sqlx::Error> {
-        // One statement, so the fallback reads `max(id)` from the same snapshot as the lookup.
+        // The cursor a `contractActions` stream starts at: it then reads actions with `id >=` it.
+        // - No action from the height on, e.g. a stream starting at a tip without actions: one past
+        //   the highest ID, so nothing is replayed and the next action indexed is still delivered.
+        // - No actions at all: `0`.
+        // One statement, so `max(id)` comes from the same snapshot as the lookup; split in two, an
+        // action indexed in between would fall below the cursor and be skipped.
         let query = indoc! {"
             SELECT COALESCE(
                 (
