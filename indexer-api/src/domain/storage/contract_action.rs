@@ -125,12 +125,12 @@ where
         contract_action_id: u64,
     ) -> Result<Vec<ContractBalance>, sqlx::Error>;
 
-    /// Get the ID for the first contract action in a transaction in a block with the given block
-    /// height or higher.
+    /// The ID of the first contract action in a block at or after the given height, else one past
+    /// the highest ID, else `0`.
     async fn get_contract_action_id_by_block_height(
         &self,
         block_height: u32,
-    ) -> Result<Option<u64>, sqlx::Error>;
+    ) -> Result<u64, sqlx::Error>;
 }
 
 #[allow(unused_variables)]
@@ -247,7 +247,7 @@ impl ContractActionStorage for NoopStorage {
     async fn get_contract_action_id_by_block_height(
         &self,
         block_height: u32,
-    ) -> Result<Option<u64>, sqlx::Error> {
+    ) -> Result<u64, sqlx::Error> {
         unimplemented!()
     }
 }
