@@ -42,6 +42,7 @@ use std::marker::PhantomData;
 #[graphql(
     field(name = "address", ty = "&HexEncoded"),
     field(name = "state", ty = "ApiResult<HexEncoded>"),
+    field(name = "state_at", ty = "ApiResult<u32>"),
     field(name = "zswap_state", ty = "ApiResult<HexEncoded>"),
     field(name = "transaction", ty = "ApiResult<Transaction<S>>"),
     field(name = "unshielded_balances", ty = "ApiResult<Vec<ContractBalance>>")
@@ -69,7 +70,7 @@ where
             attributes,
             zswap_state_key,
             transaction_id,
-            ..
+            translated_at,
         } = action;
 
         match attributes {
@@ -79,6 +80,7 @@ where
                 zswap_state_key,
                 transaction_id,
                 contract_action_id: id,
+                translated_at,
                 _s: PhantomData,
             }),
 
@@ -89,6 +91,7 @@ where
                 zswap_state_key,
                 transaction_id,
                 contract_action_id: id,
+                translated_at,
                 raw_address: address,
                 _s: PhantomData,
             }),
@@ -99,6 +102,7 @@ where
                 zswap_state_key,
                 transaction_id,
                 contract_action_id: id,
+                translated_at,
                 _s: PhantomData,
             }),
         }
@@ -124,6 +128,39 @@ pub(super) async fn resolve_state(
 
         None => Ok(ByteVec::default().hex_encode()),
     }
+}
+
+/// Resolve `stateAt`: the translation height if any, else the height of the action's block.
+pub(super) async fn resolve_state_at<S>(
+    translated_at: Option<u32>,
+    transaction_id: u64,
+    cx: &Context<'_>,
+) -> ApiResult<u32>
+where
+    S: Storage,
+{
+    if let Some(height) = translated_at {
+        return Ok(height);
+    }
+
+    let transaction = cx
+        .get_transaction_by_id_loader::<S>()
+        .load_one(transaction_id)
+        .await
+        .map_err_into_server_error(|| format!("get transaction by id {transaction_id}"))?
+        .some_or_server_error(|| format!("transaction with id {transaction_id} not found"))?;
+    let block_hash = match &transaction {
+        domain::Transaction::Regular(transaction) => transaction.block_hash,
+        domain::Transaction::System(transaction) => transaction.block_hash,
+    };
+    let block = cx
+        .get_block_by_hash_loader::<S>()
+        .load_one(block_hash)
+        .await
+        .map_err_into_server_error(|| format!("get block by hash {block_hash}"))?
+        .some_or_server_error(|| format!("block with hash {block_hash} not found"))?;
+
+    Ok(block.height)
 }
 
 /// Resolve a contract's zswap state out of the ledger arena. See [resolve_state].
@@ -168,6 +205,9 @@ where
     contract_action_id: u64,
 
     #[graphql(skip)]
+    translated_at: Option<u32>,
+
+    #[graphql(skip)]
     _s: PhantomData<S>,
 }
 
@@ -176,9 +216,17 @@ impl<S> ContractDeploy<S>
 where
     S: Storage,
 {
-    /// The hex-encoded serialized state.
+    /// The hex-encoded serialized contract state at the end of this action's block, in the encoding
+    /// of the block the query is anchored to: the latest block for `contractAction` without an
+    /// offset, otherwise the action's own block.
     async fn state(&self, cx: &Context<'_>) -> ApiResult<HexEncoded> {
         resolve_state(self.state_key.as_ref(), cx).await
+    }
+
+    /// The height of the block at which `state` last changed: this action's block, or a later block
+    /// at which the state was translated to a new ledger version.
+    async fn state_at(&self, cx: &Context<'_>) -> ApiResult<u32> {
+        resolve_state_at::<S>(self.translated_at, self.transaction_id, cx).await
     }
 
     /// The hex-encoded serialized contract-specific zswap state.
@@ -234,6 +282,9 @@ where
     contract_action_id: u64,
 
     #[graphql(skip)]
+    translated_at: Option<u32>,
+
+    #[graphql(skip)]
     raw_address: SerializedContractAddress,
 
     #[graphql(skip)]
@@ -245,9 +296,17 @@ impl<S> ContractCall<S>
 where
     S: Storage,
 {
-    /// The hex-encoded serialized state.
+    /// The hex-encoded serialized contract state at the end of this action's block, in the encoding
+    /// of the block the query is anchored to: the latest block for `contractAction` without an
+    /// offset, otherwise the action's own block.
     async fn state(&self, cx: &Context<'_>) -> ApiResult<HexEncoded> {
         resolve_state(self.state_key.as_ref(), cx).await
+    }
+
+    /// The height of the block at which `state` last changed: this action's block, or a later block
+    /// at which the state was translated to a new ledger version.
+    async fn state_at(&self, cx: &Context<'_>) -> ApiResult<u32> {
+        resolve_state_at::<S>(self.translated_at, self.transaction_id, cx).await
     }
 
     /// The hex-encoded serialized contract-specific zswap state.
@@ -364,6 +423,9 @@ where
     contract_action_id: u64,
 
     #[graphql(skip)]
+    translated_at: Option<u32>,
+
+    #[graphql(skip)]
     _s: PhantomData<S>,
 }
 
@@ -372,9 +434,17 @@ impl<S> ContractUpdate<S>
 where
     S: Storage,
 {
-    /// The hex-encoded serialized state.
+    /// The hex-encoded serialized contract state at the end of this action's block, in the encoding
+    /// of the block the query is anchored to: the latest block for `contractAction` without an
+    /// offset, otherwise the action's own block.
     async fn state(&self, cx: &Context<'_>) -> ApiResult<HexEncoded> {
         resolve_state(self.state_key.as_ref(), cx).await
+    }
+
+    /// The height of the block at which `state` last changed: this action's block, or a later block
+    /// at which the state was translated to a new ledger version.
+    async fn state_at(&self, cx: &Context<'_>) -> ApiResult<u32> {
+        resolve_state_at::<S>(self.translated_at, self.transaction_id, cx).await
     }
 
     /// The hex-encoded serialized contract-specific zswap state.

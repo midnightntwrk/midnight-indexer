@@ -390,9 +390,15 @@ type Contract @beta {
 	address: HexEncoded!
 	"""
 	The hex-encoded serialized contract state as of the queried block (the latest contract
-	action at or before it).
+	action at or before it), in that block's encoding; as of the latest block if no offset is
+	given.
 	"""
 	state: HexEncoded!
+	"""
+	The height of the block at which `state` last changed: the latest action's block, or a later
+	block at which the state was translated to a new ledger version.
+	"""
+	stateAt: Int!
 	"""
 	The contract's maintenance authority as of the queried block.
 	"""
@@ -411,6 +417,7 @@ A contract action.
 interface ContractAction {
 	address: HexEncoded!
 	state: HexEncoded!
+	stateAt: Int!
 	zswapState: HexEncoded!
 	transaction: Transaction!
 	unshieldedBalances: [ContractBalance!]!
@@ -468,9 +475,16 @@ type ContractCall implements ContractAction {
 	"""
 	entryPoint: String!
 	"""
-	The hex-encoded serialized state.
+	The hex-encoded serialized contract state at the end of this action's block, in the encoding
+	of the block the query is anchored to: the latest block for `contractAction` without an
+	offset, otherwise the action's own block.
 	"""
 	state: HexEncoded!
+	"""
+	The height of the block at which `state` last changed: this action's block, or a later block
+	at which the state was translated to a new ledger version.
+	"""
+	stateAt: Int!
 	"""
 	The hex-encoded serialized contract-specific zswap state.
 	"""
@@ -510,9 +524,16 @@ type ContractDeploy implements ContractAction {
 	"""
 	address: HexEncoded!
 	"""
-	The hex-encoded serialized state.
+	The hex-encoded serialized contract state at the end of this action's block, in the encoding
+	of the block the query is anchored to: the latest block for `contractAction` without an
+	offset, otherwise the action's own block.
 	"""
 	state: HexEncoded!
+	"""
+	The height of the block at which `state` last changed: this action's block, or a later block
+	at which the state was translated to a new ledger version.
+	"""
+	stateAt: Int!
 	"""
 	The hex-encoded serialized contract-specific zswap state.
 	"""
@@ -675,9 +696,16 @@ type ContractUpdate implements ContractAction {
 	"""
 	address: HexEncoded!
 	"""
-	The hex-encoded serialized state.
+	The hex-encoded serialized contract state at the end of this action's block, in the encoding
+	of the block the query is anchored to: the latest block for `contractAction` without an
+	offset, otherwise the action's own block.
 	"""
 	state: HexEncoded!
+	"""
+	The height of the block at which `state` last changed: this action's block, or a later block
+	at which the state was translated to a new ledger version.
+	"""
+	stateAt: Int!
 	"""
 	The hex-encoded serialized contract-specific zswap state.
 	"""

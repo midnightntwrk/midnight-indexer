@@ -21,7 +21,7 @@ use crate::{
         ApiResult, ContextExt, OptionExt, ResultExt,
         v4::{
             HexEncodable, HexEncoded,
-            contract_action::{ContractAction, resolve_state},
+            contract_action::{ContractAction, resolve_state, resolve_state_at},
             directives::beta,
         },
     },
@@ -57,6 +57,12 @@ where
     state_key: Option<SerializedContractStateKey>,
 
     #[graphql(skip)]
+    translated_at: Option<u32>,
+
+    #[graphql(skip)]
+    transaction_id: u64,
+
+    #[graphql(skip)]
     raw_address: SerializedContractAddress,
 
     #[graphql(skip)]
@@ -71,6 +77,8 @@ where
         Self {
             address: action.address.hex_encode(),
             state_key: action.state_key,
+            translated_at: action.translated_at,
+            transaction_id: action.transaction_id,
             raw_address: action.address,
             _s: PhantomData,
         }
@@ -83,9 +91,16 @@ where
     S: Storage,
 {
     /// The hex-encoded serialized contract state as of the queried block (the latest contract
-    /// action at or before it).
+    /// action at or before it), in that block's encoding; as of the latest block if no offset is
+    /// given.
     async fn state(&self, cx: &Context<'_>) -> ApiResult<HexEncoded> {
         resolve_state(self.state_key.as_ref(), cx).await
+    }
+
+    /// The height of the block at which `state` last changed: the latest action's block, or a later
+    /// block at which the state was translated to a new ledger version.
+    async fn state_at(&self, cx: &Context<'_>) -> ApiResult<u32> {
+        resolve_state_at::<S>(self.translated_at, self.transaction_id, cx).await
     }
 
     /// The contract's maintenance authority as of the queried block.
