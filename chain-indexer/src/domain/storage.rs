@@ -15,8 +15,8 @@ use indexer_common::domain::{ProtocolVersion, SerializedLedgerStateKey};
 use std::num::NonZeroUsize;
 
 use crate::domain::{
-    Block, BlockRef, DParameter, DustRegistrationEvent, SystemParametersChange, TermsAndConditions,
-    Transaction,
+    Block, BlockRef, ContractStateTranslation, DParameter, DustRegistrationEvent,
+    LatestContractAction, SystemParametersChange, TermsAndConditions, Transaction,
 };
 
 /// Storage abstraction.
@@ -25,7 +25,8 @@ pub trait Storage
 where
     Self: Clone + Send + Sync + 'static,
 {
-    /// Save the given block with parameters and return the max regular transaction ID.
+    /// Save the given block with parameters and its contract state translations, and return the max
+    /// regular transaction ID.
     async fn save_block(
         &mut self,
         block: &Block,
@@ -33,7 +34,11 @@ where
         dust_registration_events: &[DustRegistrationEvent],
         ledger_state_key: &SerializedLedgerStateKey,
         system_parameters_change: Option<&SystemParametersChange>,
+        contract_state_translations: &[ContractStateTranslation],
     ) -> Result<Option<u64>, sqlx::Error>;
+
+    /// The latest contract action of every contract.
+    async fn get_latest_contract_actions(&self) -> Result<Vec<LatestContractAction>, sqlx::Error>;
 
     /// Get the block ref, ledger state key and protocol version of the highest stored block.
     async fn get_highest_block(

@@ -493,6 +493,8 @@ where
     let (mut block, transactions) = block.try_into().context("convert node block into domain")?;
 
     let ledger_version = block.protocol_version.ledger_version();
+    // Whether this block translates the ledger state, taken before the state is replaced.
+    let translated = block.height != 0 && ledger_state.ledger_version() != ledger_version;
     ledger_state = if block.height == 0 {
         // The genesis block establishes the chain's ledger version. The inherited
         // bootstrap state was created at OLDEST and is replaced by the genesis state below, so
@@ -644,6 +646,35 @@ where
     metrics.record_uncaptured_contract_states(uncaptured);
     let transactions = transactions;
 
+    // At a hard fork, the translated state key of every contract without an action in this block.
+    // Before `persist()`, so the translated nodes are flushed ahead of the SQL commit.
+    let contract_state_translations = if translated {
+        let latest_actions = storage
+            .get_latest_contract_actions()
+            .await
+            .context("get latest contract actions")?;
+        let contracts_in_block = transactions
+            .iter()
+            .filter_map(|transaction| match transaction {
+                Transaction::Regular(transaction) => Some(&transaction.contract_actions),
+                _ => None,
+            })
+            .flatten()
+            .map(|action| action.address.clone())
+            .collect::<HashSet<_>>();
+        let contract_state_translations = ledger_state
+            .contract_state_translations(latest_actions, &contracts_in_block)
+            .context("record contract state translations at fork block")?;
+        info!(
+            count = contract_state_translations.len(),
+            height = block.height;
+            "recorded contract state translations at fork block"
+        );
+        contract_state_translations
+    } else {
+        vec![]
+    };
+
     // Determine whether caught up, also allowing to fall back a little in that state.
     // Use saturating subtraction to handle the case where streams are temporarily out of order.
     // The two subscriptions (highest_blocks and finalized_blocks) are independent with no
@@ -686,6 +717,7 @@ where
             &block.dust_registration_events,
             &ledger_state_key,
             system_parameters_change.as_ref(),
+            &contract_state_translations,
         )
         .await
         .context("save block")?;
