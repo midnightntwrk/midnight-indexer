@@ -294,26 +294,15 @@ impl Harness {
     /// node as `ws://node:9944` from inside it rather than via `--network host`
     /// plus a published port: Docker Desktop for Mac gives containers no real
     /// host networking, so host-networked toolkit runs cannot reach the node.
-    fn toolkit(&self, tag: &str, args: &[&str]) -> anyhow::Result<String> {
+    /// `out_dir`, if given, is mounted at `/out`.
+    fn toolkit(&self, tag: &str, args: &[&str], out_dir: Option<&Path>) -> anyhow::Result<String> {
         let image = format!("{}/midnight-node-toolkit:{tag}", image_registry());
-        let mut full = vec!["run", "--rm", "--network", &self.network, &image];
-        full.extend_from_slice(args);
-        docker(&full)
-    }
-
-    /// As [`Self::toolkit`], with `out_dir` mounted at `/out`.
-    fn toolkit_with_out(&self, tag: &str, out_dir: &Path, args: &[&str]) -> anyhow::Result<String> {
-        let image = format!("{}/midnight-node-toolkit:{tag}", image_registry());
-        let mount = format!("{}:/out", out_dir.display());
-        let mut full = vec![
-            "run",
-            "--rm",
-            "--network",
-            &self.network,
-            "-v",
-            &mount,
-            &image,
-        ];
+        let mount = out_dir.map(|out_dir| format!("{}:/out", out_dir.display()));
+        let mut full = vec!["run", "--rm", "--network", &self.network];
+        if let Some(mount) = &mount {
+            full.extend(["-v", mount]);
+        }
+        full.push(&image);
         full.extend_from_slice(args);
         docker(&full)
     }
@@ -1016,9 +1005,8 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
     fs::create_dir_all(&out_dir).context("create toolkit output dir")?;
     println!("[4c] deploying a contract with toolkit {from_toolkit}");
     harness
-        .toolkit_with_out(
+        .toolkit(
             &from_toolkit,
-            &out_dir,
             &[
                 "generate-txs",
                 "--src-url",
@@ -1030,12 +1018,12 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
                 "--funding-seed",
                 SOURCE_SEED,
             ],
+            Some(&out_dir),
         )
         .context("build the contract deploy transaction")?;
     harness
-        .toolkit_with_out(
+        .toolkit(
             &from_toolkit,
-            &out_dir,
             &[
                 "generate-txs",
                 "--src-file",
@@ -1044,13 +1032,14 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
                 "-d",
                 "ws://node:9944",
             ],
+            Some(&out_dir),
         )
         .context("send the contract deploy transaction")?;
     let contract_address = harness
-        .toolkit_with_out(
+        .toolkit(
             &from_toolkit,
-            &out_dir,
             &["contract-address", "--src-file", "/out/deploy_tx.mn"],
+            Some(&out_dir),
         )
         .context("read the contract address")?
         .trim()
@@ -1486,6 +1475,7 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
                 "-d",
                 "ws://node:9944",
             ],
+            None,
         )
         .and_then(|_| {
             println!("[9] submitting a ledger-9 transaction");
@@ -1511,6 +1501,7 @@ async fn hardfork_8_to_9_crossing() -> anyhow::Result<()> {
                     "--destination-address",
                     "mn_addr_undeployed1gkasr3z3vwyscy2jpp53nzr37v7n4r3lsfgj6v5g584dakjzt0xqun4d4r",
                 ],
+                None,
             )
         });
 
