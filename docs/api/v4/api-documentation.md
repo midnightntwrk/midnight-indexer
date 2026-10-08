@@ -726,6 +726,8 @@ When a new block is indexed, the client receives a `next` message.
 
 Subscribes to contract actions for a particular address: the existing actions from the offset block on, then new ones as they are indexed. Without an offset the stream starts at the latest block and replays nothing.
 
+At a ledger hard fork, a contract without an action in the fork block has its latest action re-emitted there: the same action, with `state` in the new encoding and `stateAt` set to the fork block's height. Items before the fork are in the old encoding, items from it on in the new one. Block offsets are inclusive, so resuming at a saved `stateAt` redelivers that block's items.
+
 **Example:**
 
 ```json

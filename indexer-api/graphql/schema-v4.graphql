@@ -477,7 +477,8 @@ type ContractCall implements ContractAction {
 	"""
 	The hex-encoded serialized contract state at the end of this action's block, in the encoding
 	of the block the query is anchored to: the latest block for `contractAction` without an
-	offset, otherwise the action's own block.
+	offset, the fork block for a `contractActions` re-emission, otherwise the action's own
+	block.
 	"""
 	state: HexEncoded!
 	"""
@@ -526,7 +527,8 @@ type ContractDeploy implements ContractAction {
 	"""
 	The hex-encoded serialized contract state at the end of this action's block, in the encoding
 	of the block the query is anchored to: the latest block for `contractAction` without an
-	offset, otherwise the action's own block.
+	offset, the fork block for a `contractActions` re-emission, otherwise the action's own
+	block.
 	"""
 	state: HexEncoded!
 	"""
@@ -698,7 +700,8 @@ type ContractUpdate implements ContractAction {
 	"""
 	The hex-encoded serialized contract state at the end of this action's block, in the encoding
 	of the block the query is anchored to: the latest block for `contractAction` without an
-	offset, otherwise the action's own block.
+	offset, the fork block for a `contractActions` re-emission, otherwise the action's own
+	block.
 	"""
 	state: HexEncoded!
 	"""
@@ -1989,6 +1992,9 @@ type Subscription {
 	"""
 	Subscribe to contract actions with the given address starting at the given offset or at the
 	latest block if the offset is omitted.
+	
+	At a ledger hard fork, a contract without an action in the fork block has its latest action
+	re-emitted with the translated `state` and `stateAt` set to the fork block's height.
 	"""
 	contractActions(address: HexEncoded!, offset: BlockOffset): ContractAction!
 	"""

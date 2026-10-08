@@ -218,7 +218,8 @@ where
 {
     /// The hex-encoded serialized contract state at the end of this action's block, in the encoding
     /// of the block the query is anchored to: the latest block for `contractAction` without an
-    /// offset, otherwise the action's own block.
+    /// offset, the fork block for a `contractActions` re-emission, otherwise the action's own
+    /// block.
     async fn state(&self, cx: &Context<'_>) -> ApiResult<HexEncoded> {
         resolve_state(self.state_key.as_ref(), cx).await
     }
@@ -298,7 +299,8 @@ where
 {
     /// The hex-encoded serialized contract state at the end of this action's block, in the encoding
     /// of the block the query is anchored to: the latest block for `contractAction` without an
-    /// offset, otherwise the action's own block.
+    /// offset, the fork block for a `contractActions` re-emission, otherwise the action's own
+    /// block.
     async fn state(&self, cx: &Context<'_>) -> ApiResult<HexEncoded> {
         resolve_state(self.state_key.as_ref(), cx).await
     }
@@ -436,7 +438,8 @@ where
 {
     /// The hex-encoded serialized contract state at the end of this action's block, in the encoding
     /// of the block the query is anchored to: the latest block for `contractAction` without an
-    /// offset, otherwise the action's own block.
+    /// offset, the fork block for a `contractActions` re-emission, otherwise the action's own
+    /// block.
     async fn state(&self, cx: &Context<'_>) -> ApiResult<HexEncoded> {
         resolve_state(self.state_key.as_ref(), cx).await
     }
