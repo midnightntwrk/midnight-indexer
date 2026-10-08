@@ -439,23 +439,30 @@ impl ContractActionStorage for Storage {
     async fn get_contract_action_id_by_block_height(
         &self,
         block_height: u32,
-    ) -> Result<Option<u64>, sqlx::Error> {
+    ) -> Result<u64, sqlx::Error> {
+        // One statement, so the fallback reads `max(id)` from the same snapshot as the lookup.
         let query = indoc! {"
-            SELECT contract_actions.id
-            FROM contract_actions
-            JOIN transactions ON transactions.id = transaction_id
-            JOIN blocks ON blocks.id = transactions.block_id
-            WHERE blocks.height >= $1
-            ORDER BY contract_actions.id
-            LIMIT 1
+            SELECT COALESCE(
+                (
+                    SELECT contract_actions.id
+                    FROM contract_actions
+                    JOIN transactions ON transactions.id = transaction_id
+                    JOIN blocks ON blocks.id = transactions.block_id
+                    WHERE blocks.height >= $1
+                    ORDER BY contract_actions.id
+                    LIMIT 1
+                ),
+                (SELECT max(id) + 1 FROM contract_actions),
+                0
+            )
         "};
 
-        let id = sqlx::query_as::<_, (i64,)>(query)
+        let id = sqlx::query_scalar::<_, i64>(query)
             .bind(block_height as i64)
-            .fetch_optional(&*self.pool)
+            .fetch_one(&*self.pool)
             .await?;
 
-        Ok(id.map(|(id,)| id as u64))
+        Ok(id as u64)
     }
 }
 
@@ -550,5 +557,144 @@ impl Storage {
         "});
 
         qb.build_query_as().fetch_all(&*self.pool).await
+    }
+}
+
+#[cfg(all(test, feature = "standalone"))]
+mod tests {
+    use super::*;
+    use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
+    use indexer_common::infra::{
+        migrations,
+        pool::sqlite::{self, SqlitePool},
+    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static DB_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+    /// A migrated SQLite database and a `Storage` over it.
+    async fn storage() -> (SqlitePool, Storage) {
+        let path = std::env::temp_dir().join(format!(
+            "indexer-api-contract-action-{}-{}.sqlite",
+            std::process::id(),
+            DB_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_file(&path);
+        let pool = SqlitePool::new(sqlite::Config::with_url(path.display().to_string()))
+            .await
+            .expect("create pool");
+        migrations::sqlite::run(&pool)
+            .await
+            .expect("run migrations");
+        let storage = Storage::new(ChaCha20Poly1305::new(&[0; 32].into()), pool.clone());
+
+        (pool, storage)
+    }
+
+    /// A block hash derived from the height.
+    fn block_hash(height: u32) -> Vec<u8> {
+        let mut hash = [0; 32];
+        hash[..4].copy_from_slice(&height.to_be_bytes());
+        hash.to_vec()
+    }
+
+    async fn insert_block(pool: &SqlitePool, height: u32, protocol_version: u32) -> i64 {
+        sqlx::query_scalar(indoc! {"
+            INSERT INTO blocks (
+                hash,
+                height,
+                protocol_version,
+                parent_hash,
+                timestamp,
+                zswap_merkle_tree_root,
+                ledger_parameters,
+                ledger_state_key
+            )
+            VALUES ($1, $2, $3, $4, 0, X'00', X'00', X'00')
+            RETURNING id
+        "})
+        .bind(block_hash(height))
+        .bind(height as i64)
+        .bind(protocol_version as i64)
+        .bind(block_hash(height.wrapping_sub(1)))
+        .fetch_one(&**pool)
+        .await
+        .expect("insert block")
+    }
+
+    async fn insert_transaction(pool: &SqlitePool, block_id: i64) -> i64 {
+        sqlx::query_scalar(indoc! {"
+            INSERT INTO transactions (block_id, variant, hash, protocol_version, raw)
+            VALUES ($1, 'Regular', $2, 0, X'00')
+            RETURNING id
+        "})
+        .bind(block_id)
+        .bind(block_hash(DB_COUNTER.fetch_add(1, Ordering::Relaxed) as u32))
+        .fetch_one(&**pool)
+        .await
+        .expect("insert transaction")
+    }
+
+    async fn insert_contract_action(
+        pool: &SqlitePool,
+        transaction_id: i64,
+        address: &[u8],
+        state_key: Option<&[u8]>,
+    ) -> i64 {
+        sqlx::query_scalar(indoc! {"
+            INSERT INTO contract_actions (
+                transaction_id,
+                variant,
+                address,
+                attributes,
+                state_key,
+                zswap_state_key
+            )
+            VALUES ($1, 'Deploy', $2, '\"Deploy\"', $3, NULL)
+            RETURNING id
+        "})
+        .bind(transaction_id)
+        .bind(address)
+        .bind(state_key)
+        .fetch_one(&**pool)
+        .await
+        .expect("insert contract action")
+    }
+
+    /// With no action at or after the height, the start id is one past the highest; `0` on an empty
+    /// table.
+    #[tokio::test]
+    async fn start_id_is_first_action_at_or_after_height_else_past_every_action() {
+        let (pool, storage) = storage().await;
+        assert_eq!(start_id(&storage, 0).await, 0, "empty table");
+
+        insert_block(&pool, 0, 1_000_000).await;
+        let block_1 = insert_block(&pool, 1, 1_000_000).await;
+        insert_block(&pool, 2, 1_000_000).await;
+        insert_block(&pool, 3, 1_000_000).await;
+        let transaction = insert_transaction(&pool, block_1).await;
+        let first = insert_contract_action(&pool, transaction, &[1; 32], None).await as u64;
+        let last = insert_contract_action(&pool, transaction, &[2; 32], None).await as u64;
+
+        assert_eq!(start_id(&storage, 0).await, first);
+        assert_eq!(start_id(&storage, 1).await, first);
+        assert_eq!(
+            start_id(&storage, 2).await,
+            last + 1,
+            "no action at or after height 2"
+        );
+        assert_eq!(
+            start_id(&storage, 3).await,
+            last + 1,
+            "the tip holds no action"
+        );
+        assert_eq!(start_id(&storage, 100).await, last + 1, "above the tip");
+    }
+
+    async fn start_id(storage: &Storage, height: u32) -> u64 {
+        storage
+            .get_contract_action_id_by_block_height(height)
+            .await
+            .expect("get start id")
     }
 }

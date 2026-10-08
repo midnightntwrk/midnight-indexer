@@ -74,8 +74,7 @@ where
             .await
             .map_err_into_server_error(|| {
                 format!("get contract action id by block height {height}")
-            })?
-            .unwrap_or_default();
+            })?;
 
         let contract_actions = try_stream! {
             let _hold = quota_guard;
