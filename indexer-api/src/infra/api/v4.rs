@@ -46,9 +46,9 @@ use crate::{
         v4::{
             block::BlockOffset,
             dataloader::{
-                BlockByHashLoader, ContractActionsByTransactionIdLoader,
-                ContractEventsByContractActionIdLoader, TransactionByIdLoader,
-                TransactionsByBlockIdLoader,
+                BlockByHashLoader, BlockHeightByTransactionIdLoader,
+                ContractActionsByTransactionIdLoader, ContractEventsByContractActionIdLoader,
+                TransactionByIdLoader, TransactionsByBlockIdLoader,
             },
             mutation::Mutation,
             query::Query,
@@ -401,6 +401,10 @@ where
         ))
         .data(DataLoader::new(
             TransactionByIdLoader::new(storage.clone()),
+            tokio::spawn,
+        ))
+        .data(DataLoader::new(
+            BlockHeightByTransactionIdLoader::new(storage.clone()),
             tokio::spawn,
         ))
         .data(DataLoader::new(

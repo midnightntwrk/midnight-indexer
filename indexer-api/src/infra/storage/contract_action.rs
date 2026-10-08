@@ -820,6 +820,34 @@ mod tests {
         assert_eq!(start_id(&storage, 100).await, last + 1, "above the tip");
     }
 
+    /// Block heights are read for the given transactions only, each with its transaction id.
+    #[tokio::test]
+    async fn block_heights_by_transaction_ids() {
+        use crate::domain::storage::transaction::TransactionStorage;
+
+        let (_dir, pool, storage) = storage().await;
+        let block_7 = insert_block(&pool, 7, 1_000_000).await;
+        let block_9 = insert_block(&pool, 9, 1_000_000).await;
+        let a = insert_transaction(&pool, block_7).await as u64;
+        let b = insert_transaction(&pool, block_9).await as u64;
+        insert_transaction(&pool, block_9).await;
+
+        let mut heights = storage
+            .get_block_heights_by_transaction_ids(&[a, b, 999])
+            .await
+            .expect("get block heights");
+        heights.sort();
+        assert_eq!(heights, [(a, 7), (b, 9)]);
+
+        assert!(
+            storage
+                .get_block_heights_by_transaction_ids(&[])
+                .await
+                .expect("get block heights")
+                .is_empty()
+        );
+    }
+
     async fn start_id(storage: &Storage, height: u32) -> u64 {
         storage
             .get_contract_action_id_by_block_height(height)

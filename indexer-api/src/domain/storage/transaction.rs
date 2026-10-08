@@ -25,6 +25,12 @@ where
     /// Get the transactions for the given IDs.
     async fn get_transactions_by_ids(&self, ids: &[u64]) -> Result<Vec<Transaction>, sqlx::Error>;
 
+    /// Get the block heights of the transactions with the given IDs, each with its transaction ID.
+    async fn get_block_heights_by_transaction_ids(
+        &self,
+        ids: &[u64],
+    ) -> Result<Vec<(u64, u32)>, sqlx::Error>;
+
     /// Get the transactions for the blocks with the given IDs, ordered by block ID and transaction
     /// ID. Each tuple carries the block ID alongside its transaction for grouping by the caller.
     async fn get_transactions_by_block_ids(
@@ -84,6 +90,13 @@ where
 #[allow(unused_variables)]
 impl TransactionStorage for NoopStorage {
     async fn get_transactions_by_ids(&self, ids: &[u64]) -> Result<Vec<Transaction>, sqlx::Error> {
+        unimplemented!()
+    }
+
+    async fn get_block_heights_by_transaction_ids(
+        &self,
+        ids: &[u64],
+    ) -> Result<Vec<(u64, u32)>, sqlx::Error> {
         unimplemented!()
     }
 
