@@ -324,17 +324,14 @@ impl LedgerState {
             .into_iter()
             .filter(|action| !contracts_in_block.contains(&action.address))
             .map(|action| {
-                let in_current_encoding = match &action.state_key {
-                    Some(key) => {
-                        self.0
-                            .contract_state_key_in_current_encoding(key)
-                            .map_err(|error| {
-                                Error::ContractStateKeyEncoding(action.address.clone(), error)
-                            })?
-                    }
-                    None => false,
-                };
-                if in_current_encoding {
+                if let Some(key) = &action.state_key
+                    && self
+                        .0
+                        .contract_state_key_in_current_encoding(key)
+                        .map_err(|error| {
+                            Error::ContractStateKeyEncoding(action.address.clone(), error)
+                        })?
+                {
                     return Ok(None);
                 }
 
