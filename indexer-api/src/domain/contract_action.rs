@@ -48,15 +48,15 @@ pub struct ContractAction {
     /// The height of the block at which the state was translated to a new ledger version, if it
     /// was.
     #[sqlx(try_from = "SqlxOption<i64>", default)]
-    pub translated_at: Option<u32>,
+    pub(crate) translated_at: Option<u32>,
 }
 
 /// A contract action with the height of its block.
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 pub struct ContractActionAtBlock {
     #[sqlx(flatten)]
-    pub action: ContractAction,
+    pub(crate) action: ContractAction,
 
     #[sqlx(try_from = "i64")]
-    pub block_height: u32,
+    pub(crate) block_height: u32,
 }
