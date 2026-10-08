@@ -12,16 +12,18 @@
 // limitations under the License.
 
 use crate::domain::{
-    self, Block, BlockRef, ContractAction, DParameter, DustRegistrationEvent, RegularTransaction,
-    SystemParametersChange, SystemTransaction, TermsAndConditions, Transaction,
+    self, Block, BlockRef, ContractAction, ContractStateTranslation, DParameter,
+    DustRegistrationEvent, LatestContractAction, RegularTransaction, SystemParametersChange,
+    SystemTransaction, TermsAndConditions, Transaction,
 };
 use fastrace::trace;
 use futures::TryFutureExt;
 use indexer_common::{
     domain::{
         BlockHash, ByteVec, ContractAttributes, ContractBalance, LedgerEvent,
-        LedgerEventAttributes, LedgerEventGrouping, ProtocolVersion, SerializedLedgerStateKey,
-        TermsAndConditionsHash, UnshieldedUtxo, bridge::BridgeEvent,
+        LedgerEventAttributes, LedgerEventGrouping, ProtocolVersion, SerializedContractAddress,
+        SerializedContractStateKey, SerializedLedgerStateKey, TermsAndConditionsHash,
+        UnshieldedUtxo, bridge::BridgeEvent,
     },
     infra::sqlx::U128BeBytes,
 };
@@ -71,6 +73,7 @@ impl domain::storage::Storage for Storage {
         dust_registration_events: &[DustRegistrationEvent],
         ledger_state_key: &SerializedLedgerStateKey,
         system_parameters_change: Option<&SystemParametersChange>,
+        contract_state_translations: &[ContractStateTranslation],
     ) -> Result<Option<u64>, sqlx::Error> {
         let mut tx = self.pool.begin().await?;
 
@@ -79,6 +82,7 @@ impl domain::storage::Storage for Storage {
             transactions,
             dust_registration_events,
             ledger_state_key,
+            contract_state_translations,
             &mut tx,
         )
         .await?;
@@ -204,6 +208,43 @@ impl domain::storage::Storage for Storage {
             .await?;
 
         Ok((deploy_count as u64, call_count as u64, update_count as u64))
+    }
+
+    #[trace]
+    async fn get_latest_contract_actions(&self) -> Result<Vec<LatestContractAction>, sqlx::Error> {
+        #[cfg(feature = "cloud")]
+        let query = indoc! {"
+            SELECT DISTINCT ON (address) id, address, state_key
+            FROM contract_actions
+            ORDER BY address, id DESC
+        "};
+
+        #[cfg(feature = "standalone")]
+        let query = indoc! {"
+            SELECT id, address, state_key
+            FROM contract_actions
+            WHERE id IN (SELECT max(id) FROM contract_actions GROUP BY address)
+        "};
+
+        let actions = sqlx::query_as::<
+            _,
+            (
+                i64,
+                SerializedContractAddress,
+                Option<SerializedContractStateKey>,
+            ),
+        >(query)
+        .fetch_all(&*self.pool)
+        .await?
+        .into_iter()
+        .map(|(id, address, state_key)| LatestContractAction {
+            id: id as u64,
+            address,
+            state_key,
+        })
+        .collect();
+
+        Ok(actions)
     }
 
     #[trace]
@@ -336,6 +377,7 @@ async fn save_block(
     transactions: &[Transaction],
     dust_registration_events: &[DustRegistrationEvent],
     ledger_state_key: &SerializedLedgerStateKey,
+    contract_state_translations: &[ContractStateTranslation],
     tx: &mut SqlxTransaction,
 ) -> Result<Option<u64>, sqlx::Error> {
     let query = indoc! {"
@@ -396,6 +438,14 @@ async fn save_block(
         .fetch_one(&mut **tx)
         .map_ok(|(id,)| id)
         .await?;
+
+    save_contract_state_translations(
+        contract_state_translations,
+        block_id,
+        CONTRACT_STATE_TRANSLATION_CHUNK,
+        tx,
+    )
+    .await?;
 
     let max_transaction_id = save_transactions(transactions, block_id, tx).await?;
 
@@ -577,6 +627,55 @@ async fn save_system_transaction(
         tx,
     )
     .await
+}
+
+/// Rows per contract state translation insert: three binds each, within the bind limits of SQLite
+/// (32,766) and Postgres (65,535).
+const CONTRACT_STATE_TRANSLATION_CHUNK: usize = 1_000;
+
+/// Save the given contract state translations against the block `block_id`, `chunk_size` rows per
+/// statement. Fewer rows affected than given is an error.
+#[trace(properties = { "block_id": "{block_id}" })]
+async fn save_contract_state_translations(
+    contract_state_translations: &[ContractStateTranslation],
+    block_id: i64,
+    chunk_size: usize,
+    tx: &mut SqlxTransaction,
+) -> Result<(), sqlx::Error> {
+    if contract_state_translations.is_empty() {
+        return Ok(());
+    }
+
+    let query = indoc! {"
+        INSERT INTO contract_action_translations (
+            contract_action_id,
+            block_id,
+            state_key
+        )
+    "};
+
+    let mut inserted = 0;
+    for chunk in contract_state_translations.chunks(chunk_size.max(1)) {
+        inserted += QueryBuilder::new(query)
+            .push_values(chunk.iter(), |mut q, translation| {
+                q.push_bind(translation.contract_action_id as i64)
+                    .push_bind(block_id)
+                    .push_bind(&translation.state_key);
+            })
+            .build()
+            .execute(&mut **tx)
+            .await?
+            .rows_affected();
+    }
+
+    if inserted as usize != contract_state_translations.len() {
+        return Err(sqlx::Error::Protocol(format!(
+            "inserted {inserted} of {} contract state translations for block {block_id}",
+            contract_state_translations.len()
+        )));
+    }
+
+    Ok(())
 }
 
 /// Save the contract actions and their balances, returning the freshly
@@ -1745,5 +1844,192 @@ mod contract_event_correlation_tests {
 
         let correlated = correlate_contract_action_ids(&events, &actions, &[10]);
         assert_eq!(correlated, vec![None, None]);
+    }
+}
+
+#[cfg(all(test, feature = "standalone"))]
+mod contract_state_translation_tests {
+    use super::*;
+    use crate::domain::storage::Storage as _;
+    use indexer_common::infra::{
+        migrations,
+        pool::sqlite::{self, SqlitePool},
+    };
+
+    /// A migrated SQLite database and a `Storage` over it.
+    async fn storage() -> (tempfile::TempDir, SqlitePool, Storage) {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let url = dir.path().join("indexer.sqlite").display().to_string();
+        let pool = SqlitePool::new(sqlite::Config::with_url(url))
+            .await
+            .expect("create pool");
+        migrations::sqlite::run(&pool)
+            .await
+            .expect("run migrations");
+        let storage = Storage::new(pool.clone());
+        (dir, pool, storage)
+    }
+
+    fn hash(seed: u32) -> Vec<u8> {
+        let mut hash = [0; 32];
+        hash[..4].copy_from_slice(&seed.to_be_bytes());
+        hash.to_vec()
+    }
+
+    async fn insert_block(pool: &SqlitePool, height: u32) -> i64 {
+        sqlx::query_scalar(indoc! {"
+            INSERT INTO blocks (
+                hash,
+                height,
+                protocol_version,
+                parent_hash,
+                timestamp,
+                zswap_merkle_tree_root,
+                ledger_parameters,
+                ledger_state_key
+            )
+            VALUES ($1, $2, 1000000, $3, 0, X'00', X'00', X'00')
+            RETURNING id
+        "})
+        .bind(hash(height))
+        .bind(height as i64)
+        .bind(hash(height.wrapping_sub(1)))
+        .fetch_one(&**pool)
+        .await
+        .expect("insert block")
+    }
+
+    async fn insert_transaction(pool: &SqlitePool, block_id: i64, seed: u32) -> i64 {
+        sqlx::query_scalar(indoc! {"
+            INSERT INTO transactions (block_id, variant, hash, protocol_version, raw)
+            VALUES ($1, 'Regular', $2, 1000000, X'00')
+            RETURNING id
+        "})
+        .bind(block_id)
+        .bind(hash(1_000 + seed))
+        .fetch_one(&**pool)
+        .await
+        .expect("insert transaction")
+    }
+
+    async fn insert_contract_action(
+        pool: &SqlitePool,
+        transaction_id: i64,
+        address: &[u8],
+        state_key: Option<&[u8]>,
+    ) -> i64 {
+        sqlx::query_scalar(indoc! {"
+            INSERT INTO contract_actions (
+                transaction_id,
+                variant,
+                address,
+                attributes,
+                state_key,
+                zswap_state_key
+            )
+            VALUES ($1, 'Call', $2, '{}', $3, NULL)
+            RETURNING id
+        "})
+        .bind(transaction_id)
+        .bind(address)
+        .bind(state_key)
+        .fetch_one(&**pool)
+        .await
+        .expect("insert contract action")
+    }
+
+    async fn translation_rows(pool: &SqlitePool) -> Vec<(i64, i64, Vec<u8>)> {
+        sqlx::query_as(indoc! {"
+            SELECT contract_action_id, block_id, state_key
+            FROM contract_action_translations
+            ORDER BY contract_action_id
+        "})
+        .fetch_all(&**pool)
+        .await
+        .expect("read translations")
+    }
+
+    /// One row per address, at its highest action id.
+    #[tokio::test]
+    async fn latest_contract_actions_are_one_per_address_at_its_highest_id() {
+        let (_dir, pool, storage) = storage().await;
+        let block = insert_block(&pool, 1).await;
+        let tx = insert_transaction(&pool, block, 1).await;
+        let a = [1; 32];
+        let b = [2; 32];
+        insert_contract_action(&pool, tx, &a, Some(&[0xa1])).await;
+        insert_contract_action(&pool, tx, &b, Some(&[0xb1])).await;
+        let a_latest = insert_contract_action(&pool, tx, &a, Some(&[0xa2])).await;
+        insert_contract_action(&pool, tx, &b, Some(&[0xb2])).await;
+        let b_latest = insert_contract_action(&pool, tx, &b, None).await;
+
+        let mut latest = storage
+            .get_latest_contract_actions()
+            .await
+            .expect("get latest contract actions");
+        latest.sort_by_key(|action| action.id);
+
+        assert_eq!(
+            latest,
+            vec![
+                LatestContractAction {
+                    id: a_latest as u64,
+                    address: a.to_vec().into(),
+                    state_key: Some(vec![0xa2].into()),
+                },
+                LatestContractAction {
+                    id: b_latest as u64,
+                    address: b.to_vec().into(),
+                    state_key: None,
+                },
+            ]
+        );
+    }
+
+    /// Translations are inserted in chunks; a failed insert leaves no rows.
+    #[tokio::test]
+    async fn translations_are_inserted_in_chunks_and_a_shortfall_rolls_back() {
+        let (_dir, pool, storage) = storage().await;
+        let block = insert_block(&pool, 1).await;
+        let tx_id = insert_transaction(&pool, block, 1).await;
+        let mut translations = Vec::new();
+        for i in 0..5u8 {
+            let action = insert_contract_action(&pool, tx_id, &[i; 32], Some(&[0x60])).await;
+            translations.push(ContractStateTranslation {
+                contract_action_id: action as u64,
+                state_key: vec![0x80, i].into(),
+            });
+        }
+        let fork_block = insert_block(&pool, 2).await;
+
+        let mut tx = storage.pool.begin().await.expect("begin");
+        save_contract_state_translations(&translations, fork_block, 2, &mut tx)
+            .await
+            .expect("insert in three chunks of 2, 2 and 1");
+        tx.commit().await.expect("commit");
+
+        let rows = translation_rows(&pool).await;
+        assert_eq!(rows.len(), 5);
+        assert!(rows.iter().all(|(_, block_id, _)| *block_id == fork_block));
+        assert_eq!(rows[3].2, vec![0x80, 3]);
+
+        // A duplicate action and block violates the primary key.
+        let mut tx = storage.pool.begin().await.expect("begin");
+        let result =
+            save_contract_state_translations(&translations[..1], fork_block, 2, &mut tx).await;
+        assert!(result.is_err(), "duplicate (action, block) must fail");
+        drop(tx);
+
+        assert_eq!(
+            translation_rows(&pool).await.len(),
+            5,
+            "nothing else was committed"
+        );
+
+        // Nothing to record is not an error.
+        let mut tx = storage.pool.begin().await.expect("begin");
+        save_contract_state_translations(&[], fork_block, 2, &mut tx)
+            .await
+            .expect("no translations");
     }
 }
