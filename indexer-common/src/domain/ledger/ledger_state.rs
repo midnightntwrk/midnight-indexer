@@ -1028,6 +1028,21 @@ impl LedgerState {
         Ok(default_storage::<v1_1::LedgerDb>().with_backend(|b| b.get(&hash).is_some()))
     }
 
+    /// Whether the given contract state key is in this ledger state's contract-state encoding:
+    /// `contract-state[v6]` for V8, `contract-state[v8]` for V9.
+    pub fn contract_state_key_in_current_encoding(
+        &self,
+        key: &SerializedContractStateKey,
+    ) -> Result<bool, Error> {
+        let key = ContractStateArenaKey::deserialize(key)?;
+
+        Ok(matches!(
+            (self, key),
+            (Self::V8 { .. }, ContractStateArenaKey::V3(_))
+                | (Self::V9 { .. }, ContractStateArenaKey::V4(_))
+        ))
+    }
+
     /// Whether the node a contract zswap state key points at is still present in the ledger DB.
     /// See [Self::contract_state_loadable].
     pub fn contract_zswap_state_loadable(key: &SerializedZswapStateKey) -> Result<bool, Error> {
@@ -3184,6 +3199,84 @@ mod tests {
             Some(second_root),
             "both collapsed updates replayed over the blank state must reconstruct the root \
              served after the second batch of leaves",
+        );
+
+        Ok(())
+    }
+
+    /// Translating a V8 state to V9 gives each contract a new `contract-state[v8]` key with the
+    /// same content, which survives a reload from the ledger DB.
+    #[cfg(any(feature = "cloud", feature = "standalone"))]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn translated_contract_state_key_is_tagged_for_ledger_9() -> Result<(), BoxError> {
+        use crate::domain::ledger::{LedgerDbContractState, SerializableExt};
+        use midnight_base_crypto_v1::hash::HashOutput;
+        use midnight_coin_structure_v2::{
+            coin::{TokenType as MidnightTokenType, UnshieldedTokenType},
+            contract::ContractAddress as ContractAddressV8,
+        };
+        use midnight_onchain_runtime_v3::state::ContractState as ContractStateV3;
+
+        const AMOUNT: u128 = 42;
+
+        let _ledger_db = init_ledger_db().await?;
+
+        let address = ContractAddressV8(HashOutput([11; 32]));
+        let serialized_address = address.serialize()?;
+        let mut state = LedgerState::new("undeployed".try_into()?, LedgerVersion::V8)
+            .expect("ledger state can be constructed");
+        match &mut state {
+            LedgerState::V8 { ledger_state, .. } => {
+                let mut contract_state = ContractStateV3::default();
+                contract_state.balance = contract_state.balance.insert(
+                    MidnightTokenType::Unshielded(UnshieldedTokenType(HashOutput([7; 32]))),
+                    AMOUNT,
+                );
+                ledger_state.contract = ledger_state.contract.insert(address, contract_state);
+            }
+            LedgerState::V9 { .. } => unreachable!("constructed as V8"),
+        }
+        let (v8_key, _) = state
+            .contract_state(&serialized_address)?
+            .expect("the contract is in the V8 ledger state");
+        assert!(state.contract_state_key_in_current_encoding(&v8_key)?);
+
+        let state = state.translate(LedgerVersion::V9)?;
+        let (v9_key, translated) = state
+            .contract_state(&serialized_address)?
+            .expect("the contract survives the translation");
+        assert_ne!(v9_key, v8_key, "the translated state is a different node");
+        assert!(state.contract_state_key_in_current_encoding(&v9_key)?);
+        assert!(
+            !state.contract_state_key_in_current_encoding(&v8_key)?,
+            "the pre-fork key is not in the ledger-9 encoding"
+        );
+        let translated_bytes = translated.serialize()?;
+        assert!(
+            translated_bytes
+                .as_ref()
+                .starts_with(b"midnight:contract-state[v8]:"),
+            "the translated state must serialize with the ledger-9 tag"
+        );
+        let balances = translated.balances()?;
+        assert_eq!(balances.len(), 1);
+        assert_eq!(
+            balances[0].amount, AMOUNT,
+            "the translation keeps the balances"
+        );
+
+        let (state, _) = state.persist()?;
+        drop(state);
+
+        assert!(
+            LedgerState::contract_state_loadable(&v9_key)?,
+            "the translated key must be loadable after its ledger state is gone"
+        );
+        let reloaded = LedgerDbContractState::load_prefetched(&v9_key)?;
+        assert_eq!(
+            reloaded.serialize()?,
+            translated_bytes,
+            "re-serializing the reloaded translated state must be byte-identical"
         );
 
         Ok(())

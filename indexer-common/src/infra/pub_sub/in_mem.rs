@@ -106,6 +106,7 @@ mod tests {
             height: 123,
             max_transaction_id: None,
             caught_up: false,
+            protocol_version: 1_000_000,
         };
         let publish_block_res = pub_sub.publisher().publish(&block_indexed).await;
 
@@ -146,6 +147,7 @@ mod tests {
                     height,
                     max_transaction_id: None,
                     caught_up: false,
+                    protocol_version: 1_000_000,
                 })
                 .await?;
         }
@@ -160,6 +162,7 @@ mod tests {
                 height: 9999,
                 max_transaction_id: None,
                 caught_up: false,
+                protocol_version: 1_000_000,
             })
             .await?;
 
