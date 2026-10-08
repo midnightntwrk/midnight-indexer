@@ -41,6 +41,14 @@ where
 
     async fn save_spo(&self, spo: &SPO, tx: &mut SqlxTransaction) -> Result<(), sqlx::Error>;
 
+    /// Remove other identities for the same mainchain key that were never valid and never
+    /// produced blocks, so a verified registration replaces one squatted by an unsigned one.
+    async fn remove_unverified_spos(
+        &self,
+        spo: &SPO,
+        tx: &mut SqlxTransaction,
+    ) -> Result<(), sqlx::Error>;
+
     async fn save_membership(
         &self,
         memberships: &[ValidatorMembership],
