@@ -100,7 +100,7 @@ where
     /// The height of the block at which `state` last changed: the latest action's block, or a later
     /// block at which the state was translated to a new ledger version.
     async fn state_at(&self, cx: &Context<'_>) -> ApiResult<u32> {
-        resolve_state_at::<S>(self.translated_at, self.transaction_id, cx).await
+        resolve_state_at::<S>(self.translated_at, None, self.transaction_id, cx).await
     }
 
     /// The contract's maintenance authority as of the queried block.

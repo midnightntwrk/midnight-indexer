@@ -63,49 +63,72 @@ where
     S: Storage,
 {
     fn from(action: domain::ContractAction) -> Self {
-        let domain::ContractAction {
-            id,
-            address,
+        contract_action(action, None)
+    }
+}
+
+impl<S> From<domain::ContractActionAtBlock> for ContractAction<S>
+where
+    S: Storage,
+{
+    fn from(action: domain::ContractActionAtBlock) -> Self {
+        contract_action(action.action, Some(action.block_height))
+    }
+}
+
+/// A contract action, with the height of its block if the query provided it.
+fn contract_action<S>(
+    action: domain::ContractAction,
+    block_height: Option<u32>,
+) -> ContractAction<S>
+where
+    S: Storage,
+{
+    let domain::ContractAction {
+        id,
+        address,
+        state_key,
+        attributes,
+        zswap_state_key,
+        transaction_id,
+        translated_at,
+    } = action;
+
+    match attributes {
+        ContractAttributes::Deploy => ContractAction::Deploy(ContractDeploy {
+            address: address.hex_encode(),
             state_key,
-            attributes,
             zswap_state_key,
             transaction_id,
+            contract_action_id: id,
             translated_at,
-        } = action;
+            block_height,
+            _s: PhantomData,
+        }),
 
-        match attributes {
-            ContractAttributes::Deploy => ContractAction::Deploy(ContractDeploy {
-                address: address.hex_encode(),
-                state_key,
-                zswap_state_key,
-                transaction_id,
-                contract_action_id: id,
-                translated_at,
-                _s: PhantomData,
-            }),
+        ContractAttributes::Call { entry_point } => ContractAction::Call(ContractCall {
+            address: address.hex_encode(),
+            state_key,
+            entry_point,
+            zswap_state_key,
+            transaction_id,
+            contract_action_id: id,
+            translated_at,
+            block_height,
+            raw_address: address,
+            _s: PhantomData,
+        }),
 
-            ContractAttributes::Call { entry_point } => ContractAction::Call(ContractCall {
-                address: address.hex_encode(),
-                state_key,
-                entry_point,
-                zswap_state_key,
-                transaction_id,
-                contract_action_id: id,
-                translated_at,
-                raw_address: address,
-                _s: PhantomData,
-            }),
-
-            ContractAttributes::Update => ContractAction::Update(ContractUpdate {
-                address: address.hex_encode(),
-                state_key,
-                zswap_state_key,
-                transaction_id,
-                contract_action_id: id,
-                translated_at,
-                _s: PhantomData,
-            }),
-        }
+        ContractAttributes::Update => ContractAction::Update(ContractUpdate {
+            address: address.hex_encode(),
+            state_key,
+            zswap_state_key,
+            transaction_id,
+            contract_action_id: id,
+            translated_at,
+            block_height,
+            _s: PhantomData,
+        }),
     }
 }
 
@@ -130,16 +153,18 @@ pub(super) async fn resolve_state(
     }
 }
 
-/// Resolve `stateAt`: the translation height if any, else the height of the action's block.
+/// Resolve `stateAt`: the translation height if any, else the height of the action's block, read
+/// from its transaction unless the query provided it.
 pub(super) async fn resolve_state_at<S>(
     translated_at: Option<u32>,
+    block_height: Option<u32>,
     transaction_id: u64,
     cx: &Context<'_>,
 ) -> ApiResult<u32>
 where
     S: Storage,
 {
-    if let Some(height) = translated_at {
+    if let Some(height) = translated_at.or(block_height) {
         return Ok(height);
     }
 
@@ -208,6 +233,9 @@ where
     translated_at: Option<u32>,
 
     #[graphql(skip)]
+    block_height: Option<u32>,
+
+    #[graphql(skip)]
     _s: PhantomData<S>,
 }
 
@@ -227,7 +255,13 @@ where
     /// The height of the block at which `state` last changed: this action's block, or a later block
     /// at which the state was translated to a new ledger version.
     async fn state_at(&self, cx: &Context<'_>) -> ApiResult<u32> {
-        resolve_state_at::<S>(self.translated_at, self.transaction_id, cx).await
+        resolve_state_at::<S>(
+            self.translated_at,
+            self.block_height,
+            self.transaction_id,
+            cx,
+        )
+        .await
     }
 
     /// The hex-encoded serialized contract-specific zswap state.
@@ -286,6 +320,9 @@ where
     translated_at: Option<u32>,
 
     #[graphql(skip)]
+    block_height: Option<u32>,
+
+    #[graphql(skip)]
     raw_address: SerializedContractAddress,
 
     #[graphql(skip)]
@@ -308,7 +345,13 @@ where
     /// The height of the block at which `state` last changed: this action's block, or a later block
     /// at which the state was translated to a new ledger version.
     async fn state_at(&self, cx: &Context<'_>) -> ApiResult<u32> {
-        resolve_state_at::<S>(self.translated_at, self.transaction_id, cx).await
+        resolve_state_at::<S>(
+            self.translated_at,
+            self.block_height,
+            self.transaction_id,
+            cx,
+        )
+        .await
     }
 
     /// The hex-encoded serialized contract-specific zswap state.
@@ -428,6 +471,9 @@ where
     translated_at: Option<u32>,
 
     #[graphql(skip)]
+    block_height: Option<u32>,
+
+    #[graphql(skip)]
     _s: PhantomData<S>,
 }
 
@@ -447,7 +493,13 @@ where
     /// The height of the block at which `state` last changed: this action's block, or a later block
     /// at which the state was translated to a new ledger version.
     async fn state_at(&self, cx: &Context<'_>) -> ApiResult<u32> {
-        resolve_state_at::<S>(self.translated_at, self.transaction_id, cx).await
+        resolve_state_at::<S>(
+            self.translated_at,
+            self.block_height,
+            self.transaction_id,
+            cx,
+        )
+        .await
     }
 
     /// The hex-encoded serialized contract-specific zswap state.
@@ -499,4 +551,41 @@ where
         .some_or_server_error(|| format!("transaction with id {id} not found"))?;
 
     Ok(transaction.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::storage::NoopStorage;
+
+    fn action() -> domain::ContractAction {
+        domain::ContractAction {
+            id: 1,
+            address: vec![0xa; 32].into(),
+            state_key: None,
+            attributes: ContractAttributes::Deploy,
+            zswap_state_key: None,
+            transaction_id: 2,
+            translated_at: None,
+        }
+    }
+
+    fn block_height(action: ContractAction<NoopStorage>) -> Option<u32> {
+        match action {
+            ContractAction::Deploy(action) => action.block_height,
+            _ => unreachable!("built as a deploy"),
+        }
+    }
+
+    /// A stream row carries its block height, so `stateAt` needs no lookup; other rows do not.
+    #[test]
+    fn only_stream_rows_carry_their_block_height() {
+        let stream_row = domain::ContractActionAtBlock {
+            action: action(),
+            block_height: 100,
+        };
+
+        assert_eq!(block_height(stream_row.into()), Some(100));
+        assert_eq!(block_height(action().into()), None);
+    }
 }
