@@ -646,8 +646,8 @@ where
     metrics.record_uncaptured_contract_states(uncaptured);
     let transactions = transactions;
 
-    // At a hard fork, the translated state key of every contract without an action in this block.
-    // Before `persist()`, so the translated nodes are flushed ahead of the SQL commit.
+    // At a hard fork, capture the translated state key of every contract without an action in this
+    // block, immediately after the contract state keys above.
     let contract_state_translations = if translated {
         let latest_actions = storage
             .get_latest_contract_actions()
