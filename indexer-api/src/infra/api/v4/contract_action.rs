@@ -168,24 +168,13 @@ where
         return Ok(height);
     }
 
-    let transaction = cx
-        .get_transaction_by_id_loader::<S>()
+    cx.get_block_height_by_transaction_id_loader::<S>()
         .load_one(transaction_id)
         .await
-        .map_err_into_server_error(|| format!("get transaction by id {transaction_id}"))?
-        .some_or_server_error(|| format!("transaction with id {transaction_id} not found"))?;
-    let block_hash = match &transaction {
-        domain::Transaction::Regular(transaction) => transaction.block_hash,
-        domain::Transaction::System(transaction) => transaction.block_hash,
-    };
-    let block = cx
-        .get_block_by_hash_loader::<S>()
-        .load_one(block_hash)
-        .await
-        .map_err_into_server_error(|| format!("get block by hash {block_hash}"))?
-        .some_or_server_error(|| format!("block with hash {block_hash} not found"))?;
-
-    Ok(block.height)
+        .map_err_into_server_error(|| {
+            format!("get block height by transaction id {transaction_id}")
+        })?
+        .some_or_server_error(|| format!("transaction with id {transaction_id} not found"))
 }
 
 /// Resolve a contract's zswap state out of the ledger arena. See [resolve_state].
