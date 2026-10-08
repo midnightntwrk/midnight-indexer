@@ -140,6 +140,40 @@ impl domain::storage::Storage for Storage {
     }
 
     #[trace]
+    async fn remove_unverified_spos(
+        &self,
+        spo: &SPO,
+        tx: &mut SqlxTransaction,
+    ) -> Result<(), sqlx::Error> {
+        const UNVERIFIED: &str = indoc! {"
+            SELECT si.spo_sk FROM spo_identity si
+            WHERE si.mainchain_pubkey = $1
+              AND si.spo_sk <> $2
+              AND NOT EXISTS (
+                  SELECT 1 FROM spo_history sh
+                  WHERE sh.spo_sk = si.spo_sk AND sh.status = 'VALID'
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM spo_epoch_performance sep
+                  WHERE sep.spo_sk = si.spo_sk
+              )
+        "};
+
+        // History rows reference the identity, so they go first.
+        for table in ["spo_history", "spo_identity"] {
+            sqlx::query(&format!(
+                "DELETE FROM {table} WHERE spo_sk IN ({UNVERIFIED})"
+            ))
+            .bind(&spo.mainchain_pubkey)
+            .bind(&spo.spo_sk)
+            .execute(&mut **tx)
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    #[trace]
     async fn save_membership(
         &self,
         memberships: &[ValidatorMembership],
@@ -428,6 +462,218 @@ impl Storage {
         .execute(&mut **tx)
         .await?;
 
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        domain::{PoolMetadata, SPO, SPOEpochPerformance, SPOHistory, SPOStatus, storage::Storage},
+        infra::storage::{SqlxTransaction, Storage as StorageImpl},
+    };
+    use anyhow::Context;
+
+    const POOL_ID: &str = "pool";
+    const MAINCHAIN_PUBKEY: &str = "mainchain";
+
+    #[tokio::test]
+    async fn test_valid_registration_replaces_squatted_identity() -> anyhow::Result<()> {
+        let (storage, _guard) = storage().await?;
+        let mut tx = storage.create_tx().await?;
+
+        // An unsigned registration claims the pool's mainchain key with the attacker's keys.
+        let squatter = spo("squatter");
+        storage.save_spo(&squatter, &mut tx).await?;
+        save_history(&storage, &squatter, 1, SPOStatus::Invalid, &mut tx).await?;
+
+        let genuine = spo("genuine");
+        storage.remove_unverified_spos(&genuine, &mut tx).await?;
+        storage.save_spo(&genuine, &mut tx).await?;
+        save_history(&storage, &genuine, 2, SPOStatus::Valid, &mut tx).await?;
+
+        assert_eq!(identities(&mut tx).await?, ["genuine"]);
+        assert_eq!(
+            history(&mut tx).await?,
+            [("genuine".to_owned(), "VALID".to_owned())]
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_once_valid_identity_is_kept() -> anyhow::Result<()> {
+        let (storage, _guard) = storage().await?;
+        let mut tx = storage.create_tx().await?;
+
+        // An identity that was valid once was registered by the pool itself.
+        let valid = spo("valid");
+        storage.save_spo(&valid, &mut tx).await?;
+        save_history(&storage, &valid, 1, SPOStatus::Valid, &mut tx).await?;
+
+        storage.remove_unverified_spos(&spo("new"), &mut tx).await?;
+        assert_eq!(identities(&mut tx).await?, ["valid"]);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_block_producing_identity_is_kept() -> anyhow::Result<()> {
+        let (storage, _guard) = storage().await?;
+        let mut tx = storage.create_tx().await?;
+
+        let producer = spo("producer");
+        storage.save_spo(&producer, &mut tx).await?;
+        let performance = SPOEpochPerformance {
+            spo_sk: producer.spo_sk.clone(),
+            identity_label: POOL_ID.to_owned(),
+            epoch_no: 1,
+            expected_blocks: 1,
+            produced_blocks: 1,
+        };
+        storage.save_spo_performance(&performance, &mut tx).await?;
+
+        storage.remove_unverified_spos(&spo("new"), &mut tx).await?;
+        assert_eq!(identities(&mut tx).await?, ["producer"]);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_identity_being_saved_is_kept() -> anyhow::Result<()> {
+        let (storage, _guard) = storage().await?;
+        let mut tx = storage.create_tx().await?;
+
+        let same = spo("same");
+        storage.save_spo(&same, &mut tx).await?;
+        storage.remove_unverified_spos(&same, &mut tx).await?;
+        assert_eq!(identities(&mut tx).await?, ["same"]);
+
+        Ok(())
+    }
+
+    /// An identity for the test pool whose sidechain and aura keys derive from `key`.
+    fn spo(key: &str) -> SPO {
+        SPO {
+            spo_sk: key.to_owned(),
+            pool_id: POOL_ID.to_owned(),
+            mainchain_pubkey: MAINCHAIN_PUBKEY.to_owned(),
+            sidechain_pubkey: key.to_owned(),
+            aura_pubkey: format!("{key}-aura"),
+        }
+    }
+
+    async fn save_history(
+        storage: &StorageImpl,
+        spo: &SPO,
+        epoch_no: u64,
+        status: SPOStatus,
+        tx: &mut SqlxTransaction,
+    ) -> anyhow::Result<()> {
+        let history = SPOHistory {
+            spo_sk: spo.spo_sk.clone(),
+            epoch_no,
+            status,
+        };
+        storage.save_spo_history(&history, tx).await?;
+        Ok(())
+    }
+
+    async fn identities(tx: &mut SqlxTransaction) -> anyhow::Result<Vec<String>> {
+        let identities = sqlx::query_scalar("SELECT spo_sk FROM spo_identity ORDER BY spo_sk")
+            .fetch_all(&mut **tx)
+            .await?;
+        Ok(identities)
+    }
+
+    async fn history(tx: &mut SqlxTransaction) -> anyhow::Result<Vec<(String, String)>> {
+        let history = sqlx::query_as("SELECT spo_sk, status FROM spo_history ORDER BY spo_sk")
+            .fetch_all(&mut **tx)
+            .await?;
+        Ok(history)
+    }
+
+    /// Storage with migrations applied and the test pool's metadata saved. The guard keeps the
+    /// database alive.
+    #[cfg(feature = "cloud")]
+    async fn storage() -> anyhow::Result<(
+        StorageImpl,
+        testcontainers::ContainerAsync<testcontainers_modules::postgres::Postgres>,
+    )> {
+        use indexer_common::infra::{
+            migrations,
+            pool::{self, postgres::PostgresPool},
+        };
+        use sqlx::postgres::PgSslMode;
+        use std::time::Duration;
+        use testcontainers::{ImageExt, runners::AsyncRunner};
+        use testcontainers_modules::postgres::Postgres;
+
+        let container = Postgres::default()
+            .with_db_name("indexer")
+            .with_user("indexer")
+            .with_password(env!("APP__INFRA__STORAGE__PASSWORD"))
+            .with_tag("17.1-alpine")
+            .start()
+            .await
+            .context("start Postgres container")?;
+        let port = container
+            .get_host_port_ipv4(5432)
+            .await
+            .context("get Postgres port")?;
+
+        let config = pool::postgres::Config {
+            host: "localhost".to_string(),
+            port,
+            dbname: "indexer".to_string(),
+            user: "indexer".to_string(),
+            password: env!("APP__INFRA__STORAGE__PASSWORD").into(),
+            sslmode: PgSslMode::Prefer,
+            max_connections: 10,
+            idle_timeout: Duration::from_secs(60),
+            max_lifetime: Duration::from_secs(5 * 60),
+        };
+        let pool = PostgresPool::new(config).await.context("create pool")?;
+        migrations::postgres::run(&pool)
+            .await
+            .context("run migrations")?;
+
+        let storage = StorageImpl::new(pool);
+        save_pool(&storage).await?;
+
+        Ok((storage, container))
+    }
+
+    /// Storage with migrations applied and the test pool's metadata saved. The guard keeps the
+    /// database alive.
+    #[cfg(feature = "standalone")]
+    async fn storage() -> anyhow::Result<(StorageImpl, tempfile::TempDir)> {
+        use indexer_common::infra::{
+            migrations,
+            pool::{self, sqlite::SqlitePool},
+        };
+
+        let temp_dir = tempfile::tempdir().context("create temp dir")?;
+        let cnn_url = temp_dir.path().join("indexer.sqlite").display().to_string();
+        let pool = SqlitePool::new(pool::sqlite::Config::with_url(cnn_url))
+            .await
+            .context("create pool")?;
+        migrations::sqlite::run(&pool)
+            .await
+            .context("run migrations")?;
+
+        let storage = StorageImpl::new(pool);
+        save_pool(&storage).await?;
+
+        Ok((storage, temp_dir))
+    }
+
+    async fn save_pool(storage: &StorageImpl) -> anyhow::Result<()> {
+        let mut tx = storage.create_tx().await?;
+        storage
+            .save_pool_meta(&PoolMetadata::placeholder(POOL_ID.to_owned()), &mut tx)
+            .await?;
+        tx.commit().await?;
         Ok(())
     }
 }

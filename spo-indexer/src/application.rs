@@ -114,6 +114,7 @@ async fn process_next_epoch(
         .candidate_registrations
         .values()
         .flatten()
+        .filter(|reg| reg.is_attributable())
         .map(|reg| (get_cardano_id(&reg.mainchain_pub_key), reg))
         .collect::<Vec<_>>();
 
@@ -361,6 +362,7 @@ async fn save_spo_identity(
         mainchain_pubkey: main_pk,
     };
 
+    storage.remove_unverified_spos(&spo, tx).await?;
     storage.save_spo(&spo, tx).await?;
     Ok(())
 }

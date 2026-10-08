@@ -118,6 +118,19 @@ pub struct CandidateRegistration {
     pub invalid_reasons: Option<InvalidReasons>,
 }
 
+impl CandidateRegistration {
+    /// Whether this registration provably belongs to the pool it names. Anyone can submit an
+    /// unsigned registration naming another pool's keys; the node only reports a stake error for
+    /// a registration whose signatures already verified.
+    pub fn is_attributable(&self) -> bool {
+        self.is_valid
+            || matches!(
+                self.invalid_reasons,
+                Some(InvalidReasons::StakeError { .. })
+            )
+    }
+}
+
 /// The node returns whatever keys the registrant put in the Cardano datum, and a registration
 /// lacking `aura` or `gran` is still returned (marked invalid), so both must be optional.
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -372,6 +385,29 @@ mod tests {
                 ),
                 "{reason} should decode as InvalidReasons::Other"
             );
+        }
+    }
+
+    #[test]
+    fn test_is_attributable() {
+        let keys = json!({ "gran": "0x04", "aura": "0x05" });
+        let cases = [
+            (None, true),
+            (Some(json!({ "StakeError": "InvalidStake" })), true),
+            (
+                Some(json!({ "InvalidRegistrationData": "InvalidMainchainSignature" })),
+                false,
+            ),
+            (
+                Some(json!({ "InvalidRegistrationData": "InvalidAccountKeys" })),
+                false,
+            ),
+            (Some(json!("unknown")), false),
+        ];
+
+        for (reason, expected) in cases {
+            let registration = deserialize(registration(keys.clone(), reason.clone()));
+            assert_eq!(registration.is_attributable(), expected, "{reason:?}");
         }
     }
 
