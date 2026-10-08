@@ -315,7 +315,7 @@ impl LedgerState {
     /// state's encoding, excluding `contracts_in_block`. Call after `translate` and
     /// `capture_contract_state_keys`. A contract absent from this state is an error.
     #[trace]
-    pub fn contract_state_translations(
+    pub(crate) fn contract_state_translations(
         &self,
         latest_actions: Vec<(u64, LatestContractAction)>,
         contracts_in_block: &HashSet<SerializedContractAddress>,
