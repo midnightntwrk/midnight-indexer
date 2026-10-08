@@ -3245,7 +3245,10 @@ mod tests {
         let (v9_key, translated) = state
             .contract_state(&serialized_address)?
             .expect("the contract survives the translation");
-        assert_ne!(v9_key, v8_key, "the translated state is a different node");
+        assert_ne!(
+            v9_key, v8_key,
+            "the translated key carries the ledger-9 tag"
+        );
         // The tag, then a by-reference key: one discriminant byte and the 32-byte hash.
         assert!(
             v9_key
