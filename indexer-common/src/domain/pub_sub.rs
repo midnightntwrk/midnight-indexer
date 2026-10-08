@@ -45,6 +45,9 @@ pub struct BlockIndexed {
     pub height: u64,
     pub max_transaction_id: Option<u64>,
     pub caught_up: bool,
+    /// The block's protocol version as the raw `spec_version`, so an unknown version still
+    /// deserializes.
+    pub protocol_version: u32,
 }
 message!(BlockIndexed);
 

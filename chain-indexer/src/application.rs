@@ -700,6 +700,7 @@ where
             height: block.height,
             max_transaction_id,
             caught_up: *caught_up,
+            protocol_version: block.protocol_version.into(),
         })
         .await
         .context("publish BlockIndexed event")?;
