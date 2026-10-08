@@ -11,3 +11,6 @@ target
 
 # Toolkit Postgres data (local only)
 toolkit-postgres-data/
+
+# Sparse midnight-node checkout used by `just fork-up` (local only)
+.midnight-node/
