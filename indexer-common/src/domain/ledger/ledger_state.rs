@@ -1036,6 +1036,8 @@ impl LedgerState {
     ) -> Result<bool, Error> {
         let key = ContractStateArenaKey::deserialize(key)?;
 
+        // The key variants are named after the dependency defining `ContractState`: V8 holds
+        // `midnight-onchain-runtime_v3`'s, V9 `midnight-onchain-runtime_v4`'s.
         Ok(matches!(
             (self, key),
             (Self::V8 { .. }, ContractStateArenaKey::V3(_))
