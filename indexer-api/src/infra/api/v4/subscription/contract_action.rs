@@ -123,7 +123,7 @@ where
                     yield translation.into();
                 }
                 contract_action_id = contract_action.action.id + 1;
-                yield contract_action.action.into();
+                yield contract_action.into();
             }
             for translation in due(&mut replay_translations, seen.height) {
                 yield translation.into();
@@ -178,7 +178,7 @@ where
                         yield translation.into();
                     }
                     contract_action_id = contract_action.action.id + 1;
-                    yield contract_action.action.into();
+                    yield contract_action.into();
                 }
                 for translation in due(&mut live_translations, height) {
                     yield translation.into();
