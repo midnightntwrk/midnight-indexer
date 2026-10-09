@@ -109,7 +109,8 @@ Nothing detects either omission.
 ### 4. Regenerate tx fixtures (if the wire format moved)
 
 ```bash
-just generate-txs   # rewrites indexer-common/tests/*.raw from a running node
+just generate-txs                # rewrites indexer-common/tests/*.raw from a running node
+just generate-txs 1.0.2 1.0.0    # a named version whose toolkit version differs
 ```
 
 ### 5. Drop superseded data (optional)
