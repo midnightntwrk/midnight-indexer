@@ -14,7 +14,7 @@
 //! Bootstrap + empty-batch apply — the per-block overhead that runs regardless
 //! of transaction count.
 
-use chain_indexer::domain::LedgerState;
+use chain_indexer::domain::{BlockRef, LedgerState};
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use indexer_common::{
     domain::{BlockHash, LedgerVersion, NetworkId},
@@ -58,6 +58,10 @@ fn bench_apply_transactions_empty(c: &mut Criterion) {
     let _temp_dir = init_ledger_db(&rt);
 
     let network_id: NetworkId = "undeployed".try_into().expect("network id");
+    let block = BlockRef {
+        hash: BlockHash::from([1u8; 32]),
+        height: 1,
+    };
     let parent_block_hash = BlockHash::from([0u8; 32]);
     let block_timestamp: u64 = 1_700_000_000_000;
     let parent_block_timestamp: u64 = block_timestamp - 6_000;
@@ -69,6 +73,7 @@ fn bench_apply_transactions_empty(c: &mut Criterion) {
                 ledger_state
                     .apply_transactions(
                         std::iter::empty(),
+                        black_box(block),
                         black_box(parent_block_hash),
                         black_box(block_timestamp),
                         black_box(parent_block_timestamp),
