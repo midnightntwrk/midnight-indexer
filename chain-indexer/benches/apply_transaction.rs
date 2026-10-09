@@ -104,7 +104,7 @@ fn bench_apply_real_tx(c: &mut Criterion) {
     // allows [generation, generation + 14d], but the dust spend is tighter: the
     // dust ctime must lie in [block_timestamp - 3h, block_timestamp], so pick a
     // timestamp within ~3h after `just generate-txs` ran.
-    let block_timestamp: u64 = 1_790_872_100_000;
+    let block_timestamp: u64 = 1_791_544_300_000;
     let parent_block_timestamp: u64 = block_timestamp - 6_000;
 
     let mut group = c.benchmark_group("LedgerState::apply_transactions");
