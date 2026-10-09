@@ -523,6 +523,10 @@ where
         ledger_state
             .apply_transactions(
                 transactions,
+                BlockRef {
+                    hash: block.hash,
+                    height: block.height,
+                },
                 block.parent_hash,
                 block.timestamp,
                 *parent_block_timestamp,

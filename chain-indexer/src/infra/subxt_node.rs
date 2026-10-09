@@ -17,6 +17,7 @@ mod runtimes;
 use crate::{
     domain::{
         BlockRef, SystemParametersChange,
+        extrinsic::{EventIndex, Phase},
         node::{Block, Node, RegularTransaction, SystemTransaction, Transaction},
     },
     infra::subxt_node::{header::SubstrateHeaderExt, runtimes::BlockDetails},
@@ -296,31 +297,36 @@ impl SubxtNode {
             transactions,
             mut dust_registration_events,
             bridge_events,
-        } = runtimes::make_block_details(
-            authorities,
-            content_node_version,
-            &block,
-            content_source.as_ref(),
-        )
-        .await?;
+        } = runtimes::make_block_details(authorities, content_node_version, &block, content_source)
+            .await?;
 
         // At genesis, Substrate does not emit events (Parity PR #5463). Fetch cNight
         // registrations from pallet storage instead.
         // Also fetch the ledger state root for genesis ledger state detection.
-        let ledger_state_root = if height == 0 {
-            let genesis_registrations =
-                runtimes::fetch_genesis_cnight_registrations(state_node_version, &block).await?;
-            dust_registration_events.extend(genesis_registrations);
+        let ledger_state_root =
+            if height == 0 {
+                let genesis_registrations =
+                    runtimes::fetch_genesis_cnight_registrations(state_node_version, &block)
+                        .await?;
+                // Registrations read from storage are part of the genesis state, which is set
+                // before any extrinsic; their index is their position in the read.
+                dust_registration_events.extend(genesis_registrations.into_iter().enumerate().map(
+                    |(position, event)| (Phase::Initialization, position as EventIndex, event),
+                ));
 
-            runtimes::get_ledger_state_root(state_node_version, &block)
-                .await?
-                .map(Into::into)
-        } else {
-            None
-        };
+                runtimes::get_ledger_state_root(state_node_version, &block)
+                    .await?
+                    .map(Into::into)
+            } else {
+                None
+            };
 
         let transactions = stream::iter(transactions)
-            .then(|t| make_transaction(t, protocol_version))
+            .then(|(phase, transaction, outcome)| async move {
+                make_transaction(transaction, protocol_version)
+                    .await
+                    .map(|transaction| (phase, transaction, outcome))
+            })
             .try_collect::<Vec<_>>()
             .await?;
 

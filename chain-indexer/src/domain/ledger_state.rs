@@ -12,8 +12,10 @@
 // limitations under the License.
 
 use crate::domain::{
-    ContractAction, ContractStateTranslation, LatestContractAction, RegularTransaction,
-    SystemTransaction, Transaction, node,
+    BlockRef, ContractAction, ContractStateTranslation, LatestContractAction, RegularTransaction,
+    SystemTransaction, Transaction,
+    extrinsic::{Applied, Phase, divergence},
+    node,
 };
 use derive_more::derive::{Deref, From};
 use fastrace::trace;
@@ -23,7 +25,7 @@ use indexer_common::domain::{
     TransactionHash, TransactionResult,
     ledger::{self, LedgerParameters, RootCountRepair},
 };
-use log::warn;
+use log::{debug, warn};
 use std::{
     collections::{HashMap, HashSet},
     ops::DerefMut,
@@ -173,7 +175,8 @@ impl LedgerState {
     #[trace(properties = { "parent_block_hash": "{parent_block_hash}" })]
     pub fn apply_transactions(
         &mut self,
-        transactions: impl IntoIterator<Item = node::Transaction>,
+        transactions: impl IntoIterator<Item = (Phase, node::Transaction, Result<Applied, String>)>,
+        block: BlockRef,
         parent_block_hash: BlockHash,
         block_timestamp: u64,
         parent_block_timestamp: u64,
@@ -194,27 +197,71 @@ impl LedgerState {
         let mut no_regular_transaction_applied = true;
         let transactions = transactions
             .into_iter()
-            .map(|transaction| match transaction {
-                node::Transaction::Regular(transaction) => {
-                    let well_formed_timestamp = (no_regular_transaction_applied
-                        && bump_first_regular_tblock)
-                        .then_some(parent_block_timestamp + MEMPOOL_TBLOCK_BUMP_MILLIS);
+            .map(|(phase, transaction, outcome)| {
+                use node::Transaction::*;
 
-                    let transaction = self.apply_regular_transaction(
-                        transaction,
-                        parent_block_hash,
-                        block_timestamp,
-                        parent_block_timestamp,
-                        well_formed_timestamp,
-                    )?;
-                    no_regular_transaction_applied &=
-                        matches!(transaction.transaction_result, TransactionResult::Failure);
+                match (transaction, outcome) {
+                    // Failed at dispatch: the state is unchanged, so the transaction is never
+                    // passed to the ledger. It does not count as applied for the
+                    // first-regular-`tblock` rule.
+                    (Regular(transaction), Err(error)) => {
+                        debug!(
+                            transaction_hash:% = transaction.hash,
+                            phase:?,
+                            error:%;
+                            "regular transaction failed at dispatch"
+                        );
 
-                    Ok(Transaction::Regular(transaction.into()))
-                }
+                        self.failed_regular_transaction(transaction)
+                            .map(|transaction| Transaction::Regular(transaction.into()))
+                    }
 
-                node::Transaction::System(transaction) => {
-                    self.apply_system_transaction(transaction, block_timestamp)
+                    (Regular(transaction), Ok(applied)) => {
+                        let well_formed_timestamp = (no_regular_transaction_applied
+                            && bump_first_regular_tblock)
+                            .then_some(parent_block_timestamp + MEMPOOL_TBLOCK_BUMP_MILLIS);
+
+                        let (transaction, failure_reason) = self.apply_regular_transaction(
+                            transaction,
+                            parent_block_hash,
+                            block_timestamp,
+                            parent_block_timestamp,
+                            well_formed_timestamp,
+                        )?;
+                        no_regular_transaction_applied &=
+                            matches!(transaction.transaction_result, TransactionResult::Failure);
+
+                        check_regular_transaction(
+                            block,
+                            &transaction,
+                            failure_reason,
+                            &applied,
+                            phase,
+                        );
+
+                        Ok(Transaction::Regular(transaction.into()))
+                    }
+
+                    (System(transaction), outcome) => {
+                        let transaction =
+                            self.apply_system_transaction(transaction, block_timestamp)?;
+
+                        // Only applied system transactions are ever passed in.
+                        match outcome {
+                            Ok(applied) => check_hash(block, transaction.hash(), &applied, phase),
+
+                            Err(error) => divergence(
+                                block,
+                                format_args!(
+                                    "system transaction {} in {phase:?}: failed on chain \
+                                     ({error}), but it is applied",
+                                    transaction.hash()
+                                ),
+                            ),
+                        }
+
+                        Ok(transaction)
+                    }
                 }
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -347,7 +394,55 @@ impl LedgerState {
             .collect()
     }
 
-    // Applies one regular transaction and converts it into a domain regular transaction.
+    // Converts a regular transaction that failed at dispatch into a domain regular transaction
+    // with a `Failure` result. It never reaches the ledger, whose state it leaves unchanged: no
+    // fees, no UTXOs, no ledger events, no contract actions, and the state indices and root are the
+    // current ones.
+    fn failed_regular_transaction(
+        &self,
+        transaction: node::RegularTransaction,
+    ) -> Result<RegularTransaction, Error> {
+        let mut transaction = RegularTransaction::from(transaction);
+
+        self.set_state_range(
+            &mut transaction,
+            self.zswap_first_free(),
+            self.dust_commitments_first_free(),
+            self.dust_generations_first_free(),
+        )?;
+        transaction.transaction_result = TransactionResult::Failure;
+        transaction.paid_fees = 0;
+        transaction.estimated_fees = 0;
+        transaction.contract_actions.clear();
+
+        Ok(transaction)
+    }
+
+    // Sets where the transaction leaves the ledger state: the current zswap root and, from the
+    // given start indices, the current first-free indices as end indices.
+    fn set_state_range(
+        &self,
+        transaction: &mut RegularTransaction,
+        zswap_start_index: u64,
+        dust_commitment_start_index: u64,
+        dust_generation_start_index: u64,
+    ) -> Result<(), Error> {
+        transaction.zswap_merkle_tree_root = self
+            .zswap_merkle_tree_root()
+            .serialize()
+            .map_err(|error| Error::SerializeMerkleTreeRoot(transaction.hash, error))?;
+        transaction.zswap_start_index = zswap_start_index;
+        transaction.zswap_end_index = self.zswap_first_free();
+        transaction.dust_commitment_start_index = dust_commitment_start_index;
+        transaction.dust_commitment_end_index = self.dust_commitments_first_free();
+        transaction.dust_generation_start_index = dust_generation_start_index;
+        transaction.dust_generation_end_index = self.dust_generations_first_free();
+
+        Ok(())
+    }
+
+    // Applies one regular transaction and converts it into a domain regular transaction, with the
+    // ledger's reason if it fails.
     //
     // `well_formed_timestamp` is a second `tblock`, in milliseconds, to verify the transaction at
     // if it is malformed at `block_timestamp`. It is the adjusted `tblock` for a regular
@@ -365,7 +460,7 @@ impl LedgerState {
         block_timestamp: u64,
         parent_block_timestamp: u64,
         well_formed_timestamp: Option<u64>,
-    ) -> Result<RegularTransaction, Error> {
+    ) -> Result<(RegularTransaction, Option<String>), Error> {
         let mut transaction = RegularTransaction::from(transaction);
 
         // Apply transaction.
@@ -407,6 +502,7 @@ impl LedgerState {
             spent_unshielded_utxos,
             ledger_events,
             fees,
+            failure_reason,
             bridge_claim,
         } = outcome
             .map_err(|error| Error::ApplyRegularTransaction(Some(transaction.hash), error))?;
@@ -424,16 +520,12 @@ impl LedgerState {
 
         // Update transaction.
         transaction.transaction_result = transaction_result;
-        transaction.zswap_merkle_tree_root = self
-            .zswap_merkle_tree_root()
-            .serialize()
-            .map_err(|error| Error::SerializeMerkleTreeRoot(transaction.hash, error))?;
-        transaction.zswap_start_index = start_index;
-        transaction.zswap_end_index = self.zswap_first_free();
-        transaction.dust_commitment_start_index = dust_commitment_start_index;
-        transaction.dust_commitment_end_index = self.dust_commitments_first_free();
-        transaction.dust_generation_start_index = dust_generation_start_index;
-        transaction.dust_generation_end_index = self.dust_generations_first_free();
+        self.set_state_range(
+            &mut transaction,
+            start_index,
+            dust_commitment_start_index,
+            dust_generation_start_index,
+        )?;
         transaction.created_unshielded_utxos = created_unshielded_utxos;
         transaction.spent_unshielded_utxos = spent_unshielded_utxos;
         transaction.ledger_events = ledger_events;
@@ -453,7 +545,7 @@ impl LedgerState {
             contract_action.zswap_state_key = Some(zswap_state_key);
         }
 
-        Ok(transaction)
+        Ok((transaction, failure_reason))
     }
 
     #[trace(properties = {
@@ -557,6 +649,48 @@ pub enum Error {
         SerializedContractAddress,
         #[source] indexer_common::domain::ledger::Error,
     ),
+}
+
+/// The ledger result of an applied regular transaction must be how it was applied on chain; a
+/// disagreement is a divergence.
+fn check_regular_transaction(
+    block: BlockRef,
+    transaction: &RegularTransaction,
+    failure_reason: Option<String>,
+    applied: &Applied,
+    phase: Phase,
+) {
+    use {Applied::*, TransactionResult::*};
+
+    let agrees = matches!(
+        (applied, &transaction.transaction_result),
+        (Fully { .. }, Success) | (Partially { .. }, PartialSuccess(_))
+    );
+    if !agrees {
+        let reason = failure_reason
+            .map(|reason| format!(": {reason}"))
+            .unwrap_or_default();
+        divergence(
+            block,
+            format_args!(
+                "transaction {} in {phase:?}: {applied:?} on chain, {:?} in the ledger{reason}",
+                transaction.hash, transaction.transaction_result
+            ),
+        );
+    }
+
+    check_hash(block, transaction.hash, applied, phase);
+}
+
+/// The hash recorded on chain for an applied transaction must be the indexer's.
+fn check_hash(block: BlockRef, hash: TransactionHash, applied: &Applied, phase: Phase) {
+    let tx_hash = applied.tx_hash();
+    if tx_hash != hash {
+        divergence(
+            block,
+            format_args!("transaction {hash} in {phase:?}: hash {tx_hash} on chain"),
+        );
+    }
 }
 
 fn stringify_hash(hash: &Option<TransactionHash>) -> String {
@@ -733,7 +867,11 @@ mod tblock_skew_tests {
 #[cfg(all(test, any(feature = "cloud", feature = "standalone")))]
 mod apply_transactions_tblock_tests {
     use super::should_bump_first_regular_tblock;
-    use crate::domain::{LedgerState, Transaction, node};
+    use crate::domain::{
+        BlockRef, LedgerState, Transaction,
+        extrinsic::{Applied, Phase},
+        node,
+    };
     use indexer_common::{
         domain::{
             BlockHash, LedgerVersion, ProtocolVersion, SerializedTransaction, TransactionHash,
@@ -750,6 +888,7 @@ mod apply_transactions_tblock_tests {
 
     // One block applied at `NOW` to a fresh ledger state. Times are in seconds; the adjusted
     // `tblock` is `parent_block_time + 12s`.
+    #[cfg(not(feature = "divergence-halt"))]
     struct Case {
         name: &'static str,
         // Intent TTL and dust `ctime` of each regular transaction.
@@ -761,7 +900,11 @@ mod apply_transactions_tblock_tests {
 
     // On a runtime that skews, a regular transaction is accepted if well-formed at the block time
     // or at the adjusted `tblock` until one applies; from then on only at the block time.
+    //
+    // Some cases have the ledger fail a transaction that `apply` takes to be applied on chain,
+    // which is a divergence and panics with `divergence-halt`, so this runs in default builds.
     #[tokio::test(flavor = "multi_thread")]
+    #[cfg(not(feature = "divergence-halt"))]
     async fn regular_transactions_are_accepted_at_the_adjusted_tblock_until_one_applies()
     -> Result<(), BoxError> {
         use Malformed::{IntentTtlExpired, OutOfDustValidityWindow};
@@ -869,7 +1012,10 @@ mod apply_transactions_tblock_tests {
                 for &(ttl, ctime) in case.transactions {
                     transactions.push(dust_registration(ledger_version, ttl, ctime).await?);
                 }
-                let transactions = transactions.iter().collect::<Vec<_>>();
+                let transactions = transactions
+                    .iter()
+                    .map(|transaction| (transaction, fully_applied as fn(_) -> _))
+                    .collect::<Vec<_>>();
 
                 assert_eq!(
                     apply(
@@ -879,7 +1025,13 @@ mod apply_transactions_tblock_tests {
                         NOW,
                         case.parent_block_time,
                         case.bump_first_regular_tblock,
-                    )?,
+                    )?
+                    .map(|transactions| {
+                        transactions
+                            .iter()
+                            .map(|transaction| regular(transaction).transaction_result.clone())
+                            .collect::<Vec<_>>()
+                    }),
                     case.expected,
                     "{ledger_version}: {}",
                     case.name
@@ -916,7 +1068,7 @@ mod apply_transactions_tblock_tests {
             apply(
                 "preprod",
                 PROTOCOL_VERSION,
-                &[&transaction],
+                &[(&transaction, fully_applied)],
                 BLOCK_TIME,
                 PARENT_BLOCK_TIME,
                 should_bump_first_regular_tblock(BLOCK_HEIGHT, PROTOCOL_VERSION),
@@ -954,7 +1106,7 @@ mod apply_transactions_tblock_tests {
             apply(
                 "mainnet",
                 PROTOCOL_VERSION,
-                &[&transaction],
+                &[(&transaction, fully_applied)],
                 BLOCK_TIME,
                 PARENT_BLOCK_TIME,
                 should_bump_first_regular_tblock(BLOCK_HEIGHT, PROTOCOL_VERSION),
@@ -992,7 +1144,7 @@ mod apply_transactions_tblock_tests {
             let result = apply(
                 "preview",
                 protocol_version,
-                &[&transaction],
+                &[(&transaction, fully_applied)],
                 BLOCK_TIME,
                 PARENT_BLOCK_TIME,
                 should_bump_first_regular_tblock(BLOCK_HEIGHT, protocol_version),
@@ -1005,6 +1157,236 @@ mod apply_transactions_tblock_tests {
                 "{protocol_version:?}: {reason}"
             );
         }
+
+        Ok(())
+    }
+
+    fn regular(transaction: &Transaction) -> &crate::domain::RegularTransaction {
+        match transaction {
+            Transaction::Regular(transaction) => transaction,
+            Transaction::System(_) => panic!("expected a regular transaction"),
+        }
+    }
+
+    // A transaction that failed at dispatch is never applied: it is recorded as failed with no
+    // fees and no effects, and it leaves the ledger state, and the indices recorded for the next
+    // one, untouched.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn failed_transaction_is_recorded_as_failure_and_leaves_the_state_untouched()
+    -> Result<(), BoxError> {
+        let _ledger_db = init_ledger_db().await?;
+
+        for ledger_version in [LedgerVersion::V8, LedgerVersion::V9] {
+            let protocol_version = skewing_protocol_version(ledger_version);
+            let transaction = dust_registration(ledger_version, NOW + 60, NOW).await?;
+
+            let transactions = apply(
+                NETWORK_ID,
+                protocol_version,
+                &[(&transaction, failed), (&transaction, fully_applied)],
+                NOW,
+                NOW - 6,
+                true,
+            )?
+            .unwrap();
+            let [failed, applied] = transactions.as_slice() else {
+                panic!("{ledger_version}: two transactions expected");
+            };
+            let (failed, applied) = (regular(failed), regular(applied));
+
+            // Were it applied, this transaction would succeed, as it does second.
+            assert_eq!(
+                failed.transaction_result,
+                TransactionResult::Failure,
+                "{ledger_version}"
+            );
+            assert_eq!(applied.transaction_result, TransactionResult::Success);
+            assert_eq!(failed.hash, applied.hash);
+            assert_eq!((failed.paid_fees, failed.estimated_fees), (0, 0));
+            assert!(failed.created_unshielded_utxos.is_empty());
+            assert!(failed.spent_unshielded_utxos.is_empty());
+            assert!(failed.ledger_events.is_empty());
+            assert!(failed.contract_actions.is_empty());
+            assert_eq!(failed.zswap_start_index, failed.zswap_end_index);
+            assert_eq!(
+                failed.dust_commitment_start_index,
+                failed.dust_commitment_end_index
+            );
+            assert_eq!(
+                failed.dust_generation_start_index,
+                failed.dust_generation_end_index
+            );
+
+            // The state did not move: the next transaction starts where the failed one stood.
+            assert_eq!(failed.zswap_end_index, applied.zswap_start_index);
+            assert_eq!(
+                failed.dust_commitment_end_index,
+                applied.dust_commitment_start_index
+            );
+            assert_eq!(
+                failed.dust_generation_end_index,
+                applied.dust_generation_start_index
+            );
+            assert_eq!(
+                failed.zswap_merkle_tree_root,
+                applied.zswap_merkle_tree_root
+            );
+        }
+
+        Ok(())
+    }
+
+    // A failed transaction does not count as applied for the first-regular-`tblock` rule, so
+    // the next regular transaction is still the first: its dust `ctime` of `NOW + 4s` is only
+    // valid at the adjusted `tblock` `NOW + 6s`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn failed_transaction_does_not_use_up_the_first_regular_tblock_bump()
+    -> Result<(), BoxError> {
+        let _ledger_db = init_ledger_db().await?;
+
+        for ledger_version in [LedgerVersion::V8, LedgerVersion::V9] {
+            let protocol_version = skewing_protocol_version(ledger_version);
+            let first = dust_registration(ledger_version, NOW + 60, NOW).await?;
+            let second = dust_registration(ledger_version, NOW + 60, NOW + 4).await?;
+
+            let transactions = apply(
+                NETWORK_ID,
+                protocol_version,
+                &[(&first, failed), (&second, fully_applied)],
+                NOW,
+                NOW - 6,
+                true,
+            )?
+            .unwrap();
+
+            assert_eq!(
+                regular(&transactions[1]).transaction_result,
+                TransactionResult::Success,
+                "{ledger_version}"
+            );
+        }
+
+        Ok(())
+    }
+
+    // A transaction was applied on chain, but the indexer's ledger disagrees, or the hash is not
+    // the same: a divergence. By default it is logged and the ledger's result is stored; with
+    // `divergence-halt` it panics.
+    #[tokio::test(flavor = "multi_thread")]
+    #[cfg_attr(
+        feature = "divergence-halt",
+        should_panic(expected = "Failure in the ledger: ")
+    )]
+    async fn applied_on_chain_but_failed_in_the_ledger_is_a_divergence() {
+        let _ledger_db = init_ledger_db().await.unwrap();
+        let ledger_version = LedgerVersion::V9;
+        let protocol_version = skewing_protocol_version(ledger_version);
+
+        // Expired at the block time, so the ledger fails it.
+        let transaction = dust_registration(ledger_version, NOW - 5, NOW - 18)
+            .await
+            .unwrap();
+        let transactions = apply(
+            NETWORK_ID,
+            protocol_version,
+            &[(&transaction, fully_applied)],
+            NOW,
+            NOW - 18,
+            true,
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(
+            regular(&transactions[0]).transaction_result,
+            TransactionResult::Failure
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[cfg_attr(
+        feature = "divergence-halt",
+        should_panic(expected = "Partially { tx_hash")
+    )]
+    async fn partially_applied_on_chain_but_successful_in_the_ledger_is_a_divergence() {
+        let _ledger_db = init_ledger_db().await.unwrap();
+        let ledger_version = LedgerVersion::V9;
+        let protocol_version = skewing_protocol_version(ledger_version);
+
+        let transaction = dust_registration(ledger_version, NOW + 60, NOW)
+            .await
+            .unwrap();
+        let transactions = apply(
+            NETWORK_ID,
+            protocol_version,
+            &[(&transaction, partially_applied)],
+            NOW,
+            NOW - 6,
+            true,
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(
+            regular(&transactions[0]).transaction_result,
+            TransactionResult::Success
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[cfg_attr(feature = "divergence-halt", should_panic(expected = "hash abababab"))]
+    async fn hash_on_chain_differing_from_the_indexers_is_a_divergence() {
+        let _ledger_db = init_ledger_db().await.unwrap();
+        let ledger_version = LedgerVersion::V9;
+        let protocol_version = skewing_protocol_version(ledger_version);
+
+        let transaction = dust_registration(ledger_version, NOW + 60, NOW)
+            .await
+            .unwrap();
+        let transactions = apply(
+            NETWORK_ID,
+            protocol_version,
+            &[(&transaction, |_| {
+                Ok(Applied::Fully {
+                    tx_hash: [0xab; 32].into(),
+                })
+            })],
+            NOW,
+            NOW - 6,
+            true,
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(
+            regular(&transactions[0]).transaction_result,
+            TransactionResult::Success
+        );
+    }
+
+    // The chain's hash and outcome agreeing with the ledger is not a divergence, also with the
+    // feature.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn chain_and_ledger_agreeing_is_not_a_divergence() -> Result<(), BoxError> {
+        let _ledger_db = init_ledger_db().await?;
+        let ledger_version = LedgerVersion::V9;
+        let protocol_version = skewing_protocol_version(ledger_version);
+
+        let raw = dust_registration(ledger_version, NOW + 60, NOW).await?;
+        let transactions = apply(
+            NETWORK_ID,
+            protocol_version,
+            &[(&raw, fully_applied)],
+            NOW,
+            NOW - 6,
+            true,
+        )?
+        .unwrap();
+
+        assert_eq!(
+            regular(&transactions[0]).transaction_result,
+            TransactionResult::Success
+        );
 
         Ok(())
     }
@@ -1036,47 +1418,69 @@ mod apply_transactions_tblock_tests {
         }
     }
 
-    // Applies `transactions` as one block to a fresh ledger state of `network_id`; the outer error
-    // is a test setup failure, the inner one the reason the ledger rejects a transaction. Times
-    // are in seconds.
+    fn fully_applied(tx_hash: TransactionHash) -> Result<Applied, String> {
+        Ok(Applied::Fully { tx_hash })
+    }
+
+    fn partially_applied(tx_hash: TransactionHash) -> Result<Applied, String> {
+        Ok(Applied::Partially { tx_hash })
+    }
+
+    // Failed at dispatch with `CallFiltered`, as in safe mode.
+    fn failed(_: TransactionHash) -> Result<Applied, String> {
+        Err("Module(ModuleError { index: 0, error: [5, 0, 0, 0] })".to_string())
+    }
+
+    // Applies `transactions` as one block to a fresh ledger state of `network_id`, each with how it
+    // was applied on chain, given the indexer's hash for it; the outer error is a test setup
+    // failure, the inner one the reason the ledger rejects a transaction. Times are in seconds.
+    #[allow(clippy::type_complexity)]
     fn apply(
         network_id: &str,
         protocol_version: ProtocolVersion,
-        transactions: &[&SerializedTransaction],
+        transactions: &[(
+            &SerializedTransaction,
+            fn(TransactionHash) -> Result<Applied, String>,
+        )],
         block_time: u64,
         parent_block_time: u64,
         bump_first_regular_tblock: bool,
-    ) -> Result<Result<Vec<TransactionResult>, Malformed>, BoxError> {
+    ) -> Result<Result<Vec<Transaction>, Malformed>, BoxError> {
         let ledger_version = protocol_version.ledger_version();
         let mut ledger_state = LedgerState::new(network_id.try_into()?, ledger_version)?;
         let transactions = transactions
             .iter()
-            .map(|&raw| {
+            .enumerate()
+            .map(|(i, (raw, outcome))| {
                 let transaction = ledger::Transaction::deserialize(raw, ledger_version)?;
-                Ok(node::Transaction::Regular(node::RegularTransaction {
-                    hash: transaction.hash(),
+                let tx_hash = transaction.hash();
+                let transaction = node::Transaction::Regular(node::RegularTransaction {
+                    hash: tx_hash,
                     protocol_version,
-                    raw: raw.clone(),
+                    raw: (*raw).clone(),
                     identifiers: transaction.identifiers()?,
                     contract_actions: vec![],
-                }))
+                });
+                Ok((
+                    Phase::ApplyExtrinsic(i as u32 + 1),
+                    transaction,
+                    outcome(tx_hash),
+                ))
             })
             .collect::<Result<Vec<_>, BoxError>>()?;
 
         match ledger_state.apply_transactions(
             transactions,
+            BlockRef {
+                hash: [1; 32].into(),
+                height: 1,
+            },
             BlockHash::from([0; 32]),
             block_time * 1_000,
             parent_block_time * 1_000,
             bump_first_regular_tblock,
         ) {
-            Ok((transactions, _)) => Ok(Ok(transactions
-                .into_iter()
-                .filter_map(|transaction| match transaction {
-                    Transaction::Regular(transaction) => Some(transaction.transaction_result),
-                    Transaction::System(_) => None,
-                })
-                .collect())),
+            Ok((transactions, _)) => Ok(Ok(transactions)),
             Err(error) => malformed(&error)
                 .map(Err)
                 .ok_or_else(|| format!("unexpected error: {error:#}").into()),
