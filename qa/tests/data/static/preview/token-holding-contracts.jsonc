@@ -1,0 +1,20 @@
+// Contracts known to hold non-zero unshielded token balances on the preview chain, used by
+// the unshieldedBalances regression tests (#1245). Contracts with no recent actions keep
+// these balances stable. Snapshot date: 2026-10-09.
+[
+  {
+    // Latest action at block 439136; holds 100 of a custom token at snapshot date.
+    "contract-address": "750320b0360129914ef0f84397610c0e7db1086baf2cdf95407eb696a89fd6ff",
+    "token-type": "6ca2475c81d9a8994bed2e3f5179ed67026a43c3d2aa7d2322ef319bd1bbd8f6"
+  },
+  {
+    // Latest action at block 202763; holds 6000000 of a custom token at snapshot date.
+    "contract-address": "8e6cd5d2cc7fbc457df7a5094976aea70a8c0d2da78ec0cb1ffb006819452538",
+    "token-type": "398e9b5491f439f63917a34f5f3f3b8a84b88e143431e10c32064b0b9bc127aa"
+  },
+  {
+    // Latest action at block 435606; holds 2000000 of the native token at snapshot date.
+    "contract-address": "b8ff0717134c78d915901873d7deb1693e8fb63e4ffc9b00a8f998f52bb9ed77",
+    "token-type": "0000000000000000000000000000000000000000000000000000000000000000"
+  }
+]
