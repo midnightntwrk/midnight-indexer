@@ -1004,14 +1004,12 @@ mod apply_transactions_tblock_tests {
         const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::V0_22(22_000);
         const TRANSACTION_HASH: &str =
             "6a1005eecf695a8f950e8f8e74de0c6336daf55448326bf0db0b3b55c089ad0b";
-        const CONTRACT_ADDRESS: &str =
-            "18835f54e98cfbf5c789ef76fb79d4cb0e8d84d627ef1e36cdf27cf3cdbaebb7";
 
         let _ledger_db = init_ledger_db().await?;
         let transaction = fixture("block_164460_tx.raw", TRANSACTION_HASH)?;
 
-        // Against a fresh state instead of preprod's, the transaction passes the time checks and
-        // fails the next stateful check: the contract it calls does not exist.
+        // Against a fresh state instead of preprod's, the transaction passes `well_formed`, time
+        // checks included, and fails to apply: the contract it calls does not exist.
         assert_eq!(
             apply(
                 "preprod",
@@ -1021,9 +1019,7 @@ mod apply_transactions_tblock_tests {
                 PARENT_BLOCK_TIME,
                 should_bump_first_regular_tblock(BLOCK_HEIGHT, PROTOCOL_VERSION),
             )?,
-            Err(Malformed::Other(format!(
-                "call to non-existant contract ContractAddress({CONTRACT_ADDRESS})"
-            )))
+            Ok(vec![TransactionResult::Failure])
         );
 
         Ok(())
@@ -1042,14 +1038,12 @@ mod apply_transactions_tblock_tests {
         const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::V1_0(1_000_000);
         const TRANSACTION_HASH: &str =
             "e769b82781bbfd1e29d602a17916abe6e967ef023eb94d23a4aa8b88a6e35c0a";
-        const CONTRACT_ADDRESS: &str =
-            "4fd31443997bd04bbf0b94e2ef3d5b0ff05479c4fb80bcac0dc74b2c763282e5";
 
         let _ledger_db = init_ledger_db().await?;
         let transaction = fixture("block_1788980_tx.raw", TRANSACTION_HASH)?;
 
-        // Against a fresh state instead of mainnet's, the transaction passes the time checks and
-        // fails the next stateful check: the contract it calls does not exist.
+        // Against a fresh state instead of mainnet's, the transaction passes `well_formed`, time
+        // checks included, and fails to apply: the contract it calls does not exist.
         assert_eq!(
             apply(
                 "mainnet",
@@ -1059,9 +1053,7 @@ mod apply_transactions_tblock_tests {
                 PARENT_BLOCK_TIME,
                 should_bump_first_regular_tblock(BLOCK_HEIGHT, PROTOCOL_VERSION),
             )?,
-            Err(Malformed::Other(format!(
-                "call to non-existant contract ContractAddress({CONTRACT_ADDRESS})"
-            )))
+            Ok(vec![TransactionResult::Failure])
         );
 
         Ok(())
@@ -1085,8 +1077,8 @@ mod apply_transactions_tblock_tests {
         let _ledger_db = init_ledger_db().await?;
         let transaction = fixture("block_128537_tx.raw", TRANSACTION_HASH)?;
 
-        // Against a fresh state instead of preview's, the transaction passes the time checks and
-        // fails the next stateful check: its dust spend proof does not verify.
+        // Against a fresh state instead of preview's, the transaction passes `well_formed`, time
+        // checks included, and fails to apply: a fresh state has no dust to spend.
         use ProtocolVersion::*;
         for protocol_version in [V1_0(1_000_000), V1_0(1_000_300)] {
             let result = apply(
@@ -1097,12 +1089,10 @@ mod apply_transactions_tblock_tests {
                 PARENT_BLOCK_TIME,
                 should_bump_first_regular_tblock(BLOCK_HEIGHT, protocol_version),
             )?;
-            let Err(Malformed::Other(reason)) = result else {
-                panic!("{protocol_version:?}: a fresh state has no dust to spend: {result:?}");
-            };
-            assert!(
-                reason.starts_with("dust spend proof failed to verify"),
-                "{protocol_version:?}: {reason}"
+            assert_eq!(
+                result,
+                Ok(vec![TransactionResult::Failure]),
+                "{protocol_version:?}"
             );
         }
 
