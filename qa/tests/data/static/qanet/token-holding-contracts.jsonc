@@ -2,7 +2,7 @@
 // Used by the unshieldedBalances regression tests (midnightntwrk/midnight-indexer#1245):
 // the field returned an empty array for every contract from 3.0.0 to 4.3.3, so these
 // tests require an indexer with the #1246 fix and repaired history (backfill or
-// re-index). Snapshot date: 2026-06-11 (verified against qanet-blue after backfill).
+// reindex). Snapshot date: 2026-06-11 (verified against qanet-blue after backfill).
 [
   {
     // QA boundary-test contract, latest action "check_balance"; holds u64::MAX of the token.
