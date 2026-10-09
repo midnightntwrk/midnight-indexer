@@ -36,6 +36,7 @@
 
 import { createHash } from 'crypto';
 import {
+  decodeBech32mAddress,
   deriveWalletKeys,
   NIGHT_TOKEN_ID,
   sendTokensWithKeys,
@@ -50,7 +51,13 @@ import log from '@utils/logging/logger';
 import { env } from '../../environment/model';
 import { ensureProofServer, proofServerMismatchHint } from './proof-server';
 import type { AddressType, ToolkitTransactionResult } from '../toolkit/toolkit-wrapper';
-import type { DustBalance } from '../toolkit/schemas';
+import type {
+  DustBalance,
+  DustOutput,
+  PrivateWalletState,
+  PublicWalletState,
+  Utxo,
+} from '../toolkit/schemas';
 
 /** Minutes to allow for a cold sync. A warm one takes seconds. */
 const SYNC_TIMEOUT_MS = Number(process.env.MN_SYNC_TIMEOUT_MS ?? 6 * 60 * 60 * 1000);
@@ -460,6 +467,145 @@ const toHex = (value: bigint | string): string => {
 
 const toSecs = (date: Date): number => Math.floor(date.getTime() / 1000);
 
+/** A ledger `QualifiedDustOutput` in the toolkit's snake_case `DustOutput` shape. */
+const toDustOutput = (token: any): DustOutput => ({
+  initial_value: Number(token.initialValue),
+  dust_public: toHex(token.owner),
+  nonce: toHex(token.nonce),
+  seq: token.seq,
+  ctime: toSecs(token.ctime),
+  backing_night: toHex(token.backingNight),
+  mt_index: Number(token.mtIndex),
+});
+
+/**
+ * An unshielded `UtxoWithMeta` in the toolkit's `Utxo` shape.
+ *
+ * `id` is `<intent hash>#<output number>`, which identifies the output on the
+ * ledger. The SDK does not expose the UTXO's `initial_nonce` (the toolkit
+ * derives it from ledger state), so it is left empty; nothing in the suite
+ * reads it beyond the schema's string check.
+ */
+const toUtxo = (coin: any): Utxo => ({
+  id: `${coin.utxo.intentHash}#${coin.utxo.outputNo}`,
+  initial_nonce: '',
+  value: Number(coin.utxo.value),
+  user_address: coin.utxo.owner,
+  token_type: coin.utxo.type,
+  intent_hash: coin.utxo.intentHash,
+  output_number: coin.utxo.outputNo,
+});
+
+/**
+ * Wait until every named sub-wallet of the moth facade reports a strictly
+ * complete sync, and return that facade state.
+ */
+const awaitStrictlyComplete = (
+  wallet: MothWallet,
+  subWallets: readonly ('shielded' | 'unshielded' | 'dust')[],
+  purpose: string,
+): Promise<any> =>
+  Rx.firstValueFrom(
+    (wallet.synced.facade.state() as Rx.Observable<any>).pipe(
+      Rx.filter((s: any) =>
+        subWallets.every((name) => s[name]?.progress?.isStrictlyComplete?.() === true),
+      ),
+      Rx.timeout({
+        each: SYNC_TIMEOUT_MS,
+        with: () =>
+          Rx.throwError(
+            () =>
+              new Error(
+                `moth did not reach a strictly-complete ${subWallets.join('/')} state in ` +
+                  `${(SYNC_TIMEOUT_MS / 60_000).toFixed(0)} minutes, so ${purpose}.`,
+              ),
+          ),
+      }),
+    ),
+  );
+
+/**
+ * Read a seed's private wallet state from the moth-synced wallet, in the shape
+ * the toolkit's `show-wallet --seed` command prints.
+ *
+ * WHY. Same as {@link getDustBalanceViaMoth}: `show-wallet` replays the whole
+ * chain into the toolkit's fetch cache before printing anything, which never
+ * finishes inside a test timeout on a deployed chain (qanet, 2026-10-09).
+ *
+ * MAPPING. `coins` holds the shielded sub-wallet's available coins keyed by
+ * nullifier (the ledger's own key for a wallet's coins), `utxos` the unshielded
+ * sub-wallet's available UTXOs, and `dust_utxos` the dust sub-wallet's
+ * available outputs. Hex encodings follow {@link toHex}, so values are
+ * schema-valid but not byte-identical to the toolkit's serialization.
+ *
+ * @param seed - The seed whose wallet to read. Never logged.
+ */
+export const showPrivateWalletStateViaMoth = async (seed: string): Promise<PrivateWalletState> => {
+  const wallet = await openMothWallet(seed);
+  const state = await awaitStrictlyComplete(
+    wallet,
+    ['shielded', 'unshielded', 'dust'],
+    'the private wallet state cannot be read',
+  );
+
+  const coins = Object.fromEntries(
+    (state.shielded.availableCoins as any[]).map(({ coin, nullifier }) => [
+      toHex(nullifier),
+      {
+        nonce: toHex(coin.nonce),
+        token_type: toHex(coin.type),
+        value: Number(coin.value),
+        mt_index: Number(coin.mt_index),
+      },
+    ]),
+  );
+
+  return {
+    coins,
+    utxos: (state.unshielded.availableCoins as any[]).map(toUtxo),
+    dust_utxos: (state.dust.availableCoins as any[]).map((coin) => toDustOutput(coin.token)),
+  };
+};
+
+/**
+ * Read an unshielded address's public wallet state from the moth-synced wallet,
+ * in the shape the toolkit's `show-wallet --address` command prints.
+ *
+ * moth opens wallets by seed, not address, so the caller passes the seed that
+ * owns `address`; the address is checked against that wallet so a mismatched
+ * pair fails loudly instead of returning another wallet's UTXOs. An address
+ * alone reveals no shielded coins or dust outputs, so those fields are empty,
+ * as in the toolkit's output.
+ *
+ * @param seed - The seed that owns `address`. Never logged.
+ * @param address - The bech32m unshielded address to report.
+ */
+export const showPublicWalletStateViaMoth = async (
+  seed: string,
+  address: string,
+): Promise<PublicWalletState> => {
+  const wallet = await openMothWallet(seed);
+  const state = await awaitStrictlyComplete(
+    wallet,
+    ['unshielded'],
+    'the public wallet state cannot be read',
+  );
+
+  const requested = Buffer.from(decodeBech32mAddress(address).data).toString('hex');
+  if (requested !== state.unshielded.address.hexString) {
+    throw new Error(
+      `Unshielded address ${address} does not belong to the supplied seed's wallet; ` +
+        'moth can only report the public state of a wallet it holds the seed for.',
+    );
+  }
+
+  return {
+    coins: {},
+    utxos: (state.unshielded.availableCoins as any[]).map(toUtxo),
+    dust_utxos: [],
+  };
+};
+
 /**
  * Read a seed's DUST balance from the moth-synced wallet, in the same shape the
  * toolkit's `dust-balance` command prints.
@@ -515,15 +661,7 @@ export const getDustBalanceViaMoth = async (seed: string): Promise<DustBalance> 
     .filter(({ generation }) => generation !== undefined);
 
   const generation_infos = withGeneration.map(({ coin, generation }) => ({
-    dust_output: {
-      initial_value: Number(coin.token.initialValue),
-      dust_public: toHex(coin.token.owner),
-      nonce: toHex(coin.token.nonce),
-      seq: coin.token.seq,
-      ctime: toSecs(coin.token.ctime),
-      backing_night: toHex(coin.token.backingNight),
-      mt_index: Number(coin.token.mtIndex),
-    },
+    dust_output: toDustOutput(coin.token),
     generation_info: {
       value: Number(generation.value),
       owner_dust_public_key: toHex(generation.owner),

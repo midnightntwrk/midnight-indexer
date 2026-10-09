@@ -25,6 +25,8 @@ import {
   closeMothWallets,
   generateSingleTxViaMoth,
   getDustBalanceViaMoth,
+  showPrivateWalletStateViaMoth,
+  showPublicWalletStateViaMoth,
 } from '../moth/moth-backend';
 import {
   callCircuitViaMoth,
@@ -704,6 +706,13 @@ class ToolkitWrapper {
    * @throws Error if the container is not started or if the show-wallet command fails.
    */
   async showPrivateWalletState(walletSeed: string): Promise<PrivateWalletState> {
+    // When TX_BACKEND=moth, read the state from moth's synced wallet. The
+    // toolkit replays the whole chain before printing it, which never finishes
+    // on a deployed chain; moth restores from its warmed cache.
+    if (env.getTxBackend() === 'moth') {
+      return showPrivateWalletStateViaMoth(walletSeed);
+    }
+
     return (await this.executeShowWallet(
       '--seed',
       walletSeed,
@@ -717,11 +726,27 @@ class ToolkitWrapper {
    * This method queries the public wallet state for the specified address.
    *
    * @param walletAddress - The wallet address to query public wallet state for (required)
+   * @param walletSeed - The seed that owns `walletAddress`. Required when TX_BACKEND=moth,
+   *                     since moth opens wallets by seed; ignored by the toolkit backend.
    *
    * @returns A promise that resolves to the public wallet state object.
    * @throws Error if the container is not started or if the show-wallet command fails.
    */
-  async showPublicWalletState(walletAddress: string): Promise<PublicWalletState> {
+  async showPublicWalletState(
+    walletAddress: string,
+    walletSeed?: string,
+  ): Promise<PublicWalletState> {
+    // When TX_BACKEND=moth, read the state from moth's synced wallet, for the
+    // same reason as showPrivateWalletState.
+    if (env.getTxBackend() === 'moth') {
+      if (!walletSeed) {
+        throw new Error(
+          'showPublicWalletState needs the seed that owns the address when TX_BACKEND=moth.',
+        );
+      }
+      return showPublicWalletStateViaMoth(walletSeed, walletAddress);
+    }
+
     return (await this.executeShowWallet(
       '--address',
       walletAddress,
