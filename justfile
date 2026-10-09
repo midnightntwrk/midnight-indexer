@@ -139,8 +139,8 @@ generate-node-data node_version=latest_node_version toolkit_version=node_version
 get-node-metadata node_version=latest_node_version:
     ./get_node_metadata.sh {{node_version}}
 
-generate-txs:
-    ./generate_txs.sh {{latest_node_version}}
+generate-txs node_version=latest_node_version toolkit_version=node_version:
+    ./generate_txs.sh {{node_version}} {{toolkit_version}}
 
 run-node node_version=latest_node_version:
     #!/usr/bin/env bash

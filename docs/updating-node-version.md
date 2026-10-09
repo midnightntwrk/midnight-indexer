@@ -58,13 +58,14 @@ Prerequisites:
 
 #### compactc version
 
-compactc must match the ledger line of the node: each compactc release pins one
-`compact-runtime` version, and the runtime demands an exact minor match. The
-script picks the default from the node version:
+compactc must match the toolkit line of the node: each compactc release pins one
+`compact-runtime` version, the toolkit ships one, and the runtime demands an
+exact minor match. The script picks the default from the node version:
 
 | Node version  | Ledger | compactc      |
 | ------------- | ------ | ------------- |
 | `2.1.*`       | v9     | `0.33.0-rc.2` |
+| `3.0.*`       | v9     | `0.34.0`      |
 | anything else | v8     | `0.30.0`      |
 
 Set `COMPACTC_VERSION` to override it, e.g. when adding a node line the table
@@ -108,7 +109,8 @@ Nothing detects either omission.
 ### 4. Regenerate tx fixtures (if the wire format moved)
 
 ```bash
-just generate-txs   # rewrites indexer-common/tests/*.raw from a running node
+just generate-txs                # rewrites indexer-common/tests/*.raw from a running node
+just generate-txs 1.0.2 1.0.0    # a named version whose toolkit version differs
 ```
 
 ### 5. Drop superseded data (optional)
