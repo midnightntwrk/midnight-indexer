@@ -597,7 +597,7 @@ Mutations allow the client to connect a wallet (establishing a session) and disc
 
 ### connect(viewingKey: ViewingKey!, options: ConnectOptions): HexEncoded!
 
-Establishes a session for a given wallet viewing key in **either** bech32m or hex format. Returns the session ID. The optional `options` argument (`ConnectOptions`) accepts `startIndex: Int`, the transaction index (inclusive) from which to start searching for relevant transactions.
+Establishes a session for a given wallet viewing key in **either** bech32m or hex format. Returns a session token: a hex-encoded, server-encrypted value that any indexer-api instance of the same deployment accepts, so sessions survive load-balancer failover and several sessions can share one viewing key. Treat it as a secret. It expires after the server's `session_token_ttl` (7 days by default). The optional `options` argument (`ConnectOptions`) accepts `startIndex: Int`, the transaction index (inclusive) from which to start searching for relevant transactions.
 
 **Viewing Key Format Support**
 - **Bech32m** (preferred): A base-32 encoded format with a human-readable prefix, e.g., `mn_shield-esk_dev1...`
@@ -616,16 +616,16 @@ mutation {
 ```json
 {
   "data": {
-    "connect": "sessionIdHere"
+    "connect": "sessionTokenHere"
   }
 }
 ```
 
-Use this `sessionId` for shielded transactions subscriptions.
+Use this token as the `sessionId` for shielded transactions subscriptions.
 
 ### disconnect(sessionId: HexEncoded!): Unit!
 
-Ends an existing session.
+Ends an existing session. Best effort: a session token cannot be revoked and stays valid on all instances until it expires, and other sessions on the same viewing key stay active. Legacy 32-byte session IDs issued before tokens are still accepted and are revoked. Returns an error for an unknown, expired or malformed session.
 
 **Example:**
 
