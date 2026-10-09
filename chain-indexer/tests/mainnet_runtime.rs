@@ -155,7 +155,7 @@ async fn test_mainnet_runtime_upgrade_boundary() -> anyhow::Result<()> {
     let contract_action = block
         .transactions
         .iter()
-        .filter_map(|transaction| match transaction {
+        .filter_map(|(_, transaction, _)| match transaction {
             Transaction::Regular(transaction) => Some(&transaction.contract_actions),
             Transaction::System(_) => None,
         })
