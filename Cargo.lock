@@ -3430,6 +3430,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "stream-cancel",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",

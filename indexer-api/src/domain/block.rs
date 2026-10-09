@@ -60,3 +60,13 @@ pub struct Block {
 
     pub dust_generation_merkle_tree_root: Option<SerializedDustGenerationMerkleTreeRoot>,
 }
+
+/// A block's height, hash and protocol version.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, FromRow)]
+pub struct BlockReference {
+    #[sqlx(try_from = "i64")]
+    pub height: u32,
+    pub hash: BlockHash,
+    #[sqlx(try_from = "i64")]
+    pub protocol_version: ProtocolVersion,
+}

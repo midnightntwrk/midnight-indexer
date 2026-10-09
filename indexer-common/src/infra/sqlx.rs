@@ -95,6 +95,15 @@ impl TryFrom<SqlxOption<i64>> for Option<u64> {
     }
 }
 
+impl TryFrom<SqlxOption<i64>> for Option<u32> {
+    type Error = BoxDynError;
+
+    fn try_from(value: SqlxOption<i64>) -> Result<Self, Self::Error> {
+        let value = value.0.map(TryInto::try_into).transpose()?;
+        Ok(value)
+    }
+}
+
 impl TryFrom<SqlxOption<U128BeBytes>> for Option<u128> {
     type Error = BoxDynError;
 
