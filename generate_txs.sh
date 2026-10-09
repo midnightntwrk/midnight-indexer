@@ -12,12 +12,15 @@ trap cleanup EXIT
 
 if [ -z "$1" ]; then
     echo "Error: node version parameter is required" >&2
-    echo "Usage: $0 <node_version>" >&2
+    echo "Usage: $0 <node_version> [toolkit_version]" >&2
     exit 1
 fi
 readonly node_version="$1"
+# A node release names the toolkit release it ships with, and the two carry
+# independent version numbers: node-1.0.2 ships toolkit-1.0.0.
+readonly toolkit_version="${2:-$node_version}"
 readonly node_image="ghcr.io/midnightntwrk/midnight-node:$node_version"
-readonly toolkit_image="ghcr.io/midnightntwrk/midnight-node-toolkit:$node_version"
+readonly toolkit_image="ghcr.io/midnightntwrk/midnight-node-toolkit:$toolkit_version"
 
 # Start the node container.
 docker run \
