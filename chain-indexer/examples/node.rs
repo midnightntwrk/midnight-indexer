@@ -5,7 +5,7 @@ use chain_indexer::{
 };
 use clap::Parser;
 use futures::{Stream, StreamExt, TryStreamExt};
-use std::{pin::Pin, time::Duration};
+use std::{num::NonZeroUsize, pin::Pin, time::Duration};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -36,6 +36,7 @@ impl Cli {
             reconnect_max_delay: Duration::from_secs(1),
             reconnect_max_attempts: 1,
             subscription_recovery_timeout: Duration::from_secs(30),
+            catch_up_concurrency: NonZeroUsize::MIN,
         };
         let mut node = SubxtNode::new(config).await.context("create SubxtNode")?;
 

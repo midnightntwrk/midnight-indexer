@@ -28,7 +28,7 @@ use chain_indexer::{
 };
 use fs_extra::dir::{CopyOptions, copy};
 use futures::TryStreamExt;
-use std::{fs, path::Path, pin::pin, time::Duration};
+use std::{fs, num::NonZeroUsize, path::Path, pin::pin, time::Duration};
 use testcontainers::{
     GenericImage, ImageExt,
     core::{Mount, WaitFor},
@@ -91,6 +91,7 @@ async fn test_finalized_blocks_node_1_0() -> anyhow::Result<()> {
         reconnect_max_delay: Duration::from_secs(1),
         reconnect_max_attempts: 1,
         subscription_recovery_timeout: Duration::from_secs(30),
+        catch_up_concurrency: NonZeroUsize::MIN,
     };
     let mut node = SubxtNode::new(config).await.context("create SubxtNode")?;
 
@@ -131,6 +132,7 @@ async fn test_mainnet_runtime_upgrade_boundary() -> anyhow::Result<()> {
         reconnect_max_delay: Duration::from_secs(1),
         reconnect_max_attempts: 3,
         subscription_recovery_timeout: Duration::from_secs(30),
+        catch_up_concurrency: NonZeroUsize::MIN,
     };
     let mut node = SubxtNode::new(config).await.context("create SubxtNode")?;
 
