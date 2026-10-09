@@ -66,6 +66,35 @@ keep the other. Don't.
   version that stored contract states as blobs, which cannot be converted.
   ```
 
+## Marking a change that needs a reindex
+
+A `REINDEX:` trailer at the end of a commit message marks a change that needs a
+reindex to take effect on data already stored. Typically the change fixes data
+that earlier versions stored incorrectly or never stored. Its value names the
+affected data:
+
+```text
+fix(chain-indexer): read authors from parent state
+
+REINDEX: session-change block authors stay wrong until reindexed
+```
+
+The PR carries the `reindex` label. A squash merge joins the PR's commit
+messages into one, so whoever merges moves the `REINDEX:` line to the end of the
+squash message, where git-cliff reads trailers. The PR template's checklist
+includes both. The change also adds an entry to [When a reindex
+is required](#when-a-reindex-is-required).
+
+`REINDEX:` is independent of `!` and `BREAKING CHANGE:`, which mark changes to the
+API or to client-visible behaviour. A change can carry both.
+
+git-cliff marks each such changelog entry `[**reindex**]` and lists every
+`REINDEX:` value under "🚨 Reindex required" in the release's section.
+
+When a migration, a startup repair or a correction at read time can repair the
+stored data, a separate commit adds that repair with its tests. That commit
+removes the entry and states that the reindex is no longer required.
+
 ## Procedure
 
 Reindexing takes as long as indexing the chain from genesis did. Plan for a
