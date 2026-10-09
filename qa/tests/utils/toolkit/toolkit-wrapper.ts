@@ -21,7 +21,11 @@ import { env } from '../../environment/model';
 import { GenericContainer, StartedTestContainer } from 'testcontainers';
 import { getContractDeploymentHashes, resolveBlockHash } from '../../tests/e2e/test-utils';
 import { ensureToolkitCachePostgres } from './toolkit-cache';
-import { closeMothWallets, generateSingleTxViaMoth } from '../moth/moth-backend';
+import {
+  closeMothWallets,
+  generateSingleTxViaMoth,
+  getDustBalanceViaMoth,
+} from '../moth/moth-backend';
 import {
   callCircuitViaMoth,
   closeMothContractContexts,
@@ -740,6 +744,13 @@ class ToolkitWrapper {
    * @throws Error if the container is not started or if the dust-balance command fails.
    */
   async getDustBalance(walletSeed: string): Promise<DustBalance> {
+    // When TX_BACKEND=moth, read the balance from moth's synced wallet. The
+    // toolkit replays the whole chain from genesis per call, which never
+    // finishes on a deployed chain; moth restores from its warmed cache.
+    if (env.getTxBackend() === 'moth') {
+      return getDustBalanceViaMoth(walletSeed);
+    }
+
     if (!this.startedContainer) {
       throw new Error('Container is not started. Call start() first.');
     }

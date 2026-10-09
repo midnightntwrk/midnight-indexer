@@ -50,6 +50,7 @@ import log from '@utils/logging/logger';
 import { env } from '../../environment/model';
 import { ensureProofServer, proofServerMismatchHint } from './proof-server';
 import type { AddressType, ToolkitTransactionResult } from '../toolkit/toolkit-wrapper';
+import type { DustBalance } from '../toolkit/schemas';
 
 /** Minutes to allow for a cold sync. A warm one takes seconds. */
 const SYNC_TIMEOUT_MS = Number(process.env.MN_SYNC_TIMEOUT_MS ?? 6 * 60 * 60 * 1000);
@@ -441,4 +442,103 @@ export const listUnshieldedHoldingsViaMoth = async (seed: string): Promise<Map<s
     totals.set(tokenType, (totals.get(tokenType) ?? 0n) + BigInt(coin.utxo.value));
   }
   return totals;
+};
+
+/**
+ * The ledger's "never" timestamp, `Timestamp::MAX`, in seconds. The toolkit
+ * prints it as the `dtime` of a NIGHT UTXO that is still backing generation;
+ * the SDK maps the same sentinel to `undefined`, so map it back.
+ */
+const LEDGER_TIMESTAMP_MAX_SECS = Number(2n ** 64n - 1n);
+
+/** A field element or nonce as even-length lowercase hex, the shape the toolkit's keys take. */
+const toHex = (value: bigint | string): string => {
+  if (typeof value === 'string') return value.toLowerCase();
+  const hex = value.toString(16);
+  return hex.length % 2 === 0 ? hex : `0${hex}`;
+};
+
+const toSecs = (date: Date): number => Math.floor(date.getTime() / 1000);
+
+/**
+ * Read a seed's DUST balance from the moth-synced wallet, in the same shape the
+ * toolkit's `dust-balance` command prints.
+ *
+ * WHY. The toolkit answers this by replaying the whole chain from genesis on
+ * every call. On a deployed chain that is millions of blocks and never finishes
+ * inside a test timeout (qanet, 2026-10-09). moth restores the wallet from its
+ * on-disk cache, which global setup has already warmed for the funding seed.
+ *
+ * MAPPING. Built from the same ledger state the toolkit reads: one
+ * `generation_infos` entry per available DUST UTXO, `source` keyed by that
+ * UTXO's nonce with its value at `now` (only UTXOs with generation info, as the
+ * toolkit does), and `total` the wallet balance at `now`. Field elements are
+ * hex-encoded big-endian, so keys are valid hex but not byte-identical to the
+ * toolkit's ledger serialization; nothing in the schema or the suite compares
+ * them across backends.
+ *
+ * @param seed - The seed whose wallet to read. Never logged.
+ */
+export const getDustBalanceViaMoth = async (seed: string): Promise<DustBalance> => {
+  const wallet = await openMothWallet(seed);
+
+  const dust = await Rx.firstValueFrom(
+    (wallet.synced.facade.state() as Rx.Observable<any>).pipe(
+      Rx.map((s: any) => s.dust),
+      Rx.filter((d: any) => d?.progress?.isStrictlyComplete?.() === true),
+      Rx.timeout({
+        each: SYNC_TIMEOUT_MS,
+        with: () =>
+          Rx.throwError(
+            () =>
+              new Error(
+                'moth did not reach a strictly-complete dust state in ' +
+                  `${(SYNC_TIMEOUT_MS / 60_000).toFixed(0)} minutes, so the DUST balance ` +
+                  'cannot be read.',
+              ),
+          ),
+      }),
+    ),
+  );
+
+  const now = new Date();
+  const coinsAndBalances = dust.capabilities.coinsAndBalances;
+  const coins = dust.availableCoins as any[];
+
+  // A UTXO without generation info has no value the toolkit can report, and the
+  // schema's `generation_info` is not nullable, so it is left out of both maps.
+  const withGeneration = coins
+    .map((coin) => ({
+      coin,
+      generation: coinsAndBalances.getGenerationInfo(dust.state, coin.token),
+    }))
+    .filter(({ generation }) => generation !== undefined);
+
+  const generation_infos = withGeneration.map(({ coin, generation }) => ({
+    dust_output: {
+      initial_value: Number(coin.token.initialValue),
+      dust_public: toHex(coin.token.owner),
+      nonce: toHex(coin.token.nonce),
+      seq: coin.token.seq,
+      ctime: toSecs(coin.token.ctime),
+      backing_night: toHex(coin.token.backingNight),
+      mt_index: Number(coin.token.mtIndex),
+    },
+    generation_info: {
+      value: Number(generation.value),
+      owner_dust_public_key: toHex(generation.owner),
+      nonce: toHex(generation.nonce),
+      dtime: generation.dtime ? toSecs(generation.dtime) : LEDGER_TIMESTAMP_MAX_SECS,
+    },
+  }));
+
+  const source = Object.fromEntries(
+    withGeneration.map(({ coin }) => [toHex(coin.token.nonce), Number(coin.generatedNow)]),
+  );
+
+  return {
+    generation_infos,
+    source,
+    total: Number(dust.balance(now)),
+  };
 };
