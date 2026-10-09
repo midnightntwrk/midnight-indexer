@@ -59,17 +59,18 @@ const FIRST_UNSKEWED_NODE_1_0_SPEC_VERSION: u32 = 1_000_300;
 ///   `tblock`, if the cache holds it for the parent block's ledger state. The block author may have
 ///   validated it against an older state, in which case the node verifies it against the block's
 ///   own time.
-/// - 1.0 from `FIRST_UNSKEWED_NODE_1_0_SPEC_VERSION` on (`Ledger8Bridge` version 2) and 2.1 (whose
-///   ledger-8 and ledger-9 host functions never skew) verify it against the block's own time.
+/// - 1.0 from `FIRST_UNSKEWED_NODE_1_0_SPEC_VERSION` on (`Ledger8Bridge` version 2), 2.1 and 3.0
+///   (whose ledger-8 and ledger-9 host functions never skew) verify it against the block's own time.
 ///
 /// The block does not record whether the cache held the transaction. A skewing runtime's first
 /// regular transaction is therefore accepted if it is well-formed at the block time or at the
 /// bumped `tblock`.
 fn node_skews_first_regular_tblock(protocol_version: ProtocolVersion) -> bool {
+    use ProtocolVersion::*;
     match protocol_version {
-        ProtocolVersion::V0_22(_) | ProtocolVersion::V2_0(_) => true,
-        ProtocolVersion::V1_0(spec_version) => spec_version < FIRST_UNSKEWED_NODE_1_0_SPEC_VERSION,
-        ProtocolVersion::V2_1(_) => false,
+        V0_22(_) | V2_0(_) => true,
+        V1_0(spec_version) => spec_version < FIRST_UNSKEWED_NODE_1_0_SPEC_VERSION,
+        V2_1(_) | V3_0(_) => false,
     }
 }
 
@@ -785,30 +786,18 @@ mod tblock_skew_tests {
         assert!(!skews(1_000_999));
         assert!(skews(2_000_000));
         assert!(!skews(2_001_000));
+        assert!(!skews(3_000_000));
     }
 
     #[test]
     fn bumps_only_non_genesis_blocks_built_by_skewing_runtimes() {
-        assert!(!should_bump_first_regular_tblock(
-            0,
-            ProtocolVersion::V0_22(22_000),
-        ));
-        assert!(should_bump_first_regular_tblock(
-            1,
-            ProtocolVersion::V1_0(1_000_299),
-        ));
-        assert!(!should_bump_first_regular_tblock(
-            1,
-            ProtocolVersion::V1_0(1_000_300),
-        ));
-        assert!(should_bump_first_regular_tblock(
-            1,
-            ProtocolVersion::V2_0(2_000_000),
-        ));
-        assert!(!should_bump_first_regular_tblock(
-            1,
-            ProtocolVersion::V2_1(2_001_000),
-        ));
+        use ProtocolVersion::*;
+        assert!(!should_bump_first_regular_tblock(0, V0_22(22_000)));
+        assert!(should_bump_first_regular_tblock(1, V1_0(1_000_299)));
+        assert!(!should_bump_first_regular_tblock(1, V1_0(1_000_300)));
+        assert!(should_bump_first_regular_tblock(1, V2_0(2_000_000)));
+        assert!(!should_bump_first_regular_tblock(1, V2_1(2_001_000)));
+        assert!(!should_bump_first_regular_tblock(1, V3_0(3_000_000)));
     }
 }
 
