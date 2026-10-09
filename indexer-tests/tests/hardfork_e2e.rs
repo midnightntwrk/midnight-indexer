@@ -87,6 +87,9 @@ use tokio::{task::JoinHandle, time::sleep};
 /// Ledger-8 node whose `dev` preset provides the fork-from chain-spec.
 const FROM_NODE_TAG: &str = "1.0.0";
 
+/// Node line whose last `NODE_VERSIONS` entry migrates the ledger-8 chain at the 8 -> 9 fork.
+const TO_NODE_LINE: &str = "2.1.";
+
 /// Genesis-funded dev wallet the test transacts from.
 const SOURCE_SEED: &str = "0000000000000000000000000000000000000000000000000000000000000001";
 
@@ -130,7 +133,7 @@ fn image_registry() -> String {
     env::var("IMAGE_REGISTRY").unwrap_or_else(|_| "midnightntwrk".to_string())
 }
 
-/// The migration node under test: the last `NODE_VERSIONS` line, overridable.
+/// The migration node under test: the last `NODE_VERSIONS` line of [TO_NODE_LINE], overridable.
 fn to_node_tag() -> anyhow::Result<String> {
     if let Ok(tag) = env::var("TO_NODE_TAG") {
         return Ok(tag);
@@ -139,9 +142,10 @@ fn to_node_tag() -> anyhow::Result<String> {
         .context("read NODE_VERSIONS")?;
     versions
         .lines()
-        .rfind(|l| !l.trim().is_empty())
-        .map(|l| l.trim().to_string())
-        .context("NODE_VERSIONS is empty")
+        .map(str::trim)
+        .rfind(|line| line.starts_with(TO_NODE_LINE))
+        .map(str::to_string)
+        .with_context(|| format!("NODE_VERSIONS has no {TO_NODE_LINE}x version"))
 }
 
 fn toolkit_tag() -> anyhow::Result<String> {
