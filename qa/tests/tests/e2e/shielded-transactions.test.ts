@@ -248,15 +248,36 @@ describe('shielded transactions', () => {
      * After a shielded transaction is confirmed, the indexer streams the Zswap
      * events in sequence, followed by a DustSpendProcessed event.
      *
+     * The number of Zswap events depends on wallet-side coin selection (input + recipient output,
+     * plus a change output only when the selected coin exceeds the amount), so the expected events
+     * are taken from the transaction itself rather than hard-coded.
+     *
      * @given a confirmed shielded transaction
-     * @when we subscribe to Zswap events starting from (previousMaxId + 1)
-     * @then the Zswap events are delivered in order
+     * @when we subscribe to Zswap events starting from the transaction's first Zswap event id
+     * @then the transaction's Zswap events are delivered in order
      * @and the following event is DustSpendProcessed
      */
     test(
       'should stream Zswap events followed by DustSpendProcessed after a shielded transaction',
       { timeout: 90_000 },
-      async () => {
+      async (ctx: TestContext) => {
+        ctx.skip?.(transactionResult.status !== 'confirmed', "Transaction hasn't been confirmed");
+
+        const transactionResponse = await getTransactionByHashWithRetry(transactionResult.txHash);
+        expect(transactionResponse).toBeSuccess();
+        const tx = transactionResponse.data!.transactions.find(
+          (t: Transaction) => t.hash === transactionResult.txHash,
+        );
+        expect(tx).toBeDefined();
+
+        const expectedZswapIds = (tx!.zswapLedgerEvents ?? [])
+          .map((e) => e.id)
+          .sort((a, b) => a - b);
+        // At minimum the spent input and the recipient output
+        expect(expectedZswapIds.length).toBeGreaterThanOrEqual(2);
+        expect(expectedZswapIds[0]).toBeGreaterThan(previousMaxLedgerId);
+        log.debug(`Transaction zswap ledger event ids: ${expectedZswapIds.join(', ')}`);
+
         // Reconnect WS client - the connection may have gone stale during the long toolkit transaction
         await indexerWsClient.connectionClose();
         await indexerWsClient.connectionInit();
@@ -264,11 +285,12 @@ describe('shielded transactions', () => {
         const received = await collectValidZswapEvents(
           indexerWsClient,
           indexerEventCoordinator,
-          3,
-          previousMaxLedgerId + 1,
+          expectedZswapIds.length,
+          expectedZswapIds[0],
           30_000,
         );
-        expect(received).toHaveLength(3);
+        expect(received).toHaveLength(expectedZswapIds.length);
+        expect(received.map((m) => m.data!.zswapLedgerEvents.id)).toEqual(expectedZswapIds);
 
         received.forEach((msg) => {
           const event = msg.data!.zswapLedgerEvents;
