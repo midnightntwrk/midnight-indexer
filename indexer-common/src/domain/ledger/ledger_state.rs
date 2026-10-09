@@ -919,7 +919,7 @@ impl LedgerState {
     /// The returned node is rooted, so it survives garbage collection independently of the ledger
     /// state it came from. Rooting is intentionally never balanced by an unpersist: a contract
     /// state must stay readable for as long as the action referencing it exists, which is
-    /// forever. Re-indexing a block therefore takes an existing root's count from K to K+1, which
+    /// forever. Reindexing a block therefore takes an existing root's count from K to K+1, which
     /// is semantically free precisely because these roots are never released — the exact inverse
     /// of the ledger-state retention invariant, where a double persist would corrupt the balance.
     ///
@@ -3272,7 +3272,7 @@ mod tests {
         // Capturing the same state again is idempotent in the key — it is content-addressed — and
         // takes the root count to two rather than replacing it. That is safe only because these
         // roots are never unpersisted, which is the exact inverse of the ledger-state retention
-        // invariant, and it is what lets a re-indexed block need no dedup logic on the write path.
+        // invariant, and it is what lets a reindexed block need no dedup logic on the write path.
         assert_eq!(
             state
                 .contract_state(&serialized_address)?

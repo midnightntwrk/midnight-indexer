@@ -132,7 +132,7 @@ describe('contract queries', () => {
      *
      * Regression test for #1245: unshieldedBalances silently returned an empty array for
      * every contract from 3.0.0 to 4.3.3, which format-only assertions could not catch.
-     * Requires an indexer with the #1246 fix and repaired history (backfill or re-index);
+     * Requires an indexer with the #1246 fix and repaired history (backfill or reindex);
      * skipped on environments without configured token-holding contracts.
      *
      * @given we have contracts known to hold non-zero unshielded token balances
