@@ -43,6 +43,7 @@ pub async fn init(config: Config) -> Result<(), Error> {
     let Config {
         cache_max_nodes,
         cnn_url,
+        create_if_missing,
     } = config;
 
     // storage-core assumes a single writer: `flush_*` reads root counts and
@@ -61,6 +62,7 @@ pub async fn init(config: Config) -> Result<(), Error> {
         cnn_url,
         max_connections: MAX_CONNECTIONS,
         synchronous_full: true,
+        create_if_missing,
     })
     .await?;
     migrations::sqlite::run_for_ledger_db(&pool).await?;
@@ -105,6 +107,10 @@ pub struct Config {
 
     #[cfg(feature = "standalone")]
     pub cnn_url: String,
+
+    #[cfg(feature = "standalone")]
+    #[serde(default = "crate::infra::pool::sqlite::create_if_missing_default")]
+    pub create_if_missing: bool,
 }
 
 #[cfg(feature = "standalone")]

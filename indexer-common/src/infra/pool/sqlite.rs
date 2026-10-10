@@ -117,6 +117,9 @@ pub struct Config {
     /// other files (the ledger DB; see `infra::ledger_db::init`).
     #[serde(skip)]
     pub synchronous_full: bool,
+
+    #[serde(default = "create_if_missing_default")]
+    pub create_if_missing: bool,
 }
 
 impl Config {
@@ -128,6 +131,10 @@ impl Config {
             ..Default::default()
         }
     }
+}
+
+pub(crate) const fn create_if_missing_default() -> bool {
+    true
 }
 
 fn default_max_connections() -> u32 {
@@ -159,7 +166,7 @@ impl TryFrom<Config> for SqliteConnectOptions {
         let options = config
             .cnn_url
             .parse::<SqliteConnectOptions>()?
-            .create_if_missing(true)
+            .create_if_missing(config.create_if_missing)
             .journal_mode(SqliteJournalMode::Wal)
             .synchronous(synchronous)
             .busy_timeout(Duration::from_secs(30));
@@ -173,6 +180,7 @@ impl Default for Config {
             cnn_url: "sqlite::memory:".to_string(),
             max_connections: default_max_connections(),
             synchronous_full: false,
+            create_if_missing: create_if_missing_default(),
         }
     }
 }
@@ -201,6 +209,21 @@ mod tests {
         fs::remove_file(db_path)
             .await
             .expect("Failed to remove test database file");
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_pool_file_creation_disabled() {
+        let temp_dir = tempfile::tempdir().expect("create temp directory");
+        let db_path = temp_dir.path().join("missing.sqlite");
+
+        let pool = SqlitePool::new(Config {
+            create_if_missing: false,
+            ..Config::with_url(format!("sqlite://{}", db_path.display()))
+        })
+        .await;
+
+        assert!(pool.is_err());
+        assert!(!db_path.exists());
     }
 
     #[tokio::test]

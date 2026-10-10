@@ -386,6 +386,11 @@ fn start_indexer_standalone(node_url: &str) -> anyhow::Result<(Child, u16, TempD
         .env("APP__INFRA__SPO_NODE__BLOCKFROST_ID", "e2e-test-dummy")
         .env("APP__INFRA__STORAGE__CNN_URL", sqlite_file)
         .env("APP__INFRA__LEDGER_DB__CNN_URL", sqlite_ledger_db_file)
+        // The e2e test bootstraps both SQLite databases from scratch in a fresh
+        // temp dir, so it must opt into file creation; the shipped config.yaml
+        // defaults these to false to avoid silently re-indexing from genesis.
+        .env("APP__INFRA__STORAGE__CREATE_IF_MISSING", "true")
+        .env("APP__INFRA__LEDGER_DB__CREATE_IF_MISSING", "true")
         .env("APP__TELEMETRY__TRACING__ENABLED", "true")
         .spawn()
         .context("spawn indexer-standalone process")
