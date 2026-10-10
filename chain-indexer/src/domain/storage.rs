@@ -62,7 +62,7 @@ where
     /// Whether any stored contract action predates contract states being referenced by
     /// ledger-arena key, i.e. has neither key set. Such rows were written by a version that stored
     /// the states as blobs; those blobs are gone and cannot be recreated, so the database must be
-    /// re-indexed rather than resumed.
+    /// reindexed rather than resumed.
     async fn contract_actions_without_state_keys_exist(&self) -> Result<bool, sqlx::Error>;
 
     /// Get the latest D-Parameter.

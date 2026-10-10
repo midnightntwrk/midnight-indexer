@@ -61,7 +61,7 @@ pub struct Config {
 
     /// Time budget for one storage-core gc-v1 mark-and-sweep pass, per block covered by that pass.
     /// The pass gets `gc_bound * gc_interval`. Set to "0s" to disable garbage collection — but note
-    /// that is not safe during a long re-index, since retention-window unpersists keep producing
+    /// that is not safe during a long reindex, since retention-window unpersists keep producing
     /// garbage that then never gets reclaimed.
     #[serde(with = "humantime_serde")]
     pub gc_bound: Duration,
@@ -126,7 +126,7 @@ pub async fn run(
     // Refuse to resume a database written before contract states were referenced by ledger-arena
     // key. Those rows carried the state as a blob in columns that no longer exist, and the blobs
     // cannot be recreated: their arena nodes were garbage collected and nothing can replay the
-    // chain for them. Failing here turns "you must re-index" into an actionable message instead of
+    // chain for them. Failing here turns "you must reindex" into an actionable message instead of
     // contract states silently reading back empty.
     if storage
         .contract_actions_without_state_keys_exist()
@@ -136,7 +136,7 @@ pub async fn run(
         bail!(
             "found contract actions with no contract state key; they were indexed by a version \
              that stored contract states as blobs, which cannot be converted. Wipe both the \
-             indexer database and the ledger DB and re-index from genesis; see docs/re-indexing.md"
+             indexer database and the ledger DB and reindex from genesis; see docs/reindexing.md"
         );
     }
 
@@ -637,7 +637,7 @@ where
     //
     // Ordering arena-flush before SQL-commit means a crash between them can never leave a key in
     // SQL without its node; the benign inverse — a rooted node with no row referencing it — is
-    // possible and permanent. Re-indexing a block yields the *same* content-addressed key and a
+    // possible and permanent. Reindexing a block yields the *same* content-addressed key and a
     // second `persist()`, taking the root count from 1 to 2. That is semantically free because
     // these roots are never unpersisted, so the write path needs no dedup logic. Note this is the
     // exact inverse of the ledger-state retention invariant above, where a double persist *would*
