@@ -521,12 +521,21 @@ where
         ledger_state
             .apply_transactions(
                 transactions,
+                BlockRef {
+                    hash: block.hash,
+                    height: block.height,
+                },
                 block.parent_hash,
                 block.timestamp,
                 *parent_block_timestamp,
                 should_bump_first_regular_tblock(block.height, block.protocol_version),
             )
-            .context("apply transactions to ledger state")
+            .with_context(|| {
+                format!(
+                    "apply transactions of block {} at height {} to ledger state",
+                    block.hash, block.height
+                )
+            })
     };
 
     // Apply transactions to ledger state with special handling for genesis block.

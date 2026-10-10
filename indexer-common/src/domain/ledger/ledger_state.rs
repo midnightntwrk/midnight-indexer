@@ -508,11 +508,11 @@ impl LedgerState {
     ///
     /// `block_timestamp` drives the block context passed to `apply`, and thus the timestamps the
     /// ledger writes into its state (e.g. dust generation `dtime`), so it must always be the real
-    /// block time. `well_formed_timestamp` is the `tblock` used only for the dust-validity-window
-    /// check in `well_formed`; it normally equals `block_timestamp` but is bumped ahead for the
-    /// first regular transaction in a block to reproduce the node's cached mempool validity result
-    /// (see `chain-indexer`'s `apply_transactions`). Bumping it only affects whether the check
-    /// passes, not the resulting state, since `well_formed` merely validates.
+    /// block time. `well_formed_timestamp` is the `tblock` of the intent TTL and dust validity
+    /// window checks in `well_formed`. It normally equals `block_timestamp`; the caller may pass
+    /// the `tblock` the node verified the transaction at instead (see `chain-indexer`'s
+    /// `apply_transactions`). It only affects whether the check passes, not the resulting state,
+    /// since `well_formed` merely validates.
     #[trace]
     pub fn apply_regular_transaction(
         &mut self,
@@ -558,9 +558,9 @@ impl LedgerState {
                 let (ledger_state, transaction_result) =
                     ledger_state.apply(&verified_ledger_transaction, &cx);
 
-                let (transaction_result, events, should_count_cost) = match transaction_result {
+                let (transaction_result, events, failure_reason) = match transaction_result {
                     TransactionResultV8::Success(events) => {
-                        (TransactionResult::Success, events, true)
+                        (TransactionResult::Success, events, None)
                     }
 
                     TransactionResultV8::PartialSuccess(segments, events) => {
@@ -568,11 +568,19 @@ impl LedgerState {
                             .into_iter()
                             .map(|(id, result)| (id, result.is_ok()))
                             .collect::<Vec<_>>();
-                        (TransactionResult::PartialSuccess(segments), events, true)
+                        (TransactionResult::PartialSuccess(segments), events, None)
                     }
 
-                    TransactionResultV8::Failure(_) => (TransactionResult::Failure, vec![], false),
+                    TransactionResultV8::Failure(reason) => (
+                        TransactionResult::Failure,
+                        vec![],
+                        Some(format!("{reason:?}")),
+                    ),
                 };
+                let should_count_cost = failure_reason.is_none();
+
+                // A failed transaction pays no fees.
+                let fees = if should_count_cost { fees } else { 0 };
 
                 // Only count cost for successful/partial transactions (match node behavior)
                 let block_fullness = if should_count_cost {
@@ -601,6 +609,7 @@ impl LedgerState {
                     spent_unshielded_utxos,
                     ledger_events,
                     fees,
+                    failure_reason,
                     // The bridge relies on ledger 9 primitives, so a `CardanoBridge` claim cannot
                     // occur on a ledger 8 chain; there is never a bridge claim to extract here.
                     bridge_claim: None,
@@ -659,9 +668,9 @@ impl LedgerState {
                 let (ledger_state, transaction_result) =
                     ledger_state.apply(&verified_ledger_transaction, &cx);
 
-                let (transaction_result, events, should_count_cost) = match transaction_result {
+                let (transaction_result, events, failure_reason) = match transaction_result {
                     TransactionResultV9::Success(events) => {
-                        (TransactionResult::Success, events, true)
+                        (TransactionResult::Success, events, None)
                     }
 
                     TransactionResultV9::PartialSuccess(segments, events) => {
@@ -669,11 +678,19 @@ impl LedgerState {
                             .into_iter()
                             .map(|(id, result)| (id, result.is_ok()))
                             .collect::<Vec<_>>();
-                        (TransactionResult::PartialSuccess(segments), events, true)
+                        (TransactionResult::PartialSuccess(segments), events, None)
                     }
 
-                    TransactionResultV9::Failure(_) => (TransactionResult::Failure, vec![], false),
+                    TransactionResultV9::Failure(reason) => (
+                        TransactionResult::Failure,
+                        vec![],
+                        Some(format!("{reason:?}")),
+                    ),
                 };
+                let should_count_cost = failure_reason.is_none();
+
+                // A failed transaction pays no fees.
+                let fees = if should_count_cost { fees } else { 0 };
 
                 // Only count cost for successful/partial transactions (match node behavior)
                 let block_fullness = if should_count_cost {
@@ -718,6 +735,7 @@ impl LedgerState {
                     spent_unshielded_utxos,
                     ledger_events,
                     fees,
+                    failure_reason,
                     bridge_claim,
                 })
             }
@@ -2838,7 +2856,7 @@ mod tests {
         //
         // The pinned v9 root below was reproduced byte-for-byte by the ledger
         // team's `v8-to-v9-state-translation` crate (`midnightntwrk/midnight-ledger`
-        // rev `da96e33d`) over this same blob — the crate `node-2.1.0-rc.2`
+        // rev `da96e33d`) over this same blob — the crate `node-2.1.0-rc.4`
         // itself translates with, so this fixture is authoritative for the
         // translation. It moved when the ledger 8 -> 9 dust wipe landed
         // (midnight-node #2012, backported as #2057): the v8 dust state is
@@ -4605,6 +4623,22 @@ mod well_formed_timestamp_tests {
                 assert_eq!(
                     outcome.transaction_result, expected,
                     "{ledger_version}: block timestamp {block_timestamp}"
+                );
+
+                // A failed transaction pays no fees; a successful one does.
+                assert_eq!(
+                    outcome.fees == 0,
+                    expected == TransactionResult::Failure,
+                    "{ledger_version}: block timestamp {block_timestamp}: fees {}",
+                    outcome.fees
+                );
+
+                // Only a failure has a reason.
+                assert_eq!(
+                    outcome.failure_reason.is_some(),
+                    expected == TransactionResult::Failure,
+                    "{ledger_version}: block timestamp {block_timestamp}: {:?}",
+                    outcome.failure_reason
                 );
             }
         }

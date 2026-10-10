@@ -31,13 +31,13 @@ that the zswap/state-root match guards each block.
 `ci-standalone.yaml`):
 
 - Starts a **real `midnightntwrk/midnight-node` container** (version = last line of
-  `NODE_VERSIONS`, currently `2.1.0-rc.2`) whose chain DB is **pre-seeded from fixed data in
+  `NODE_VERSIONS`, currently `2.1.0-rc.4`) whose chain DB is **pre-seeded from fixed data in
   `.node/<version>/`** (bind-mounted, `CFG_PRESET=dev`) so it replays a known, deterministic
   chain, plus postgres + nats via testcontainers, and runs the **actual** chain-indexer /
   wallet-indexer / indexer-api binaries (cloud) or `indexer-standalone` + SQLite (standalone).
   It SIGTERMs and restarts chain-indexer once to exercise reconnect.
 - `indexer-tests/src/e2e.rs` then runs the assertions. It **collects the blocks subscription
-  (heights 0..=32) as the source of truth**, validating structural invariants as it goes: heights
+  (heights 0..=40) as the source of truth**, validating structural invariants as it goes: heights
   increment by one, parent-hash linkage, transactions reference their block and share its protocol
   version, segment results match the transaction status, fees parse, a contract call shares its
   deploy's address, unshielded balances have a valid token type + amount, and zswap/dust ledger
