@@ -161,10 +161,11 @@ where
             .some_or_client_error(|| "unknown or expired session ID")?;
 
         // Only acquire a per-session quota bucket for a known session, so that arbitrary session
-        // IDs cannot create buckets.
+        // IDs cannot create buckets. The bucket is keyed by wallet ID, so reconnecting with a new
+        // session does not reset it.
         let quota_guard = cx
             .get_subscription_quotas()
-            .try_acquire(cx.get_per_connection_counter(), Some(&session_id))
+            .try_acquire(cx.get_per_connection_counter(), Some(wallet_id))
             .map_err_into_client_error(|| "subscription limit exceeded")?;
 
         let index = index.unwrap_or_default();

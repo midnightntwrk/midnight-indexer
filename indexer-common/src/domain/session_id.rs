@@ -14,7 +14,6 @@
 use crate::domain::ByteArrayLenError;
 use derive_more::{Debug, Display};
 use secrecy::{ExposeSecret, SecretBox};
-use std::hash::{Hash, Hasher};
 
 const SESSION_ID_LEN: usize = 32;
 
@@ -62,24 +61,9 @@ impl Clone for SessionId {
     }
 }
 
-impl PartialEq for SessionId {
-    fn eq(&self, other: &Self) -> bool {
-        self.expose_secret() == other.expose_secret()
-    }
-}
-
-impl Eq for SessionId {}
-
-impl Hash for SessionId {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.expose_secret().hash(state);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::domain::SessionId;
-    use std::hash::{BuildHasher, RandomState};
 
     #[test]
     fn test_debug_and_display_redacted() {
@@ -93,13 +77,9 @@ mod tests {
     }
 
     #[test]
-    fn test_clone_eq_hash() {
+    fn test_clone() {
         let session_id = SessionId::from([1; 32]);
         let clone = session_id.clone();
-        assert_eq!(clone, session_id);
-        assert_ne!(SessionId::from([2; 32]), session_id);
-
-        let state = RandomState::new();
-        assert_eq!(state.hash_one(&clone), state.hash_one(&session_id));
+        assert_eq!(clone.expose_secret(), session_id.expose_secret());
     }
 }
