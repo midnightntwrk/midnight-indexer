@@ -144,33 +144,56 @@ impl domain::storage::Storage for Storage {
         &self,
         spo: &SPO,
         tx: &mut SqlxTransaction,
-    ) -> Result<(), sqlx::Error> {
-        const UNVERIFIED: &str = indoc! {"
+    ) -> Result<Vec<String>, sqlx::Error> {
+        // Matches every row that would make `save_spo` skip `spo`, except `spo` itself.
+        let query = indoc! {"
             SELECT si.spo_sk FROM spo_identity si
-            WHERE si.mainchain_pubkey = $1
-              AND si.spo_sk <> $2
-              AND NOT EXISTS (
-                  SELECT 1 FROM spo_history sh
-                  WHERE sh.spo_sk = si.spo_sk AND sh.status = 'VALID'
-              )
-              AND NOT EXISTS (
-                  SELECT 1 FROM spo_epoch_performance sep
-                  WHERE sep.spo_sk = si.spo_sk
-              )
+            WHERE (
+                si.spo_sk = $1
+                OR si.sidechain_pubkey IS NOT DISTINCT FROM $2
+                OR si.mainchain_pubkey IS NOT DISTINCT FROM $4
+                OR si.aura_pubkey IS NOT DISTINCT FROM $5
+            )
+            AND NOT (
+                si.spo_sk = $1
+                AND si.sidechain_pubkey IS NOT DISTINCT FROM $2
+                AND si.pool_id IS NOT DISTINCT FROM $3
+                AND si.mainchain_pubkey IS NOT DISTINCT FROM $4
+                AND si.aura_pubkey IS NOT DISTINCT FROM $5
+            )
+            AND NOT EXISTS (
+                SELECT 1 FROM spo_history sh
+                WHERE sh.spo_sk = si.spo_sk AND sh.status = 'VALID'
+            )
+            AND NOT EXISTS (
+                SELECT 1 FROM spo_epoch_performance sep
+                WHERE sep.spo_sk = si.spo_sk
+            )
+            ORDER BY si.spo_sk
         "};
 
-        // History rows reference the identity, so they go first.
-        for table in ["spo_history", "spo_identity"] {
-            sqlx::query(&format!(
-                "DELETE FROM {table} WHERE spo_sk IN ({UNVERIFIED})"
-            ))
-            .bind(&spo.mainchain_pubkey)
+        let removed = sqlx::query_scalar::<_, String>(query)
             .bind(&spo.spo_sk)
-            .execute(&mut **tx)
+            .bind(&spo.sidechain_pubkey)
+            .bind(&spo.pool_id)
+            .bind(&spo.mainchain_pubkey)
+            .bind(&spo.aura_pubkey)
+            .fetch_all(&mut **tx)
             .await?;
+
+        for spo_sk in &removed {
+            // History rows reference the identity, so they go first.
+            sqlx::query("DELETE FROM spo_history WHERE spo_sk = $1")
+                .bind(spo_sk)
+                .execute(&mut **tx)
+                .await?;
+            sqlx::query("DELETE FROM spo_identity WHERE spo_sk = $1")
+                .bind(spo_sk)
+                .execute(&mut **tx)
+                .await?;
         }
 
-        Ok(())
+        Ok(removed)
     }
 
     #[trace]
@@ -497,6 +520,80 @@ mod tests {
             history(&mut tx).await?,
             [("genuine".to_owned(), "VALID".to_owned())]
         );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_valid_registration_replaces_squat_on_any_key() -> anyhow::Result<()> {
+        let genuine = spo("genuine");
+        let attacker = SPO {
+            mainchain_pubkey: "attacker".to_owned(),
+            ..spo("attacker")
+        };
+        let squats = [
+            ("mainchain key", spo("attacker")),
+            (
+                "sidechain key",
+                SPO {
+                    spo_sk: genuine.spo_sk.clone(),
+                    sidechain_pubkey: genuine.sidechain_pubkey.clone(),
+                    ..attacker.clone()
+                },
+            ),
+            (
+                "aura key",
+                SPO {
+                    aura_pubkey: genuine.aura_pubkey.clone(),
+                    ..attacker.clone()
+                },
+            ),
+        ];
+
+        for (shared, squatter) in squats {
+            let (storage, _guard) = storage().await?;
+            let mut tx = storage.create_tx().await?;
+            storage.save_spo(&squatter, &mut tx).await?;
+            save_history(&storage, &squatter, 1, SPOStatus::Invalid, &mut tx).await?;
+
+            let removed = storage.remove_unverified_spos(&genuine, &mut tx).await?;
+            assert_eq!(removed, [squatter.spo_sk.as_str()], "{shared}");
+
+            storage.save_spo(&genuine, &mut tx).await?;
+            let identity = sqlx::query_as::<_, (String, String, String)>(
+                "SELECT spo_sk, mainchain_pubkey, aura_pubkey FROM spo_identity",
+            )
+            .fetch_all(&mut *tx)
+            .await?;
+            assert_eq!(
+                identity,
+                [(
+                    genuine.spo_sk.clone(),
+                    genuine.mainchain_pubkey.clone(),
+                    genuine.aura_pubkey.clone()
+                )],
+                "{shared}"
+            );
+            assert!(history(&mut tx).await?.is_empty(), "{shared}");
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_unrelated_identity_is_kept() -> anyhow::Result<()> {
+        let (storage, _guard) = storage().await?;
+        let mut tx = storage.create_tx().await?;
+
+        let other = SPO {
+            mainchain_pubkey: "other".to_owned(),
+            ..spo("other")
+        };
+        storage.save_spo(&other, &mut tx).await?;
+
+        let removed = storage.remove_unverified_spos(&spo("new"), &mut tx).await?;
+        assert!(removed.is_empty());
+        assert_eq!(identities(&mut tx).await?, ["other"]);
 
         Ok(())
     }
