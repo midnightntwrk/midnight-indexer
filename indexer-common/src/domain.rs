@@ -212,6 +212,8 @@ pub struct ApplyRegularTransactionOutcome {
     pub spent_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub ledger_events: Vec<LedgerEvent>,
     pub fees: u128,
+    /// The ledger's reason for a `Failure`, rendered; `None` otherwise.
+    pub failure_reason: Option<String>,
     /// Populated when the transaction is a `ClaimRewards(claim)` with
     /// `claim.kind == ClaimKind::CardanoBridge`. The recipient is the claim's
     /// owner (32-byte address); the amount is the claim's value.

@@ -21,10 +21,7 @@ use crate::{
     utils::{hex_to_bytes, remove_hex_prefix},
 };
 use anyhow::Context;
-use blake2::{
-    Blake2bVar,
-    digest::{Update, VariableOutput},
-};
+use blake2::{Blake2b, Digest, digest::consts::U28};
 use log::{debug, error, info, warn};
 use serde::Deserialize;
 use std::{
@@ -504,22 +501,15 @@ fn elapsed_ms(t: Instant) -> u64 {
 
 fn get_cardano_id(mainchain_pk: &str) -> String {
     let mainchain_pk = hex_to_bytes(mainchain_pk);
-    let mut hasher = Blake2bVar::new(28).expect("blake2b output size 28 is valid");
-    hasher.update(&mainchain_pk);
-
-    let mut buffer = [0u8; 28];
-    hasher
-        .finalize_variable(&mut buffer)
-        .expect("blake2b finalize should succeed with valid buffer");
-
-    let hex_hash = to_hex(buffer);
+    let hash = Blake2b::<U28>::digest(&mainchain_pk);
+    let hex_hash = to_hex(hash);
 
     remove_hex_prefix(&hex_hash).to_owned()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::is_transient_epoch_error;
+    use super::{get_cardano_id, is_transient_epoch_error};
     use crate::infra::spo_client::SPOClientError;
     use std::io;
     use subxt::error::{ExtrinsicError, OnlineClientAtBlockError};
@@ -600,5 +590,19 @@ mod tests {
             let error = error.context("processing epoch");
             assert!(!is_transient_epoch_error(error.as_ref()), "{error:#}");
         }
+    }
+
+    #[test]
+    fn test_get_cardano_id() {
+        // Expected value is BLAKE2b with a 28-byte digest, computed independently.
+        let expected = "8f63e953a61da4860de78f58c44ba7af7121726b5c21cc2d157e9f89";
+
+        let cardano_id =
+            get_cardano_id("aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899");
+        assert_eq!(cardano_id, expected);
+
+        let cardano_id =
+            get_cardano_id("0xaabbccddeeff00112233445566778899aabbccddeeff00112233445566778899");
+        assert_eq!(cardano_id, expected);
     }
 }

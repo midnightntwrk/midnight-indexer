@@ -56,12 +56,12 @@ anyhow                      = { version = "1.0" }
 assert_matches              = { version = "1.5" }
 async-graphql               = { version = "7.2" }
 async-graphql-axum          = { version = "7.2" }
-async-nats                  = { version = "0.49" }
+async-nats                  = { version = "0.50" }
 async-stream                = { version = "0.3" }
 axum                        = { version = "0.8" }
 bech32                      = { version = "0.12" }
 bip32                       = { version = "0.5" }
-blake2                      = { version = "0.10" }
+blake2                      = { version = "0.11" }
 blockfrost                  = { version = "1.2" }
 byte-unit-serde             = { version = "0.1" }
 chacha20poly1305            = { version = "0.10" }
@@ -104,7 +104,7 @@ serde_with                  = { version = "3.18" }
 sha2                        = { version = "0.11" }
 sqlx                        = { version = "0.8" }
 stream-cancel               = { version = "0.8" }
-subxt                       = { version = "0.50" }
+subxt                       = { version = "0.51" }
 tempfile                    = { version = "3.27" }
 testcontainers              = { version = "0.27" }
 testcontainers-modules      = { version = "0.15" }
@@ -125,7 +125,7 @@ walkdir                     = { version = "2.5" }
 # crates.io yet, hence git tags. rc.4 -> rc.5 moves storage and storage-core to
 # versions compatible with ledger 8.1.2, mirroring midnight-node#2096.
 #
-# These pins match midnight-node `node-2.1.0-rc.2` crate for crate — same
+# These pins match midnight-node `node-2.1.0-rc.4` crate for crate — same
 # per-crate rc tags on the v9 side, same `=8.1.2` / `=3.0.1` / `=3.1.1` v8 side,
 # same `layout-v2` + `gc-v1` on storage-core, same `v8-to-v9-state-translation`
 # rev. They have to: the indexer re-derives the translated arena root and
