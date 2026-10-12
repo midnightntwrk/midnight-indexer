@@ -96,7 +96,7 @@ impl Default for HttpPoolConfig {
     }
 }
 
-/// A [Node] implementation based on subxt.
+/// Client for node RPCs and Blockfrost stake pool data.
 #[derive(Clone)]
 pub struct SPOClient {
     pub epoch_duration: u32,
