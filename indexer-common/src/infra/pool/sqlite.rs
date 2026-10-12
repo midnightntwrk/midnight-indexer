@@ -43,24 +43,20 @@ impl SqlitePool {
     ///
     /// With `max_connections <= 1` the read pool is the write pool: callers like the ledger
     /// DB require reads to observe the writer connection's own in-progress state (see
-    /// `infra::ledger_db::init`). The same applies to in-memory databases, where every new
-    /// connection would otherwise open its own empty database.
+    /// `infra::ledger_db::init`). In-memory tests also select this mode explicitly via
+    /// `Config::default()`.
     pub async fn new(config: Config) -> Result<Self, Error> {
         let max_connections = config.max_connections;
-        let single_connection = max_connections <= 1
-            || config.cnn_url.contains(":memory:")
-            || config.cnn_url.contains("mode=memory");
+        let single_connection = max_connections <= 1;
         let connect_options =
             SqliteConnectOptions::try_from(config).map_err(Error::ConvertConfig)?;
 
         // The write pool connects first: on a fresh database it creates the file and
-        // switches it to WAL before any read-only connection touches it. The generous
-        // acquire timeout replaces `busy_timeout` as the wait bound for writers; the wait
-        // is fair, so it only expires if the writer ahead genuinely holds the connection
-        // that long.
+        // switches it to WAL before any read-only connection touches it. Keep the default
+        // 30-second checkout timeout, including for API mutations. In-process writers
+        // wait in the pool's FIFO queue; busy_timeout only handles external lock holders.
         let write = SqlitePoolOptions::new()
             .max_connections(1)
-            .acquire_timeout(Duration::from_secs(300))
             .connect_with(connect_options.clone())
             .await?;
         let read = if single_connection {
@@ -83,7 +79,20 @@ impl SqlitePool {
     /// In-process writers queue fairly on the pool's single connection, so the lock is
     /// uncontended here; `BEGIN IMMEDIATE` still guards against `SQLITE_BUSY_SNAPSHOT`
     /// (517) races with writers outside the process (e.g. the sqlite3 CLI).
+    /// External lock contention is retried up to four attempts, each subject to
+    /// `busy_timeout`. Pool checkout timeouts and other errors are returned immediately.
     pub async fn begin(&self) -> Result<Transaction<'static, Sqlite>, sqlx::Error> {
+        const ATTEMPTS: u32 = 4;
+
+        for attempt in 1..ATTEMPTS {
+            match self.write.begin_with("BEGIN IMMEDIATE").await {
+                Err(error) if is_busy_error(&error) => {
+                    log::warn!(attempt; "external sqlite writer is busy, retrying begin");
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                other => return other,
+            }
+        }
         self.write.begin_with("BEGIN IMMEDIATE").await
     }
 
@@ -92,6 +101,15 @@ impl SqlitePool {
     pub fn writer(&self) -> &sqlx::SqlitePool {
         &self.write
     }
+}
+
+/// Whether SQLite reported lock contention, including extended BUSY/LOCKED codes.
+pub fn is_busy_error(error: &sqlx::Error) -> bool {
+    error
+        .as_database_error()
+        .and_then(|error| error.code())
+        .and_then(|code| code.parse::<i32>().ok())
+        .is_some_and(|code| matches!(code & 0xff, 5 | 6))
 }
 
 impl Deref for SqlitePool {
@@ -135,7 +153,8 @@ impl Config {
     pub fn with_url(cnn_url: impl Into<String>) -> Self {
         Self {
             cnn_url: cnn_url.into(),
-            ..Default::default()
+            max_connections: default_max_connections(),
+            synchronous_full: false,
         }
     }
 }
@@ -151,11 +170,8 @@ impl TryFrom<Config> for SqliteConnectOptions {
         // WAL lets readers run concurrent with a single writer; without it the
         // default `DELETE` journal mode serializes all access on a single file.
         // `busy_timeout` lets SQLite itself retry on lock contention instead of
-        // immediately returning `SQLITE_BUSY`. It needs to cover the worst-case
-        // writer hold time: on mainnet, chain-indexer's per-block write
-        // transaction (many inserts across several tables) can exceed a few
-        // seconds, so a short timeout causes concurrent writes (e.g. an API
-        // `disconnect_wallet` UPDATE) to spuriously fail.
+        // immediately returning `SQLITE_BUSY` when another process holds the write lock.
+        // Writers sharing this pool queue on its single write connection instead.
         //
         // `synchronous=NORMAL` fsyncs the WAL only at checkpoints: a power loss can drop the
         // last commits (never corrupt), all of which the indexer recomputes from the node -
@@ -177,11 +193,12 @@ impl TryFrom<Config> for SqliteConnectOptions {
     }
 }
 
+#[cfg(any(test, feature = "testing"))]
 impl Default for Config {
     fn default() -> Self {
         Self {
             cnn_url: "sqlite::memory:".to_string(),
-            max_connections: default_max_connections(),
+            max_connections: 1,
             synchronous_full: false,
         }
     }
@@ -190,27 +207,19 @@ impl Default for Config {
 #[cfg(test)]
 mod tests {
     use crate::infra::pool::sqlite::{Config, SqlitePool};
-    use std::{ops::Deref, path::Path};
-    use tokio::fs;
+    use std::{ops::Deref, time::Duration};
 
     #[tokio::test]
     async fn test_sqlite_pool_file_creation() {
-        let db_path = "test_indexer.sqlite";
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("test_indexer.sqlite");
+        assert!(!db_path.exists());
 
-        if Path::new(db_path).exists() {
-            fs::remove_file(db_path)
-                .await
-                .expect("Failed to remove existing test database file");
-        }
-        assert!(!Path::new(db_path).exists());
-
-        let pool = SqlitePool::new(Config::with_url(format!("sqlite://{db_path}"))).await;
+        let pool =
+            SqlitePool::new(Config::with_url(format!("sqlite://{}", db_path.display()))).await;
 
         assert!(pool.is_ok());
-        assert!(Path::new(db_path).exists());
-        fs::remove_file(db_path)
-            .await
-            .expect("Failed to remove test database file");
+        assert!(db_path.exists());
     }
 
     #[tokio::test]
@@ -229,7 +238,7 @@ mod tests {
     /// one file-backed DB, each also reading inside its transaction like wallet-indexer's
     /// read-modify-write. With DEFERRED transactions this dies with `database is locked`
     /// (SQLITE_BUSY, 5) or `SQLITE_BUSY_SNAPSHOT` (517, not retried by busy_timeout);
-    /// `BEGIN IMMEDIATE` + WAL + busy_timeout must let every writer through.
+    /// The single writer queue and `BEGIN IMMEDIATE` must let every writer through.
     #[tokio::test(flavor = "multi_thread")]
     async fn concurrent_write_transactions_never_hit_busy_errors() {
         const WRITERS: usize = 8;
@@ -295,7 +304,11 @@ mod tests {
     #[tokio::test]
     async fn read_pool_rejects_writes() {
         let temp_dir = tempfile::tempdir().expect("create tempdir");
-        let db_path = temp_dir.path().join("readonly.sqlite").display().to_string();
+        let db_path = temp_dir
+            .path()
+            .join("readonly.sqlite")
+            .display()
+            .to_string();
         let pool = SqlitePool::new(Config::with_url(format!("sqlite://{db_path}")))
             .await
             .expect("create pool");
@@ -309,5 +322,47 @@ mod tests {
             .execute(pool.deref())
             .await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn begin_retries_external_lock_contention() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config = Config::with_url(format!(
+            "sqlite://{}",
+            temp_dir.path().join("external-lock.sqlite").display()
+        ));
+        let pool = SqlitePool::new(config.clone()).await.unwrap();
+        let external = SqlitePool::new(config).await.unwrap();
+        sqlx::query("PRAGMA busy_timeout = 1")
+            .execute(pool.writer())
+            .await
+            .unwrap();
+
+        let external_tx = external.begin().await.unwrap();
+        let begin = pool.begin();
+        tokio::pin!(begin);
+        // The first lock wait expires, but begin must keep retrying.
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut begin)
+                .await
+                .is_err()
+        );
+        external_tx.rollback().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), begin)
+            .await
+            .unwrap()
+            .unwrap()
+            .rollback()
+            .await
+            .unwrap();
+
+        // A lock that outlasts all attempts must still return a bounded error.
+        let external_tx = external.begin().await.unwrap();
+        let error = tokio::time::timeout(Duration::from_secs(2), pool.begin())
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert!(super::is_busy_error(&error));
+        external_tx.rollback().await.unwrap();
     }
 }

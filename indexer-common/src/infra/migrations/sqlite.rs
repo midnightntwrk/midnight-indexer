@@ -22,7 +22,9 @@ const CONTRACT_STATE_KEYS_VERSION: i64 = 11;
 /// Run the database migrations for SQLite.
 pub async fn run(pool: &SqlitePool) -> Result<(), Error> {
     refuse_unconvertible_contract_states(pool).await?;
-    sqlx::migrate!("migrations/sqlite").run(pool.writer()).await?;
+    sqlx::migrate!("migrations/sqlite")
+        .run(pool.writer())
+        .await?;
     Ok(())
 }
 
