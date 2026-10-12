@@ -37,7 +37,7 @@ use fastrace_tracing::FastraceCompatLayer;
 use logforth::{
     append::{FastraceEvent, Stdout},
     diagnostic::FastraceDiagnostic,
-    filter::rustlog::RustLogFilterBuilder,
+    filter::{RustLogFilter, rustlog::RustLogFilterBuilder},
     layout::JsonLayout,
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
@@ -108,12 +108,17 @@ pub fn init_logging() {
     logforth::starter_log::builder()
         .dispatch(|dispatch| {
             dispatch
-                .filter(RustLogFilterBuilder::from_default_env().build())
+                .filter(log_filter(std::env::var("RUST_LOG").ok().as_deref()))
                 .diagnostic(FastraceDiagnostic::default())
                 .append(Stdout::default().with_layout(JsonLayout::default()))
                 .append(FastraceEvent::default())
         })
         .apply();
+}
+
+/// Build the log filter from the given `RUST_LOG` specification.
+fn log_filter(spec: Option<&str>) -> RustLogFilter {
+    RustLogFilterBuilder::from_spec(spec.unwrap_or_default()).build()
 }
 
 /// Initialize tracing with [fastrace](https://github.com/fast/fastrace).
@@ -204,4 +209,85 @@ fn package_name() -> String {
 
 fn package_version() -> String {
     format!("v{}", env!("CARGO_PKG_VERSION"))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::telemetry::log_filter;
+    use logforth::{
+        Filter,
+        filter::FilterResult,
+        record::{FilterCriteria, Level},
+    };
+
+    fn enabled(spec: Option<&str>, level: Level, target: &str) -> bool {
+        let criteria = FilterCriteria::builder()
+            .level(level)
+            .target(target)
+            .build();
+        !matches!(
+            log_filter(spec).enabled(&criteria, &[]),
+            FilterResult::Reject
+        )
+    }
+
+    #[test]
+    fn test_log_filter_websocket_payloads_never_logged() {
+        let specs = [
+            Some("trace"),
+            Some("info,tungstenite=trace,tokio_tungstenite=trace"),
+            Some("info,tungstenite::protocol=trace,tokio_tungstenite::compat=debug"),
+        ];
+
+        for spec in specs {
+            for target in [
+                "tungstenite::protocol",
+                "tokio_tungstenite",
+                "tokio_tungstenite::compat",
+            ] {
+                assert!(
+                    !enabled(spec, Level::Debug, target),
+                    "{spec:?} enables DEBUG for {target}"
+                );
+                assert!(
+                    !enabled(spec, Level::Trace, target),
+                    "{spec:?} enables TRACE for {target}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_log_filter_other_targets_unchanged() {
+        assert!(enabled(None, Level::Error, "chain_indexer"));
+        assert!(!enabled(None, Level::Warn, "chain_indexer"));
+        assert!(!enabled(None, Level::Info, "tungstenite::protocol"));
+
+        assert!(enabled(Some("debug"), Level::Debug, "indexer_api"));
+        assert!(!enabled(Some("debug"), Level::Trace, "indexer_api"));
+
+        assert!(enabled(
+            Some("info,indexer_api=trace"),
+            Level::Trace,
+            "indexer_api::infra"
+        ));
+        assert!(!enabled(
+            Some("indexer_api=trace"),
+            Level::Error,
+            "chain_indexer"
+        ));
+
+        assert!(!enabled(Some("warn"), Level::Info, "tungstenite::protocol"));
+        assert!(enabled(Some("warn"), Level::Warn, "tungstenite::protocol"));
+        assert!(enabled(Some("trace"), Level::Info, "tungstenite::protocol"));
+
+        // Only the payload targets themselves and their submodules are capped, not other crates
+        // whose names merely start the same.
+        assert!(enabled(Some("debug"), Level::Debug, "tungstenite_ext"));
+        assert!(enabled(
+            Some("debug"),
+            Level::Debug,
+            "tokio_tungstenite_ext::compat"
+        ));
+    }
 }

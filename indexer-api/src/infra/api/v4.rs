@@ -24,6 +24,7 @@ pub mod ledger_events;
 pub mod merkle_tree_collapsed_update;
 pub mod mutation;
 pub mod query;
+pub mod session_id;
 pub mod spo;
 pub mod subscription;
 pub mod system_parameters;
@@ -577,5 +578,96 @@ async fn resolve_height<S: Storage>(
 
             Ok(height)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        domain::storage::NoopStorage,
+        infra::api::{Metrics, v4::schema_builder},
+    };
+    use async_graphql::{
+        Request, ServerResult, Variables,
+        extensions::{Extension, ExtensionContext, ExtensionFactory, NextParseQuery},
+        parser::types::ExecutableDocument,
+    };
+    use futures::StreamExt;
+    use indexer_common::domain::{NetworkId, NoopSubscriber};
+    use parking_lot::Mutex;
+    use std::sync::Arc;
+
+    const MARKER: &str = "deadbeefdeadbeefdeadbeefdeadbeef";
+
+    /// Captures the executable document as rendered for telemetry by the `Tracing` extension.
+    #[derive(Default, Clone)]
+    struct CaptureExecuteDoc(Arc<Mutex<Vec<String>>>);
+
+    impl ExtensionFactory for CaptureExecuteDoc {
+        fn create(&self) -> Arc<dyn Extension> {
+            Arc::new(self.clone())
+        }
+    }
+
+    #[async_graphql::async_trait::async_trait]
+    impl Extension for CaptureExecuteDoc {
+        async fn parse_query(
+            &self,
+            ctx: &ExtensionContext<'_>,
+            query: &str,
+            variables: &Variables,
+            next: NextParseQuery<'_>,
+        ) -> ServerResult<ExecutableDocument> {
+            let doc = next.run(ctx, query, variables).await?;
+            self.0
+                .lock()
+                .push(ctx.stringify_execute_doc(&doc, variables));
+            Ok(doc)
+        }
+    }
+
+    #[tokio::test]
+    async fn test_wallet_secrets_not_in_telemetry() {
+        let capture = CaptureExecuteDoc::default();
+        let schema = schema_builder::<NoopStorage, NoopSubscriber>()
+            .extension(capture.clone())
+            .data(Metrics::default())
+            .data(NetworkId::try_from("undeployed").expect("network ID is valid"))
+            .finish();
+
+        let requests = [
+            Request::new(format!(r#"mutation {{ connect(viewingKey: "{MARKER}") }}"#)),
+            Request::new(format!(
+                r#"mutation {{ disconnect(sessionId: "{MARKER}") }}"#
+            )),
+            Request::new("mutation($key: ViewingKey!) { connect(viewingKey: $key) }")
+                .variables(Variables::from_json(serde_json::json!({ "key": MARKER }))),
+            Request::new("mutation($id: HexEncoded!) { disconnect(sessionId: $id) }")
+                .variables(Variables::from_json(serde_json::json!({ "id": MARKER }))),
+        ];
+        for request in requests {
+            // Errors from the resolvers are irrelevant: parsing runs first.
+            let _ = schema.execute(request).await;
+        }
+
+        // The session ID is too short, so the subscription fails before reaching storage.
+        let subscriptions = [
+            Request::new(format!(
+                r#"subscription {{ shieldedTransactions(sessionId: "{MARKER}") {{ __typename }} }}"#
+            )),
+            Request::new(
+                "subscription($id: HexEncoded!) { shieldedTransactions(sessionId: $id) { __typename } }",
+            )
+            .variables(Variables::from_json(serde_json::json!({ "id": MARKER }))),
+        ];
+        for subscription in subscriptions {
+            let _ = schema.execute_stream(subscription).next().await;
+        }
+
+        let captured = capture.0.lock().clone();
+        assert_eq!(captured.len(), 6);
+        captured.iter().for_each(|doc| {
+            assert!(!doc.contains(MARKER), "secret in telemetry: {doc}");
+        });
     }
 }

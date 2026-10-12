@@ -70,4 +70,17 @@ mod tests {
         println!("{domain_viewing_key:?}");
         assert!(domain_viewing_key.is_ok());
     }
+
+    #[test]
+    fn test_debug_and_display_redacted() {
+        let secret =
+            "mn_shield-esk_undeployed1dlyj7u8juj68fd4psnkqhjxh32sec0q480vzswg8kd485e2kljcs9ete5h";
+        let viewing_key = ViewingKey::from(secret);
+
+        let debug = format!("{viewing_key:?}");
+        assert!(!debug.contains(secret), "secret in Debug: {debug}");
+
+        let display = viewing_key.to_string();
+        assert!(!display.contains(secret), "secret in Display: {display}");
+    }
 }
