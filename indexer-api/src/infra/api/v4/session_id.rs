@@ -15,18 +15,27 @@ use crate::infra::api::v4::HexDecodeError;
 use async_graphql::scalar;
 use derive_more::{Debug, Display, derive::From};
 use indexer_common::domain::{self, ByteArrayLenError};
-use serde::{Deserialize, Serialize};
+use secrecy::{ExposeSecret, SecretString, zeroize::Zeroizing};
+use serde::{Deserialize, Serialize, Serializer};
 use thiserror::Error;
 
 /// Hex-encoded session ID. Exposed as the `HexEncoded` scalar, so the GraphQL schema is the same
 /// as for other hex-encoded values.
 ///
-/// `Debug` and `Display` are redacted, because the session ID is a secret.
-#[derive(Debug, Display, Clone, PartialEq, Eq, Serialize, Deserialize, From)]
+/// `Debug` and `Display` are redacted, because the session ID is a secret. Held in a
+/// [SecretString], which zeroizes the string on drop.
+#[derive(Debug, Display, Clone, Deserialize, From)]
 #[from(&str)]
 #[debug("SessionId(<redacted>)")]
 #[display("<redacted>")]
-pub struct SessionId(String);
+pub struct SessionId(SecretString);
+
+// Serializing exposes the secret; the GraphQL scalar needs it to output the value.
+impl Serialize for SessionId {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.0.expose_secret().serialize(serializer)
+    }
+}
 
 // Parsing only fails for non-string values, so a parse error never echoes a session ID. A custom
 // parse that validates the string must not put the value into its error message.
@@ -38,7 +47,7 @@ scalar!(SessionId, "HexEncoded");
 
 impl From<domain::SessionId> for SessionId {
     fn from(session_id: domain::SessionId) -> Self {
-        Self(const_hex::encode(session_id.expose_secret()))
+        Self(const_hex::encode(session_id.expose_secret()).into())
     }
 }
 
@@ -47,7 +56,9 @@ impl TryFrom<SessionId> for domain::SessionId {
 
     /// Hex-decodes the given API session ID into a domain session ID.
     fn try_from(session_id: SessionId) -> Result<Self, Self::Error> {
-        let bytes = const_hex::decode(&session_id.0).map_err(HexDecodeError::from)?;
+        let bytes = Zeroizing::new(
+            const_hex::decode(session_id.0.expose_secret()).map_err(HexDecodeError::from)?,
+        );
         let session_id = Self::try_from(bytes.as_slice())?;
         Ok(session_id)
     }
@@ -76,5 +87,12 @@ mod tests {
 
         let display = session_id.to_string();
         assert!(!display.contains(secret), "secret in Display: {display}");
+    }
+
+    #[test]
+    fn test_serialize() {
+        let session_id = SessionId::from("0123456789abcdef");
+        let json = serde_json::to_string(&session_id).expect("SessionId can be serialized");
+        assert_eq!(json, r#""0123456789abcdef""#);
     }
 }

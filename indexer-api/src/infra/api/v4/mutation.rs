@@ -68,7 +68,7 @@ where
             .map_err_into_server_error(|| "connect wallet")?;
 
         let wallet_id = storage
-            .resolve_session_id(session_id)
+            .resolve_session_id(&session_id)
             .await
             .map_err_into_server_error(|| "resolve session ID")?
             .some_or_client_error(|| "unknown or expired session ID")?;
@@ -92,13 +92,13 @@ where
         let storage = cx.get_storage::<S>();
 
         let wallet_id = storage
-            .resolve_session_id(session_id)
+            .resolve_session_id(&session_id)
             .await
             .map_err_into_server_error(|| "resolve session ID")?
             .some_or_client_error(|| "unknown or expired session ID")?;
 
         storage
-            .disconnect_wallet(session_id)
+            .disconnect_wallet(&session_id)
             .await
             .map_err_into_server_error(|| "disconnect wallet")?;
 

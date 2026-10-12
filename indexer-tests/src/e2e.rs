@@ -50,7 +50,7 @@ use futures::{StreamExt, TryStreamExt, future::ok};
 use graphql_client::{GraphQLQuery, Response};
 use indexer_api::infra::api::v4::{
     AddressType, HexEncodable, HexEncoded, dust::DustAddress, encode_address,
-    unshielded::UnshieldedAddress, viewing_key::ViewingKey,
+    unshielded::UnshieldedAddress,
 };
 use indexer_common::domain::NetworkId;
 use itertools::Itertools;
@@ -372,14 +372,14 @@ async fn test_connect_mutation(
     network_id: &NetworkId,
 ) -> anyhow::Result<HexEncoded> {
     // Valid viewing key.
-    let viewing_key = ViewingKey::from(viewing_key(network_id));
+    let viewing_key = viewing_key(network_id).to_owned();
     let variables = connect_mutation::Variables { viewing_key };
     let response = send_query::<ConnectMutation>(api_client, api_url, variables).await?;
     let session_id = response.connect;
 
     // Invalid viewing key.
     let variables = connect_mutation::Variables {
-        viewing_key: ViewingKey("invalid".to_string()),
+        viewing_key: "invalid".to_owned(),
     };
     let response = send_query::<ConnectMutation>(api_client, api_url, variables).await;
     assert!(response.is_err());
@@ -1406,8 +1406,12 @@ mod graphql {
     use graphql_client::GraphQLQuery;
     use indexer_api::infra::api::v4::{
         CardanoRewardAddress, HexEncoded, dust::DustAddress, mutation::Unit,
-        unshielded::UnshieldedAddress, viewing_key::ViewingKey,
+        unshielded::UnshieldedAddress,
     };
+
+    // A client sends the viewing key as a plain string; the API type deliberately cannot be
+    // serialized.
+    type ViewingKey = String;
 
     #[derive(GraphQLQuery)]
     #[graphql(

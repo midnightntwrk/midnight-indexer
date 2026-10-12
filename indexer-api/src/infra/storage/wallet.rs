@@ -73,7 +73,7 @@ impl WalletStorage for Storage {
     }
 
     #[trace]
-    async fn disconnect_wallet(&self, session_id: SessionId) -> Result<(), sqlx::Error> {
+    async fn disconnect_wallet(&self, session_id: &SessionId) -> Result<(), sqlx::Error> {
         let query = indoc! {"
             UPDATE wallets
             SET session_id = NULL
@@ -89,7 +89,10 @@ impl WalletStorage for Storage {
     }
 
     #[trace]
-    async fn resolve_session_id(&self, session_id: SessionId) -> Result<Option<Uuid>, sqlx::Error> {
+    async fn resolve_session_id(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<Uuid>, sqlx::Error> {
         let query = indoc! {"
             SELECT id
             FROM wallets
@@ -128,7 +131,5 @@ impl WalletStorage for Storage {
 }
 
 fn generate_session_id() -> SessionId {
-    let mut session_id = [0u8; 32];
-    OsRng.fill_bytes(&mut session_id);
-    session_id.into()
+    SessionId::init_with_mut(|session_id| OsRng.fill_bytes(session_id))
 }

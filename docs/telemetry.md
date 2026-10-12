@@ -74,8 +74,11 @@ OTLP.
   `init_logging` applies this cap on top of the `RUST_LOG` filter.
 - GraphQL arguments that carry wallet secrets (`viewingKey`, `sessionId`) are marked
   `#[graphql(secret)]`, so the `Tracing` extension records them as `"<secret>"`. Their API
-  and domain types, `ViewingKey` and `SessionId`, redact `Debug` and `Display`. Treat any new
-  secret argument the same way.
+  and domain types, `ViewingKey` and `SessionId`, redact `Debug` and `Display` and hold the value
+  in a `secrecy` `SecretString` or `SecretBox`, which zeroizes it on drop. Zeroizing is
+  best-effort: copies made before the value is wrapped, such as the request body, the parsed
+  GraphQL value and decoding buffers inside dependencies, are not zeroized. Treat any new secret
+  argument the same way.
 - With `enabled: false` no reporter is installed and spans are cheap no-ops, so `#[trace]` on
   hot paths costs nothing while tracing is off.
 - `instrumentation_scope_name` / `instrumentation_scope_version` default to the crate name and

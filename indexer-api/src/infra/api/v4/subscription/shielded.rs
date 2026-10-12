@@ -155,12 +155,12 @@ where
 
         let quota_guard = cx
             .get_subscription_quotas()
-            .try_acquire(cx.get_per_connection_counter(), Some(session_id))
+            .try_acquire(cx.get_per_connection_counter(), Some(&session_id))
             .map_err_into_client_error(|| "subscription limit exceeded")?;
 
         let wallet_id = cx
             .get_storage::<S>()
-            .resolve_session_id(session_id)
+            .resolve_session_id(&session_id)
             .await
             .map_err_into_server_error(|| "resolve session ID")?
             .some_or_client_error(|| "unknown or expired session ID")?;

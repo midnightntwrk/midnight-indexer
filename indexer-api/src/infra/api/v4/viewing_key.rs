@@ -11,27 +11,42 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use async_graphql::scalar;
+use async_graphql::{InputValueError, InputValueResult, Scalar, ScalarType, Value};
 use derive_more::{Debug, Display, derive::From};
 use fastrace::trace;
 use indexer_common::domain::{NetworkId, ledger};
-use serde::{Deserialize, Serialize};
+use secrecy::{ExposeSecret, SecretString, zeroize::Zeroizing};
 use thiserror::Error;
 
 use crate::infra::api::v4::{AddressType, DecodeAddressError, decode_address};
 
 /// Bech32m-encoded viewing key.
 ///
-/// `Debug` and `Display` are redacted, because the viewing key is a secret.
-#[derive(Debug, Display, Clone, PartialEq, Eq, Serialize, Deserialize, From)]
+/// `Debug` and `Display` are redacted, because the viewing key is a secret. Held in a
+/// [SecretString], which zeroizes the string on drop.
+#[derive(Debug, Display, Clone, From)]
 #[from(&str)]
 #[debug("ViewingKey(<redacted>)")]
 #[display("<redacted>")]
-pub struct ViewingKey(pub String);
+pub struct ViewingKey(SecretString);
 
-// Parsing only fails for non-string values, so a parse error never echoes a viewing key. A custom
-// parse that validates the string must not put the value into its error message.
-scalar!(ViewingKey);
+// Implemented by hand rather than with `scalar!`, which would require `Serialize` and thereby a
+// way to serialize the secret. The viewing key is input-only, so `to_value` is never used.
+#[Scalar]
+impl ScalarType for ViewingKey {
+    // Only a non-string value is echoed in the error message, never a viewing key. Validation of
+    // the string must not put the value into its error message either.
+    fn parse(value: Value) -> InputValueResult<Self> {
+        match value {
+            Value::String(viewing_key) => Ok(Self(viewing_key.into())),
+            other => Err(InputValueError::expected_type(other)),
+        }
+    }
+
+    fn to_value(&self) -> Value {
+        Value::String("<redacted>".to_owned())
+    }
+}
 
 impl ViewingKey {
     /// Converts this API viewing key into a domain viewing key, validating the bech32m format and
@@ -46,9 +61,12 @@ impl ViewingKey {
         self,
         network_id: &NetworkId,
     ) -> Result<indexer_common::domain::ViewingKey, ViewingKeyFormatError> {
-        let bytes = decode_address(&self.0, AddressType::SecretEncryptionKey, network_id)?;
-        let secret_key = ledger::SecretKey::deserialize(bytes)?;
-        let viewing_key = secret_key.expose_secret().into();
+        let bytes = Zeroizing::new(Vec::from(decode_address(
+            self.0.expose_secret(),
+            AddressType::SecretEncryptionKey,
+            network_id,
+        )?));
+        let viewing_key = ledger::SecretKey::deserialize(bytes.as_slice())?.into();
 
         Ok(viewing_key)
     }
@@ -66,6 +84,8 @@ pub enum ViewingKeyFormatError {
 #[cfg(test)]
 mod tests {
     use crate::infra::api::v4::viewing_key::ViewingKey;
+    use async_graphql::{ScalarType, Value};
+    use secrecy::ExposeSecret;
 
     #[test]
     fn test_try_into_domain() {
@@ -88,5 +108,18 @@ mod tests {
 
         let display = viewing_key.to_string();
         assert!(!display.contains(secret), "secret in Display: {display}");
+    }
+
+    #[test]
+    fn test_scalar() {
+        let secret = "mn_shield-esk_undeployed1dlyj7u8";
+
+        let viewing_key = ViewingKey::parse(Value::String(secret.to_owned()))
+            .expect("string can be parsed as ViewingKey");
+        assert_eq!(viewing_key.0.expose_secret(), secret);
+        assert!(ViewingKey::parse(Value::Number(42.into())).is_err());
+
+        let value = viewing_key.to_value().to_string();
+        assert!(!value.contains(secret), "secret in value: {value}");
     }
 }

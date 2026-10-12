@@ -13,27 +13,36 @@
 
 use crate::domain::ByteArrayLenError;
 use derive_more::{Debug, Display};
+use secrecy::{ExposeSecret, SecretBox};
+use std::hash::{Hash, Hasher};
 
 const SESSION_ID_LEN: usize = 32;
 
 /// A session ID.
 ///
 /// Attention: Do not accidentally leak the secret!
-#[derive(Debug, Display, Clone, Copy, PartialEq, Eq, Hash)]
+///
+/// Held in a [SecretBox], which zeroizes the bytes on drop.
+#[derive(Debug, Display)]
 #[debug("SessionId(REDACTED)")]
 #[display("REDACTED")]
-pub struct SessionId([u8; SESSION_ID_LEN]);
+pub struct SessionId(SecretBox<[u8; SESSION_ID_LEN]>);
 
 impl SessionId {
+    /// Create a session ID by writing its bytes in place, so they are never copied.
+    pub fn init_with_mut(ctr: impl FnOnce(&mut [u8; SESSION_ID_LEN])) -> Self {
+        Self(SecretBox::init_with_mut(ctr))
+    }
+
     /// Expose the secret.
     pub fn expose_secret(&self) -> &[u8; SESSION_ID_LEN] {
-        &self.0
+        self.0.expose_secret()
     }
 }
 
 impl From<[u8; SESSION_ID_LEN]> for SessionId {
     fn from(bytes: [u8; SESSION_ID_LEN]) -> Self {
-        Self(bytes)
+        Self(SecretBox::new(Box::new(bytes)))
     }
 }
 
@@ -41,16 +50,36 @@ impl TryFrom<&[u8]> for SessionId {
     type Error = ByteArrayLenError;
 
     fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        bytes
-            .try_into()
-            .map(Self)
-            .map_err(|_| ByteArrayLenError(SESSION_ID_LEN, bytes.len()))
+        (bytes.len() == SESSION_ID_LEN)
+            .then(|| Self::init_with_mut(|session_id| session_id.copy_from_slice(bytes)))
+            .ok_or(ByteArrayLenError(SESSION_ID_LEN, bytes.len()))
+    }
+}
+
+impl Clone for SessionId {
+    fn clone(&self) -> Self {
+        Self::init_with_mut(|session_id| session_id.copy_from_slice(self.expose_secret()))
+    }
+}
+
+impl PartialEq for SessionId {
+    fn eq(&self, other: &Self) -> bool {
+        self.expose_secret() == other.expose_secret()
+    }
+}
+
+impl Eq for SessionId {}
+
+impl Hash for SessionId {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.expose_secret().hash(state);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::domain::SessionId;
+    use std::hash::{BuildHasher, RandomState};
 
     #[test]
     fn test_debug_and_display_redacted() {
@@ -61,5 +90,16 @@ mod tests {
 
         let display = session_id.to_string();
         assert!(!display.contains("abab"), "secret in Display: {display}");
+    }
+
+    #[test]
+    fn test_clone_eq_hash() {
+        let session_id = SessionId::from([1; 32]);
+        let clone = session_id.clone();
+        assert_eq!(clone, session_id);
+        assert_ne!(SessionId::from([2; 32]), session_id);
+
+        let state = RandomState::new();
+        assert_eq!(state.hash_one(&clone), state.hash_one(&session_id));
     }
 }
