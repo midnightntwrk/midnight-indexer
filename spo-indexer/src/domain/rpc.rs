@@ -394,6 +394,9 @@ mod tests {
         let cases = [
             (None, true),
             (Some(json!({ "StakeError": "InvalidStake" })), true),
+            // A stake error the node did not encode as a string decodes as `Other`, so it cannot
+            // vouch for the signatures.
+            (Some(json!({ "StakeError": 42 })), false),
             (
                 Some(json!({ "InvalidRegistrationData": "InvalidMainchainSignature" })),
                 false,
