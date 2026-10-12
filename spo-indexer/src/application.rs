@@ -82,11 +82,12 @@ pub async fn run(
     loop {
         select! {
             result = process_next_epoch(poll_interval, &client, &storage) => {
-                // Transient failures (sqlite busy under write contention, node RPC hiccups)
-                // must not kill the whole standalone process; retry next interval. The
-                // backoff races SIGTERM so shutdown is not delayed by up to poll_interval.
                 if let Err(error) = result {
+                    if !is_transient_epoch_error(error.as_ref()) {
+                        return Err(error);
+                    }
                     error!("epoch processing failed, retrying next interval: {error:#}");
+                    // Keep shutdown responsive while waiting to retry.
                     select! {
                         _ = sleep(poll_interval) => {}
                         _ = sigterm.recv() => {
@@ -104,6 +105,65 @@ pub async fn run(
     }
 }
 
+/// Retry known connection failures and lock contention; unknown errors remain fatal.
+fn is_transient_epoch_error(error: &(dyn std::error::Error + 'static)) -> bool {
+    use subxt::error::{ExtrinsicError, OnlineClientAtBlockError};
+    use subxt::rpcs::client::reconnecting_rpc_client::{Error as ReconnectingError, RpcError};
+
+    if let Some(error) = error.downcast_ref::<sqlx::Error>() {
+        return match error {
+            sqlx::Error::Io(_) | sqlx::Error::PoolTimedOut => true,
+            #[cfg(feature = "standalone")]
+            sqlx::Error::Database(_) => indexer_common::infra::pool::sqlite::is_busy_error(error),
+            #[cfg(feature = "cloud")]
+            sqlx::Error::Database(error) => error.code().is_some_and(|code| {
+                code.starts_with("08")
+                    || matches!(
+                        code.as_ref(),
+                        "40001" | "40P01" | "53300" | "57P01" | "57P02" | "57P03"
+                    )
+            }),
+            _ => false,
+        };
+    }
+    if let Some(error) = error.downcast_ref::<ReconnectingError>() {
+        return match error {
+            ReconnectingError::DisconnectedWillReconnect(_) => true,
+            ReconnectingError::RpcError(error) => is_transient_epoch_error(error),
+            ReconnectingError::Dropped => false,
+        };
+    }
+    if let Some(error) = error.downcast_ref::<RpcError>() {
+        return matches!(error, RpcError::Transport(_) | RpcError::RequestTimeout);
+    }
+    if let Some(error) = error.downcast_ref::<subxt::rpcs::Error>() {
+        return match error {
+            subxt::rpcs::Error::DisconnectedWillReconnect(_) => true,
+            subxt::rpcs::Error::Client(error) => is_transient_epoch_error(error.as_ref()),
+            _ => false,
+        };
+    }
+    // These Subxt variants contain backend errors without exposing them via source().
+    if let Some(error) = error.downcast_ref::<OnlineClientAtBlockError>() {
+        return match error {
+            OnlineClientAtBlockError::CannotGetCurrentBlock { reason }
+            | OnlineClientAtBlockError::CannotGetBlockHash { reason, .. }
+            | OnlineClientAtBlockError::CannotGetBlockHeader { reason, .. }
+            | OnlineClientAtBlockError::CannotGetSpecVersion { reason, .. } => {
+                is_transient_epoch_error(reason)
+            }
+            _ => false,
+        };
+    }
+    if let Some(error) = error.downcast_ref::<ExtrinsicError>() {
+        return match error {
+            ExtrinsicError::CannotGetBlockBody(reason) => is_transient_epoch_error(reason),
+            _ => false,
+        };
+    }
+    error.source().is_some_and(is_transient_epoch_error)
+}
+
 async fn process_next_epoch(
     poll_interval: Duration,
     client: &SPOClient,
@@ -117,9 +177,8 @@ async fn process_next_epoch(
     info!(epoch_no = epoch.epoch_no; "processing epoch");
 
     // Fetch everything from the network before opening a transaction. Holding
-    // the SQLite writer across HTTP calls starves concurrent writers (e.g. the
-    // chain-indexer or the stake-refresh task) beyond `busy_timeout` and trips
-    // `database is locked` errors.
+    // the SQLite writer across HTTP calls can exhaust the checkout timeout for
+    // concurrent writers (e.g. the chain-indexer or the stake-refresh task).
     let prefetch_started = Instant::now();
     let committee = client.get_committee(epoch.epoch_no).await?;
     let raw_spos = client.get_spo_registrations(epoch.epoch_no).await?;
@@ -456,4 +515,90 @@ fn get_cardano_id(mainchain_pk: &str) -> String {
     let hex_hash = to_hex(buffer);
 
     remove_hex_prefix(&hex_hash).to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_transient_epoch_error;
+    use crate::infra::spo_client::SPOClientError;
+    use std::io;
+    use subxt::error::{ExtrinsicError, OnlineClientAtBlockError};
+    use subxt::rpcs::client::reconnecting_rpc_client::{Error as ReconnectingError, RpcError};
+
+    #[test]
+    fn retries_transport_and_database_availability_errors_with_context() {
+        for error in [
+            anyhow::Error::from(sqlx::Error::PoolTimedOut),
+            sqlx::Error::Io(io::ErrorKind::ConnectionReset.into()).into(),
+            SPOClientError::RpcCall(
+                "sidechain_getStatus".into(),
+                ReconnectingError::RpcError(RpcError::RequestTimeout),
+            )
+            .into(),
+            SPOClientError::RpcCall(
+                "sidechain_getStatus".into(),
+                ReconnectingError::RpcError(RpcError::Transport(
+                    io::Error::from(io::ErrorKind::ConnectionReset).into(),
+                )),
+            )
+            .into(),
+            SPOClientError::Subtx(Box::new(subxt::rpcs::Error::DisconnectedWillReconnect(
+                "node restarted".into(),
+            )))
+            .into(),
+            SPOClientError::Subtx(Box::new(subxt::rpcs::Error::Client(Box::new(
+                ReconnectingError::RpcError(RpcError::RequestTimeout),
+            ))))
+            .into(),
+            SPOClientError::Subtx(Box::new(OnlineClientAtBlockError::CannotGetBlockHash {
+                block_number: 1,
+                reason: subxt::rpcs::Error::DisconnectedWillReconnect("node restarted".into())
+                    .into(),
+            }))
+            .into(),
+            SPOClientError::Subtx(Box::new(ExtrinsicError::CannotGetBlockBody(
+                subxt::rpcs::Error::Client(Box::new(ReconnectingError::RpcError(
+                    RpcError::RequestTimeout,
+                )))
+                .into(),
+            )))
+            .into(),
+        ] {
+            let error = error.context("processing epoch");
+            assert!(is_transient_epoch_error(error.as_ref()), "{error:#}");
+        }
+    }
+
+    #[test]
+    fn permanent_and_unknown_errors_are_not_retried() {
+        for error in [
+            anyhow::anyhow!("invalid epoch data"),
+            sqlx::Error::RowNotFound.into(),
+            sqlx::Error::PoolClosed.into(),
+            sqlx::Error::Decode(io::Error::from(io::ErrorKind::TimedOut).into()).into(),
+            SPOClientError::UnexpectedResponse("invalid timestamp".into()).into(),
+            SPOClientError::MissingBlockfrostId.into(),
+            SPOClientError::Subtx(Box::new(OnlineClientAtBlockError::BlockNotFound {
+                block_number: 1,
+            }))
+            .into(),
+            SPOClientError::Subtx(Box::new(ExtrinsicError::IncompatibleCodegen)).into(),
+            SPOClientError::RpcCall("sidechain_getStatus".into(), ReconnectingError::Dropped)
+                .into(),
+            SPOClientError::RpcCall(
+                "sidechain_getStatus".into(),
+                ReconnectingError::RpcError(RpcError::ParseError(
+                    serde_json::from_str::<u32>("invalid").unwrap_err(),
+                )),
+            )
+            .into(),
+            SPOClientError::Subtx(Box::new(subxt::rpcs::Error::User(
+                subxt::rpcs::UserError::method_not_found(),
+            )))
+            .into(),
+        ] {
+            let error = error.context("processing epoch");
+            assert!(!is_transient_epoch_error(error.as_ref()), "{error:#}");
+        }
+    }
 }
