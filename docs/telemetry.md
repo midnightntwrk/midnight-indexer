@@ -69,6 +69,13 @@ OTLP.
 
 - Keep `fastrace_opentelemetry=off` in `RUST_LOG` (the justfile and deployments already do),
   otherwise the exporter logs its own export activity.
+- `tungstenite` and `tokio_tungstenite` never log below INFO, whatever `RUST_LOG` says: their
+  DEBUG and TRACE records contain WebSocket payloads, which carry session IDs and viewing keys.
+  `init_logging` applies this cap on top of the `RUST_LOG` filter.
+- GraphQL arguments that carry wallet secrets (`viewingKey`, `sessionId`) are marked
+  `#[graphql(secret)]`, so the `Tracing` extension records them as `"<secret>"`. Their API
+  and domain types, `ViewingKey` and `SessionId`, redact `Debug` and `Display`. Treat any new
+  secret argument the same way.
 - With `enabled: false` no reporter is installed and spans are cheap no-ops, so `#[trace]` on
   hot paths costs nothing while tracing is off.
 - `instrumentation_scope_name` / `instrumentation_scope_version` default to the crate name and

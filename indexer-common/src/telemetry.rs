@@ -35,10 +35,12 @@ use fastrace::{
 use fastrace_opentelemetry::OpenTelemetryReporter;
 use fastrace_tracing::FastraceCompatLayer;
 use logforth::{
+    Diagnostic, Filter,
     append::{FastraceEvent, Stdout},
     diagnostic::FastraceDiagnostic,
-    filter::{RustLogFilter, rustlog::RustLogFilterBuilder},
+    filter::{FilterResult, RustLogFilter, rustlog::RustLogFilterBuilder},
     layout::JsonLayout,
+    record::{FilterCriteria, Level},
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
 use opentelemetry::InstrumentationScope;
@@ -94,8 +96,10 @@ pub struct MetricsConfig {
 
 /// Initialize logging with [Logforth](https://github.com/fast/logforth).
 ///
-/// Log levels are filterd based on the `RUST_LOG` environment variable and log records are
-/// formatted as JSON.
+/// Log levels are filtered based on the `RUST_LOG` environment variable and log records are
+/// formatted as JSON. Regardless of `RUST_LOG`, the `tungstenite` and `tokio_tungstenite` targets
+/// never log below INFO, because their DEBUG and TRACE records contain WebSocket payloads, which
+/// carry session IDs and viewing keys.
 ///
 /// If logging happens in the context of a span, log records are added to the current span as events
 /// and the trace ID of the current span is added to the log records, thus correlating logs and
@@ -116,9 +120,38 @@ pub fn init_logging() {
         .apply();
 }
 
-/// Build the log filter from the given `RUST_LOG` specification.
-fn log_filter(spec: Option<&str>) -> RustLogFilter {
-    RustLogFilterBuilder::from_spec(spec.unwrap_or_default()).build()
+/// Log targets whose DEBUG and TRACE records contain WebSocket payloads.
+const PAYLOAD_LOG_TARGETS: [&str; 2] = ["tungstenite", "tokio_tungstenite"];
+
+/// Build the log filter from the given `RUST_LOG` specification, capping the
+/// [PAYLOAD_LOG_TARGETS] at INFO.
+fn log_filter(spec: Option<&str>) -> LogFilter {
+    LogFilter(RustLogFilterBuilder::from_spec(spec.unwrap_or_default()).build())
+}
+
+/// A `RUST_LOG` filter which cannot enable the [PAYLOAD_LOG_TARGETS] below INFO.
+///
+/// This is a separate check rather than an extra directive, because in a `RUST_LOG` filter the
+/// longest matching target wins, so e.g. `tungstenite::protocol=trace` would override a forced
+/// `tungstenite=info`.
+#[derive(Debug)]
+struct LogFilter(RustLogFilter);
+
+impl Filter for LogFilter {
+    fn enabled(&self, criteria: &FilterCriteria, diags: &[Box<dyn Diagnostic>]) -> FilterResult {
+        let payload_target = PAYLOAD_LOG_TARGETS.iter().any(|target| {
+            criteria
+                .target()
+                .strip_prefix(target)
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with("::"))
+        });
+
+        if payload_target && criteria.level() < Level::Info {
+            FilterResult::Reject
+        } else {
+            self.0.enabled(criteria, diags)
+        }
+    }
 }
 
 /// Initialize tracing with [fastrace](https://github.com/fast/fastrace).

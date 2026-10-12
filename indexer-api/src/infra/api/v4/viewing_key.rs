@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use async_graphql::scalar;
-use derive_more::{Display, derive::From};
+use derive_more::{Debug, Display, derive::From};
 use fastrace::trace;
 use indexer_common::domain::{NetworkId, ledger};
 use serde::{Deserialize, Serialize};
@@ -21,10 +21,16 @@ use thiserror::Error;
 use crate::infra::api::v4::{AddressType, DecodeAddressError, decode_address};
 
 /// Bech32m-encoded viewing key.
+///
+/// `Debug` and `Display` are redacted, because the viewing key is a secret.
 #[derive(Debug, Display, Clone, PartialEq, Eq, Serialize, Deserialize, From)]
 #[from(&str)]
+#[debug("ViewingKey(<redacted>)")]
+#[display("<redacted>")]
 pub struct ViewingKey(pub String);
 
+// Parsing only fails for non-string values, so a parse error never echoes a viewing key. A custom
+// parse that validates the string must not put the value into its error message.
 scalar!(ViewingKey);
 
 impl ViewingKey {

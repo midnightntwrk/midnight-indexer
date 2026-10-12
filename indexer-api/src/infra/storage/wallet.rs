@@ -65,7 +65,7 @@ impl WalletStorage for Storage {
             .bind(&viewing_key)
             .bind(start_index)
             .bind(OffsetDateTime::now_utc())
-            .bind(session_id.as_ref())
+            .bind(session_id.expose_secret().as_slice())
             .execute(&*self.pool)
             .await?;
 
@@ -81,7 +81,7 @@ impl WalletStorage for Storage {
         "};
 
         sqlx::query(query)
-            .bind(session_id.as_ref())
+            .bind(session_id.expose_secret().as_slice())
             .execute(&*self.pool)
             .await?;
 
@@ -97,7 +97,7 @@ impl WalletStorage for Storage {
         "};
 
         sqlx::query_scalar::<_, Uuid>(query)
-            .bind(session_id.as_ref())
+            .bind(session_id.expose_secret().as_slice())
             .fetch_optional(&*self.pool)
             .await
     }

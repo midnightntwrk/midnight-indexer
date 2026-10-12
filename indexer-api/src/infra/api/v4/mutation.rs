@@ -15,7 +15,7 @@ use crate::{
     domain::storage::Storage,
     infra::api::{
         ApiResult, ContextExt, OptionExt, ResultExt,
-        v4::{HexEncodable, HexEncoded, decode_session_id, viewing_key::ViewingKey},
+        v4::{session_id::SessionId, viewing_key::ViewingKey},
     },
 };
 use async_graphql::{Context, InputObject, Object, scalar};
@@ -44,9 +44,9 @@ where
     async fn connect(
         &self,
         cx: &Context<'_>,
-        viewing_key: ViewingKey,
+        #[graphql(secret)] viewing_key: ViewingKey,
         options: Option<ConnectOptions>,
-    ) -> ApiResult<HexEncoded> {
+    ) -> ApiResult<SessionId> {
         let viewing_key = viewing_key
             .try_into_domain(cx.get_network_id())
             .map_err_into_client_error(|| "invalid viewing key")?;
@@ -75,14 +75,19 @@ where
 
         debug!(wallet_id:%; "wallet connected");
 
-        Ok(session_id.hex_encode())
+        Ok(session_id.into())
     }
 
     /// Disconnect the wallet with the given session ID.
     #[trace]
-    async fn disconnect(&self, cx: &Context<'_>, session_id: HexEncoded) -> ApiResult<Unit> {
-        let session_id =
-            decode_session_id(session_id).map_err_into_client_error(|| "invalid session ID")?;
+    async fn disconnect(
+        &self,
+        cx: &Context<'_>,
+        #[graphql(secret)] session_id: SessionId,
+    ) -> ApiResult<Unit> {
+        let session_id = session_id
+            .try_into()
+            .map_err_into_client_error(|| "invalid session ID")?;
 
         let storage = cx.get_storage::<S>();
 

@@ -72,8 +72,8 @@ use bech32::{Bech32, Bech32m, Hrp};
 use const_hex::FromHexError;
 use derive_more::{AsRef, Debug, Display};
 use indexer_common::domain::{
-    ByteArrayLenError, ByteVec, CardanoRewardAddress as DomainCardanoRewardAddress, NetworkId,
-    NoopSubscriber, SessionId, Subscriber,
+    ByteVec, CardanoRewardAddress as DomainCardanoRewardAddress, NetworkId, NoopSubscriber,
+    Subscriber,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -88,6 +88,8 @@ use thiserror::Error;
 #[as_ref(str)]
 pub struct HexEncoded(String);
 
+// `session_id::SessionId` registers the same GraphQL scalar. async-graphql keeps whichever type
+// registers first and does not check that the two agree, so keep both definitions identical.
 scalar!(HexEncoded);
 
 impl HexEncoded {
@@ -516,21 +518,6 @@ where
         Subscription::<S, B>::default(),
     )
     .extension(async_graphql::extensions::Tracing)
-}
-
-fn decode_session_id(session_id: HexEncoded) -> Result<SessionId, DecodeSessionIdError> {
-    let session_id = session_id.hex_decode::<Vec<u8>>()?;
-    let session_id = SessionId::try_from(session_id.as_slice())?;
-    Ok(session_id)
-}
-
-#[derive(Debug, Error)]
-enum DecodeSessionIdError {
-    #[error("cannot hex-decode session ID")]
-    HexDecode(#[from] HexDecodeError),
-
-    #[error("cannot convert into session ID")]
-    ByteArrayLen(#[from] ByteArrayLenError),
 }
 
 /// Resolve the block height for the given optional block offset. If it is a block height, it is

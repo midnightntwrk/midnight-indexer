@@ -11,9 +11,42 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::ByteArray;
+use crate::domain::ByteArrayLenError;
+use derive_more::{Debug, Display};
 
-pub type SessionId = ByteArray<32>;
+const SESSION_ID_LEN: usize = 32;
+
+/// A session ID.
+///
+/// Attention: Do not accidentally leak the secret!
+#[derive(Debug, Display, Clone, Copy, PartialEq, Eq, Hash)]
+#[debug("SessionId(REDACTED)")]
+#[display("REDACTED")]
+pub struct SessionId([u8; SESSION_ID_LEN]);
+
+impl SessionId {
+    /// Expose the secret.
+    pub fn expose_secret(&self) -> &[u8; SESSION_ID_LEN] {
+        &self.0
+    }
+}
+
+impl From<[u8; SESSION_ID_LEN]> for SessionId {
+    fn from(bytes: [u8; SESSION_ID_LEN]) -> Self {
+        Self(bytes)
+    }
+}
+
+impl TryFrom<&[u8]> for SessionId {
+    type Error = ByteArrayLenError;
+
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        bytes
+            .try_into()
+            .map(Self)
+            .map_err(|_| ByteArrayLenError(SESSION_ID_LEN, bytes.len()))
+    }
+}
 
 #[cfg(test)]
 mod tests {
