@@ -15,11 +15,12 @@
 //! of transaction count.
 
 use chain_indexer::domain::{BlockRef, LedgerState};
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use indexer_common::{
     domain::{BlockHash, LedgerVersion, NetworkId},
     infra::ledger_db,
 };
+use std::{hint::black_box, iter};
 use tokio::runtime::Runtime;
 
 fn init_ledger_db(rt: &Runtime) -> tempfile::TempDir {
@@ -72,7 +73,7 @@ fn bench_apply_transactions_empty(c: &mut Criterion) {
             |mut ledger_state| {
                 ledger_state
                     .apply_transactions(
-                        std::iter::empty(),
+                        iter::empty(),
                         black_box(block),
                         black_box(parent_block_hash),
                         black_box(block_timestamp),
@@ -81,7 +82,7 @@ fn bench_apply_transactions_empty(c: &mut Criterion) {
                     )
                     .expect("apply_transactions")
             },
-            criterion::BatchSize::SmallInput,
+            BatchSize::SmallInput,
         )
     });
 }
