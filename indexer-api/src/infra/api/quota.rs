@@ -117,6 +117,9 @@ impl SubscriptionQuotas {
             active_gauge: self.metrics.active.clone(),
         })
     }
+
+    /// Drop per-session buckets that are idle at `now`.
+    fn prune_idle_at(&self, _now: Instant) {}
 }
 
 /// RAII handle held by an active subscription. On drop, decrements the per-connection counter and
@@ -304,6 +307,27 @@ mod tests {
             .try_acquire(&counter, Some(&session(10)))
             .unwrap_err();
         assert!(matches!(err, QuotaError::PerSessionRate(1)));
+    }
+
+    #[test]
+    fn idle_full_buckets_are_pruned() {
+        let quotas = SubscriptionQuotas::new(config(1000, 1));
+        let counter = Arc::new(AtomicUsize::new(0));
+
+        let guards = (0..100)
+            .map(|n| quotas.try_acquire(&counter, Some(&session(n))).unwrap())
+            .collect::<Vec<_>>();
+        drop(guards);
+        assert_eq!(quotas.per_session_buckets.len(), 100);
+
+        // After a full refill period every bucket is full again, i.e. indistinguishable from a
+        // missing one.
+        quotas.prune_idle_at(Instant::now() + Duration::from_secs(120));
+        assert!(
+            quotas.per_session_buckets.is_empty(),
+            "{} idle buckets were not pruned",
+            quotas.per_session_buckets.len()
+        );
     }
 
     #[test]
