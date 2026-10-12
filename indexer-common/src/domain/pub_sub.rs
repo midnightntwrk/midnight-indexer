@@ -70,7 +70,8 @@ pub struct BlockIndexed {
     pub max_transaction_id: Option<u64>,
     pub caught_up: bool,
     /// The block's protocol version as the raw `spec_version`, so an unknown version still
-    /// deserializes.
+    /// deserializes. `0` when the publisher predates the field.
+    #[serde(default)]
     pub protocol_version: u32,
 }
 
@@ -154,7 +155,7 @@ mod sealed {
 
 #[cfg(test)]
 mod tests {
-    use crate::domain::Topic;
+    use super::*;
 
     /// Every topic renders as its own name. The match is exhaustive, so a new topic must be added
     /// here too.
@@ -180,5 +181,24 @@ mod tests {
         for &topic in Topic::VARIANTS {
             assert_eq!(Topic::VARIANTS[topic as usize], topic);
         }
+    }
+
+    /// A message from a publisher that predates `protocol_version` still deserializes.
+    #[test]
+    fn block_indexed_without_protocol_version_deserializes() {
+        let message = serde_json::from_str::<BlockIndexed>(
+            r#"{"height":42,"max_transaction_id":7,"caught_up":true}"#,
+        )
+        .expect("deserialize BlockIndexed without protocol_version");
+
+        assert_eq!(
+            message,
+            BlockIndexed {
+                height: 42,
+                max_transaction_id: Some(7),
+                caught_up: true,
+                protocol_version: 0,
+            }
+        );
     }
 }
