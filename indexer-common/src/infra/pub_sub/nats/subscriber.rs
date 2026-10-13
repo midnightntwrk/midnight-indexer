@@ -63,20 +63,33 @@ impl NatsSubscriber {
 impl Subscriber for NatsSubscriber {
     type Error = SubscriberError;
 
-    fn subscribe<T>(&self) -> impl Stream<Item = Result<T, Self::Error>> + Send
+    async fn subscribe<T>(&self) -> impl Stream<Item = Result<T, Self::Error>> + Send
     where
         T: Message,
     {
+        // NATS registers a subscription when its command reaches the server; the flush round trip
+        // waits for that, so every message published afterwards is delivered.
+        let subscription = self
+            .client
+            .subscribe(T::TOPIC)
+            .await
+            .map_err(SubscriberError::Subscribe);
+        if let Err(error) = self.client.flush().await {
+            warn!(error:%; "cannot flush NATS subscription for topic {}", T::TOPIC);
+        }
+
         // The subscriber stream may complete, without returning any error (it is not baked into the
-        // item type), e.g. because of disconnecting. Therefore we wrap it into an infinite "outer"
-        // stream which is slightly throttled and resubscribe repeatedly.
-        tokio_stream::StreamExt::throttle(stream::repeat(()), REPEAT_DELAY)
-            .map(|_| Ok::<_, Self::Error>(()))
-            .and_then(|_| {
+        // item type), e.g. because of disconnecting. Therefore we follow it with an infinite
+        // stream which is slightly throttled and resubscribes repeatedly.
+        let resubscriptions = tokio_stream::StreamExt::throttle(stream::repeat(()), REPEAT_DELAY)
+            .then(|_| {
                 self.client
                     .subscribe(T::TOPIC)
                     .map_err(SubscriberError::Subscribe)
-            })
+            });
+
+        stream::iter([subscription])
+            .chain(resubscriptions)
             .map_ok(|subscriber| {
                 subscriber.map(|message| {
                     let message = serde_json::from_slice(&message.payload)?;

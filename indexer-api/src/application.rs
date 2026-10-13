@@ -38,7 +38,7 @@ pub async fn run(config: Config, api: impl Api, subscriber: impl Subscriber) -> 
         let caught_up = caught_up.clone();
 
         async move {
-            let block_indexed_stream = subscriber.subscribe::<BlockIndexed>();
+            let block_indexed_stream = subscriber.subscribe::<BlockIndexed>().await;
 
             block_indexed_stream
                 .try_for_each(|block_indexed| {

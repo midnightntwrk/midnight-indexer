@@ -87,7 +87,7 @@ where
         let storage = cx.get_storage::<S>();
         let subscriber = cx.get_subscriber::<B>();
         let batch_size = cx.get_subscription_config().contract_events.batch_size;
-        let block_indexed_stream = subscriber.subscribe::<BlockIndexed>();
+        let block_indexed_stream = subscriber.subscribe::<BlockIndexed>().await;
 
         // Bounded subscription: when `filter.toBlock` is set, evaluate the terminator BEFORE
         // each drain — the drain's DB snapshot then covers everything the check saw, so events

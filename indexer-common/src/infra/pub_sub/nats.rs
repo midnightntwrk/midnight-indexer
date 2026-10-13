@@ -85,7 +85,7 @@ mod tests {
         let subscriber = NatsSubscriber::new(config.clone())
             .await
             .context("create NatsSubscriber")?;
-        let wallet_indexed_messages = subscriber.subscribe::<WalletIndexed>();
+        let wallet_indexed_messages = subscriber.subscribe::<WalletIndexed>().await;
 
         let wallet_indexed = WalletIndexed {
             wallet_id: Uuid::nil(),
@@ -128,7 +128,7 @@ mod tests {
         let subscriber = NatsSubscriber::new(config.clone())
             .await
             .context("create NatsSubscriber")?;
-        let wallet_indexed_messages = subscriber.subscribe::<WalletIndexed>();
+        let wallet_indexed_messages = subscriber.subscribe::<WalletIndexed>().await;
 
         let wallet_indexed = WalletIndexed {
             wallet_id: Uuid::nil(),

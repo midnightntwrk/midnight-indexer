@@ -139,7 +139,7 @@ where
 
             // Live tail.
             let live = subscriber
-                .subscribe::<BridgeEventIndexed>()
+                .subscribe::<BridgeEventIndexed>().await
                 .try_filter(move |evt| {
                     let recipient_match = recipient
                         .map(|r| evt.event.recipient().map(|er| er.as_bytes() == r.as_ref()).unwrap_or(false))
@@ -194,7 +194,7 @@ where
             yield BridgePoolUpdate { new_event: None, pool: BridgePoolSummary::from(initial) };
 
             let live = subscriber
-                .subscribe::<BridgeEventIndexed>()
+                .subscribe::<BridgeEventIndexed>().await
                 .try_filter(|evt| {
                     use indexer_common::domain::bridge::BridgeEventVariant::*;
                     let interesting = matches!(
@@ -272,7 +272,7 @@ where
             // so also wake on unshielded UTXO activity for the address (a claim creates
             // unshielded UTXOs for the recipient).
             let deposits = subscriber
-                .subscribe::<BridgeEventIndexed>()
+                .subscribe::<BridgeEventIndexed>().await
                 .try_filter(move |evt| {
                     let matches = evt
                         .event
@@ -283,7 +283,7 @@ where
                 })
                 .map_ok(|_| ());
             let claims = subscriber
-                .subscribe::<UnshieldedUtxoIndexed>()
+                .subscribe::<UnshieldedUtxoIndexed>().await
                 .try_filter(move |utxo| ready(utxo.address == address))
                 .map_ok(|_| ());
             let live = stream::select(deposits, claims);

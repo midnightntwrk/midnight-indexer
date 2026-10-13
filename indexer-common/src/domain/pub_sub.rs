@@ -117,8 +117,9 @@ where
 
     /// Subscribe to the messages of the given type. Implementations must return an infinite stream
     /// that can handle any underlying errors transparently, i.e. without leaking into the
-    /// `Self::Error` type which is reserved for conversion errors.
-    fn subscribe<T>(&self) -> impl Stream<Item = Result<T, Self::Error>> + Send
+    /// `Self::Error` type which is reserved for conversion errors. The stream delivers every
+    /// message published after the returned future resolves.
+    async fn subscribe<T>(&self) -> impl Stream<Item = Result<T, Self::Error>> + Send
     where
         T: Message;
 }
@@ -130,7 +131,7 @@ pub struct NoopSubscriber;
 impl Subscriber for NoopSubscriber {
     type Error = Infallible;
 
-    fn subscribe<T>(&self) -> impl Stream<Item = Result<T, Self::Error>> + Send
+    async fn subscribe<T>(&self) -> impl Stream<Item = Result<T, Self::Error>> + Send
     where
         T: Message,
     {
