@@ -24,6 +24,7 @@ pub mod ledger_events;
 pub mod merkle_tree_collapsed_update;
 pub mod mutation;
 pub mod query;
+pub mod session_id;
 pub mod spo;
 pub mod subscription;
 pub mod system_parameters;
@@ -71,8 +72,8 @@ use bech32::{Bech32, Bech32m, Hrp};
 use const_hex::FromHexError;
 use derive_more::{AsRef, Debug, Display};
 use indexer_common::domain::{
-    ByteArrayLenError, ByteVec, CardanoRewardAddress as DomainCardanoRewardAddress, NetworkId,
-    NoopSubscriber, SessionId, Subscriber,
+    ByteVec, CardanoRewardAddress as DomainCardanoRewardAddress, NetworkId, NoopSubscriber,
+    Subscriber,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -87,6 +88,8 @@ use thiserror::Error;
 #[as_ref(str)]
 pub struct HexEncoded(String);
 
+// `session_id::SessionId` registers the same GraphQL scalar. async-graphql keeps whichever type
+// registers first and does not check that the two agree, so keep both definitions identical.
 scalar!(HexEncoded);
 
 impl HexEncoded {
@@ -517,21 +520,6 @@ where
     .extension(async_graphql::extensions::Tracing)
 }
 
-fn decode_session_id(session_id: HexEncoded) -> Result<SessionId, DecodeSessionIdError> {
-    let session_id = session_id.hex_decode::<Vec<u8>>()?;
-    let session_id = SessionId::try_from(session_id.as_slice())?;
-    Ok(session_id)
-}
-
-#[derive(Debug, Error)]
-enum DecodeSessionIdError {
-    #[error("cannot hex-decode session ID")]
-    HexDecode(#[from] HexDecodeError),
-
-    #[error("cannot convert into session ID")]
-    ByteArrayLen(#[from] ByteArrayLenError),
-}
-
 /// Resolve the block height for the given optional block offset. If it is a block height, it is
 /// simple, if it is a hash, the block is loaded via the DataLoader and its height returned. If the
 /// block offset is omitted, the last block is loaded and its height returned.
@@ -577,5 +565,96 @@ async fn resolve_height<S: Storage>(
 
             Ok(height)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        domain::storage::NoopStorage,
+        infra::api::{Metrics, v4::schema_builder},
+    };
+    use async_graphql::{
+        Request, ServerResult, Variables,
+        extensions::{Extension, ExtensionContext, ExtensionFactory, NextParseQuery},
+        parser::types::ExecutableDocument,
+    };
+    use futures::StreamExt;
+    use indexer_common::domain::{NetworkId, NoopSubscriber};
+    use parking_lot::Mutex;
+    use std::sync::Arc;
+
+    const MARKER: &str = "deadbeefdeadbeefdeadbeefdeadbeef";
+
+    /// Captures the executable document as rendered for telemetry by the `Tracing` extension.
+    #[derive(Default, Clone)]
+    struct CaptureExecuteDoc(Arc<Mutex<Vec<String>>>);
+
+    impl ExtensionFactory for CaptureExecuteDoc {
+        fn create(&self) -> Arc<dyn Extension> {
+            Arc::new(self.clone())
+        }
+    }
+
+    #[async_graphql::async_trait::async_trait]
+    impl Extension for CaptureExecuteDoc {
+        async fn parse_query(
+            &self,
+            ctx: &ExtensionContext<'_>,
+            query: &str,
+            variables: &Variables,
+            next: NextParseQuery<'_>,
+        ) -> ServerResult<ExecutableDocument> {
+            let doc = next.run(ctx, query, variables).await?;
+            self.0
+                .lock()
+                .push(ctx.stringify_execute_doc(&doc, variables));
+            Ok(doc)
+        }
+    }
+
+    #[tokio::test]
+    async fn test_wallet_secrets_not_in_telemetry() {
+        let capture = CaptureExecuteDoc::default();
+        let schema = schema_builder::<NoopStorage, NoopSubscriber>()
+            .extension(capture.clone())
+            .data(Metrics::default())
+            .data(NetworkId::try_from("undeployed").expect("network ID is valid"))
+            .finish();
+
+        let requests = [
+            Request::new(format!(r#"mutation {{ connect(viewingKey: "{MARKER}") }}"#)),
+            Request::new(format!(
+                r#"mutation {{ disconnect(sessionId: "{MARKER}") }}"#
+            )),
+            Request::new("mutation($key: ViewingKey!) { connect(viewingKey: $key) }")
+                .variables(Variables::from_json(serde_json::json!({ "key": MARKER }))),
+            Request::new("mutation($id: HexEncoded!) { disconnect(sessionId: $id) }")
+                .variables(Variables::from_json(serde_json::json!({ "id": MARKER }))),
+        ];
+        for request in requests {
+            // Errors from the resolvers are irrelevant: parsing runs first.
+            let _ = schema.execute(request).await;
+        }
+
+        // The session ID is too short, so the subscription fails before reaching storage.
+        let subscriptions = [
+            Request::new(format!(
+                r#"subscription {{ shieldedTransactions(sessionId: "{MARKER}") {{ __typename }} }}"#
+            )),
+            Request::new(
+                "subscription($id: HexEncoded!) { shieldedTransactions(sessionId: $id) { __typename } }",
+            )
+            .variables(Variables::from_json(serde_json::json!({ "id": MARKER }))),
+        ];
+        for subscription in subscriptions {
+            let _ = schema.execute_stream(subscription).next().await;
+        }
+
+        let captured = capture.0.lock().clone();
+        assert_eq!(captured.len(), 6);
+        captured.iter().for_each(|doc| {
+            assert!(!doc.contains(MARKER), "secret in telemetry: {doc}");
+        });
     }
 }

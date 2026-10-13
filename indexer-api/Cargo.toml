@@ -40,7 +40,7 @@ log                = { workspace = true, features = [ "kv" ] }
 metrics            = { workspace = true }
 moka               = { workspace = true }
 parking_lot        = { workspace = true }
-secrecy            = { workspace = true }
+secrecy            = { workspace = true, features = [ "serde" ] }
 serde              = { workspace = true, features = [ "derive" ] }
 serde_json         = { workspace = true }
 sqlx               = { workspace = true, features = [ "time" ] }

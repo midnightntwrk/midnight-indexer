@@ -29,10 +29,11 @@ where
     ) -> Result<SessionId, sqlx::Error>;
 
     /// Disconnect a wallet, i.e. remove it from the active ones.
-    async fn disconnect_wallet(&self, session_id: SessionId) -> Result<(), sqlx::Error>;
+    async fn disconnect_wallet(&self, session_id: &SessionId) -> Result<(), sqlx::Error>;
 
     /// Resolve a session ID to the corresponding wallet ID.
-    async fn resolve_session_id(&self, session_id: SessionId) -> Result<Option<Uuid>, sqlx::Error>;
+    async fn resolve_session_id(&self, session_id: &SessionId)
+    -> Result<Option<Uuid>, sqlx::Error>;
 
     /// Refresh the wallet's last active timestamp to avoid timing out.
     async fn keep_wallet_active(&self, wallet_id: Uuid) -> Result<(), sqlx::Error>;
@@ -48,11 +49,14 @@ impl WalletStorage for NoopStorage {
         unimplemented!()
     }
 
-    async fn disconnect_wallet(&self, session_id: SessionId) -> Result<(), sqlx::Error> {
+    async fn disconnect_wallet(&self, session_id: &SessionId) -> Result<(), sqlx::Error> {
         unimplemented!()
     }
 
-    async fn resolve_session_id(&self, session_id: SessionId) -> Result<Option<Uuid>, sqlx::Error> {
+    async fn resolve_session_id(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<Uuid>, sqlx::Error> {
         unimplemented!()
     }
 
