@@ -18,8 +18,8 @@ use crate::{
         ApiError, ApiResult, ContextExt, OptionExt, ResultExt,
         ledger_query_limit::LedgerQueryLimiter,
         v4::{
-            HexEncoded, decode_session_id,
             merkle_tree_collapsed_update::{CollapsedMerkleTree, MerkleTreeCollapsedUpdate},
+            session_id::SessionId,
             transaction::RegularTransaction,
         },
     },
@@ -143,23 +143,24 @@ where
     async fn shielded_transactions<'a>(
         &self,
         cx: &'a Context<'a>,
-        session_id: HexEncoded,
+        #[graphql(secret)] session_id: SessionId,
         index: Option<u64>,
     ) -> Result<impl Stream<Item = ApiResult<ShieldedTransactionsEvent<S>>> + use<'a, S, B>, ApiError>
     {
         cx.get_metrics().wallets_connected.increment(1);
 
-        let session_id =
-            decode_session_id(session_id).map_err_into_client_error(|| "invalid session ID")?;
+        let session_id = session_id
+            .try_into()
+            .map_err_into_client_error(|| "invalid session ID")?;
 
         let quota_guard = cx
             .get_subscription_quotas()
-            .try_acquire(cx.get_per_connection_counter(), Some(session_id))
+            .try_acquire(cx.get_per_connection_counter(), Some(&session_id))
             .map_err_into_client_error(|| "subscription limit exceeded")?;
 
         let wallet_id = cx
             .get_storage::<S>()
-            .resolve_session_id(session_id)
+            .resolve_session_id(&session_id)
             .await
             .map_err_into_server_error(|| "resolve session ID")?
             .some_or_client_error(|| "unknown or expired session ID")?;
