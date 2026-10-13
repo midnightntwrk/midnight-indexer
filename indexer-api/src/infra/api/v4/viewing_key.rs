@@ -44,6 +44,10 @@ impl ScalarType for ViewingKey {
     }
 
     fn to_value(&self) -> Value {
+        debug_assert!(
+            false,
+            "ViewingKey is input-only and never converted to a value"
+        );
         Value::String("<redacted>".to_owned())
     }
 }
@@ -118,8 +122,20 @@ mod tests {
             .expect("string can be parsed as ViewingKey");
         assert_eq!(viewing_key.0.expose_secret(), secret);
         assert!(ViewingKey::parse(Value::Number(42.into())).is_err());
+    }
 
-        let value = viewing_key.to_value().to_string();
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn test_to_value_redacted() {
+        let secret = "mn_shield-esk_undeployed1dlyj7u8";
+        let value = ViewingKey::from(secret).to_value().to_string();
         assert!(!value.contains(secret), "secret in value: {value}");
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "input-only")]
+    fn test_to_value_unused() {
+        let _ = ViewingKey::from("mn_shield-esk_undeployed1dlyj7u8").to_value();
     }
 }
