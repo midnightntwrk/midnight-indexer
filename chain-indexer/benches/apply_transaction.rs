@@ -19,7 +19,7 @@ use chain_indexer::domain::{
     extrinsic::{Applied, Phase},
     node,
 };
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use indexer_common::{
     domain::{
         BlockHash, ByteVec, LedgerVersion, ProtocolVersion, TransactionHash,
@@ -27,7 +27,7 @@ use indexer_common::{
     },
     infra::ledger_db,
 };
-use std::fs;
+use std::{fs, hint::black_box};
 use tokio::runtime::Runtime;
 
 fn init_ledger_db(rt: &Runtime) -> tempfile::TempDir {
@@ -130,7 +130,7 @@ fn bench_apply_real_tx(c: &mut Criterion) {
                     )
                     .expect("apply")
             },
-            criterion::BatchSize::SmallInput,
+            BatchSize::SmallInput,
         )
     });
 
@@ -157,7 +157,7 @@ fn bench_apply_real_tx(c: &mut Criterion) {
                     )
                     .expect("apply")
             },
-            criterion::BatchSize::SmallInput,
+            BatchSize::SmallInput,
         )
     });
 
