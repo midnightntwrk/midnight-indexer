@@ -53,11 +53,12 @@ impl WalletStorage for NoopStorage {
         unimplemented!()
     }
 
+    /// No wallet is connected, so every session ID is unknown.
     async fn resolve_session_id(
         &self,
         session_id: &SessionId,
     ) -> Result<Option<Uuid>, sqlx::Error> {
-        unimplemented!()
+        Ok(None)
     }
 
     async fn keep_wallet_active(&self, wallet_id: Uuid) -> Result<(), sqlx::Error> {
