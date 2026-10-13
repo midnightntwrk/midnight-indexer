@@ -121,7 +121,7 @@ where
     ) -> ApiResult<MerkleTreeCollapsedUpdate> {
         let storage = cx.get_storage::<S>();
 
-        let (protocol_version, _) = storage
+        let (_, protocol_version, _) = storage
             .get_highest_ledger_state()
             .await
             .map_err_into_server_error(|| "get highest ledger state")?
@@ -396,7 +396,7 @@ where
     ) -> ApiResult<MerkleTreeCollapsedUpdate> {
         let storage = cx.get_storage::<S>();
 
-        let (protocol_version, _) = storage
+        let (_, protocol_version, _) = storage
             .get_highest_ledger_state()
             .await
             .map_err_into_server_error(|| "get highest ledger state")?
@@ -431,7 +431,7 @@ where
     ) -> ApiResult<MerkleTreeCollapsedUpdate> {
         let storage = cx.get_storage::<S>();
 
-        let (protocol_version, _) = storage
+        let (_, protocol_version, _) = storage
             .get_highest_ledger_state()
             .await
             .map_err_into_server_error(|| "get highest ledger state")?
@@ -972,7 +972,7 @@ where
             .await
             .map_err_into_server_error(|| "get highest ledger state")?
         {
-            Some((protocol_version, ledger_state_key)) => {
+            Some((_, protocol_version, ledger_state_key)) => {
                 // Bound concurrent ledger-DB work (issue #595): acquire after the SQL above, so
                 // the permit covers the ledger walk and not a Postgres round-trip.
                 let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
@@ -1135,7 +1135,7 @@ async fn current_ledger_version<S: Storage>(storage: &S) -> ApiResult<LedgerVers
         .get_highest_ledger_state()
         .await
         .map_err_into_server_error(|| "get highest ledger state")?
-        .map(|(protocol_version, _)| protocol_version.ledger_version())
+        .map(|(_, protocol_version, _)| protocol_version.ledger_version())
         .unwrap_or(LedgerVersion::LATEST);
 
     Ok(ledger_version)

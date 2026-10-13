@@ -18,10 +18,11 @@ use indexer_common::domain::{
 };
 use log::debug;
 use thiserror::Error;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, RwLockReadGuard};
 
+/// Cache for the latest ledger state, together with the height of the block it belongs to.
 #[derive(Debug, Default)]
-pub struct LedgerStateCache(RwLock<Option<LedgerState>>);
+pub struct LedgerStateCache(RwLock<Option<(LedgerState, u32)>>);
 
 impl LedgerStateCache {
     /// Create a zswap state Merkle tree collapsed update. Only load the ledger state if it is
@@ -33,45 +34,15 @@ impl LedgerStateCache {
         storage: &impl Storage,
         protocol_version: ProtocolVersion,
     ) -> Result<MerkleTreeCollapsedUpdate, LedgerStateCacheError> {
-        // Acquire a read lock.
-        let mut ledger_state_read = self.0.read().await;
+        let ledger_state = self
+            .load_if_stale(end_index, storage, |s| s.zswap_first_free())
+            .await?;
 
-        // Check if the current ledger state is stale and needs to be updated.
-        let first_free = ledger_state_read
+        debug!(start_index, end_index; "creating zswap collapsed update");
+
+        let update = ledger_state
             .as_ref()
-            .map(|s| s.zswap_first_free())
-            .unwrap_or_default();
-        if end_index >= first_free {
-            // Release the read lock and acquire a write lock.
-            drop(ledger_state_read);
-            let mut ledger_state_write = self.0.write().await;
-
-            // Check if the ledger state has been updated in the meantime.
-            let first_free = ledger_state_write
-                .as_ref()
-                .map(|s| s.zswap_first_free())
-                .unwrap_or_default();
-            if end_index >= first_free {
-                debug!(end_index, first_free; "outdated ledger state, loading from storage");
-
-                let Some((protocol_version, ledger_state_key)) =
-                    storage.get_highest_ledger_state().await?
-                else {
-                    return Err(LedgerStateCacheError::NotFound);
-                };
-
-                let ledger_state =
-                    LedgerState::load(&ledger_state_key, protocol_version.ledger_version())?;
-                *ledger_state_write = Some(ledger_state);
-            }
-
-            ledger_state_read = ledger_state_write.downgrade();
-        }
-
-        debug!(start_index, end_index; "creating collapsed update");
-
-        let update = ledger_state_read
-            .as_ref()
+            .map(|(s, _)| s)
             .expect("ledger state should exist after loading")
             .make_zswap_collapsed_update(start_index, end_index, protocol_version)?;
 
@@ -86,41 +57,15 @@ impl LedgerStateCache {
         storage: &impl Storage,
         protocol_version: ProtocolVersion,
     ) -> Result<MerkleTreeCollapsedUpdate, LedgerStateCacheError> {
-        let mut ledger_state_read = self.0.read().await;
-
-        let first_free = ledger_state_read
-            .as_ref()
-            .map(|s| s.dust_generations_first_free())
-            .unwrap_or_default();
-        if end_index >= first_free {
-            drop(ledger_state_read);
-            let mut ledger_state_write = self.0.write().await;
-
-            let first_free = ledger_state_write
-                .as_ref()
-                .map(|s| s.dust_generations_first_free())
-                .unwrap_or_default();
-            if end_index >= first_free {
-                debug!(end_index, first_free; "outdated ledger state for dust generations, loading from storage");
-
-                let Some((protocol_version, ledger_state_key)) =
-                    storage.get_highest_ledger_state().await?
-                else {
-                    return Err(LedgerStateCacheError::NotFound);
-                };
-
-                let ledger_state =
-                    LedgerState::load(&ledger_state_key, protocol_version.ledger_version())?;
-                *ledger_state_write = Some(ledger_state);
-            }
-
-            ledger_state_read = ledger_state_write.downgrade();
-        }
+        let ledger_state = self
+            .load_if_stale(end_index, storage, |s| s.dust_generations_first_free())
+            .await?;
 
         debug!(start_index, end_index; "creating dust generations collapsed update");
 
-        let collapsed_update = ledger_state_read
+        let collapsed_update = ledger_state
             .as_ref()
+            .map(|(s, _)| s)
             .expect("ledger state should exist after loading")
             .dust_generations_collapsed_update(start_index, end_index, protocol_version)?;
 
@@ -135,46 +80,73 @@ impl LedgerStateCache {
         storage: &impl Storage,
         protocol_version: ProtocolVersion,
     ) -> Result<MerkleTreeCollapsedUpdate, LedgerStateCacheError> {
-        let mut ledger_state_read = self.0.read().await;
-
-        let first_free = ledger_state_read
-            .as_ref()
-            .map(|s| s.dust_commitments_first_free())
-            .unwrap_or_default();
-        if end_index >= first_free {
-            drop(ledger_state_read);
-            let mut ledger_state_write = self.0.write().await;
-
-            let first_free = ledger_state_write
-                .as_ref()
-                .map(|s| s.dust_commitments_first_free())
-                .unwrap_or_default();
-            if end_index >= first_free {
-                debug!(end_index, first_free; "outdated ledger state for dust commitments, loading from storage");
-
-                let Some((protocol_version, ledger_state_key)) =
-                    storage.get_highest_ledger_state().await?
-                else {
-                    return Err(LedgerStateCacheError::NotFound);
-                };
-
-                let ledger_state =
-                    LedgerState::load(&ledger_state_key, protocol_version.ledger_version())?;
-                *ledger_state_write = Some(ledger_state);
-            }
-
-            ledger_state_read = ledger_state_write.downgrade();
-        }
+        let ledger_state = self
+            .load_if_stale(end_index, storage, |s| s.dust_commitments_first_free())
+            .await?;
 
         debug!(start_index, end_index; "creating dust commitments collapsed update");
 
-        let collapsed_update = ledger_state_read
+        let collapsed_update = ledger_state
             .as_ref()
+            .map(|(s, _)| s)
             .expect("ledger state should exist after loading")
             .dust_commitments_collapsed_update(start_index, end_index, protocol_version)?;
 
         Ok(collapsed_update)
     }
+
+    /// Return a read guard on the cached ledger state, first replacing it with the latest ledger
+    /// state from storage if `end_index` is at or beyond the first free index of the relevant tree.
+    async fn load_if_stale(
+        &self,
+        end_index: u64,
+        storage: &impl Storage,
+        first_free: impl Fn(&LedgerState) -> u64,
+    ) -> Result<RwLockReadGuard<'_, Option<(LedgerState, u32)>>, LedgerStateCacheError> {
+        let is_stale = |cached: &Option<(LedgerState, u32)>| {
+            let first_free = cached
+                .as_ref()
+                .map(|(s, _)| first_free(s))
+                .unwrap_or_default();
+            end_index >= first_free
+        };
+
+        // Acquire a read lock and check if the cached ledger state is stale.
+        let ledger_state_read = self.0.read().await;
+        if !is_stale(&ledger_state_read) {
+            return Ok(ledger_state_read);
+        }
+
+        // Release the read lock, acquire a write lock and check again, because the ledger state
+        // could have been updated in the meantime.
+        drop(ledger_state_read);
+        let mut ledger_state_write = self.0.write().await;
+        if is_stale(&ledger_state_write) {
+            debug!(end_index; "outdated ledger state, loading from storage");
+
+            let Some((latest_height, protocol_version, latest_key)) =
+                storage.get_highest_ledger_state().await?
+            else {
+                return Err(LedgerStateCacheError::NotFound);
+            };
+
+            let cached_height = ledger_state_write.as_ref().map(|(_, height)| *height);
+            if needs_reload(cached_height, latest_height) {
+                let ledger_state =
+                    LedgerState::load(&latest_key, protocol_version.ledger_version())?;
+                *ledger_state_write = Some((ledger_state, latest_height));
+            }
+        }
+
+        Ok(ledger_state_write.downgrade())
+    }
+}
+
+/// Whether a cached ledger state of the block at `cached_height` must be reloaded to serve the
+/// latest ledger state of the block at `height`. Once the first free index check has found
+/// the cached ledger state stale, it is always replaced with the latest one.
+fn needs_reload(_cached_height: Option<u32>, _height: u32) -> bool {
+    true
 }
 
 #[derive(Debug, Error)]
@@ -272,4 +244,34 @@ pub struct MerkleTreeCollapsedUpdate {
     pub end_index: u64,
     pub update: ByteVec,
     pub protocol_version: ProtocolVersion,
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::domain::ledger_state::needs_reload;
+
+    #[test]
+    fn test_needs_reload_nothing_cached() {
+        assert!(needs_reload(None, 42));
+    }
+
+    #[test]
+    fn test_needs_reload_newer() {
+        // A newer ledger state exists, e.g. after a NIGHT spend updated a dust generation leaf in
+        // place without changing the first free index of the tree.
+        assert!(needs_reload(Some(42), 43));
+    }
+
+    #[test]
+    fn test_needs_reload_same() {
+        // The cached ledger state is the latest one.
+        assert!(!needs_reload(Some(42), 42));
+    }
+
+    #[test]
+    fn test_needs_reload_older() {
+        // The caller fetched the latest ledger state before a new block arrived and the cache was
+        // meanwhile reloaded with the newer one; it must not move back.
+        assert!(!needs_reload(Some(43), 42));
+    }
 }

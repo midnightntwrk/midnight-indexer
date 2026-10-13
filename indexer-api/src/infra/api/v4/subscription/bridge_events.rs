@@ -254,7 +254,7 @@ where
                 .await
                 .map_err_into_server_error(|| "get highest ledger state")?
             {
-                Some((protocol_version, ledger_state_key)) => {
+                Some((_, protocol_version, ledger_state_key)) => {
                     let _ledger_permit = ledger_query_limiter.acquire().await;
                     indexer_common::domain::ledger::LedgerState::load(
                         &ledger_state_key,
@@ -300,7 +300,7 @@ where
                     .await
                     .map_err_into_server_error(|| "get highest ledger state (live)")?
                 {
-                    Some((protocol_version, ledger_state_key)) => {
+                    Some((_, protocol_version, ledger_state_key)) => {
                         let _ledger_permit = ledger_query_limiter.acquire().await;
                         indexer_common::domain::ledger::LedgerState::load(
                             &ledger_state_key,
