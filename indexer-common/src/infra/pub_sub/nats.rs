@@ -52,8 +52,13 @@ mod tests {
         },
         time::{Duration, Instant},
     };
-    use testcontainers::{GenericImage, ImageExt, core::WaitFor, runners::AsyncRunner};
-    use tokio::{task, time::sleep};
+    use testcontainers::{
+        ContainerAsync, GenericImage, ImageExt, core::WaitFor, runners::AsyncRunner,
+    };
+    use tokio::{
+        task,
+        time::{sleep, timeout},
+    };
     use uuid::Uuid;
 
     /// Pins the subject wire format, which the `Display` impl of `Topic` determines. The match is
@@ -75,40 +80,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_publish_subscribe() -> Result<(), BoxError> {
-        let nats_container = GenericImage::new("nats", "2.12.3")
-            .with_wait_for(WaitFor::message_on_stderr("Server is ready"))
-            .with_cmd([
-                "--user",
-                "indexer",
-                "--pass",
-                env!("APP__INFRA__PUB_SUB__PASSWORD"),
-            ])
-            .start()
-            .await
-            .context("start NATS container")?;
-
-        // In spite of the above "WaitFor" NATS stubbornly rejects connections.
-        let start = Instant::now();
-        while reqwest::get("localhost:8222/healthz")
-            .await
-            .and_then(|r| r.error_for_status())
-            .is_err()
-            && Instant::now() - start < Duration::from_millis(1_500)
-        {
-            sleep(Duration::from_millis(100)).await;
-        }
-
-        let nats_port = nats_container
-            .get_host_port_ipv4(4222)
-            .await
-            .context("get NATS port")?;
-        let nats_url = format!("localhost:{nats_port}");
-        let config = Config {
-            url: nats_url.clone(),
-            username: "indexer".to_string(),
-            password: env!("APP__INFRA__PUB_SUB__PASSWORD").into(),
-            max_reconnects: 1,
-        };
+        let (_nats_container, config) = start_nats().await?;
 
         let subscriber = NatsSubscriber::new(config.clone())
             .await
@@ -145,5 +117,78 @@ mod tests {
         assert_eq!(messages, [wallet_indexed]);
 
         Ok(())
+    }
+
+    /// A message published after `subscribe` returns is delivered, even before the stream is
+    /// first polled.
+    #[tokio::test]
+    async fn test_message_published_before_first_poll_is_delivered() -> Result<(), BoxError> {
+        let (_nats_container, config) = start_nats().await?;
+
+        let subscriber = NatsSubscriber::new(config.clone())
+            .await
+            .context("create NatsSubscriber")?;
+        let wallet_indexed_messages = subscriber.subscribe::<WalletIndexed>();
+
+        let wallet_indexed = WalletIndexed {
+            wallet_id: Uuid::nil(),
+        };
+        // Kept until the end: dropping the publisher can discard the queued message.
+        let publisher = NatsPublisher::new(config)
+            .await
+            .context("create NatsPublisher")?;
+        publisher
+            .publish(&wallet_indexed)
+            .await
+            .context("publish")?;
+
+        let messages = timeout(
+            Duration::from_secs(5),
+            wallet_indexed_messages.take(1).try_collect::<Vec<_>>(),
+        )
+        .await
+        .context("no message within 5s")?
+        .context("collect messages")?;
+        assert_eq!(messages, [wallet_indexed]);
+
+        Ok(())
+    }
+
+    async fn start_nats() -> Result<(ContainerAsync<GenericImage>, Config), BoxError> {
+        let nats_container = GenericImage::new("nats", "2.12.3")
+            .with_wait_for(WaitFor::message_on_stderr("Server is ready"))
+            .with_cmd([
+                "--user",
+                "indexer",
+                "--pass",
+                env!("APP__INFRA__PUB_SUB__PASSWORD"),
+            ])
+            .start()
+            .await
+            .context("start NATS container")?;
+
+        // In spite of the above "WaitFor" NATS stubbornly rejects connections.
+        let start = Instant::now();
+        while reqwest::get("localhost:8222/healthz")
+            .await
+            .and_then(|r| r.error_for_status())
+            .is_err()
+            && Instant::now() - start < Duration::from_millis(1_500)
+        {
+            sleep(Duration::from_millis(100)).await;
+        }
+
+        let nats_port = nats_container
+            .get_host_port_ipv4(4222)
+            .await
+            .context("get NATS port")?;
+        let config = Config {
+            url: format!("localhost:{nats_port}"),
+            username: "indexer".to_string(),
+            password: env!("APP__INFRA__PUB_SUB__PASSWORD").into(),
+            max_reconnects: 1,
+        };
+
+        Ok((nats_container, config))
     }
 }
