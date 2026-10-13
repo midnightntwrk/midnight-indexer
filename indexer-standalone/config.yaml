@@ -48,12 +48,14 @@ infra:
 
   storage:
     cnn_url: "/data/indexer.sqlite"
-    create_if_missing: false
+    # Set false after initialization to reject missing or zero-byte database files.
+    create_if_missing: true
 
   ledger_db:
     cache_max_nodes: 100000
     cnn_url: "/data/ledger-db.sqlite"
-    create_if_missing: false
+    # Set false after initialization to reject missing or zero-byte database files.
+    create_if_missing: true
 
   node:
     url: "ws://localhost:9944"
