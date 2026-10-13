@@ -12,21 +12,11 @@
 // limitations under the License.
 
 use crate::domain::{UnshieldedAddress, bridge::BridgeEvent};
-use derive_more::derive::From;
+use derive_more::derive::{Display, From};
 use futures::{Stream, stream};
 use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, error::Error as StdError, fmt::Debug};
 use uuid::Uuid;
-
-macro_rules! message {
-    ($name:ident) => {
-        impl Message for $name {
-            const TOPIC: Topic = Topic(stringify!($name));
-        }
-
-        impl sealed::Sealed for $name {}
-    };
-}
 
 /// A pub-sub message. Restricted to implementations in this module.
 pub trait Message
@@ -36,8 +26,42 @@ where
     const TOPIC: Topic;
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct Topic(pub &'static str);
+// Declares `Topic` over the given message types and implements `Message` for each, pairing every
+// type with its same-named variant.
+macro_rules! topics {
+    ($($name:ident),+ $(,)?) => {
+        /// The channel a [Message] travels on, one variant per implementation.
+        #[derive(Debug, Display, Clone, Copy, PartialEq, Eq)]
+        pub enum Topic {
+            $($name),+
+        }
+
+        impl Topic {
+            /// Every topic in declaration order. No variant carries an explicit discriminant, so
+            /// `topic as usize` indexes this slice.
+            #[cfg(any(test, feature = "standalone"))]
+            pub(crate) const VARIANTS: &'static [Topic] = &[$(Topic::$name),+];
+        }
+
+        $(
+            // Binds the message type to the topic it travels on.
+            impl Message for $name {
+                const TOPIC: Topic = Topic::$name;
+            }
+
+            // Satisfies the supertrait bound on `Message`.
+            impl sealed::Sealed for $name {}
+        )+
+    };
+}
+
+// The complete set of pub-sub message types.
+topics!(
+    BlockIndexed,
+    WalletIndexed,
+    UnshieldedUtxoIndexed,
+    BridgeEventIndexed,
+);
 
 /// Message/event signaling that a block has been indexed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, From)]
@@ -46,14 +70,12 @@ pub struct BlockIndexed {
     pub max_transaction_id: Option<u64>,
     pub caught_up: bool,
 }
-message!(BlockIndexed);
 
 /// Message/event signaling that a wallet has been indexed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, From)]
 pub struct WalletIndexed {
     pub wallet_id: Uuid,
 }
-message!(WalletIndexed);
 
 /// Emitted when a transaction affecting unshielded UTXOs for a concrete address
 /// has been stored in the DB.
@@ -61,7 +83,6 @@ message!(WalletIndexed);
 pub struct UnshieldedUtxoIndexed {
     pub address: UnshieldedAddress,
 }
-message!(UnshieldedUtxoIndexed);
 
 /// Emitted when a c2m-bridge event (any of the 5 variants) is indexed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -69,7 +90,6 @@ pub struct BridgeEventIndexed {
     pub block_height: u64,
     pub event: BridgeEvent,
 }
-message!(BridgeEventIndexed);
 
 /// A pub-sub publisher.
 #[trait_variant::make(Send)]
@@ -118,6 +138,39 @@ impl Subscriber for NoopSubscriber {
     }
 }
 
+// Private, so only this module can name `Sealed` and thus satisfy the supertrait bound on
+// `Message`.
 mod sealed {
     pub trait Sealed {}
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::domain::Topic;
+
+    /// Every topic renders as its own name. The match is exhaustive, so a new topic must be added
+    /// here too.
+    #[test]
+    fn test_topic_display() {
+        use Topic::*;
+        for topic in Topic::VARIANTS {
+            let name = match topic {
+                BlockIndexed => "BlockIndexed",
+                WalletIndexed => "WalletIndexed",
+                UnshieldedUtxoIndexed => "UnshieldedUtxoIndexed",
+                BridgeEventIndexed => "BridgeEventIndexed",
+            };
+
+            assert_eq!(topic.to_string(), name);
+        }
+    }
+
+    /// Each topic's discriminant is its own position in `VARIANTS`. Giving a variant an explicit
+    /// discriminant breaks this, and with it every lookup keyed on `topic as usize`.
+    #[test]
+    fn test_variants_are_indexed_by_discriminant() {
+        for &topic in Topic::VARIANTS {
+            assert_eq!(Topic::VARIANTS[topic as usize], topic);
+        }
+    }
 }
