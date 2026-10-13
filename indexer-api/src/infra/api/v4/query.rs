@@ -13,7 +13,6 @@
 
 use crate::{
     domain::{
-        LedgerStateCacheError,
         bridge::TreasuryReason,
         storage::{Storage, bridge::BridgeEventFilter},
     },
@@ -121,7 +120,7 @@ where
     ) -> ApiResult<MerkleTreeCollapsedUpdate> {
         let storage = cx.get_storage::<S>();
 
-        let (_, protocol_version, _) = storage
+        let (height, protocol_version, key) = storage
             .get_highest_ledger_state()
             .await
             .map_err_into_server_error(|| "get highest ledger state")?
@@ -133,10 +132,12 @@ where
         let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
 
         cx.get_ledger_state_cache()
-            .make_zswap_collapsed_update(start_index, end_index, storage, protocol_version)
+            .at_least(height, &key, protocol_version.ledger_version())
             .await
+            .map_err_into_server_error(|| "load ledger state")?
+            .make_zswap_collapsed_update(start_index, end_index, protocol_version)
             .map_err(|error| match error {
-                error @ LedgerStateCacheError::Ledger(ledger::Error::InvalidUpdate(_)) => {
+                error @ ledger::Error::InvalidUpdate(_) => {
                     ApiError::client("invalid start_index and/or end_index", error)
                 }
 
@@ -396,7 +397,7 @@ where
     ) -> ApiResult<MerkleTreeCollapsedUpdate> {
         let storage = cx.get_storage::<S>();
 
-        let (_, protocol_version, _) = storage
+        let (height, protocol_version, key) = storage
             .get_highest_ledger_state()
             .await
             .map_err_into_server_error(|| "get highest ledger state")?
@@ -408,10 +409,12 @@ where
         let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
 
         cx.get_ledger_state_cache()
-            .dust_commitments_collapsed_update(start_index, end_index, storage, protocol_version)
+            .at_least(height, &key, protocol_version.ledger_version())
             .await
+            .map_err_into_server_error(|| "load ledger state")?
+            .dust_commitments_collapsed_update(start_index, end_index, protocol_version)
             .map_err(|error| match error {
-                error @ LedgerStateCacheError::Ledger(ledger::Error::InvalidUpdate(_)) => {
+                error @ ledger::Error::InvalidUpdate(_) => {
                     ApiError::client("invalid start_index and/or end_index", error)
                 }
 
@@ -431,7 +434,7 @@ where
     ) -> ApiResult<MerkleTreeCollapsedUpdate> {
         let storage = cx.get_storage::<S>();
 
-        let (_, protocol_version, _) = storage
+        let (height, protocol_version, key) = storage
             .get_highest_ledger_state()
             .await
             .map_err_into_server_error(|| "get highest ledger state")?
@@ -443,10 +446,12 @@ where
         let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
 
         cx.get_ledger_state_cache()
-            .dust_generations_collapsed_update(start_index, end_index, storage, protocol_version)
+            .at_least(height, &key, protocol_version.ledger_version())
             .await
+            .map_err_into_server_error(|| "load ledger state")?
+            .dust_generations_collapsed_update(start_index, end_index, protocol_version)
             .map_err(|error| match error {
-                error @ LedgerStateCacheError::Ledger(ledger::Error::InvalidUpdate(_)) => {
+                error @ ledger::Error::InvalidUpdate(_) => {
                     ApiError::client("invalid start_index and/or end_index", error)
                 }
 
