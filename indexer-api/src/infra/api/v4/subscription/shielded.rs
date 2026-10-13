@@ -326,8 +326,9 @@ where
         // walk, so it is released before this transaction is yielded to the client.
         let _ledger_permit = ledger_query_limiter.acquire().await;
         let zswap_collapsed_update = ledger_state_cache
-            .at_least(height, &key, protocol_version.ledger_version())
+            .at_least(height, &key, protocol_version)
             .await
+            .map(|(ledger_state, _)| ledger_state)
             .map_err_into_server_error(|| "load ledger state")?
             .make_zswap_collapsed_update(
                 index,

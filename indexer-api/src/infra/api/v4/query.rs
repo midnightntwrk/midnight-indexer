@@ -132,10 +132,12 @@ where
         let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
 
         cx.get_ledger_state_cache()
-            .at_least(height, &key, protocol_version.ledger_version())
+            .at_least(height, &key, protocol_version)
             .await
+            .map(|(ledger_state, protocol_version)| {
+                ledger_state.make_zswap_collapsed_update(start_index, end_index, protocol_version)
+            })
             .map_err_into_server_error(|| "load ledger state")?
-            .make_zswap_collapsed_update(start_index, end_index, protocol_version)
             .map_err(|error| match error {
                 error @ ledger::Error::InvalidUpdate(_) => {
                     ApiError::client("invalid start_index and/or end_index", error)
@@ -409,10 +411,16 @@ where
         let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
 
         cx.get_ledger_state_cache()
-            .at_least(height, &key, protocol_version.ledger_version())
+            .at_least(height, &key, protocol_version)
             .await
+            .map(|(ledger_state, protocol_version)| {
+                ledger_state.dust_commitments_collapsed_update(
+                    start_index,
+                    end_index,
+                    protocol_version,
+                )
+            })
             .map_err_into_server_error(|| "load ledger state")?
-            .dust_commitments_collapsed_update(start_index, end_index, protocol_version)
             .map_err(|error| match error {
                 error @ ledger::Error::InvalidUpdate(_) => {
                     ApiError::client("invalid start_index and/or end_index", error)
@@ -446,10 +454,16 @@ where
         let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
 
         cx.get_ledger_state_cache()
-            .at_least(height, &key, protocol_version.ledger_version())
+            .at_least(height, &key, protocol_version)
             .await
+            .map(|(ledger_state, protocol_version)| {
+                ledger_state.dust_generations_collapsed_update(
+                    start_index,
+                    end_index,
+                    protocol_version,
+                )
+            })
             .map_err_into_server_error(|| "load ledger state")?
-            .dust_generations_collapsed_update(start_index, end_index, protocol_version)
             .map_err(|error| match error {
                 error @ ledger::Error::InvalidUpdate(_) => {
                     ApiError::client("invalid start_index and/or end_index", error)
