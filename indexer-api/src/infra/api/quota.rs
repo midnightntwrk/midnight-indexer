@@ -82,7 +82,7 @@ impl SubscriptionQuotas {
     pub fn try_acquire(
         &self,
         per_connection_counter: &Arc<AtomicUsize>,
-        session: Option<SessionId>,
+        session: Option<&SessionId>,
     ) -> Result<SubscriptionGuard, QuotaError> {
         let max_concurrent = self.config.max_concurrent_per_connection.get();
         if per_connection_counter
@@ -98,7 +98,7 @@ impl SubscriptionQuotas {
         if let Some(session) = session {
             let bucket = self
                 .per_session_buckets
-                .entry(session)
+                .entry(session.clone())
                 .or_insert_with(|| Arc::new(Mutex::new(TokenBucket::new(&self.config))))
                 .clone();
             let allowed = bucket.lock().try_take();
@@ -249,9 +249,9 @@ mod tests {
 
         let mut guards = Vec::new();
         for _ in 0..5 {
-            guards.push(quotas.try_acquire(&counter, Some(s)).unwrap());
+            guards.push(quotas.try_acquire(&counter, Some(&s)).unwrap());
         }
-        let err = quotas.try_acquire(&counter, Some(s)).unwrap_err();
+        let err = quotas.try_acquire(&counter, Some(&s)).unwrap_err();
         assert!(matches!(err, QuotaError::PerSessionRate(5)));
     }
 
@@ -261,10 +261,10 @@ mod tests {
         let counter = Arc::new(AtomicUsize::new(0));
         let s = session(2);
 
-        let _g = quotas.try_acquire(&counter, Some(s)).unwrap();
+        let _g = quotas.try_acquire(&counter, Some(&s)).unwrap();
         assert_eq!(counter.load(Ordering::Acquire), 1);
 
-        let err = quotas.try_acquire(&counter, Some(s)).unwrap_err();
+        let err = quotas.try_acquire(&counter, Some(&s)).unwrap_err();
         assert!(matches!(err, QuotaError::PerSessionRate(1)));
         assert_eq!(
             counter.load(Ordering::Acquire),
@@ -279,8 +279,8 @@ mod tests {
         let counter = Arc::new(AtomicUsize::new(0));
         let s = session(3);
 
-        let _g = quotas.try_acquire(&counter, Some(s)).unwrap();
-        let err = quotas.try_acquire(&counter, Some(s)).unwrap_err();
+        let _g = quotas.try_acquire(&counter, Some(&s)).unwrap();
+        let err = quotas.try_acquire(&counter, Some(&s)).unwrap_err();
         assert!(matches!(err, QuotaError::PerConnection(1)));
 
         let bucket = quotas.per_session_buckets.get(&s).unwrap().clone();
@@ -296,11 +296,13 @@ mod tests {
         let quotas = SubscriptionQuotas::new(config(1000, 1));
         let counter = Arc::new(AtomicUsize::new(0));
 
-        quotas.try_acquire(&counter, Some(session(10))).unwrap();
-        quotas.try_acquire(&counter, Some(session(11))).unwrap();
-        quotas.try_acquire(&counter, Some(session(12))).unwrap();
+        quotas.try_acquire(&counter, Some(&session(10))).unwrap();
+        quotas.try_acquire(&counter, Some(&session(11))).unwrap();
+        quotas.try_acquire(&counter, Some(&session(12))).unwrap();
 
-        let err = quotas.try_acquire(&counter, Some(session(10))).unwrap_err();
+        let err = quotas
+            .try_acquire(&counter, Some(&session(10)))
+            .unwrap_err();
         assert!(matches!(err, QuotaError::PerSessionRate(1)));
     }
 
