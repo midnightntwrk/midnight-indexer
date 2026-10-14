@@ -153,17 +153,21 @@ where
             .try_into()
             .map_err_into_client_error(|| "invalid session ID")?;
 
-        let quota_guard = cx
-            .get_subscription_quotas()
-            .try_acquire(cx.get_per_connection_counter(), Some(&session_id))
-            .map_err_into_client_error(|| "subscription limit exceeded")?;
-
         let wallet_id = cx
             .get_storage::<S>()
             .resolve_session_id(&session_id)
             .await
             .map_err_into_server_error(|| "resolve session ID")?
             .some_or_client_error(|| "unknown or expired session ID")?;
+
+        // Only acquire a per-session quota bucket for a known session, so that arbitrary session
+        // IDs cannot create buckets. The bucket is keyed by wallet ID, so reconnecting with a new
+        // session does not reset it.
+        let quota_guard = cx
+            .get_subscription_quotas()
+            .try_acquire(cx.get_per_connection_counter(), Some(wallet_id))
+            .map_err_into_client_error(|| "subscription limit exceeded")?;
+
         let index = index.unwrap_or_default();
 
         // Build a stream of shielded transaction events by merging relevant transactions and

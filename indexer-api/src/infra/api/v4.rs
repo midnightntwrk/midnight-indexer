@@ -576,7 +576,11 @@ async fn resolve_height<S: Storage>(
 mod tests {
     use crate::{
         domain::storage::NoopStorage,
-        infra::api::{Metrics, v4::schema_builder},
+        infra::api::{
+            Metrics,
+            quota::{PerConnectionCounter, QuotaConfig, SubscriptionQuotas},
+            v4::schema_builder,
+        },
     };
     use async_graphql::{
         Request, ServerResult, Variables,
@@ -586,7 +590,10 @@ mod tests {
     use futures::StreamExt;
     use indexer_common::domain::{NetworkId, NoopSubscriber};
     use parking_lot::Mutex;
-    use std::sync::Arc;
+    use std::{
+        num::{NonZeroU32, NonZeroUsize},
+        sync::Arc,
+    };
 
     const MARKER: &str = "deadbeefdeadbeefdeadbeefdeadbeef";
 
@@ -660,5 +667,46 @@ mod tests {
         captured.iter().for_each(|doc| {
             assert!(!doc.contains(MARKER), "secret in telemetry: {doc}");
         });
+    }
+
+    #[tokio::test]
+    async fn test_unknown_session_does_not_consume_quota() {
+        let quota_config = QuotaConfig {
+            max_concurrent_per_connection: NonZeroUsize::new(10).expect("10 is non-zero"),
+            max_session_subscriptions_per_minute: NonZeroU32::new(1).expect("1 is non-zero"),
+        };
+        let schema = schema_builder::<NoopStorage, NoopSubscriber>()
+            .data(NoopStorage)
+            .data(Metrics::default())
+            .data(NetworkId::try_from("undeployed").expect("network ID is valid"))
+            .data(SubscriptionQuotas::new(quota_config))
+            .finish();
+
+        // A well-formed session ID that no wallet has. With one subscription per minute allowed,
+        // a second attempt would exceed the rate limit if unknown sessions consumed quota.
+        let session_id = "00".repeat(32);
+        for attempt in 1..=2 {
+            let request = Request::new(format!(
+                r#"subscription {{ shieldedTransactions(sessionId: "{session_id}") {{ __typename }} }}"#
+            ))
+            .data(PerConnectionCounter::default());
+            let response = schema
+                .execute_stream(request)
+                .next()
+                .await
+                .expect("subscription yields a response");
+
+            let messages = response
+                .errors
+                .iter()
+                .map(|error| error.message.as_str())
+                .collect::<Vec<_>>();
+            assert!(
+                messages
+                    .iter()
+                    .any(|message| message.starts_with("unknown or expired session ID")),
+                "attempt {attempt}: {messages:?}"
+            );
+        }
     }
 }
