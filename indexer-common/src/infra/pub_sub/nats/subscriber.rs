@@ -15,13 +15,16 @@ use crate::{
     domain::{Message, Subscriber},
     infra::pub_sub::nats::Config,
 };
-use async_nats::{Client, ConnectOptions, Event, client::RequestErrorKind};
+use async_nats::{Client, ConnectOptions, Event, Request, client::RequestErrorKind};
 use futures::{Stream, StreamExt, TryFutureExt, TryStreamExt, stream};
 use log::{debug, info, warn};
 use secrecy::ExposeSecret;
 use std::time::Duration;
 use thiserror::Error;
 
+// Bounds the round trip that confirms a subscription, so an unreachable server delays each
+// subscription by at most this long.
+pub(super) const CONFIRM_TIMEOUT: Duration = Duration::from_secs(1);
 const REPEAT_DELAY: Duration = Duration::from_millis(100);
 
 // NATS based [Subscriber] implementation.
@@ -82,7 +85,10 @@ impl Subscriber for NatsSubscriber {
         // https://docs.nats.io/learn/resilient-clients/drain-and-shutdown.
         match self
             .client
-            .request(self.client.new_inbox(), Default::default())
+            .send_request(
+                self.client.new_inbox(),
+                Request::new().timeout(Some(CONFIRM_TIMEOUT)),
+            )
             .await
         {
             // The expected answer: the server processed the SUB and found no subscriber to the inbox.

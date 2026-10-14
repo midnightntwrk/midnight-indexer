@@ -40,7 +40,11 @@ mod tests {
     use crate::{
         domain::{Publisher, Subscriber, Topic, WalletIndexed},
         error::BoxError,
-        infra::pub_sub::nats::{Config, publisher::NatsPublisher, subscriber::NatsSubscriber},
+        infra::pub_sub::nats::{
+            Config,
+            publisher::NatsPublisher,
+            subscriber::{CONFIRM_TIMEOUT, NatsSubscriber},
+        },
     };
     use anyhow::Context;
     use async_nats::subject::ToSubject;
@@ -166,6 +170,28 @@ mod tests {
             .await
             .context("collect messages")?;
         assert_eq!(messages, [after_subscribe]);
+
+        Ok(())
+    }
+
+    /// `subscribe` returns shortly after its confirmation timeout when the server does not answer.
+    #[tokio::test]
+    async fn test_subscribe_returns_when_server_does_not_answer() -> Result<(), BoxError> {
+        let (nats_container, config) = start_nats().await?;
+        let subscriber = NatsSubscriber::new(config)
+            .await
+            .context("create NatsSubscriber")?;
+
+        nats_container.pause().await.context("pause NATS")?;
+        let start = Instant::now();
+        let _wallet_indexed_messages = subscriber.subscribe::<WalletIndexed>().await;
+        let elapsed = start.elapsed();
+        nats_container.unpause().await.context("unpause NATS")?;
+
+        assert!(
+            elapsed < CONFIRM_TIMEOUT + Duration::from_millis(100),
+            "subscribe took {elapsed:?}"
+        );
 
         Ok(())
     }
