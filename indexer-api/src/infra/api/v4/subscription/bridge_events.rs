@@ -113,6 +113,19 @@ where
         let domain_variant = variant.map(Into::into);
 
         let stream = try_stream! {
+            // Subscribe before reading existing items, so none indexed in between is missed.
+            let live = subscriber
+                .subscribe::<BridgeEventIndexed>().await
+                .try_filter(move |evt| {
+                    let recipient_match = recipient
+                        .map(|r| evt.event.recipient().map(|er| er.as_bytes() == r.as_ref()).unwrap_or(false))
+                        .unwrap_or(true);
+                    let variant_match = domain_variant
+                        .map(|v| evt.event.variant() == v)
+                        .unwrap_or(true);
+                    ready(recipient_match && variant_match)
+                });
+
             let mut last_id = from.unwrap_or(0);
 
             loop {
@@ -138,17 +151,6 @@ where
             }
 
             // Live tail.
-            let live = subscriber
-                .subscribe::<BridgeEventIndexed>().await
-                .try_filter(move |evt| {
-                    let recipient_match = recipient
-                        .map(|r| evt.event.recipient().map(|er| er.as_bytes() == r.as_ref()).unwrap_or(false))
-                        .unwrap_or(true);
-                    let variant_match = domain_variant
-                        .map(|v| evt.event.variant() == v)
-                        .unwrap_or(true);
-                    ready(recipient_match && variant_match)
-                });
             let mut live = pin!(live);
             while let Some(_msg) = live.try_next().await
                 .map_err_into_server_error(|| "subscribe BridgeEventIndexed")?
@@ -186,13 +188,7 @@ where
         let subscriber = cx.get_subscriber::<B>();
 
         let stream = try_stream! {
-            // Initial snapshot.
-            let initial = storage
-                .get_bridge_pool_summary(None)
-                .await
-                .map_err_into_server_error(|| "get bridge pool summary")?;
-            yield BridgePoolUpdate { new_event: None, pool: BridgePoolSummary::from(initial) };
-
+            // Subscribe before reading existing items, so none indexed in between is missed.
             let live = subscriber
                 .subscribe::<BridgeEventIndexed>().await
                 .try_filter(|evt| {
@@ -203,10 +199,24 @@ where
                     );
                     ready(interesting)
                 });
+
+            // Initial snapshot.
+            let initial = storage
+                .get_bridge_pool_summary(None)
+                .await
+                .map_err_into_server_error(|| "get bridge pool summary")?;
+            let snapshot_height = initial.last_event_block_height;
+            yield BridgePoolUpdate { new_event: None, pool: BridgePoolSummary::from(initial) };
+
             let mut live = pin!(live);
             while let Some(msg) = live.try_next().await
                 .map_err_into_server_error(|| "subscribe BridgeEventIndexed")?
             {
+                // A block commits all its events at once, so an event at or below the snapshot's
+                // last event height is already in the initial snapshot.
+                if Some(msg.block_height) <= snapshot_height {
+                    continue;
+                }
                 let pool = storage
                     .get_bridge_pool_summary(None)
                     .await
@@ -239,6 +249,27 @@ where
             .map_err_into_client_error(|| "invalid recipient address")?;
 
         let stream = try_stream! {
+            // Re-emit on each relevant pub-sub event, subscribing before reading the initial balance
+            // so none indexed in between is missed. Bridge pallet events cover the deposit
+            // side; a claim is a regular `ClaimRewards` transaction that emits no pallet event,
+            // so also wake on unshielded UTXO activity for the address (a claim creates
+            // unshielded UTXOs for the recipient).
+            let deposits = subscriber
+                .subscribe::<BridgeEventIndexed>().await
+                .try_filter(move |evt| {
+                    let matches = evt
+                        .event
+                        .recipient()
+                        .map(|r| r.as_bytes() == address.as_ref())
+                        .unwrap_or(false);
+                    ready(matches)
+                })
+                .map_ok(|_| ());
+            let claims = subscriber
+                .subscribe::<UnshieldedUtxoIndexed>().await
+                .try_filter(move |utxo| ready(utxo.address == address))
+                .map_ok(|_| ());
+
             // Emit initial balance. `balance` is overridden with the authoritative claimable from
             // the ledger's `bridge_receiving` map (see the `bridge_balance` query for rationale).
             let mut initial = storage
@@ -265,27 +296,9 @@ where
                 }
                 None => 0,
             };
+            let mut last_balance = initial;
             yield BridgeBalance::from(initial);
 
-            // Re-emit on each relevant pub-sub event. Bridge pallet events cover the deposit
-            // side; a claim is a regular `ClaimRewards` transaction that emits no pallet event,
-            // so also wake on unshielded UTXO activity for the address (a claim creates
-            // unshielded UTXOs for the recipient).
-            let deposits = subscriber
-                .subscribe::<BridgeEventIndexed>().await
-                .try_filter(move |evt| {
-                    let matches = evt
-                        .event
-                        .recipient()
-                        .map(|r| r.as_bytes() == address.as_ref())
-                        .unwrap_or(false);
-                    ready(matches)
-                })
-                .map_ok(|_| ());
-            let claims = subscriber
-                .subscribe::<UnshieldedUtxoIndexed>().await
-                .try_filter(move |utxo| ready(utxo.address == address))
-                .map_ok(|_| ());
             let live = stream::select(deposits, claims);
             let mut live = pin!(live);
             while let Some(_msg) = live.try_next().await
@@ -311,6 +324,12 @@ where
                     }
                     None => 0,
                 };
+                // A wake-up need not change the balance, e.g. for an event already in the initial
+                // balance or several events in one block.
+                if updated == last_balance {
+                    continue;
+                }
+                last_balance = updated;
                 yield BridgeBalance::from(updated);
             }
         };
