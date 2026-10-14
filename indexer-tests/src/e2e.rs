@@ -874,7 +874,8 @@ async fn test_contract_actions_subscription(
         .into_group_map();
 
     for (address, expected_contract_actions) in contract_actions_by_address {
-        // No offset.
+        // No offset: the stream starts at the latest block, past every contract action, so it
+        // replays nothing.
         let variables = contract_action_subscription::Variables {
             address: address.clone(),
             contract_action_subscription_offset: None,
@@ -883,12 +884,15 @@ async fn test_contract_actions_subscription(
             graphql_ws_client::subscribe::<ContractActionSubscription>(ws_api_url, variables)
                 .await
                 .context("subscribe to contract actions")?
-                .take(expected_contract_actions.len())
+                .take_until(sleep(Duration::from_secs(3)))
                 .map_ok(|data| data.contract_actions.to_json_value())
                 .try_collect::<Vec<_>>()
                 .await
                 .context("collect blocks from contract action subscription")?;
-        assert_eq!(contract_actions, expected_contract_actions);
+        assert!(
+            contract_actions.is_empty(),
+            "a stream without offset replays no contract action, got: {contract_actions:?}"
+        );
 
         // Genesis hash.
         let hash = indexer_data
@@ -907,7 +911,14 @@ async fn test_contract_actions_subscription(
                 .await
                 .context("subscribe to contract actions")?
                 .take(expected_contract_actions.len())
-                .map_ok(|data| data.contract_actions.to_json_value())
+                .map_ok(|data| {
+                    let action = data.contract_actions;
+                    assert_eq!(
+                        action.state_at.hash, action.transaction.block.hash,
+                        "an ordinary stream item's stateAt is its own block"
+                    );
+                    action.to_json_value()
+                })
                 .try_collect::<Vec<_>>()
                 .await
                 .context("collect blocks from contract action subscription")?;
@@ -925,7 +936,14 @@ async fn test_contract_actions_subscription(
                 .await
                 .context("subscribe to contract actions")?
                 .take(expected_contract_actions.len())
-                .map_ok(|data| data.contract_actions.to_json_value())
+                .map_ok(|data| {
+                    let action = data.contract_actions;
+                    assert_eq!(
+                        action.state_at.hash, action.transaction.block.hash,
+                        "an ordinary stream item's stateAt is its own block"
+                    );
+                    action.to_json_value()
+                })
                 .try_collect::<Vec<_>>()
                 .await
                 .context("collect blocks from contract action subscription")?;
