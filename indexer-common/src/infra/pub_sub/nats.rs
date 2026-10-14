@@ -43,13 +43,14 @@ mod tests {
         infra::pub_sub::nats::{
             Config,
             publisher::NatsPublisher,
-            subscriber::{CONFIRM_TIMEOUT, NatsSubscriber},
+            subscriber::{CONFIRM_TIMEOUT, NatsSubscriber, SubscriberError},
         },
     };
     use anyhow::Context;
     use async_nats::subject::ToSubject;
     use futures::{StreamExt, TryStreamExt};
     use std::{
+        pin::pin,
         sync::{
             Arc,
             atomic::{AtomicBool, Ordering},
@@ -63,7 +64,7 @@ mod tests {
         io::{self, AsyncReadExt, AsyncWriteExt},
         net::{TcpListener, TcpStream},
         task,
-        time::sleep,
+        time::{sleep, timeout},
     };
     use uuid::Uuid;
 
@@ -174,7 +175,8 @@ mod tests {
         Ok(())
     }
 
-    /// `subscribe` returns shortly after its confirmation timeout when the server does not answer.
+    /// `subscribe` returns shortly after its confirmation timeout when the server does not answer,
+    /// and the stream's first item is an error.
     #[tokio::test]
     async fn test_subscribe_returns_when_server_does_not_answer() -> Result<(), BoxError> {
         let (nats_container, config) = start_nats().await?;
@@ -184,13 +186,22 @@ mod tests {
 
         nats_container.pause().await.context("pause NATS")?;
         let start = Instant::now();
-        let _wallet_indexed_messages = subscriber.subscribe::<WalletIndexed>().await;
+        let wallet_indexed_messages = subscriber.subscribe::<WalletIndexed>().await;
         let elapsed = start.elapsed();
         nats_container.unpause().await.context("unpause NATS")?;
 
         assert!(
             elapsed < CONFIRM_TIMEOUT + Duration::from_millis(100),
             "subscribe took {elapsed:?}"
+        );
+        let first = timeout(
+            Duration::from_millis(100),
+            pin!(wallet_indexed_messages).next(),
+        )
+        .await;
+        assert!(
+            matches!(first, Ok(Some(Err(SubscriberError::Subscribe(_))))),
+            "first item is {first:?}"
         );
 
         Ok(())

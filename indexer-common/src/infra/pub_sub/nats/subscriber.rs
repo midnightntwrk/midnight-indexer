@@ -15,7 +15,10 @@ use crate::{
     domain::{Message, Subscriber},
     infra::pub_sub::nats::Config,
 };
-use async_nats::{Client, ConnectOptions, Event, Request, client::RequestErrorKind};
+use async_nats::{
+    Client, ConnectOptions, Event, Request, SubscribeError,
+    client::{RequestErrorKind, SubscribeErrorKind},
+};
 use futures::{Stream, StreamExt, TryFutureExt, TryStreamExt, stream};
 use log::{debug, info, warn};
 use secrecy::ExposeSecret;
@@ -70,7 +73,7 @@ impl Subscriber for NatsSubscriber {
     where
         T: Message,
     {
-        let subscription = self
+        let mut subscription = self
             .client
             .subscribe(T::TOPIC)
             .await
@@ -102,8 +105,12 @@ impl Subscriber for NatsSubscriber {
                     T::TOPIC
                 );
             }
+            // An unconfirmed subscription may miss messages, so it fails like an unestablished one.
             Err(error) => {
-                warn!(error:%; "cannot confirm NATS subscription for topic {}", T::TOPIC);
+                subscription = Err(SubscriberError::Subscribe(SubscribeError::with_source(
+                    SubscribeErrorKind::Other,
+                    error,
+                )));
             }
         }
 
