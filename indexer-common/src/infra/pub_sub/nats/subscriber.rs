@@ -26,8 +26,9 @@ use std::time::Duration;
 use thiserror::Error;
 
 // Bounds the round trip that confirms a subscription, so an unreachable server delays each
-// subscription by at most this long.
-pub(super) const CONFIRM_TIMEOUT: Duration = Duration::from_secs(1);
+// subscription by at most this long. A subscription that times out fails, so a slow but healthy
+// server needs room to answer.
+pub(super) const CONFIRM_TIMEOUT: Duration = Duration::from_secs(3);
 const REPEAT_DELAY: Duration = Duration::from_millis(100);
 
 // NATS based [Subscriber] implementation.
