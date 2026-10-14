@@ -165,11 +165,15 @@ mod tests {
             .await
             .context("publish after subscribe")?;
 
-        let messages = wallet_indexed_messages
-            .take_until(sleep(Duration::from_secs(2)))
-            .try_collect::<Vec<_>>()
-            .await
-            .context("collect messages")?;
+        // Both messages travel on the publisher's connection in order, so had the first been
+        // delivered, it would be received first.
+        let messages = timeout(
+            Duration::from_secs(2),
+            wallet_indexed_messages.take(1).try_collect::<Vec<_>>(),
+        )
+        .await
+        .context("no message within 2s")?
+        .context("collect messages")?;
         assert_eq!(messages, [after_subscribe]);
 
         Ok(())
