@@ -255,14 +255,21 @@ mod tests {
                 "indexer",
                 "--pass",
                 env!("APP__INFRA__PUB_SUB__PASSWORD"),
+                "--http_port",
+                "8222",
             ])
             .start()
             .await
             .context("start NATS container")?;
 
         // In spite of the above "WaitFor" NATS stubbornly rejects connections.
+        let monitoring_port = nats_container
+            .get_host_port_ipv4(8222)
+            .await
+            .context("get NATS monitoring port")?;
+        let health_url = format!("http://localhost:{monitoring_port}/healthz");
         let start = Instant::now();
-        while reqwest::get("localhost:8222/healthz")
+        while reqwest::get(&health_url)
             .await
             .and_then(|r| r.error_for_status())
             .is_err()
