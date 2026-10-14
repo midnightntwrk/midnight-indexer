@@ -15,9 +15,9 @@ use crate::{
     domain::{Message, Subscriber},
     infra::pub_sub::nats::Config,
 };
-use async_nats::{Client, ConnectOptions, Event};
+use async_nats::{Client, ConnectOptions, Event, client::RequestErrorKind};
 use futures::{Stream, StreamExt, TryFutureExt, TryStreamExt, stream};
-use log::{info, warn};
+use log::{debug, info, warn};
 use secrecy::ExposeSecret;
 use std::time::Duration;
 use thiserror::Error;
@@ -67,15 +67,38 @@ impl Subscriber for NatsSubscriber {
     where
         T: Message,
     {
-        // NATS registers a subscription when its command reaches the server; the flush round trip
-        // waits for that, so every message published afterwards is delivered.
         let subscription = self
             .client
             .subscribe(T::TOPIC)
             .await
             .map_err(SubscriberError::Subscribe);
-        if let Err(error) = self.client.flush().await {
-            warn!(error:%; "cannot flush NATS subscription for topic {}", T::TOPIC);
+
+        // The server delivers only messages published after it has registered the subscription, and
+        // this method promises every message published once it returns. The server processes a
+        // connection's commands in order and answers a request to a subject without subscribers
+        // with "no responders", so that answer confirms the subscription above. `Client::flush`
+        // cannot confirm it: the Rust client's flush resolves once the bytes reach the socket,
+        // without waiting for the server's PONG, unlike other NATS clients. See "Flush" in
+        // https://docs.nats.io/learn/resilient-clients/drain-and-shutdown.
+        match self
+            .client
+            .request(self.client.new_inbox(), Default::default())
+            .await
+        {
+            // The expected answer: the server processed the SUB and found no subscriber to the inbox.
+            Err(error) if error.kind() == RequestErrorKind::NoResponders => {
+                debug!("confirmed NATS subscription for topic {}", T::TOPIC);
+            }
+            // Any reply also completes a round trip.
+            Ok(_) => {
+                debug!(
+                    "confirmed NATS subscription for topic {} by a reply",
+                    T::TOPIC
+                );
+            }
+            Err(error) => {
+                warn!(error:%; "cannot confirm NATS subscription for topic {}", T::TOPIC);
+            }
         }
 
         // The subscriber stream may complete, without returning any error (it is not baked into the
