@@ -56,8 +56,10 @@ mod tests {
         ContainerAsync, GenericImage, ImageExt, core::WaitFor, runners::AsyncRunner,
     };
     use tokio::{
+        io::{self, AsyncReadExt, AsyncWriteExt},
+        net::{TcpListener, TcpStream},
         task,
-        time::{sleep, timeout},
+        time::sleep,
     };
     use uuid::Uuid;
 
@@ -119,39 +121,89 @@ mod tests {
         Ok(())
     }
 
-    /// A message published after `subscribe` returns is delivered, even before the stream is
-    /// first polled.
+    /// A message published on another connection right after `subscribe` returns is delivered,
+    /// even when the subscriber's commands reach the server late, as over a slow link, and before
+    /// the stream is first polled. One published before `subscribe` is not.
     #[tokio::test]
     async fn test_message_published_before_first_poll_is_delivered() -> Result<(), BoxError> {
-        let (_nats_container, config) = start_nats().await?;
-
-        let subscriber = NatsSubscriber::new(config.clone())
+        let (nats_container, config) = start_nats().await?;
+        let nats_port = nats_container
+            .get_host_port_ipv4(4222)
             .await
-            .context("create NatsSubscriber")?;
-        let wallet_indexed_messages = subscriber.subscribe::<WalletIndexed>().await;
+            .context("get NATS port")?;
+        let proxy_port = start_delaying_proxy(nats_port, Duration::from_millis(200)).await?;
 
-        let wallet_indexed = WalletIndexed {
-            wallet_id: Uuid::nil(),
-        };
-        // Kept until the end: dropping the publisher can discard the queued message.
+        let subscriber = NatsSubscriber::new(Config {
+            url: format!("localhost:{proxy_port}"),
+            ..config.clone()
+        })
+        .await
+        .context("create NatsSubscriber")?;
         let publisher = NatsPublisher::new(config)
             .await
             .context("create NatsPublisher")?;
-        publisher
-            .publish(&wallet_indexed)
-            .await
-            .context("publish")?;
 
-        let messages = timeout(
-            Duration::from_secs(5),
-            wallet_indexed_messages.take(1).try_collect::<Vec<_>>(),
-        )
-        .await
-        .context("no message within 5s")?
-        .context("collect messages")?;
-        assert_eq!(messages, [wallet_indexed]);
+        let before_subscribe = WalletIndexed {
+            wallet_id: Uuid::from_u128(1),
+        };
+        publisher
+            .publish(&before_subscribe)
+            .await
+            .context("publish before subscribe")?;
+
+        let wallet_indexed_messages = subscriber.subscribe::<WalletIndexed>().await;
+        let after_subscribe = WalletIndexed {
+            wallet_id: Uuid::from_u128(2),
+        };
+        publisher
+            .publish(&after_subscribe)
+            .await
+            .context("publish after subscribe")?;
+
+        let messages = wallet_indexed_messages
+            .take_until(sleep(Duration::from_secs(2)))
+            .try_collect::<Vec<_>>()
+            .await
+            .context("collect messages")?;
+        assert_eq!(messages, [after_subscribe]);
 
         Ok(())
+    }
+
+    /// Starts a TCP proxy to `server_port` that holds each chunk a client sends for `delay` before
+    /// forwarding it, and returns the proxy's port.
+    async fn start_delaying_proxy(server_port: u16, delay: Duration) -> Result<u16, BoxError> {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .context("bind proxy")?;
+        let port = listener.local_addr().context("get proxy address")?.port();
+
+        task::spawn(async move {
+            while let Ok((client, _)) = listener.accept().await {
+                let Ok(server) = TcpStream::connect(("127.0.0.1", server_port)).await else {
+                    continue;
+                };
+                let (mut client_reader, mut client_writer) = client.into_split();
+                let (mut server_reader, mut server_writer) = server.into_split();
+
+                task::spawn(async move {
+                    let _ = io::copy(&mut server_reader, &mut client_writer).await;
+                });
+                task::spawn(async move {
+                    let mut buffer = vec![0; 64 * 1024];
+                    while let Ok(read) = client_reader.read(&mut buffer).await
+                        && read > 0
+                    {
+                        sleep(delay).await;
+                        if server_writer.write_all(&buffer[..read]).await.is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+        });
+
+        Ok(port)
     }
 
     async fn start_nats() -> Result<(ContainerAsync<GenericImage>, Config), BoxError> {
