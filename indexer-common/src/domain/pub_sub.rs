@@ -112,13 +112,18 @@ pub trait Subscriber
 where
     Self: Clone + Send + Sync + 'static,
 {
-    /// Conversion errors into the message type of the [Subscriber::subscribe] method.
+    /// Errors of the [Subscriber::subscribe] stream: conversion errors into the message type, and a
+    /// subscription that cannot be established.
     type Error: StdError + Send + Sync + 'static;
 
     /// Subscribe to the messages of the given type. Implementations must return an infinite stream
     /// that can handle any underlying errors transparently, i.e. without leaking into the
-    /// `Self::Error` type which is reserved for conversion errors.
-    fn subscribe<T>(&self) -> impl Stream<Item = Result<T, Self::Error>> + Send
+    /// `Self::Error` type, which is reserved for conversion errors and for a subscription that
+    /// cannot be established.
+    ///
+    /// The stream delivers every message published after the returned future resolves. If the
+    /// subscription cannot be established, the stream's first item is an error.
+    async fn subscribe<T>(&self) -> impl Stream<Item = Result<T, Self::Error>> + Send
     where
         T: Message;
 }
@@ -130,7 +135,7 @@ pub struct NoopSubscriber;
 impl Subscriber for NoopSubscriber {
     type Error = Infallible;
 
-    fn subscribe<T>(&self) -> impl Stream<Item = Result<T, Self::Error>> + Send
+    async fn subscribe<T>(&self) -> impl Stream<Item = Result<T, Self::Error>> + Send
     where
         T: Message,
     {
