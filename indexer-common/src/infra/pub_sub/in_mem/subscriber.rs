@@ -34,7 +34,7 @@ impl InMemSubscriber {
 impl Subscriber for InMemSubscriber {
     type Error = SubscriberError;
 
-    fn subscribe<T>(&self) -> impl Stream<Item = Result<T, Self::Error>>
+    async fn subscribe<T>(&self) -> impl Stream<Item = Result<T, Self::Error>>
     where
         T: Message,
     {

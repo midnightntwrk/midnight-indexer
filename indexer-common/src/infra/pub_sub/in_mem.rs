@@ -180,7 +180,7 @@ mod tests {
         message: T,
     ) -> Result<(), Box<dyn StdError>> {
         let subscriber = pub_sub.subscriber();
-        let mut messages = subscriber.subscribe::<T>();
+        let mut messages = subscriber.subscribe::<T>().await;
 
         pub_sub.publisher().publish(&message).await?;
 

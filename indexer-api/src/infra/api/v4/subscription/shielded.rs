@@ -228,11 +228,13 @@ where
         .shielded_transactions
         .batch_size;
 
-    let wallet_indexed_events = subscriber
-        .subscribe::<WalletIndexed>()
-        .try_filter(move |wallet_indexed| ready(wallet_indexed.wallet_id == wallet_id));
-
     try_stream! {
+        // Subscribe before reading existing items, so none indexed in between is missed.
+        let wallet_indexed_events = subscriber
+            .subscribe::<WalletIndexed>()
+            .await
+            .try_filter(move |wallet_indexed| ready(wallet_indexed.wallet_id == wallet_id));
+
         // Stream exiting transactions.
         debug!(wallet_id:%, index; "streaming existing transactions");
 
