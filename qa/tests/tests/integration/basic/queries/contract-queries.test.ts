@@ -16,16 +16,23 @@
 import log from '@utils/logging/logger';
 import { env } from 'environment/model';
 import type { TestContext } from 'vitest';
+import { z } from 'zod';
 import '@utils/logging/test-logging-hooks';
 import {
+  ContractActionStateAtSchema,
   ContractBalanceSchema,
   ContractDeployActionSchema,
   ContractCallActionSchema,
+  ContractStateAtSchema,
   ContractUpdateActionSchema,
 } from '@utils/indexer/graphql/schema';
+import { GET_CONTRACT_ACTION_STATE_AT } from '@utils/indexer/graphql/contract-queries';
+import { GET_CONTRACT_STATE_AT } from '@utils/indexer/graphql/contract-type-queries';
+import { GET_TRANSACTION_CONTRACT_ACTIONS_STATE_AT } from '@utils/indexer/graphql/transaction-queries';
 import dataProvider, { type TokenHoldingContractInfo } from '@utils/testdata-provider';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { contractEventsSurfacePresent } from '@utils/indexer/contract-events-support';
+import { currentStateAt, ownBlock } from 'tests/shared/contract-state-utils';
 
 /** Introspect the field names on a GraphQL type (null when the type is absent). */
 async function introspectFieldNames(typeName: string): Promise<string[] | null> {
@@ -660,6 +667,113 @@ describe('contract queries', () => {
         expect(fields, `${typeName} must not expose contractEvents`).not.toContain(
           'contractEvents',
         );
+      }
+    });
+  });
+
+  describe('the block a contract state is anchored at', () => {
+    const fork = dataProvider.getLedgerHardFork();
+    let knownContract: string | null = null;
+
+    beforeAll(() => {
+      try {
+        knownContract = dataProvider.getKnownContractAddress();
+      } catch (error) {
+        log.warn(error);
+      }
+    });
+
+    /**
+     * The latest contract action's state is anchored at the block it was last written: the
+     * action's own block, or the hard fork block if the chain crossed one after the action.
+     *
+     * @given a contract known to exist on the chain
+     * @when its latest contract action is queried by address without an offset
+     * @then stateAt names the height, hash and protocol version of the action's own block
+     * @and on a chain that crossed a hard fork after the action, it names the fork block instead
+     */
+    test('should anchor the latest contract action state at the block it was last written', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Query', 'ContractAction', 'StateAt'] };
+      if (!knownContract) return ctx.skip(true, 'no known contract fixture on this env');
+
+      const response = await indexerHttpClient.getContractAction(
+        knownContract,
+        undefined,
+        GET_CONTRACT_ACTION_STATE_AT,
+      );
+
+      expect(response).toBeSuccess();
+      const action = ContractActionStateAtSchema.parse(response.data?.contractAction);
+      expect(action.address).toBe(knownContract);
+      expect(action.stateAt).toEqual(currentStateAt(action, fork));
+    });
+
+    /**
+     * A contract's current state is anchored where its latest action's state is.
+     *
+     * @given a contract known to exist on the chain
+     * @when the contract is queried by address without an offset
+     * @then its stateAt names the block of its latest action
+     * @and on a chain that crossed a hard fork after that action, it names the fork block instead
+     */
+    test('should anchor the contract state at the block of its latest action', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Query', 'Contract', 'StateAt'] };
+      if (!knownContract) return ctx.skip(true, 'no known contract fixture on this env');
+
+      const response = await indexerHttpClient.getContract(
+        knownContract,
+        { actionsLimit: 1 },
+        GET_CONTRACT_STATE_AT,
+      );
+
+      expect(response).toBeSuccess();
+      const contract = ContractStateAtSchema.parse(response.data?.contract);
+      expect(contract.actions).toHaveLength(1);
+      expect(contract.stateAt).toEqual(currentStateAt(contract.actions[0], fork));
+    });
+
+    /**
+     * Recorded contract actions keep the state written by their own transaction, so each is
+     * anchored at its own block, whether listed under the contract or under its transaction.
+     *
+     * @given a contract known to exist on the chain
+     * @when its recent actions are listed through Contract.actions
+     * @and the transactions of those actions are queried by hash for their contract actions
+     * @then every listed contract action's stateAt names the block of its own transaction
+     */
+    test('should anchor every recorded contract action at its own block', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Query', 'Contract', 'Transaction', 'StateAt'] };
+      if (!knownContract) return ctx.skip(true, 'no known contract fixture on this env');
+
+      const contractResponse = await indexerHttpClient.getContract(
+        knownContract,
+        { actionsLimit: 3 },
+        GET_CONTRACT_STATE_AT,
+      );
+      expect(contractResponse).toBeSuccess();
+      const { actions } = ContractStateAtSchema.parse(contractResponse.data?.contract);
+      expect(actions.length).toBeGreaterThan(0);
+
+      for (const action of actions) {
+        expect(action.stateAt, `Contract.actions item ${action.transaction.hash}`).toEqual(
+          ownBlock(action),
+        );
+
+        const txResponse = await indexerHttpClient.getTransactionByOffset(
+          { hash: action.transaction.hash },
+          GET_TRANSACTION_CONTRACT_ACTIONS_STATE_AT,
+        );
+        expect(txResponse).toBeSuccess();
+        const txActions = z
+          .array(ContractActionStateAtSchema)
+          .parse(txResponse.data?.transactions.flatMap((tx) => tx.contractActions));
+        expect(txActions.length).toBeGreaterThan(0);
+        for (const txAction of txActions) {
+          expect(
+            txAction.stateAt,
+            `Transaction.contractActions item ${txAction.transaction.hash}`,
+          ).toEqual(ownBlock(txAction));
+        }
       }
     });
   });
