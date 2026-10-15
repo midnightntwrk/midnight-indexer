@@ -13,6 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import { CONTRACT_ACTION_STATE_AT_BODY } from './contract-queries';
+
 // GraphQL document for the top-level Contract type and contract(address, offset)
 // query (#1275): the contract as the topmost concept, with point-in-time state,
 // maintenance authority and a bounded recent-actions sub-query.
@@ -32,6 +34,22 @@ query Contract($ADDRESS: HexEncoded!, $OFFSET: BlockOffset, $ACTIONS_LIMIT: Int,
     actions(limit: $ACTIONS_LIMIT, type: $ACTIONS_TYPE) {
       __typename
       address
+    }
+  }
+}`;
+
+export const GET_CONTRACT_STATE_AT = `
+query ContractStateAt($ADDRESS: HexEncoded!, $OFFSET: BlockOffset, $ACTIONS_LIMIT: Int) {
+  contract(address: $ADDRESS, offset: $OFFSET) {
+    address
+    state
+    stateAt {
+      height
+      hash
+      protocolVersion
+    }
+    actions(limit: $ACTIONS_LIMIT) {
+      ${CONTRACT_ACTION_STATE_AT_BODY}
     }
   }
 }`;

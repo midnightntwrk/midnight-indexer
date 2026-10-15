@@ -23,9 +23,15 @@ import {
   ContractActionSubscriptionResponse,
 } from '@utils/indexer/websocket-client';
 import { EventCoordinator } from '@utils/event-coordinator';
-import { ContractActionUnionSchema } from '@utils/indexer/graphql/schema';
+import {
+  ContractActionStateAtSchema,
+  ContractActionUnionSchema,
+} from '@utils/indexer/graphql/schema';
+import { CONTRACT_ACTIONS_STATE_AT_SUBSCRIPTION } from '@utils/indexer/graphql/subscriptions';
 import type { BlockOffset, GraphQLResponse } from '@utils/indexer/indexer-types';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
+import { extractSubscriptionErrorMessage } from '@utils/indexer/subscription-error';
+import { forkBlock, ownBlock } from 'tests/shared/contract-state-utils';
 
 // ContractActionSubscriptionResponse is now imported from websocket-client
 
@@ -106,6 +112,37 @@ describe('contract action subscriptions', () => {
     await eventCoordinator.waitForAll([eventName], maxTimeForContractAction);
     unsubscribe();
     return receivedContractActions;
+  }
+
+  /**
+   * Streams contract actions with their stateAt from `offset` until `count` actions arrived or
+   * `timeoutMs` passed, then for `settleMs` more to catch anything streamed after them.
+   */
+  async function streamStateAt(
+    contractAddress: string,
+    offset: BlockOffset,
+    count: number,
+    timeoutMs: number,
+    settleMs = 0,
+  ) {
+    const received: ContractActionSubscriptionResponse[] = [];
+    const errors: string[] = [];
+    const unsubscribe = indexerWsClient.subscribeToContractActionEvents(
+      {
+        next: (payload) => received.push(payload),
+        error: (error) => errors.push(extractSubscriptionErrorMessage(error)),
+      },
+      contractAddress,
+      offset,
+      CONTRACT_ACTIONS_STATE_AT_SUBSCRIPTION,
+    );
+    const deadline = Date.now() + timeoutMs;
+    while (received.length < count && errors.length === 0 && Date.now() < deadline) {
+      await sleep(500);
+    }
+    await sleep(settleMs);
+    unsubscribe();
+    return { received, errors };
   }
 
   describe('a subscription to contract action updates without parameters', () => {
@@ -274,6 +311,52 @@ describe('contract action subscriptions', () => {
           expect(firstActionBlockHash).toBeDefined();
           expect(firstAction.address).toBe(contractAddress!);
         }
+      }
+    });
+  });
+
+  describe('a subscription to contract action updates with the block their state is anchored at', () => {
+    /**
+     * Every streamed contract action names the block its state is anchored at: its own block,
+     * or the hard fork block for the re-emission of a contract's latest pre-fork action.
+     *
+     * @given a known contract address with existing contract actions
+     * @when contract actions are streamed from block height 0
+     * @then each action's stateAt names the height, hash and protocol version of its own block
+     * @and an action streamed twice is a re-emission at the hard fork block of a chain that
+     *      crossed one, and on any other chain no action is streamed twice
+     */
+    test('should anchor each streamed contract action at the block its state was written', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Subscription', 'ContractAction', 'StateAt'] };
+      let contractAddress: string;
+      try {
+        contractAddress = dataProvider.getKnownContractAddress();
+      } catch (error) {
+        log.warn(error);
+        return ctx.skip(true, (error as Error).message);
+      }
+      const fork = dataProvider.getLedgerHardFork();
+
+      const { received, errors } = await streamStateAt(
+        contractAddress,
+        { height: 0 },
+        Infinity,
+        NO_REPLAY_WAIT_MS,
+      );
+
+      expect(errors).toEqual([]);
+      expect(received.length).toBeGreaterThan(0);
+      const streamed = new Set<string>();
+      for (const msg of received) {
+        const action = ContractActionStateAtSchema.parse(msg.data?.contractActions);
+        const { hash } = action.transaction;
+        if (streamed.has(hash)) {
+          expect(fork, `action of tx ${hash} streamed twice without a hard fork`).not.toBeNull();
+          expect(action.stateAt, `re-emission of tx ${hash}`).toEqual(forkBlock(fork!));
+        } else {
+          expect(action.stateAt, `action of tx ${hash}`).toEqual(ownBlock(action));
+        }
+        streamed.add(hash);
       }
     });
   });

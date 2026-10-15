@@ -70,3 +70,29 @@ export const GET_CONTRACT_ACTION_BY_OFFSET = `query GetContractActionByOffset($A
         ${CONTRACT_ACTION_LIGHT_BODY}
     }
 }`;
+
+// stateAt has its own queries rather than joining the shared bodies above, so the existing
+// contract-action tests keep their signal on indexers without the field (pre-4.4).
+export const CONTRACT_ACTION_STATE_AT_BODY = `
+    __typename
+    address
+    state
+    stateAt {
+        height
+        hash
+        protocolVersion
+    }
+    transaction {
+        hash
+        protocolVersion
+        block {
+            height
+            hash
+        }
+    }`;
+
+export const GET_CONTRACT_ACTION_STATE_AT = `query GetContractActionStateAt($ADDRESS: HexEncoded!, $OFFSET: ContractActionOffset) {
+    contractAction(address: $ADDRESS, offset: $OFFSET) {
+        ${CONTRACT_ACTION_STATE_AT_BODY}
+    }
+}`;

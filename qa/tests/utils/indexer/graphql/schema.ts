@@ -265,6 +265,37 @@ export const ContractActionUnionSchema = z.discriminatedUnion('__typename', [
   ContractUpdateActionSchema,
 ]);
 
+// A block's height, hash and protocol version, as returned by the stateAt field.
+export const BlockReferenceSchema = z.object({
+  height: BlockHeight,
+  hash: Hash64,
+  protocolVersion: z.number().int(),
+});
+
+// A contract action with the block its state is anchored at (stateAt) and the block of
+// its own transaction, as returned by the dedicated stateAt queries and subscription.
+export const ContractActionStateAtSchema = z.object({
+  __typename: z.enum(['ContractDeploy', 'ContractCall', 'ContractUpdate']),
+  address: Hash64,
+  state: VarLenghtHex,
+  stateAt: BlockReferenceSchema,
+  transaction: z.object({
+    hash: Hash64,
+    protocolVersion: z.number().int(),
+    block: z.object({ height: BlockHeight, hash: Hash64 }),
+  }),
+});
+
+export const ContractStateAtSchema = z.object({
+  address: Hash64,
+  state: VarLenghtHex,
+  stateAt: BlockReferenceSchema,
+  actions: z.array(ContractActionStateAtSchema),
+});
+
+export type BlockReference = z.infer<typeof BlockReferenceSchema>;
+export type ContractActionStateAt = z.infer<typeof ContractActionStateAtSchema>;
+
 // Contract event schemas (MIP-0002 public contract log emission). HexEncoded
 // fields are hex strings (optional `0x` prefix); `amount` is a decimal u128
 // string. `transaction` is left as `z.any()` like the contract-action schemas
