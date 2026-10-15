@@ -16,6 +16,17 @@
 import type { BlockReference, ContractActionStateAt } from '@utils/indexer/graphql/schema';
 import type { LedgerHardForkInfo } from '@utils/testdata-provider';
 
+// Tagged-serialization prefixes of a contract state in the ledger 8 and ledger 9 encodings.
+// Fork tests also assert the node's states carry them, so a renamed tag fails loudly there.
+export const CONTRACT_STATE_V6_TAG = 'midnight:contract-state[v6]:';
+export const CONTRACT_STATE_V8_TAG = 'midnight:contract-state[v8]:';
+
+/** The ASCII serialization tag a hex-encoded contract state starts with, up to its second `:`. */
+export function contractStateTag(stateHex: string): string {
+  const text = Buffer.from(stateHex.slice(0, 128), 'hex').toString('latin1');
+  return text.slice(0, text.indexOf(':', 'midnight:'.length) + 1);
+}
+
 /** The block of a contract action's own transaction. */
 export function ownBlock(action: ContractActionStateAt): BlockReference {
   const { block, protocolVersion } = action.transaction;
