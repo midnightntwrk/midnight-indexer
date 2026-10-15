@@ -304,11 +304,18 @@ where
 struct Cursor {
     /// The zswap index up to which the client has the zswap state Merkle tree.
     index: u64,
+    /// The lowest ID of the transactions still to stream, i.e. one past the last streamed
+    /// transaction: re-queries resume there rather than at the zswap index, which does not advance
+    /// for a transaction without commitments.
+    from_transaction_id: u64,
 }
 
 impl Cursor {
     fn new(index: u64) -> Self {
-        Self { index }
+        Self {
+            index,
+            from_transaction_id: 0,
+        }
     }
 
     /// The cursor after streaming the given transaction.
@@ -316,6 +323,7 @@ impl Cursor {
         // The end index is "exclusive", i.e. the next free index; hence no +1 here!
         Self {
             index: transaction.zswap_end_index,
+            from_transaction_id: transaction.id + 1,
         }
     }
 
@@ -327,7 +335,12 @@ impl Cursor {
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<domain::RegularTransaction, sqlx::Error>> + Send + use<'_, S>
     {
-        storage.get_relevant_transactions(wallet_id, self.index, batch_size)
+        storage.get_relevant_transactions(
+            wallet_id,
+            self.index,
+            self.from_transaction_id,
+            batch_size,
+        )
     }
 }
 

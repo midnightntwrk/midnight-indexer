@@ -47,11 +47,13 @@ where
     ) -> Result<Vec<Transaction>, sqlx::Error>;
 
     /// Get a stream of all regular transactions which are relevant for a wallet with the given
-    /// wallet ID, starting at the given index, ordered by transaction ID.
+    /// wallet ID, have a zswap start index of at least the given index and an ID of at least the
+    /// given transaction ID, ordered by transaction ID.
     fn get_relevant_transactions(
         &self,
         wallet_id: Uuid,
         index: u64,
+        from_transaction_id: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<RegularTransaction, sqlx::Error>> + Send;
 
@@ -112,6 +114,7 @@ impl TransactionStorage for NoopStorage {
         &self,
         wallet_id: Uuid,
         index: u64,
+        from_transaction_id: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<RegularTransaction, sqlx::Error>> + Send {
         stream::empty()
