@@ -14,6 +14,7 @@
 // limitations under the License.
 
 import log from '@utils/logging/logger';
+import { env, EnvironmentName } from 'environment/model';
 import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
 import dataProvider from '@utils/testdata-provider';
@@ -31,7 +32,14 @@ import { CONTRACT_ACTIONS_STATE_AT_SUBSCRIPTION } from '@utils/indexer/graphql/s
 import type { BlockOffset, GraphQLResponse } from '@utils/indexer/indexer-types';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { extractSubscriptionErrorMessage } from '@utils/indexer/subscription-error';
-import { forkBlock, ownBlock } from 'tests/shared/contract-state-utils';
+import { NodeRpcClient } from '@utils/node/rpc-client';
+import {
+  CONTRACT_STATE_V6_TAG,
+  CONTRACT_STATE_V8_TAG,
+  contractStateTag,
+  forkBlock,
+  ownBlock,
+} from 'tests/shared/contract-state-utils';
 
 // ContractActionSubscriptionResponse is now imported from websocket-client
 
@@ -360,4 +368,72 @@ describe('contract action subscriptions', () => {
       }
     });
   });
+
+  // Expected blocks, hashes and states come from the hard fork fixture and the node, never from
+  // the indexer under test.
+  describe.runIf(env.getCurrentEnvironmentName() === EnvironmentName.DEVNET)(
+    'a subscription from before a ledger hard fork to a contract untouched since',
+    () => {
+      /**
+       * A contract untouched since the hard fork has its latest action re-emitted once at the
+       * fork block, with the state translated to the post-fork encoding the node serves.
+       *
+       * @given a contract deployed and last called before the fork (actions at 124,321, 124,417
+       *        and 124,423; fork at 169,496)
+       * @when its contract actions are streamed from its deploy block
+       * @then the three original actions arrive in order, in the [v6] encoding, each anchored at
+       *       its own block
+       * @and then exactly one re-emission of the latest action: same transaction, the node's
+       *      [v8] state at the fork block, and stateAt naming the fork block (protocol version
+       *      2001000), which differs from the transaction's block
+       */
+      test('should re-emit the latest pre-fork action once at the fork block', async (ctx: TestContext) => {
+        ctx.task!.meta.custom = {
+          labels: ['Subscription', 'ContractAction', 'StateAt', 'HardFork'],
+        };
+        const fork = dataProvider.getLedgerHardFork();
+        if (!fork) throw new Error('devnet must declare the hard fork it crossed');
+        const { 'contract-address': address, 'contract-actions': actions } =
+          fork['untouched-contracts'][0];
+        const latest = actions.at(-1)!;
+        const nodeState = await new NodeRpcClient().getContractState(
+          address,
+          fork['fork-block'].hash,
+        );
+        expect(contractStateTag(nodeState), 'node state tag at the fork').toBe(
+          CONTRACT_STATE_V8_TAG,
+        );
+
+        const { received, errors } = await streamStateAt(
+          address,
+          { height: actions[0]['block-height'] },
+          actions.length + 1,
+          90_000,
+          NO_REPLAY_WAIT_MS,
+        );
+
+        expect(errors).toEqual([]);
+        const streamed = received.map((msg) =>
+          ContractActionStateAtSchema.parse(msg.data?.contractActions),
+        );
+        expect(streamed.map((action) => action.transaction.hash)).toEqual([
+          ...actions.map((action) => action['transaction-hash']),
+          latest['transaction-hash'],
+        ]);
+        streamed.slice(0, -1).forEach((action, i) => {
+          expect(contractStateTag(action.state)).toBe(CONTRACT_STATE_V6_TAG);
+          expect(action.stateAt).toEqual(ownBlock(action));
+          expect(action.stateAt).toMatchObject({
+            height: actions[i]['block-height'],
+            hash: actions[i]['block-hash'],
+          });
+        });
+        const reEmitted = streamed.at(-1)!;
+        expect(reEmitted.stateAt).toEqual(forkBlock(fork));
+        expect(reEmitted.stateAt.hash).not.toBe(reEmitted.transaction.block.hash);
+        expect(reEmitted.transaction.block.height).toBe(latest['block-height']);
+        expect(reEmitted.state).toBe(nodeState);
+      }, 120_000);
+    },
+  );
 });

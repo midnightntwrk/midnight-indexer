@@ -51,6 +51,16 @@ export class NodeRpcClient {
     return await this.call<string | null>('chain_getBlockHash', [height]);
   }
 
+  /**
+   * The hex-encoded state of a contract (without `0x`) as the node's ledger serializes it, as of
+   * the given block hash or the best block.
+   */
+  async getContractState(address: string, blockHash?: string): Promise<string> {
+    const params = blockHash ? [address, `0x${blockHash.replace(/^0x/, '')}`] : [address];
+    const state = await this.call<string>('midnight_contractState', params);
+    return state.replace(/^0x/, '');
+  }
+
   private async call<T>(
     method: string,
     params: unknown[] = [],
