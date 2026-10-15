@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{ContractAction, ContractBalance, storage::NoopStorage};
+use crate::domain::{ContractAction, ContractActionAtBlock, ContractBalance, storage::NoopStorage};
 use futures::{Stream, stream};
 use indexer_common::domain::{
     BlockHash, SerializedContractAddress, SerializedTransactionIdentifier, TransactionHash,
@@ -111,13 +111,29 @@ where
     ) -> Result<Vec<ContractAction>, sqlx::Error>;
 
     /// Get a stream of contract actions for the given address starting at the given contract_action
-    /// ID, ordered by transaction ID.
+    /// ID, ordered by transaction ID, each with a reference to its block.
     fn get_contract_actions_by_address(
         &self,
         address: &SerializedContractAddress,
         contract_action_id: u64,
         batch_size: NonZeroU32,
-    ) -> impl Stream<Item = Result<ContractAction, sqlx::Error>> + Send;
+    ) -> impl Stream<Item = Result<ContractActionAtBlock, sqlx::Error>> + Send;
+
+    /// The contract state translations of the given address, ordered by block height, each as its
+    /// action with the translated state key and a reference to the block it was translated at.
+    async fn get_contract_state_translations_by_address(
+        &self,
+        address: &SerializedContractAddress,
+    ) -> Result<Vec<ContractActionAtBlock>, sqlx::Error>;
+
+    /// As [Self::get_contract_state_translations_by_address], for blocks with heights in
+    /// `(after_height, through_height]`.
+    async fn get_contract_state_translations_between(
+        &self,
+        address: &SerializedContractAddress,
+        after_height: u32,
+        through_height: u32,
+    ) -> Result<Vec<ContractActionAtBlock>, sqlx::Error>;
 
     /// Get unshielded token balances for a contract action.
     async fn get_unshielded_balances_by_contract_action_id(
@@ -125,12 +141,12 @@ where
         contract_action_id: u64,
     ) -> Result<Vec<ContractBalance>, sqlx::Error>;
 
-    /// Get the ID for the first contract action in a transaction in a block with the given block
-    /// height or higher.
+    /// The ID of the first contract action from the given block height on, else one past the
+    /// highest ID, else `0`.
     async fn get_contract_action_id_by_block_height(
         &self,
         block_height: u32,
-    ) -> Result<Option<u64>, sqlx::Error>;
+    ) -> Result<u64, sqlx::Error>;
 }
 
 #[allow(unused_variables)]
@@ -233,8 +249,24 @@ impl ContractActionStorage for NoopStorage {
         address: &SerializedContractAddress,
         contract_action_id: u64,
         batch_size: NonZeroU32,
-    ) -> impl Stream<Item = Result<ContractAction, sqlx::Error>> + Send {
+    ) -> impl Stream<Item = Result<ContractActionAtBlock, sqlx::Error>> + Send {
         stream::empty()
+    }
+
+    async fn get_contract_state_translations_by_address(
+        &self,
+        address: &SerializedContractAddress,
+    ) -> Result<Vec<ContractActionAtBlock>, sqlx::Error> {
+        unimplemented!()
+    }
+
+    async fn get_contract_state_translations_between(
+        &self,
+        address: &SerializedContractAddress,
+        after_height: u32,
+        through_height: u32,
+    ) -> Result<Vec<ContractActionAtBlock>, sqlx::Error> {
+        unimplemented!()
     }
 
     async fn get_unshielded_balances_by_contract_action_id(
@@ -247,7 +279,7 @@ impl ContractActionStorage for NoopStorage {
     async fn get_contract_action_id_by_block_height(
         &self,
         block_height: u32,
-    ) -> Result<Option<u64>, sqlx::Error> {
+    ) -> Result<u64, sqlx::Error> {
         unimplemented!()
     }
 }

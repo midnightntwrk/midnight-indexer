@@ -558,9 +558,9 @@ impl LedgerState {
                 let (ledger_state, transaction_result) =
                     ledger_state.apply(&verified_ledger_transaction, &cx);
 
-                let (transaction_result, events, should_count_cost) = match transaction_result {
+                let (transaction_result, events, failure_reason) = match transaction_result {
                     TransactionResultV8::Success(events) => {
-                        (TransactionResult::Success, events, true)
+                        (TransactionResult::Success, events, None)
                     }
 
                     TransactionResultV8::PartialSuccess(segments, events) => {
@@ -568,11 +568,19 @@ impl LedgerState {
                             .into_iter()
                             .map(|(id, result)| (id, result.is_ok()))
                             .collect::<Vec<_>>();
-                        (TransactionResult::PartialSuccess(segments), events, true)
+                        (TransactionResult::PartialSuccess(segments), events, None)
                     }
 
-                    TransactionResultV8::Failure(_) => (TransactionResult::Failure, vec![], false),
+                    TransactionResultV8::Failure(reason) => (
+                        TransactionResult::Failure,
+                        vec![],
+                        Some(format!("{reason:?}")),
+                    ),
                 };
+                let should_count_cost = failure_reason.is_none();
+
+                // A failed transaction pays no fees.
+                let fees = if should_count_cost { fees } else { 0 };
 
                 // Only count cost for successful/partial transactions (match node behavior)
                 let block_fullness = if should_count_cost {
@@ -601,6 +609,7 @@ impl LedgerState {
                     spent_unshielded_utxos,
                     ledger_events,
                     fees,
+                    failure_reason,
                     // The bridge relies on ledger 9 primitives, so a `CardanoBridge` claim cannot
                     // occur on a ledger 8 chain; there is never a bridge claim to extract here.
                     bridge_claim: None,
@@ -659,9 +668,9 @@ impl LedgerState {
                 let (ledger_state, transaction_result) =
                     ledger_state.apply(&verified_ledger_transaction, &cx);
 
-                let (transaction_result, events, should_count_cost) = match transaction_result {
+                let (transaction_result, events, failure_reason) = match transaction_result {
                     TransactionResultV9::Success(events) => {
-                        (TransactionResult::Success, events, true)
+                        (TransactionResult::Success, events, None)
                     }
 
                     TransactionResultV9::PartialSuccess(segments, events) => {
@@ -669,11 +678,19 @@ impl LedgerState {
                             .into_iter()
                             .map(|(id, result)| (id, result.is_ok()))
                             .collect::<Vec<_>>();
-                        (TransactionResult::PartialSuccess(segments), events, true)
+                        (TransactionResult::PartialSuccess(segments), events, None)
                     }
 
-                    TransactionResultV9::Failure(_) => (TransactionResult::Failure, vec![], false),
+                    TransactionResultV9::Failure(reason) => (
+                        TransactionResult::Failure,
+                        vec![],
+                        Some(format!("{reason:?}")),
+                    ),
                 };
+                let should_count_cost = failure_reason.is_none();
+
+                // A failed transaction pays no fees.
+                let fees = if should_count_cost { fees } else { 0 };
 
                 // Only count cost for successful/partial transactions (match node behavior)
                 let block_fullness = if should_count_cost {
@@ -718,6 +735,7 @@ impl LedgerState {
                     spent_unshielded_utxos,
                     ledger_events,
                     fees,
+                    failure_reason,
                     bridge_claim,
                 })
             }
@@ -1026,6 +1044,23 @@ impl LedgerState {
         let hash = ContractStateArenaKey::deserialize(key)?.hash().to_owned();
 
         Ok(default_storage::<v1_1::LedgerDb>().with_backend(|b| b.get(&hash).is_some()))
+    }
+
+    /// Whether the given contract state key is in this ledger state's contract-state encoding:
+    /// `contract-state[v6]` for V8, `contract-state[v8]` for V9.
+    pub fn contract_state_key_in_current_encoding(
+        &self,
+        key: &SerializedContractStateKey,
+    ) -> Result<bool, Error> {
+        let key = ContractStateArenaKey::deserialize(key)?;
+
+        // The key variants are named after the dependency defining `ContractState`: V8 holds
+        // `midnight-onchain-runtime_v3`'s, V9 `midnight-onchain-runtime_v4`'s.
+        Ok(matches!(
+            (self, key),
+            (Self::V8 { .. }, ContractStateArenaKey::V3(_))
+                | (Self::V9 { .. }, ContractStateArenaKey::V4(_))
+        ))
     }
 
     /// Whether the node a contract zswap state key points at is still present in the ledger DB.
@@ -3189,6 +3224,94 @@ mod tests {
         Ok(())
     }
 
+    /// Translating a V8 state to V9 gives each contract a new `contract-state[v8]` key with the
+    /// same content, which survives a reload from the ledger DB.
+    #[cfg(any(feature = "cloud", feature = "standalone"))]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn translated_contract_state_key_is_tagged_for_ledger_9() -> Result<(), BoxError> {
+        use crate::domain::ledger::{LedgerDbContractState, SerializableExt};
+        use midnight_base_crypto_v1::hash::HashOutput;
+        use midnight_coin_structure_v2::{
+            coin::{TokenType as MidnightTokenType, UnshieldedTokenType},
+            contract::ContractAddress as ContractAddressV8,
+        };
+        use midnight_onchain_runtime_v3::state::ContractState as ContractStateV3;
+
+        const AMOUNT: u128 = 42;
+
+        let _ledger_db = init_ledger_db().await?;
+
+        let address = ContractAddressV8(HashOutput([11; 32]));
+        let serialized_address = address.serialize()?;
+        let mut state = LedgerState::new("undeployed".try_into()?, LedgerVersion::V8)
+            .expect("ledger state can be constructed");
+        match &mut state {
+            LedgerState::V8 { ledger_state, .. } => {
+                let mut contract_state = ContractStateV3::default();
+                contract_state.balance = contract_state.balance.insert(
+                    MidnightTokenType::Unshielded(UnshieldedTokenType(HashOutput([7; 32]))),
+                    AMOUNT,
+                );
+                ledger_state.contract = ledger_state.contract.insert(address, contract_state);
+            }
+            LedgerState::V9 { .. } => unreachable!("constructed as V8"),
+        }
+        let (v8_key, _) = state
+            .contract_state(&serialized_address)?
+            .expect("the contract is in the V8 ledger state");
+        assert!(state.contract_state_key_in_current_encoding(&v8_key)?);
+
+        let state = state.translate(LedgerVersion::V9)?;
+        let (v9_key, translated) = state
+            .contract_state(&serialized_address)?
+            .expect("the contract survives the translation");
+        assert_ne!(
+            v9_key, v8_key,
+            "the translated key carries the ledger-9 tag"
+        );
+        // The tag, then a by-reference key: one discriminant byte and the 32-byte hash.
+        assert!(
+            v9_key
+                .as_ref()
+                .starts_with(b"midnight:storage-key(contract-state[v8]):")
+        );
+        assert_eq!(v9_key.as_ref().len(), 41 + 1 + 32);
+        assert!(state.contract_state_key_in_current_encoding(&v9_key)?);
+        assert!(
+            !state.contract_state_key_in_current_encoding(&v8_key)?,
+            "the pre-fork key is not in the ledger-9 encoding"
+        );
+        let translated_bytes = translated.serialize()?;
+        assert!(
+            translated_bytes
+                .as_ref()
+                .starts_with(b"midnight:contract-state[v8]:"),
+            "the translated state must serialize with the ledger-9 tag"
+        );
+        let balances = translated.balances()?;
+        assert_eq!(balances.len(), 1);
+        assert_eq!(
+            balances[0].amount, AMOUNT,
+            "the translation keeps the balances"
+        );
+
+        let (state, _) = state.persist()?;
+        drop(state);
+
+        assert!(
+            LedgerState::contract_state_loadable(&v9_key)?,
+            "the translated key must be loadable after its ledger state is gone"
+        );
+        let reloaded = LedgerDbContractState::load_prefetched(&v9_key)?;
+        assert_eq!(
+            reloaded.serialize()?,
+            translated_bytes,
+            "re-serializing the reloaded translated state must be byte-identical"
+        );
+
+        Ok(())
+    }
+
     /// The property the key-instead-of-blob change rests on: capturing a contract state's arena
     /// key, dropping the ledger state it came from, then reloading and re-serializing must yield
     /// exactly the bytes that state serializes to. It also covers the rooting, since the ledger
@@ -3246,6 +3369,13 @@ mod tests {
         let (key, captured) = state
             .contract_state(&serialized_address)?
             .expect("the contract is in the ledger state");
+
+        // The tag, then a by-reference key: one discriminant byte and the 32-byte hash.
+        assert!(
+            key.as_ref()
+                .starts_with(b"midnight:storage-key(contract-state[v6]):")
+        );
+        assert_eq!(key.as_ref().len(), 41 + 1 + 32);
 
         // Anything derived from the state comes off the pointer the accessor hands back, without a
         // second arena lookup for a node that is rooted but not yet flushed.
@@ -4600,6 +4730,22 @@ mod well_formed_timestamp_tests {
                 assert_eq!(
                     outcome.transaction_result, expected,
                     "{ledger_version}: block timestamp {block_timestamp}"
+                );
+
+                // A failed transaction pays no fees; a successful one does.
+                assert_eq!(
+                    outcome.fees == 0,
+                    expected == TransactionResult::Failure,
+                    "{ledger_version}: block timestamp {block_timestamp}: fees {}",
+                    outcome.fees
+                );
+
+                // Only a failure has a reason.
+                assert_eq!(
+                    outcome.failure_reason.is_some(),
+                    expected == TransactionResult::Failure,
+                    "{ledger_version}: block timestamp {block_timestamp}: {:?}",
+                    outcome.failure_reason
                 );
             }
         }

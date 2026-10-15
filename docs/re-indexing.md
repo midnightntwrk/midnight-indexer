@@ -6,7 +6,7 @@ genesis, which means **wiping both stores together** and letting chain-indexer
 rebuild them from the node.
 
 > [!CAUTION]
-> **Despite living in `migrations/`, `008`/`010_contract_state_keys.sql` converts
+> **Despite living in `migrations/`, `009`/`011_contract_state_keys.sql` converts
 > nothing.** It drops the contract-state blob columns and adds empty key columns.
 > Your existing contract states are not carried forward and cannot be recovered
 > afterwards, by any version. Do not read "migration" here as "upgrade in place".
