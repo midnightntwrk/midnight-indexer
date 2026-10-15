@@ -18,11 +18,13 @@ pub mod ledger;
 mod bytes;
 mod protocol_version;
 mod pub_sub;
+mod session_id;
 mod viewing_key;
 
 pub use bytes::*;
 pub use protocol_version::*;
 pub use pub_sub::*;
+pub use session_id::*;
 pub use viewing_key::*;
 
 use derive_more::{AsRef, Deref, Display, From, Into};
@@ -36,7 +38,6 @@ pub type BlockAuthor = ByteArray<32>;
 pub type BlockHash = ByteArray<32>;
 pub type IntentHash = ByteArray<32>;
 pub type Nonce = ByteArray<32>;
-pub type SessionId = ByteArray<32>;
 pub type ViewingKeyHash = ByteArray<32>;
 pub type TermsAndConditionsHash = ByteArray<32>;
 pub type TokenType = ByteArray<32>;
@@ -212,6 +213,8 @@ pub struct ApplyRegularTransactionOutcome {
     pub spent_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub ledger_events: Vec<LedgerEvent>,
     pub fees: u128,
+    /// The ledger's reason for a `Failure`, rendered; `None` otherwise.
+    pub failure_reason: Option<String>,
     /// Populated when the transaction is a `ClaimRewards(claim)` with
     /// `claim.kind == ClaimKind::CardanoBridge`. The recipient is the claim's
     /// owner (32-byte address); the amount is the claim's value.
