@@ -24,15 +24,44 @@ import {
 } from '@utils/indexer/websocket-client';
 import { EventCoordinator } from '@utils/event-coordinator';
 import { ContractActionUnionSchema } from '@utils/indexer/graphql/schema';
-import { BlockOffset } from '@utils/indexer/indexer-types';
+import type { BlockOffset, GraphQLResponse } from '@utils/indexer/indexer-types';
+import { IndexerHttpClient } from '@utils/indexer/http-client';
 
 // ContractActionSubscriptionResponse is now imported from websocket-client
 
+// How long a subscription without offset is observed to confirm nothing is replayed.
+const NO_REPLAY_WAIT_MS = 8_000;
+
+const CONTRACT_ACTIONS_WITH_HEIGHT_FROM_LATEST_BLOCK = `subscription ContractActionsWithHeightFromLatestBlock($ADDRESS: HexEncoded!) {
+    contractActions(address: $ADDRESS) {
+        __typename
+        address
+        transaction {
+            hash
+            block {
+                height
+            }
+        }
+    }
+}`;
+
+type ContractActionWithHeightResponse = GraphQLResponse<{
+  contractActions: {
+    __typename: string;
+    address: string;
+    transaction: { hash: string; block: { height: number } };
+  };
+}>;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 describe('contract action subscriptions', () => {
   let indexerWsClient: IndexerWsClient;
+  let indexerHttpClient: IndexerHttpClient;
   let eventCoordinator: EventCoordinator;
 
   beforeEach(async () => {
+    indexerHttpClient = new IndexerHttpClient();
     indexerWsClient = new IndexerWsClient();
     eventCoordinator = new EventCoordinator();
     await indexerWsClient.connectionInit();
@@ -81,16 +110,19 @@ describe('contract action subscriptions', () => {
 
   describe('a subscription to contract action updates without parameters', () => {
     /**
-     * Subscribing to contract action updates without any offset parameters should stream
-     * contract actions starting from the latest available block and continue streaming
-     * new contract actions as they are produced.
+     * Subscribing to contract action updates without an offset starts at the latest block:
+     * the contract's existing actions are not replayed, only actions indexed after the
+     * subscription starts are streamed (midnight-indexer #1654).
      *
-     * @given no block offset parameters are provided
-     * @when we subscribe to contract action events
-     * @then we should receive contract actions starting from the latest available
-     * @and we should receive new contract actions as they are produced
+     * @given a known contract address with existing contract actions
+     * @and the height of the latest indexed block
+     * @when we subscribe to contract action events without a block offset
+     * @then the subscription is accepted without errors
+     * @and no contract action at or below that height is replayed
      */
-    test('should stream contract actions from the latest available block', async (ctx: TestContext) => {
+    test('should not replay existing contract actions', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Subscription', 'ContractAction', 'NoOffset'] };
+
       let contractAddress: string;
       try {
         contractAddress = dataProvider.getKnownContractAddress();
@@ -98,35 +130,50 @@ describe('contract action subscriptions', () => {
         log.warn(error);
         ctx.skip?.(true, (error as Error).message);
       }
-      const receivedContractActions = await collectContractActions(
+
+      const latestBlock = await indexerHttpClient.getLatestBlock();
+      expect(latestBlock).toBeSuccess();
+      const tipHeight = latestBlock.data!.block.height;
+
+      const received: ContractActionWithHeightResponse[] = [];
+      const unsubscribe = indexerWsClient.subscribeToContractActionEvents(
+        {
+          next: (payload) => {
+            log.debug(`Received contract action:\n${JSON.stringify(payload)}`);
+            received.push(payload as ContractActionWithHeightResponse);
+          },
+        },
         contractAddress!,
-        2,
         undefined,
-        'contractActionReceived',
+        CONTRACT_ACTIONS_WITH_HEIGHT_FROM_LATEST_BLOCK,
       );
+      await sleep(NO_REPLAY_WAIT_MS);
+      unsubscribe();
 
-      // We should receive at least one contract action message
-      expect(receivedContractActions.length).toBeGreaterThanOrEqual(1);
-      expect(receivedContractActions[0]).toBeSuccess();
-
-      // Validate the received contract action
-      receivedContractActions
-        .filter((msg) => msg.data?.contractActions)
-        .forEach((msg) => {
-          const contractAction = msg.data?.contractActions;
-          expect(['ContractDeploy', 'ContractCall', 'ContractUpdate']).toContain(
-            contractAction?.__typename,
-          );
-          expect(contractAction?.address).toBe(contractAddress);
-        });
+      // Hosted environments may index new actions for this contract while we wait; those are
+      // allowed, but each must come from a block after the tip read before subscribing.
+      for (const msg of received) {
+        expect(msg).toBeSuccess();
+        const contractAction = msg.data!.contractActions;
+        expect(contractAction.address).toBe(contractAddress!);
+        expect(
+          contractAction.transaction.block.height,
+          `Contract action from block ${contractAction.transaction.block.height} was replayed; ` +
+            `a subscription without offset must only stream actions after block ${tipHeight}`,
+        ).toBeGreaterThan(tipHeight);
+      }
     });
+  });
 
+  describe('a subscription to contract action updates from genesis', () => {
     /**
-     * Validates that all streamed contract actions conform to their expected schema.
+     * Subscribing to contract action updates from block height 0 replays the contract's full
+     * history; every streamed contract action must conform to its expected schema.
      *
-     * @given a contract action subscription for a known contract address
-     * @when contract actions are streamed from the indexer
-     * @then each received contract action should match its corresponding Zod schema
+     * @given a known contract address with existing contract actions
+     * @when we subscribe to contract action events from block height 0
+     * @then we should receive the contract's historical contract actions
+     * @and each received contract action should match its corresponding Zod schema
      */
     test('should stream contract actions adhering to the expected schema', async (ctx: TestContext) => {
       let contractAddress: string;
@@ -136,24 +183,29 @@ describe('contract action subscriptions', () => {
         log.warn(error);
         ctx.skip?.(true, (error as Error).message);
       }
-      const receivedContractActions = await collectContractActions(contractAddress!, 2);
+      const receivedContractActions = await collectContractActions(contractAddress!, 2, {
+        height: 0,
+      });
 
-      receivedContractActions
-        .filter((msg) => msg?.data?.contractActions)
-        .forEach((msg) => {
-          expect.soft(msg).toBeSuccess();
-          const contractAction = msg.data?.contractActions;
+      expect(receivedContractActions.length).toBeGreaterThanOrEqual(2);
+      receivedContractActions.forEach((msg) => {
+        expect.soft(msg).toBeSuccess();
+        const contractAction = msg.data?.contractActions;
+        expect(['ContractDeploy', 'ContractCall', 'ContractUpdate']).toContain(
+          contractAction?.__typename,
+        );
+        expect(contractAction?.address).toBe(contractAddress!);
 
-          const parsed = ContractActionUnionSchema.safeParse(contractAction);
-          expect(
-            parsed.success,
-            `Contract action schema validation failed: ${JSON.stringify(
-              parsed.error?.format(),
-              null,
-              2,
-            )}`,
-          ).toBe(true);
-        });
+        const parsed = ContractActionUnionSchema.safeParse(contractAction);
+        expect(
+          parsed.success,
+          `Contract action schema validation failed: ${JSON.stringify(
+            parsed.error?.format(),
+            null,
+            2,
+          )}`,
+        ).toBe(true);
+      });
     });
   });
 
