@@ -41,6 +41,7 @@ use midnight_transient_crypto_v3::{
 };
 use midnight_zswap_v8::Offer as OfferV8;
 use midnight_zswap_v9::Offer as OfferV9;
+use secrecy::zeroize::Zeroizing;
 use std::str;
 
 #[derive(Debug, Clone)]
@@ -192,7 +193,7 @@ impl Transaction {
     }
 
     // Check if this transaction belongs to the given viewing key.
-    pub fn relevant(&self, viewing_key: ViewingKey) -> bool {
+    pub fn relevant(&self, viewing_key: &ViewingKey) -> bool {
         match self {
             Self::V8(transaction) => match transaction {
                 TransactionV8::Standard(StandardTransactionV8 {
@@ -200,8 +201,10 @@ impl Transaction {
                     fallible_coins,
                     ..
                 }) => {
-                    let secret_key = SecretKey::from_repr(&viewing_key.expose_secret().0)
-                        .expect("SecretKey can be created from repr");
+                    let secret_key = Zeroizing::new(
+                        SecretKey::from_repr(viewing_key.expose_secret())
+                            .expect("SecretKey can be created from repr"),
+                    );
 
                     let can_decrypt_guaranteed_coins = guaranteed_coins
                         .as_ref()
@@ -226,8 +229,10 @@ impl Transaction {
                     fallible_coins,
                     ..
                 }) => {
-                    let secret_key = SecretKeyV9::from_repr(&viewing_key.expose_secret().0)
-                        .expect("SecretKey can be created from repr");
+                    let secret_key = Zeroizing::new(
+                        SecretKeyV9::from_repr(viewing_key.expose_secret())
+                            .expect("SecretKey can be created from repr"),
+                    );
 
                     let can_decrypt_guaranteed_coins = guaranteed_coins
                         .as_ref()
@@ -453,18 +458,18 @@ mod tests {
         let transaction = Transaction::deserialize(transaction, LedgerVersion::V9)
             .expect("transaction can be deserialized");
 
-        assert!(transaction.relevant(viewing_key(1)));
-        assert!(transaction.relevant(viewing_key(2)));
-        assert!(!transaction.relevant(viewing_key(3)));
+        assert!(transaction.relevant(&viewing_key(1)));
+        assert!(transaction.relevant(&viewing_key(2)));
+        assert!(!transaction.relevant(&viewing_key(3)));
 
         let transaction = fs::read(format!("{}/tests/tx_1_2_3.raw", env!("CARGO_MANIFEST_DIR")))
             .expect("transaction file can be read");
         let transaction = Transaction::deserialize(transaction, LedgerVersion::V9)
             .expect("transaction can be deserialized");
 
-        assert!(transaction.relevant(viewing_key(1)));
-        assert!(!transaction.relevant(viewing_key(2)));
-        assert!(transaction.relevant(viewing_key(3)));
+        assert!(transaction.relevant(&viewing_key(1)));
+        assert!(!transaction.relevant(&viewing_key(2)));
+        assert!(transaction.relevant(&viewing_key(3)));
 
         Ok(())
     }

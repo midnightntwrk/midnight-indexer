@@ -18,8 +18,8 @@ use crate::{
         ApiError, ApiResult, ContextExt, OptionExt, ResultExt,
         ledger_query_limit::LedgerQueryLimiter,
         v4::{
-            HexEncoded, decode_session_id,
             merkle_tree_collapsed_update::{CollapsedMerkleTree, MerkleTreeCollapsedUpdate},
+            session_id::SessionId,
             transaction::RegularTransaction,
         },
     },
@@ -143,26 +143,31 @@ where
     async fn shielded_transactions<'a>(
         &self,
         cx: &'a Context<'a>,
-        session_id: HexEncoded,
+        #[graphql(secret)] session_id: SessionId,
         index: Option<u64>,
     ) -> Result<impl Stream<Item = ApiResult<ShieldedTransactionsEvent<S>>> + use<'a, S, B>, ApiError>
     {
         cx.get_metrics().wallets_connected.increment(1);
 
-        let session_id =
-            decode_session_id(session_id).map_err_into_client_error(|| "invalid session ID")?;
-
-        let quota_guard = cx
-            .get_subscription_quotas()
-            .try_acquire(cx.get_per_connection_counter(), Some(session_id))
-            .map_err_into_client_error(|| "subscription limit exceeded")?;
+        let session_id = session_id
+            .try_into()
+            .map_err_into_client_error(|| "invalid session ID")?;
 
         let wallet_id = cx
             .get_storage::<S>()
-            .resolve_session_id(session_id)
+            .resolve_session_id(&session_id)
             .await
             .map_err_into_server_error(|| "resolve session ID")?
             .some_or_client_error(|| "unknown or expired session ID")?;
+
+        // Only acquire a per-session quota bucket for a known session, so that arbitrary session
+        // IDs cannot create buckets. The bucket is keyed by wallet ID, so reconnecting with a new
+        // session does not reset it.
+        let quota_guard = cx
+            .get_subscription_quotas()
+            .try_acquire(cx.get_per_connection_counter(), Some(wallet_id))
+            .map_err_into_client_error(|| "subscription limit exceeded")?;
+
         let index = index.unwrap_or_default();
 
         // Build a stream of shielded transaction events by merging relevant transactions and
@@ -227,11 +232,13 @@ where
         .shielded_transactions
         .batch_size;
 
-    let wallet_indexed_events = subscriber
-        .subscribe::<WalletIndexed>()
-        .try_filter(move |wallet_indexed| ready(wallet_indexed.wallet_id == wallet_id));
-
     try_stream! {
+        // Subscribe before reading existing items, so none indexed in between is missed.
+        let wallet_indexed_events = subscriber
+            .subscribe::<WalletIndexed>()
+            .await
+            .try_filter(move |wallet_indexed| ready(wallet_indexed.wallet_id == wallet_id));
+
         // Stream exiting transactions.
         debug!(wallet_id:%, index; "streaming existing transactions");
 
