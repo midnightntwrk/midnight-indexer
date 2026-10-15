@@ -19,7 +19,12 @@ import log from '@utils/logging/logger';
 import dataProvider from '@utils/testdata-provider';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { env } from '../../environment/model';
-import { getBlockByHashWithRetry, getTransactionByHashWithRetry } from './test-utils';
+import { getBlockByHashWithRetry, getTransactionByHashWithRetry, retry } from './test-utils';
+import {
+  ContractActionSubscriptionResponse,
+  IndexerWsClient,
+} from '@utils/indexer/websocket-client';
+import { extractSubscriptionErrorMessage } from '@utils/indexer/subscription-error';
 import {
   ToolkitWrapper,
   DeployContractResult,
@@ -181,7 +186,32 @@ describe.sequential('contract actions', () => {
   });
 
   describe('a transaction to call the store circuit on the deployed counter smart contract', () => {
+    let wsClient: IndexerWsClient;
+    let unsubscribeWithoutOffset: () => void;
+    const streamedWithoutOffset: ContractActionSubscriptionResponse[] = [];
+    const subscriptionErrors: string[] = [];
+
     beforeAll(async () => {
+      // Subscribe without an offset only once the deploy is below the indexer's tip, so the
+      // deploy is history the subscription must not replay.
+      const deployBlock = await getBlockByHashWithRetry(contractDeployResult['deploy-block-hash']);
+      const deployHeight = deployBlock.data!.block.height;
+      await retry(
+        () => indexerHttpClient.getLatestBlock(),
+        (response) => (response.data?.block.height ?? 0) > deployHeight,
+        30,
+        2000,
+      );
+      wsClient = new IndexerWsClient();
+      await wsClient.connectionInit();
+      unsubscribeWithoutOffset = wsClient.subscribeToContractActionEvents(
+        {
+          next: (payload) => streamedWithoutOffset.push(payload),
+          error: (error) => subscriptionErrors.push(extractSubscriptionErrorMessage(error)),
+        },
+        contractDeployResult['contract-address-untagged'],
+      );
+
       contractCallResult = await toolkit.callContract(
         'store',
         contractDeployResult,
@@ -197,6 +227,42 @@ describe.sequential('contract actions', () => {
       contractCallBlockHash = contractCallResult.blockHash;
       contractCallTransactionHash = contractCallResult.txHash;
     }, CONTRACT_ACTION_TIMEOUT);
+
+    afterAll(async () => {
+      unsubscribeWithoutOffset?.();
+      await wsClient?.connectionClose();
+    });
+
+    /**
+     * A contract action subscription without an offset starts at the latest block: it streams
+     * the actions indexed after it started and replays none of the contract's earlier ones.
+     *
+     * @given a contract whose deploy is in a block below the indexer's tip
+     * @and a contract action subscription opened for it without an offset
+     * @when the store circuit is called on the contract
+     * @then the subscription streams exactly the call, and not the earlier deploy
+     */
+    test('should stream only the call to a subscription opened without an offset before it', async (context: TestContext) => {
+      context.task!.meta.custom = {
+        labels: ['Subscription', 'ContractAction', 'NoOffset', 'ContractCall'],
+      };
+
+      await retry(
+        async () => streamedWithoutOffset.length + subscriptionErrors.length,
+        (count) => count > 0,
+        15,
+        2000,
+      ).catch(() => log.warn('No contract action streamed without an offset'));
+      // Anything replayed or streamed twice would arrive alongside the call.
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+
+      expect(subscriptionErrors).toEqual([]);
+      const streamed = streamedWithoutOffset.map((msg) => {
+        const hash = msg.data?.contractActions.transaction?.hash;
+        return sameHash(hash, contractCallTransactionHash) ? 'the call' : hash;
+      });
+      expect(streamed, 'transactions of the streamed contract actions').toEqual(['the call']);
+    }, 60_000);
 
     /**
      * Once a contract call transaction has been submitted to node and confirmed, the indexer should report
