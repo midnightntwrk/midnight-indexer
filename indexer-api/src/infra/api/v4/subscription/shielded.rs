@@ -18,8 +18,8 @@ use crate::{
         ApiError, ApiResult, ContextExt, OptionExt, ResultExt,
         ledger_query_limit::LedgerQueryLimiter,
         v4::{
-            HexEncoded, decode_session,
             merkle_tree_collapsed_update::{CollapsedMerkleTree, MerkleTreeCollapsedUpdate},
+            session_id::SessionId,
             transaction::RegularTransaction,
         },
     },
@@ -35,8 +35,9 @@ use futures::{
     future::ok,
     stream::{self, TryStreamExt},
 };
-use indexer_common::domain::{SessionId, Subscriber, WalletIndexed};
+use indexer_common::domain::{Subscriber, WalletIndexed};
 use log::{debug, warn};
+use secrecy::ExposeSecret;
 use std::{future::ready, marker::PhantomData, pin::pin};
 use stream_cancel::{StreamExt as _, Trigger, Tripwire};
 use tokio::time::sleep;
@@ -143,32 +144,31 @@ where
     async fn shielded_transactions<'a>(
         &self,
         cx: &'a Context<'a>,
-        session_id: HexEncoded,
+        #[graphql(secret)] session_id: SessionId,
         index: Option<u64>,
     ) -> Result<impl Stream<Item = ApiResult<ShieldedTransactionsEvent<S>>> + use<'a, S, B>, ApiError>
     {
         cx.get_metrics().wallets_connected.increment(1);
 
-        let session =
-            decode_session(session_id).map_err_into_client_error(|| "invalid session ID")?;
-
-        // Per-session quota key: the legacy 32-byte session ID itself, or for a sealed token its
-        // unique AEAD tail.
-        let session = session.as_ref();
-        let quota_key = SessionId::try_from(&session[session.len() - 32..])
-            .expect("session is at least 32 bytes");
-
-        let quota_guard = cx
-            .get_subscription_quotas()
-            .try_acquire(cx.get_per_connection_counter(), Some(quota_key))
-            .map_err_into_client_error(|| "subscription limit exceeded")?;
+        let session = session_id
+            .into_bytes()
+            .map_err_into_client_error(|| "invalid session ID")?;
 
         let wallet_id = cx
             .get_storage::<S>()
-            .resolve_session(session, cx.get_session_token_ttl())
+            .resolve_session(session.expose_secret(), cx.get_session_token_ttl())
             .await
             .map_err_into_server_error(|| "resolve session")?
             .some_or_client_error(|| "unknown or expired session ID")?;
+
+        // Only acquire a per-session quota bucket for a known session, so that arbitrary session
+        // IDs cannot create buckets. The bucket is keyed by wallet ID, so reconnecting with a new
+        // session does not reset it.
+        let quota_guard = cx
+            .get_subscription_quotas()
+            .try_acquire(cx.get_per_connection_counter(), Some(wallet_id))
+            .map_err_into_client_error(|| "subscription limit exceeded")?;
+
         let index = index.unwrap_or_default();
 
         // Build a stream of shielded transaction events by merging relevant transactions and
@@ -233,11 +233,13 @@ where
         .shielded_transactions
         .batch_size;
 
-    let wallet_indexed_events = subscriber
-        .subscribe::<WalletIndexed>()
-        .try_filter(move |wallet_indexed| ready(wallet_indexed.wallet_id == wallet_id));
-
     try_stream! {
+        // Subscribe before reading existing items, so none indexed in between is missed.
+        let wallet_indexed_events = subscriber
+            .subscribe::<WalletIndexed>()
+            .await
+            .try_filter(move |wallet_indexed| ready(wallet_indexed.wallet_id == wallet_id));
+
         // Stream exiting transactions.
         debug!(wallet_id:%, index; "streaming existing transactions");
 

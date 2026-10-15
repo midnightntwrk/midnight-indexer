@@ -14,13 +14,13 @@
 //! Transaction deserialisation and wallet-relevance filtering.
 
 use bip32::{DerivationPath, XPrv};
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use indexer_common::{
     domain::{LedgerVersion, ViewingKey, ledger::Transaction},
     infra::ledger_db,
 };
 use midnight_zswap_v8::keys::{SecretKeys, Seed};
-use std::{fs, str::FromStr};
+use std::{fs, hint::black_box, str::FromStr};
 use tokio::runtime::Runtime;
 
 fn init_ledger_db(rt: &Runtime) -> tempfile::TempDir {
@@ -106,18 +106,18 @@ fn bench_transaction_relevant(c: &mut Criterion) {
 
     // tx_1_2_2 matches vk_1 and vk_2 but not vk_3.
     group.bench_function("tx_1_2_2 vk_1 (match)", |b| {
-        b.iter(|| tx_1_2_2.relevant(black_box(vk_1)))
+        b.iter(|| tx_1_2_2.relevant(black_box(&vk_1)))
     });
     group.bench_function("tx_1_2_2 vk_3 (no match)", |b| {
-        b.iter(|| tx_1_2_2.relevant(black_box(vk_3)))
+        b.iter(|| tx_1_2_2.relevant(black_box(&vk_3)))
     });
 
     // tx_1_2_3 matches vk_1 and vk_3 but not vk_2.
     group.bench_function("tx_1_2_3 vk_1 (match)", |b| {
-        b.iter(|| tx_1_2_3.relevant(black_box(vk_1)))
+        b.iter(|| tx_1_2_3.relevant(black_box(&vk_1)))
     });
     group.bench_function("tx_1_2_3 vk_2 (no match)", |b| {
-        b.iter(|| tx_1_2_3.relevant(black_box(vk_2)))
+        b.iter(|| tx_1_2_3.relevant(black_box(&vk_2)))
     });
 
     group.finish();

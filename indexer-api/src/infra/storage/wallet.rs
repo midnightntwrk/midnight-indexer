@@ -18,8 +18,9 @@ use crate::{
 use chacha20poly1305::aead::{OsRng, rand_core::RngCore};
 use fastrace::trace;
 use futures::TryFutureExt;
-use indexer_common::domain::{ByteVec, SessionId, ViewingKey};
+use indexer_common::domain::{SessionId, ViewingKey};
 use indoc::indoc;
+use secrecy::SecretSlice;
 use sqlx::types::{Uuid, time::OffsetDateTime};
 use std::time::Duration;
 
@@ -29,11 +30,11 @@ impl WalletStorage for Storage {
         &self,
         viewing_key: &ViewingKey,
         start_index: Option<u64>,
-    ) -> Result<(Uuid, ByteVec), sqlx::Error> {
+    ) -> Result<(Uuid, SecretSlice<u8>), sqlx::Error> {
         let wallet_id = self.upsert_wallet(viewing_key, start_index).await?;
 
         let token = SessionToken {
-            viewing_key: *viewing_key,
+            viewing_key: viewing_key.clone(),
             start_index: start_index.unwrap_or_default(),
             issued_at: OffsetDateTime::now_utc().unix_timestamp(),
         }
@@ -179,16 +180,14 @@ impl Storage {
             .bind(&viewing_key)
             .bind(start_index)
             .bind(OffsetDateTime::now_utc())
-            .bind(session_id.as_ref())
+            .bind(session_id.expose_secret().as_slice())
             .fetch_one(&*self.pool)
             .await
     }
 }
 
 fn generate_session_id() -> SessionId {
-    let mut session_id = [0u8; 32];
-    OsRng.fill_bytes(&mut session_id);
-    session_id.into()
+    SessionId::init_with_mut(|session_id| OsRng.fill_bytes(session_id))
 }
 
 #[cfg(all(test, feature = "standalone"))]
@@ -196,6 +195,7 @@ mod tests {
     use super::*;
     use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit};
     use indexer_common::infra::{migrations, pool::sqlite::SqlitePool};
+    use secrecy::ExposeSecret;
     use std::error::Error as StdError;
 
     const TTL: Duration = Duration::from_secs(60);
@@ -217,15 +217,23 @@ mod tests {
         let (wallet_id, token) = instance_a.connect_wallet(&viewing_key, Some(7)).await?;
 
         // The issuing instance resolves the token to the same wallet.
-        let resolved = instance_a.resolve_session(token.as_ref(), TTL).await?;
+        let resolved = instance_a
+            .resolve_session(token.expose_secret(), TTL)
+            .await?;
         assert_eq!(resolved, Some(wallet_id));
 
         // An instance that never saw the connect creates the wallet and resolves the token.
-        let resolved = instance_b.resolve_session(token.as_ref(), TTL).await?;
+        let resolved = instance_b
+            .resolve_session(token.expose_secret(), TTL)
+            .await?;
         assert!(resolved.is_some());
 
         // Disconnect is accepted on that instance too.
-        assert!(instance_b.disconnect_wallet(token.as_ref(), TTL).await?);
+        assert!(
+            instance_b
+                .disconnect_wallet(token.expose_secret(), TTL)
+                .await?
+        );
 
         Ok(())
     }
@@ -240,18 +248,26 @@ mod tests {
 
         // One wallet row per viewing key, but both tokens resolve.
         assert_eq!(wallet_id_1, wallet_id_2);
-        assert_ne!(token_1, token_2);
+        assert_ne!(token_1.expose_secret(), token_2.expose_secret());
         assert_eq!(
-            storage.resolve_session(token_1.as_ref(), TTL).await?,
+            storage
+                .resolve_session(token_1.expose_secret(), TTL)
+                .await?,
             Some(wallet_id_1)
         );
         assert_eq!(
-            storage.resolve_session(token_2.as_ref(), TTL).await?,
+            storage
+                .resolve_session(token_2.expose_secret(), TTL)
+                .await?,
             Some(wallet_id_1)
         );
 
         // Disconnecting one session leaves the wallet active for the other.
-        assert!(storage.disconnect_wallet(token_1.as_ref(), TTL).await?);
+        assert!(
+            storage
+                .disconnect_wallet(token_1.expose_secret(), TTL)
+                .await?
+        );
         let active: bool =
             sqlx::query_scalar("SELECT session_id IS NOT NULL FROM wallets WHERE id = $1")
                 .bind(wallet_id_1)
@@ -259,7 +275,9 @@ mod tests {
                 .await?;
         assert!(active);
         assert_eq!(
-            storage.resolve_session(token_2.as_ref(), TTL).await?,
+            storage
+                .resolve_session(token_2.expose_secret(), TTL)
+                .await?,
             Some(wallet_id_1)
         );
 
@@ -278,12 +296,12 @@ mod tests {
         }
         .seal(&storage.cipher)?;
         let expired = storage
-            .resolve_session(expired_token.as_ref(), Duration::from_secs(10))
+            .resolve_session(expired_token.expose_secret(), Duration::from_secs(10))
             .await?;
         assert_eq!(expired, None);
         assert!(
             !storage
-                .disconnect_wallet(expired_token.as_ref(), Duration::from_secs(10))
+                .disconnect_wallet(expired_token.expose_secret(), Duration::from_secs(10))
                 .await?
         );
 

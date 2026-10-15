@@ -24,6 +24,7 @@ pub mod ledger_events;
 pub mod merkle_tree_collapsed_update;
 pub mod mutation;
 pub mod query;
+pub mod session_id;
 pub mod spo;
 pub mod subscription;
 pub mod system_parameters;
@@ -46,9 +47,9 @@ use crate::{
         v4::{
             block::BlockOffset,
             dataloader::{
-                BlockByHashLoader, ContractActionsByTransactionIdLoader,
-                ContractEventsByContractActionIdLoader, TransactionByIdLoader,
-                TransactionsByBlockIdLoader,
+                BlockByHashLoader, BlockReferenceByTransactionIdLoader,
+                ContractActionsByTransactionIdLoader, ContractEventsByContractActionIdLoader,
+                TransactionByIdLoader, TransactionsByBlockIdLoader,
             },
             mutation::Mutation,
             query::Query,
@@ -88,6 +89,8 @@ use thiserror::Error;
 #[as_ref(str)]
 pub struct HexEncoded(String);
 
+// `session_id::SessionId` registers the same GraphQL scalar. async-graphql keeps whichever type
+// registers first and does not check that the two agree, so keep both definitions identical.
 scalar!(HexEncoded);
 
 impl HexEncoded {
@@ -406,6 +409,10 @@ where
             tokio::spawn,
         ))
         .data(DataLoader::new(
+            BlockReferenceByTransactionIdLoader::new(storage.clone()),
+            tokio::spawn,
+        ))
+        .data(DataLoader::new(
             TransactionsByBlockIdLoader::new(storage.clone()),
             tokio::spawn,
         ))
@@ -520,25 +527,6 @@ where
     .extension(async_graphql::extensions::Tracing)
 }
 
-/// Decode a hex-encoded session, either a sealed session token or a legacy 32-byte session ID.
-fn decode_session(session_id: HexEncoded) -> Result<ByteVec, DecodeSessionError> {
-    let session = session_id.hex_decode::<ByteVec>()?;
-    // The shortest valid session is the legacy 32-byte session ID.
-    if session.as_ref().len() < 32 {
-        return Err(DecodeSessionError::TooShort);
-    }
-    Ok(session)
-}
-
-#[derive(Debug, Error)]
-enum DecodeSessionError {
-    #[error("cannot hex-decode session ID")]
-    HexDecode(#[from] HexDecodeError),
-
-    #[error("session ID too short")]
-    TooShort,
-}
-
 /// Resolve the block height for the given optional block offset. If it is a block height, it is
 /// simple, if it is a hash, the block is loaded via the DataLoader and its height returned. If the
 /// block offset is omitted, the last block is loaded and its height returned.
@@ -583,6 +571,147 @@ async fn resolve_height<S: Storage>(
             let height = latest_block.map(|block| block.height).unwrap_or_default();
 
             Ok(height)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        domain::storage::NoopStorage,
+        infra::api::{
+            Metrics, SessionTokenTtl,
+            quota::{PerConnectionCounter, QuotaConfig, SubscriptionQuotas},
+            v4::schema_builder,
+        },
+    };
+    use async_graphql::{
+        Request, ServerResult, Variables,
+        extensions::{Extension, ExtensionContext, ExtensionFactory, NextParseQuery},
+        parser::types::ExecutableDocument,
+    };
+    use futures::StreamExt;
+    use indexer_common::domain::{NetworkId, NoopSubscriber};
+    use parking_lot::Mutex;
+    use std::{
+        num::{NonZeroU32, NonZeroUsize},
+        sync::Arc,
+        time::Duration,
+    };
+
+    const MARKER: &str = "deadbeefdeadbeefdeadbeefdeadbeef";
+
+    /// Captures the executable document as rendered for telemetry by the `Tracing` extension.
+    #[derive(Default, Clone)]
+    struct CaptureExecuteDoc(Arc<Mutex<Vec<String>>>);
+
+    impl ExtensionFactory for CaptureExecuteDoc {
+        fn create(&self) -> Arc<dyn Extension> {
+            Arc::new(self.clone())
+        }
+    }
+
+    #[async_graphql::async_trait::async_trait]
+    impl Extension for CaptureExecuteDoc {
+        async fn parse_query(
+            &self,
+            ctx: &ExtensionContext<'_>,
+            query: &str,
+            variables: &Variables,
+            next: NextParseQuery<'_>,
+        ) -> ServerResult<ExecutableDocument> {
+            let doc = next.run(ctx, query, variables).await?;
+            self.0
+                .lock()
+                .push(ctx.stringify_execute_doc(&doc, variables));
+            Ok(doc)
+        }
+    }
+
+    #[tokio::test]
+    async fn test_wallet_secrets_not_in_telemetry() {
+        let capture = CaptureExecuteDoc::default();
+        let schema = schema_builder::<NoopStorage, NoopSubscriber>()
+            .extension(capture.clone())
+            .data(Metrics::default())
+            .data(NetworkId::try_from("undeployed").expect("network ID is valid"))
+            .finish();
+
+        let requests = [
+            Request::new(format!(r#"mutation {{ connect(viewingKey: "{MARKER}") }}"#)),
+            Request::new(format!(
+                r#"mutation {{ disconnect(sessionId: "{MARKER}") }}"#
+            )),
+            Request::new("mutation($key: ViewingKey!) { connect(viewingKey: $key) }")
+                .variables(Variables::from_json(serde_json::json!({ "key": MARKER }))),
+            Request::new("mutation($id: HexEncoded!) { disconnect(sessionId: $id) }")
+                .variables(Variables::from_json(serde_json::json!({ "id": MARKER }))),
+        ];
+        for request in requests {
+            // Errors from the resolvers are irrelevant: parsing runs first.
+            let _ = schema.execute(request).await;
+        }
+
+        // The session ID is too short, so the subscription fails before reaching storage.
+        let subscriptions = [
+            Request::new(format!(
+                r#"subscription {{ shieldedTransactions(sessionId: "{MARKER}") {{ __typename }} }}"#
+            )),
+            Request::new(
+                "subscription($id: HexEncoded!) { shieldedTransactions(sessionId: $id) { __typename } }",
+            )
+            .variables(Variables::from_json(serde_json::json!({ "id": MARKER }))),
+        ];
+        for subscription in subscriptions {
+            let _ = schema.execute_stream(subscription).next().await;
+        }
+
+        let captured = capture.0.lock().clone();
+        assert_eq!(captured.len(), 6);
+        captured.iter().for_each(|doc| {
+            assert!(!doc.contains(MARKER), "secret in telemetry: {doc}");
+        });
+    }
+
+    #[tokio::test]
+    async fn test_unknown_session_does_not_consume_quota() {
+        let quota_config = QuotaConfig {
+            max_concurrent_per_connection: NonZeroUsize::new(10).expect("10 is non-zero"),
+            max_session_subscriptions_per_minute: NonZeroU32::new(1).expect("1 is non-zero"),
+        };
+        let schema = schema_builder::<NoopStorage, NoopSubscriber>()
+            .data(NoopStorage)
+            .data(SessionTokenTtl(Duration::from_secs(60)))
+            .data(Metrics::default())
+            .data(NetworkId::try_from("undeployed").expect("network ID is valid"))
+            .data(SubscriptionQuotas::new(quota_config))
+            .finish();
+
+        // A well-formed session ID that no wallet has. With one subscription per minute allowed,
+        // a second attempt would exceed the rate limit if unknown sessions consumed quota.
+        for (attempt, len) in [(1, 32), (2, 32), (1, 76), (2, 76)] {
+            let session_id = "00".repeat(len);
+            let request = Request::new(format!(
+                r#"subscription {{ shieldedTransactions(sessionId: "{session_id}") {{ __typename }} }}"#
+            ))
+            .data(PerConnectionCounter::default());
+            let response = schema
+                .execute_stream(request)
+                .next()
+                .await
+                .expect("subscription yields a response");
+
+            let messages = response
+                .errors
+                .iter()
+                .map(|error| error.message.as_str())
+                .collect::<Vec<_>>();
+            assert!(
+                messages
+                    .iter()
+                    .any(|message| message.starts_with("unknown or expired session ID")),
+                "attempt {attempt}: {messages:?}"
+            );
         }
     }
 }

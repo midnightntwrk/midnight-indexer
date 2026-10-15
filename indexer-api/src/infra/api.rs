@@ -25,9 +25,9 @@ use crate::{
         progress_cache::{ProgressCache, ProgressCacheConfig},
         quota::{PerConnectionCounter, QuotaConfig, SubscriptionQuotas},
         v4::dataloader::{
-            BlockByHashLoader, ContractActionsByTransactionIdLoader,
-            ContractEventsByContractActionIdLoader, TransactionByIdLoader,
-            TransactionsByBlockIdLoader,
+            BlockByHashLoader, BlockReferenceByTransactionIdLoader,
+            ContractActionsByTransactionIdLoader, ContractEventsByContractActionIdLoader,
+            TransactionByIdLoader, TransactionsByBlockIdLoader,
         },
     },
 };
@@ -441,6 +441,12 @@ trait ContextExt {
     where
         S: Storage;
 
+    fn get_block_reference_by_transaction_id_loader<S>(
+        &self,
+    ) -> &DataLoader<BlockReferenceByTransactionIdLoader<S>>
+    where
+        S: Storage;
+
     fn get_transactions_by_block_id_loader<S>(&self) -> &DataLoader<TransactionsByBlockIdLoader<S>>
     where
         S: Storage;
@@ -507,6 +513,16 @@ impl ContextExt for Context<'_> {
     {
         self.data::<DataLoader<TransactionByIdLoader<S>>>()
             .expect("TransactionByIdLoader is stored in Context")
+    }
+
+    fn get_block_reference_by_transaction_id_loader<S>(
+        &self,
+    ) -> &DataLoader<BlockReferenceByTransactionIdLoader<S>>
+    where
+        S: Storage,
+    {
+        self.data::<DataLoader<BlockReferenceByTransactionIdLoader<S>>>()
+            .expect("BlockReferenceByTransactionIdLoader is stored in Context")
     }
 
     fn get_transactions_by_block_id_loader<S>(&self) -> &DataLoader<TransactionsByBlockIdLoader<S>>

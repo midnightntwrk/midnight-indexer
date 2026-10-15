@@ -26,3 +26,7 @@ data/static/*/contract-actions.jsonc
 data/static/*/contract-events.jsonc
 data/static/*/transactions.jsonc
 data/static/*/unshielded-token-types.jsonc
+
+# Compact fixtures are compiled on the fly into .tmp/compact; this only catches
+# output from compiling one in place by hand.
+data/contracts/*/managed/

@@ -15,7 +15,8 @@ use chacha20poly1305::{
     AeadCore, ChaCha20Poly1305,
     aead::{Aead, OsRng, Payload},
 };
-use indexer_common::domain::{ByteVec, VIEWING_KEY_LEN, ViewingKey};
+use indexer_common::domain::{VIEWING_KEY_LEN, ViewingKey};
+use secrecy::{SecretSlice, zeroize::Zeroizing};
 use sqlx::types::time::OffsetDateTime;
 use std::time::Duration;
 use thiserror::Error;
@@ -44,8 +45,11 @@ pub struct SessionToken {
 
 impl SessionToken {
     /// Seal this session token with a fresh random nonce: `nonce || AEAD ciphertext`.
-    pub fn seal(&self, cipher: &ChaCha20Poly1305) -> Result<ByteVec, chacha20poly1305::Error> {
-        let mut payload = [0; PAYLOAD_LEN];
+    pub fn seal(
+        &self,
+        cipher: &ChaCha20Poly1305,
+    ) -> Result<SecretSlice<u8>, chacha20poly1305::Error> {
+        let mut payload = Zeroizing::new([0; PAYLOAD_LEN]);
         payload[..32].copy_from_slice(self.viewing_key.expose_secret().as_ref());
         payload[32..40].copy_from_slice(&self.start_index.to_be_bytes());
         payload[40..].copy_from_slice(&self.issued_at.to_be_bytes());
@@ -54,7 +58,7 @@ impl SessionToken {
         let mut ciphertext = cipher.encrypt(
             &nonce,
             Payload {
-                msg: &payload,
+                msg: payload.as_ref(),
                 aad: AAD,
             },
         )?;
@@ -76,15 +80,17 @@ impl SessionToken {
         }
 
         let (nonce, ciphertext) = token.split_at(NONCE_LEN);
-        let payload = cipher
-            .decrypt(
-                nonce.into(),
-                Payload {
-                    msg: ciphertext,
-                    aad: AAD,
-                },
-            )
-            .map_err(|_| OpenSessionTokenError::Invalid)?;
+        let payload = Zeroizing::new(
+            cipher
+                .decrypt(
+                    nonce.into(),
+                    Payload {
+                        msg: ciphertext,
+                        aad: AAD,
+                    },
+                )
+                .map_err(|_| OpenSessionTokenError::Invalid)?,
+        );
 
         let viewing_key = ViewingKey::from(
             <[u8; 32]>::try_from(&payload[..32]).map_err(|_| OpenSessionTokenError::Invalid)?,
@@ -118,6 +124,7 @@ pub enum OpenSessionTokenError {
 mod tests {
     use super::*;
     use chacha20poly1305::KeyInit;
+    use secrecy::ExposeSecret;
 
     fn cipher(key: u8) -> ChaCha20Poly1305 {
         ChaCha20Poly1305::new(&[key; 32].into())
@@ -134,11 +141,12 @@ mod tests {
     #[test]
     fn roundtrip() {
         let sealed = token().seal(&cipher(0)).unwrap();
-        assert_eq!(sealed.as_ref().len(), SESSION_TOKEN_LEN);
+        assert_eq!(sealed.expose_secret().len(), SESSION_TOKEN_LEN);
 
         let opened =
-            SessionToken::open(sealed.as_ref(), &cipher(0), Duration::from_secs(60)).unwrap();
-        assert_eq!(opened.viewing_key, [7; 32].into());
+            SessionToken::open(sealed.expose_secret(), &cipher(0), Duration::from_secs(60))
+                .unwrap();
+        assert_eq!(opened.viewing_key.expose_secret(), &[7; 32]);
         assert_eq!(opened.start_index, 42);
     }
 
@@ -151,13 +159,14 @@ mod tests {
         .seal(&cipher(0))
         .unwrap();
 
-        let result = SessionToken::open(sealed.as_ref(), &cipher(0), Duration::from_secs(10));
+        let result =
+            SessionToken::open(sealed.expose_secret(), &cipher(0), Duration::from_secs(10));
         assert_eq!(result.unwrap_err(), OpenSessionTokenError::Expired);
     }
 
     #[test]
     fn tampered() {
-        let mut sealed = token().seal(&cipher(0)).unwrap().as_ref().to_vec();
+        let mut sealed = token().seal(&cipher(0)).unwrap().expose_secret().to_vec();
         sealed[NONCE_LEN] ^= 1;
 
         let result = SessionToken::open(&sealed, &cipher(0), Duration::from_secs(60));
@@ -168,7 +177,8 @@ mod tests {
     fn wrong_key() {
         let sealed = token().seal(&cipher(0)).unwrap();
 
-        let result = SessionToken::open(sealed.as_ref(), &cipher(1), Duration::from_secs(60));
+        let result =
+            SessionToken::open(sealed.expose_secret(), &cipher(1), Duration::from_secs(60));
         assert_eq!(result.unwrap_err(), OpenSessionTokenError::Invalid);
     }
 

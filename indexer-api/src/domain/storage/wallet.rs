@@ -12,7 +12,8 @@
 // limitations under the License.
 
 use crate::domain::storage::NoopStorage;
-use indexer_common::domain::{ByteVec, ViewingKey};
+use indexer_common::domain::ViewingKey;
+use secrecy::SecretSlice;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -28,7 +29,7 @@ where
         &self,
         viewing_key: &ViewingKey,
         start_index: Option<u64>,
-    ) -> Result<(Uuid, ByteVec), sqlx::Error>;
+    ) -> Result<(Uuid, SecretSlice<u8>), sqlx::Error>;
 
     /// Disconnect a wallet session and return whether it was valid. A legacy session ID is
     /// removed; a sealed session token cannot be revoked on other instances, so it is not revoked
@@ -57,7 +58,7 @@ impl WalletStorage for NoopStorage {
         &self,
         viewing_key: &ViewingKey,
         start_index: Option<u64>,
-    ) -> Result<(Uuid, ByteVec), sqlx::Error> {
+    ) -> Result<(Uuid, SecretSlice<u8>), sqlx::Error> {
         unimplemented!()
     }
 
@@ -74,7 +75,7 @@ impl WalletStorage for NoopStorage {
         session: &[u8],
         token_ttl: Duration,
     ) -> Result<Option<Uuid>, sqlx::Error> {
-        unimplemented!()
+        Ok(None)
     }
 
     async fn keep_wallet_active(&self, wallet_id: Uuid) -> Result<(), sqlx::Error> {

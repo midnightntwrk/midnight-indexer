@@ -15,12 +15,13 @@ use crate::{
     domain::storage::Storage,
     infra::api::{
         ApiResult, ContextExt, OptionExt, ResultExt,
-        v4::{HexEncodable, HexEncoded, decode_session, viewing_key::ViewingKey},
+        v4::{session_id::SessionId, viewing_key::ViewingKey},
     },
 };
 use async_graphql::{Context, InputObject, Object, scalar};
 use fastrace::trace;
 use log::debug;
+use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 
@@ -45,9 +46,9 @@ where
     async fn connect(
         &self,
         cx: &Context<'_>,
-        viewing_key: ViewingKey,
+        #[graphql(secret)] viewing_key: ViewingKey,
         options: Option<ConnectOptions>,
-    ) -> ApiResult<HexEncoded> {
+    ) -> ApiResult<SessionId> {
         let viewing_key = viewing_key
             .try_into_domain(cx.get_network_id())
             .map_err_into_client_error(|| "invalid viewing key")?;
@@ -70,18 +71,23 @@ where
 
         debug!(wallet_id:%; "wallet connected");
 
-        Ok(session_token.hex_encode())
+        Ok(session_token.into())
     }
 
     /// Disconnect the wallet with the given session token or legacy session ID. Best effort: a
     /// session token cannot be revoked and stays valid on all instances until it expires.
     #[trace]
-    async fn disconnect(&self, cx: &Context<'_>, session_id: HexEncoded) -> ApiResult<Unit> {
-        let session =
-            decode_session(session_id).map_err_into_client_error(|| "invalid session ID")?;
+    async fn disconnect(
+        &self,
+        cx: &Context<'_>,
+        #[graphql(secret)] session_id: SessionId,
+    ) -> ApiResult<Unit> {
+        let session = session_id
+            .into_bytes()
+            .map_err_into_client_error(|| "invalid session ID")?;
 
         cx.get_storage::<S>()
-            .disconnect_wallet(session.as_ref(), cx.get_session_token_ttl())
+            .disconnect_wallet(session.expose_secret(), cx.get_session_token_ttl())
             .await
             .map_err_into_server_error(|| "disconnect wallet")?
             .then_some(())
