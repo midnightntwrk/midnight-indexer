@@ -43,6 +43,7 @@ pub async fn init(config: Config) -> Result<(), Error> {
     let Config {
         cache_max_nodes,
         cnn_url,
+        create_if_missing,
     } = config;
 
     // storage-core assumes a single writer: `flush_*` reads root counts and
@@ -61,6 +62,7 @@ pub async fn init(config: Config) -> Result<(), Error> {
         cnn_url,
         max_connections: MAX_CONNECTIONS,
         synchronous_full: true,
+        create_if_missing,
     })
     .await?;
     migrations::sqlite::run_for_ledger_db(&pool).await?;
@@ -103,8 +105,16 @@ pub struct Config {
     /// is `DEFAULT_CACHE_SIZE = 10_000`). `0` means unbounded.
     pub cache_max_nodes: usize,
 
+    /// SQLite connection URL or filesystem path for the ledger database.
     #[cfg(feature = "standalone")]
     pub cnn_url: String,
+
+    /// Allow creating a missing ledger database file. Defaults to true.
+    /// When false, require an existing, non-empty file; in-memory databases are exempt.
+    /// This does not validate the schema or the presence of ledger data.
+    #[cfg(feature = "standalone")]
+    #[serde(default = "crate::infra::pool::sqlite::create_if_missing_default")]
+    pub create_if_missing: bool,
 }
 
 #[cfg(feature = "standalone")]

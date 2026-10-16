@@ -15,10 +15,10 @@ use derive_more::Into;
 use log::debug;
 use serde::Deserialize;
 use sqlx::{
-    Sqlite, Transaction,
+    ConnectOptions, Sqlite, Transaction,
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
 };
-use std::{ops::Deref, time::Duration};
+use std::{ops::Deref, path::PathBuf, time::Duration};
 use thiserror::Error;
 
 /// New type for `sqlx::SqlitePool`, allowing for some custom extensions as well as security.
@@ -32,12 +32,37 @@ impl SqlitePool {
     /// Try to create a new [SqlitePool] with the given config.
     pub async fn new(config: Config) -> Result<Self, Error> {
         let max_connections = config.max_connections;
-        let connect_options =
-            SqliteConnectOptions::try_from(config).map_err(Error::ConvertConfig)?;
+        let create_if_missing = config.create_if_missing;
+        let cnn_url = config.cnn_url.clone();
+        let connect_options = SqliteConnectOptions::try_from(config)
+            .map_err(|source| Error::ConvertConfig { cnn_url, source })?;
+        let path = connect_options.get_filename().to_path_buf();
+        // Read SQLx's parsed mode rather than guessing from the filename. Its generated
+        // in-memory filename is not URL-safe in SQLx 0.8, so replace only the filename
+        // in this temporary copy before inspecting the mode.
+        let in_memory = connect_options
+            .clone()
+            .filename("/")
+            .to_url_lossy()
+            .query_pairs()
+            .any(|(key, value)| key == "mode" && value == "memory");
+        if !create_if_missing && !in_memory {
+            let metadata =
+                tokio::fs::metadata(&path)
+                    .await
+                    .map_err(|source| Error::InspectFile {
+                        path: path.clone(),
+                        source,
+                    })?;
+            if metadata.len() == 0 {
+                return Err(Error::EmptyFile { path });
+            }
+        }
         let inner = SqlitePoolOptions::new()
             .max_connections(max_connections)
             .connect_with(connect_options)
-            .await?;
+            .await
+            .map_err(|source| Error::CreatePool { path, source })?;
         let pool = SqlitePool(inner);
         debug!(pool:?; "created pool");
 
@@ -97,18 +122,40 @@ impl Deref for SqlitePool {
 /// Error possibly returned by [SqlitePool::new].
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("cannot convert config into sqlite connect options")]
-    ConvertConfig(#[source] sqlx::Error),
+    #[error("cannot parse SQLite connection URL {cnn_url:?}: {source}")]
+    ConvertConfig {
+        cnn_url: String,
+        #[source]
+        source: sqlx::Error,
+    },
 
-    #[error("cannot create sqlite connection pool")]
-    CreatePool(#[from] sqlx::Error),
+    #[error("cannot inspect existing SQLite database {path:?} (create_if_missing=false): {source}")]
+    InspectFile {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error(
+        "SQLite database {path:?} is empty (create_if_missing=false); refusing to initialize it"
+    )]
+    EmptyFile { path: PathBuf },
+
+    #[error("cannot open SQLite database {path:?}: {source}")]
+    CreatePool {
+        path: PathBuf,
+        #[source]
+        source: sqlx::Error,
+    },
 }
 
 /// Configuration for [SqlitePool].
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
+    /// SQLite connection URL or filesystem path.
     pub cnn_url: String,
 
+    /// Maximum number of connections in the pool. Defaults to eight.
     #[serde(default = "default_max_connections")]
     pub max_connections: u32,
 
@@ -117,6 +164,13 @@ pub struct Config {
     /// other files (the ledger DB; see `infra::ledger_db::init`).
     #[serde(skip)]
     pub synchronous_full: bool,
+
+    /// Allow creating a missing database file. Defaults to true for fresh installations.
+    /// When false, require an existing, non-empty file before opening it; this also
+    /// rejects zero-byte files to avoid silently initializing a replacement database.
+    /// In-memory databases are exempt. This does not validate schema or indexed data.
+    #[serde(default = "create_if_missing_default")]
+    pub create_if_missing: bool,
 }
 
 impl Config {
@@ -128,6 +182,10 @@ impl Config {
             ..Default::default()
         }
     }
+}
+
+pub(crate) const fn create_if_missing_default() -> bool {
+    true
 }
 
 fn default_max_connections() -> u32 {
@@ -159,7 +217,7 @@ impl TryFrom<Config> for SqliteConnectOptions {
         let options = config
             .cnn_url
             .parse::<SqliteConnectOptions>()?
-            .create_if_missing(true)
+            .create_if_missing(config.create_if_missing)
             .journal_mode(SqliteJournalMode::Wal)
             .synchronous(synchronous)
             .busy_timeout(Duration::from_secs(30));
@@ -173,34 +231,126 @@ impl Default for Config {
             cnn_url: "sqlite::memory:".to_string(),
             max_connections: default_max_connections(),
             synchronous_full: false,
+            create_if_missing: create_if_missing_default(),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::infra::pool::sqlite::{Config, SqlitePool};
-    use std::{ops::Deref, path::Path};
+    use crate::infra::pool::sqlite::{Config, Error, SqlitePool};
+    use std::ops::Deref;
     use tokio::fs;
 
     #[tokio::test]
     async fn test_sqlite_pool_file_creation() {
-        let db_path = "test_indexer.sqlite";
-
-        if Path::new(db_path).exists() {
-            fs::remove_file(db_path)
-                .await
-                .expect("Failed to remove existing test database file");
-        }
-        assert!(!Path::new(db_path).exists());
-
-        let pool = SqlitePool::new(Config::with_url(format!("sqlite://{db_path}"))).await;
-
-        assert!(pool.is_ok());
-        assert!(Path::new(db_path).exists());
-        fs::remove_file(db_path)
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("test_indexer.sqlite");
+        let pool = SqlitePool::new(Config::with_url(db_path.to_str().unwrap()))
             .await
-            .expect("Failed to remove test database file");
+            .unwrap();
+
+        assert!(db_path.exists());
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_pool_file_creation_disabled() {
+        let temp_dir = tempfile::tempdir().expect("create temp directory");
+        let db_path = temp_dir.path().join("missing.sqlite");
+
+        let error = SqlitePool::new(Config {
+            create_if_missing: false,
+            ..Config::with_url(format!("sqlite://{}", db_path.display()))
+        })
+        .await
+        .unwrap_err();
+
+        assert!(error.to_string().contains(db_path.to_str().unwrap()));
+        assert!(error.to_string().contains("create_if_missing=false"));
+        assert!(matches!(error, Error::InspectFile { source, .. }
+            if source.kind() == std::io::ErrorKind::NotFound));
+        assert!(!db_path.exists());
+    }
+
+    #[tokio::test]
+    async fn creation_disabled_rejects_empty_files_without_initializing_them() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("empty-memory.sqlite");
+        fs::write(&db_path, []).await.unwrap();
+
+        // The explicit flag must override mode=rwc, and "memory" in a filename
+        // must not exempt a real file from the guard.
+        let error = SqlitePool::new(Config {
+            create_if_missing: false,
+            ..Config::with_url(format!("sqlite://{}?mode=rwc", db_path.display()))
+        })
+        .await
+        .unwrap_err();
+
+        assert!(error.to_string().contains(db_path.to_str().unwrap()));
+        assert!(error.to_string().contains("empty"));
+        assert!(matches!(error, Error::EmptyFile { .. }));
+        assert_eq!(fs::metadata(&db_path).await.unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn creation_disabled_reopens_existing_database() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("existing.sqlite");
+        let mut config = Config::with_url(db_path.to_str().unwrap());
+        let pool = SqlitePool::new(config.clone()).await.unwrap();
+        sqlx::query("CREATE TABLE sentinel (id INTEGER)")
+            .execute(pool.deref())
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO sentinel VALUES (42)")
+            .execute(pool.deref())
+            .await
+            .unwrap();
+        pool.close().await;
+
+        config.create_if_missing = false;
+        let pool = SqlitePool::new(config).await.unwrap();
+        let id = sqlx::query_scalar::<_, i64>("SELECT id FROM sentinel")
+            .fetch_one(pool.deref())
+            .await
+            .unwrap();
+        assert_eq!(id, 42);
+        pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn creation_disabled_allows_in_memory_databases() {
+        for url in [
+            "sqlite::memory:",
+            "sqlite://?mode=memory",
+            "sqlite://named?mode=memory",
+        ] {
+            let pool = SqlitePool::new(Config {
+                create_if_missing: false,
+                ..Config::with_url(url)
+            })
+            .await
+            .unwrap();
+            pool.close().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn connection_errors_identify_the_database_file() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir
+            .path()
+            .join("missing-directory")
+            .join("indexer.sqlite");
+        let error = SqlitePool::new(Config::with_url(db_path.to_str().unwrap()))
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains(db_path.to_str().unwrap()));
+        assert!(matches!(error, Error::CreatePool { .. }));
+        assert!(!db_path.exists());
     }
 
     #[tokio::test]
