@@ -14,6 +14,9 @@ application:
   # Recent blocks whose ledger states stay loadable (gc roots). Must comfortably exceed
   # indexer-api's dust_generations max_snapshot_age.
   ledger_state_retention: 1000
+  # Commit without waiting for durability while not caught up; a database crash then loses only the
+  # last blocks indexed, which are indexed again. Every commit is durable at the tip.
+  async_commit_while_catching_up: true
 
 infra:
   run_migrations: true

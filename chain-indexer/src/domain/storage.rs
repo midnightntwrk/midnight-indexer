@@ -25,6 +25,10 @@ pub trait Storage
 where
     Self: Clone + Send + Sync + 'static,
 {
+    /// Let writes, ledger DB included, commit without waiting for durability. A database crash then
+    /// loses only the most recent blocks, which are indexed again on restart.
+    fn set_async_commit(&self, enabled: bool);
+
     /// Save the given block with parameters and return the max regular transaction ID.
     async fn save_block(
         &mut self,
