@@ -10,19 +10,20 @@
 | Test Suites | smoke, integration, e2e |
 | Tests | Indexer GraphQL API, integration with Node and end-to-end transaction flows |
 | Environment | qanet |
-| Date | Tuesday 13 Oct 2026 |
+| Date | Friday 16 Oct 2026 |
 | QA Contact | Oleksandr Romanov (oleksandr.romanov@shielded.io) |
 
 ## Summary
 
 | Suite | Test Files | Passed | Failed | Skipped | Todo | Total | Duration | Run at |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | --- | --- |
-| smoke | 3 passed, 3 skipped (6) | 18 | 0 | 12 | 0 | 30 | 2.11s | 13:26 EEST |
-| integration | 20 passed, 1 failed, 9 skipped (30) | 189 | 1 | 93 | 20 | 303 | 303.59s | 13:32 EEST |
-| e2e | 8 passed, 3 skipped (11) | 53 | 0 | 11 | 1 | 65 | 626.86s | 13:43 EEST |
+| smoke | 3 passed, 3 skipped (6) | 18 | 0 | 12 | 0 | 30 | 4.68s | 18:37 EEST |
+| integration | 20 passed, 1 failed (retested on preview), 9 skipped (30) | 189 | 1 | 93 | 20 | 303 | 506.40s | 18:36 EEST |
+| e2e | 8 passed, 3 skipped (11) | 53 | 0 | 11 | 1 | 65 | 594.57s | 18:50 EEST |
 | **Total** | | **260** | **1** | **116** | **21** | **398** | | |
 
 > Legend: ✓ passed · ✗ failed · ↓ skipped · □ todo.
+> Duration is the total test time reported in each suite's `junit-test-results.xml`.
 
 ## Failures
 
@@ -31,11 +32,21 @@
 - Suite: integration
 - File: `tests/integration/basic/queries/contract-queries.test.ts:163`
 
-```text
-AssertionError: expected 0 to be greater than 0
-```
+NOTE: 
+- Root cause: indexer qanet was not synced from scratch, so the fix have not been applied.
+- Fix have been retested against preview environment, indexer 4.3.800-rc.2 (synced from 0) - and it successfully works.
 
-Triage: this is the regression test for [#1245](https://github.com/midnightntwrk/midnight-indexer/issues/1245). In versions 3.0.0 to 4.3.3, `unshieldedBalances` came back as an empty array for every contract. A contract configured as token-holding for qanet still returned `unshieldedBalances: []`. The test needs the #1246 fix and repaired history (backfill or re-index) to pass. Possible causes: qanet history has not been backfilled or re-indexed since the upgrade, the configured token-holding contract data is stale, or the fix has regressed.
+```
+TARGET_ENV=preview bun run vitest run --project integration \
+    tests/integration/basic/queries/contract-queries.test.ts \
+    -t "should return non-empty unshieldedBalances for contracts known to hold tokens"
+
+✓ contract queries > a contract query by address > should return non-empty unshieldedBalances for contracts known to hold tokens  730ms
+
+Test Files  1 passed (1)
+     Tests  1 passed | 24 skipped (25)
+  Duration  1.28s
+```
 
 ## Smoke results
 
@@ -64,10 +75,10 @@ File name: `tests/smoke/graphql-healthchecks.test.ts`
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | an introspection message sent to the websocket channel, should return the supported graphql schema | 728 ms |
-| ✓ | an introspection message sent to the websocket channel, should return an error, given the depth of the query is > 15 | 705 ms |
-| ✓ | an introspection request sent to the http channel, should return the supported graphql schema | 316 ms |
-| ✓ | an introspection request sent to the http channel, should return an error, given the depth of the query is > 15 | 75 ms |
+| ✓ | an introspection message sent to the websocket channel, should return the supported graphql schema | 732 ms |
+| ✓ | an introspection message sent to the websocket channel, should return an error, given the depth of the query is > 15 | 719 ms |
+| ✓ | an introspection request sent to the http channel, should return the supported graphql schema | 341 ms |
+| ✓ | an introspection request sent to the http channel, should return an error, given the depth of the query is > 15 | 93 ms |
 
 ### Graphql schema change
 
@@ -87,14 +98,14 @@ File name: `tests/smoke/graphql-schema-deprecations.test.ts`
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | RegularTransaction.merkleTreeRoot, should be marked deprecated with reason "Use zswapMerkleTreeRoot instead" | 452 ms |
-| ✓ | RegularTransaction.startIndex, should be marked deprecated with reason "Use zswapStartIndex instead" | 73 ms |
-| ✓ | RegularTransaction.endIndex, should be marked deprecated with reason "Use zswapEndIndex instead" | 70 ms |
+| ✓ | RegularTransaction.merkleTreeRoot, should be marked deprecated with reason "Use zswapMerkleTreeRoot instead" | 446 ms |
+| ✓ | RegularTransaction.startIndex, should be marked deprecated with reason "Use zswapStartIndex instead" | 83 ms |
+| ✓ | RegularTransaction.endIndex, should be marked deprecated with reason "Use zswapEndIndex instead" | 85 ms |
 | ✓ | RelevantTransaction.collapsedMerkleTree, should be marked deprecated with reason "Use zswapCollapsedUpdate instead" | 72 ms |
-| ✓ | ShieldedTransactionsProgress.highestEndIndex, should be marked deprecated with reason "Use highestZswapEndIndex instead" | 68 ms |
-| ✓ | ShieldedTransactionsProgress.highestCheckedEndIndex, should be marked deprecated with reason "Use highestCheckedZswapEndIndex instead" | 68 ms |
-| ✓ | ShieldedTransactionsProgress.highestRelevantEndIndex, should be marked deprecated with reason "Use highestRelevantZswapEndIndex instead" | 66 ms |
-| ✓ | RegularTransaction.fees, should be marked deprecated with reason "Use fee instead" | 68 ms |
+| ✓ | ShieldedTransactionsProgress.highestEndIndex, should be marked deprecated with reason "Use highestZswapEndIndex instead" | 84 ms |
+| ✓ | ShieldedTransactionsProgress.highestCheckedEndIndex, should be marked deprecated with reason "Use highestCheckedZswapEndIndex instead" | 75 ms |
+| ✓ | ShieldedTransactionsProgress.highestRelevantEndIndex, should be marked deprecated with reason "Use highestRelevantZswapEndIndex instead" | 79 ms |
+| ✓ | RegularTransaction.fees, should be marked deprecated with reason "Use fee instead" | 89 ms |
 | ✓ | TransactionFees.estimatedFees, should be marked deprecated with reason "Use paidFees instead" | 73 ms |
 
 ### Progress protocol version schema
@@ -117,11 +128,11 @@ File name: `tests/smoke/service-healthchecks.test.ts`
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | a request to the /ready endpoint, should return a 200 status code OK | 447 ms |
-| ✓ | a request to an unrecognised path /api/v3/__regression_unknown_path, should not 308 to a version-double-prefixed Location | 201 ms |
-| ✓ | a request to an unrecognised path /api/v3/__regression_unknown_path, should terminate when redirects are followed | 70 ms |
-| ✓ | a request to an unrecognised path /api/v4/__regression_unknown_path, should not 308 to a version-double-prefixed Location | 68 ms |
-| ✓ | a request to an unrecognised path /api/v4/__regression_unknown_path, should terminate when redirects are followed | 68 ms |
+| ✓ | a request to the /ready endpoint, should return a 200 status code OK | 430 ms |
+| ✓ | a request to an unrecognised path /api/v3/__regression_unknown_path, should not 308 to a version-double-prefixed Location | 229 ms |
+| ✓ | a request to an unrecognised path /api/v3/__regression_unknown_path, should terminate when redirects are followed | 75 ms |
+| ✓ | a request to an unrecognised path /api/v4/__regression_unknown_path, should not 308 to a version-double-prefixed Location | 76 ms |
+| ✓ | a request to an unrecognised path /api/v4/__regression_unknown_path, should terminate when redirects are followed | 77 ms |
 
 ## Integration results
 
@@ -133,20 +144,20 @@ File name: `tests/integration/basic/queries/block-queries.test.ts`
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | a block query without parameters, should return the latest known block | 388 ms |
-| ✓ | a block query without parameters, should respond with a block according to the requested schema | 204 ms |
-| ✓ | a block query by hash, should return the block with that hash, given that block exists | 161 ms |
-| ✓ | a block query by hash, should return blocks according to the requested schema | 175 ms |
-| ✓ | a block query by hash, should return a null block, given a block with that hash doesn't exist | 74 ms |
-| ✓ | a block query by hash, should return an error, when the hash is invalid (malformed) | 346 ms |
-| ✓ | a block query by height, should return the block with that height, given a valid height | 149 ms |
-| ✓ | a block query by height, should return a blocks according to the requested schema | 144 ms |
-| ✓ | a block query by height, should return the genesis block, given height=0 is requested | 326 ms |
-| ✓ | a block query by height, should return an empty body answer, given that block height requested is the maximum available height | 67 ms |
-| ✓ | a block query by height, should return an error, given an invalid height | 208 ms |
-| ✓ | a block query by height and hash, should return an error, as only one parameter at a time can be used | 271 ms |
-| ✓ | block-level tree end indexes, should return non-negative integers for all three tree end index fields | 80 ms |
-| ✓ | block-level tree end indexes, should return non-decreasing tree end indexes from parent to child block | 146 ms |
+| ✓ | a block query without parameters, should return the latest known block | 416 ms |
+| ✓ | a block query without parameters, should respond with a block according to the requested schema | 211 ms |
+| ✓ | a block query by hash, should return the block with that hash, given that block exists | 167 ms |
+| ✓ | a block query by hash, should return blocks according to the requested schema | 166 ms |
+| ✓ | a block query by hash, should return a null block, given a block with that hash doesn't exist | 91 ms |
+| ✓ | a block query by hash, should return an error, when the hash is invalid (malformed) | 392 ms |
+| ✓ | a block query by height, should return the block with that height, given a valid height | 167 ms |
+| ✓ | a block query by height, should return a blocks according to the requested schema | 166 ms |
+| ✓ | a block query by height, should return the genesis block, given height=0 is requested | 352 ms |
+| ✓ | a block query by height, should return an empty body answer, given that block height requested is the maximum available height | 79 ms |
+| ✓ | a block query by height, should return an error, given an invalid height | 237 ms |
+| ✓ | a block query by height and hash, should return an error, as only one parameter at a time can be used | 349 ms |
+| ✓ | block-level tree end indexes, should return non-negative integers for all three tree end index fields | 96 ms |
+| ✓ | block-level tree end indexes, should return non-decreasing tree end indexes from parent to child block | 169 ms |
 | ↓ | per-block dust merkle tree roots, should return different dust generation roots for blocks with different tree sizes | — |
 | ↓ | per-block dust merkle tree roots, should return identical dust roots for repeated queries of the same block | — |
 | ↓ | per-block dust merkle tree roots, should return equal dust generation roots for parent and child with equal tree sizes | — |
@@ -155,12 +166,12 @@ File name: `tests/integration/basic/queries/block-queries.test.ts`
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | a block query to the genesis block, should contain transactions with pre-fund wallet utxos | 559 ms |
-| ✓ | a block query to the genesis block, should contain utxos related to exactly 4 pre-fund wallets | 194 ms |
-| ✓ | a block query to the genesis block, should contain utxos with exactly 1 token type | 238 ms |
-| ✓ | a block query to the genesis block, should contain utxos sorted by outputIndex in ascending order | 206 ms |
-| ✓ | a block query to the genesis block, should contain valid index ranges on regular transactions | 181 ms |
-| ✓ | a block query to the genesis block, should return block-level end indexes >= max RegularTransaction end indexes | 182 ms |
+| ✓ | a block query to the genesis block, should contain transactions with pre-fund wallet utxos | 197 ms |
+| ✓ | a block query to the genesis block, should contain utxos related to exactly 4 pre-fund wallets | 138 ms |
+| ✓ | a block query to the genesis block, should contain utxos with exactly 1 token type | 160 ms |
+| ✓ | a block query to the genesis block, should contain utxos sorted by outputIndex in ascending order | 136 ms |
+| ✓ | a block query to the genesis block, should contain valid index ranges on regular transactions | 127 ms |
+| ✓ | a block query to the genesis block, should return block-level end indexes >= max RegularTransaction end indexes | 151 ms |
 
 ### Bridge pool queries
 
@@ -249,33 +260,33 @@ File name: `tests/integration/basic/queries/contract-queries.test.ts`
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | a contract query by address, should return success as they are valid contract addresses | 566 ms |
-| ✓ | a contract query by address, should return the most recent action for a contract with multiple actions | 80 ms |
-| ✓ | a contract query by address, should return null when contract with that address does not exist | 68 ms |
-| ✓ | a contract query by address, should return an error for malformed addresses | 1044 ms |
-| ✗ | a contract query by address, should return non-empty unshieldedBalances for contracts known to hold tokens | 154 ms |
-| ✓ | a contract query by address and offset, should return the correct action using exact block hash where it was included | 92 ms |
-| ✓ | a contract query by address and offset, should return the latest state using a future block hash | 76 ms |
-| ✓ | a contract query by address and offset, should respond with a contract action according to the expected schema | 71 ms |
-| ✓ | a contract query by address and offset, should return the correct action using exact block height where it was included | 74 ms |
-| ✓ | a contract query by address and offset, should return the latest state using a future block height | 75 ms |
-| ✓ | a contract query by address and offset, should return the most recent contract action for that address before the specified block | 155 ms |
-| ✓ | a contract query by address and offset, should return null when contract with valid address and valid offset does not exist | 90 ms |
-| ✓ | a contract query by address and offset, should return null when contract with valid address and non-existing hash does not exist | 73 ms |
-| ✓ | a contract query by address and offset, should return error when contract with invalid address and valid hash | 70 ms |
-| ✓ | a contract query by address and offset, should return error when contract with invalid address and non-existing hash | 67 ms |
-| ✓ | a contract query by address and offset, should return error when contract with valid address and invalid hash | 65 ms |
-| ✓ | a contract query by address and offset, should return error when contract with invalid address and invalid hash | 319 ms |
-| ✓ | a contract query by address and offset, should return null when contract with valid address and valid height does not exist | 64 ms |
-| ✓ | a contract query by address and offset, should return null when contract with valid address and non-existing height does not exist | 64 ms |
-| ✓ | a contract query by address and offset, should return error when contract with invalid address and valid height | 62 ms |
-| ✓ | a contract query by address and offset, should return error when contract with invalid address and invalid height | 187 ms |
-| ✓ | a contract query by address and offset, should return error for negative height | 62 ms |
-| ✓ | a contract query by address and offset, should return error for non-integer height | 62 ms |
-| ✓ | a contract query by address and offset, should return error for extremely large height | 69 ms |
-| ✓ | a contract query by address and offset, should return null when using a block hash from before the action existed | 286 ms |
+| ✓ | a contract query by address, should return success as they are valid contract addresses | 598 ms |
+| ✓ | a contract query by address, should return the most recent action for a contract with multiple actions | 588 ms |
+| ✓ | a contract query by address, should return null when contract with that address does not exist | 75 ms |
+| ✓ | a contract query by address, should return an error for malformed addresses | 1224 ms |
+| ✗ | a contract query by address, should return non-empty unshieldedBalances for contracts known to hold tokens | 192 ms |
+| ✓ | a contract query by address and offset, should return the correct action using exact block hash where it was included | 96 ms |
+| ✓ | a contract query by address and offset, should return the latest state using a future block hash | 88 ms |
+| ✓ | a contract query by address and offset, should respond with a contract action according to the expected schema | 78 ms |
+| ✓ | a contract query by address and offset, should return the correct action using exact block height where it was included | 89 ms |
+| ✓ | a contract query by address and offset, should return the latest state using a future block height | 106 ms |
+| ✓ | a contract query by address and offset, should return the most recent contract action for that address before the specified block | 198 ms |
+| ✓ | a contract query by address and offset, should return null when contract with valid address and valid offset does not exist | 72 ms |
+| ✓ | a contract query by address and offset, should return null when contract with valid address and non-existing hash does not exist | 68 ms |
+| ✓ | a contract query by address and offset, should return error when contract with invalid address and valid hash | 81 ms |
+| ✓ | a contract query by address and offset, should return error when contract with invalid address and non-existing hash | 89 ms |
+| ✓ | a contract query by address and offset, should return error when contract with valid address and invalid hash | 78 ms |
+| ✓ | a contract query by address and offset, should return error when contract with invalid address and invalid hash | 413 ms |
+| ✓ | a contract query by address and offset, should return null when contract with valid address and valid height does not exist | 79 ms |
+| ✓ | a contract query by address and offset, should return null when contract with valid address and non-existing height does not exist | 77 ms |
+| ✓ | a contract query by address and offset, should return error when contract with invalid address and valid height | 93 ms |
+| ✓ | a contract query by address and offset, should return error when contract with invalid address and invalid height | 237 ms |
+| ✓ | a contract query by address and offset, should return error for negative height | 72 ms |
+| ✓ | a contract query by address and offset, should return error for non-integer height | 76 ms |
+| ✓ | a contract query by address and offset, should return error for extremely large height | 79 ms |
+| ✓ | a contract query by address and offset, should return null when using a block hash from before the action existed | 725 ms |
 | ↓ | the contractEvents field on contract actions, should expose contractEvents on ContractCall | — |
-| ✓ | the contractEvents field on contract actions, should not expose contractEvents on ContractDeploy or ContractUpdate | 322 ms |
+| ✓ | the contractEvents field on contract actions, should not expose contractEvents on ContractDeploy or ContractUpdate | 329 ms |
 
 ### Contract type queries
 
@@ -323,14 +334,14 @@ File name: `tests/integration/basic/queries/dust-commitment-update-queries.test.
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | a collapsed update query with valid index range, should return a collapsed update for a valid index range | 300 ms |
-| ✓ | a collapsed update query with valid index range, should respond with a collapsed update according to the expected schema | 71 ms |
-| ✓ | a collapsed update query with valid index range, should return a collapsed update for the full genesis dust range | 373 ms |
-| ✓ | a collapsed update query with equal start and end indices, should return a valid update when startIndex equals endIndex | 68 ms |
-| ✓ | a collapsed update query idempotency, should return identical results for the same query parameters | 154 ms |
-| ✓ | a collapsed update query with invalid index range, should return an error when startIndex is greater than endIndex | 67 ms |
-| ✓ | a collapsed update query with invalid index range, should return an error when indices are negative | 65 ms |
-| ✓ | a collapsed update query with invalid index range, should return an error when endIndex is beyond the indexed range | 72 ms |
+| ✓ | a collapsed update query with valid index range, should return a collapsed update for a valid index range | 367 ms |
+| ✓ | a collapsed update query with valid index range, should respond with a collapsed update according to the expected schema | 81 ms |
+| ✓ | a collapsed update query with valid index range, should return a collapsed update for the full genesis dust range | 1059 ms |
+| ✓ | a collapsed update query with equal start and end indices, should return a valid update when startIndex equals endIndex | 102 ms |
+| ✓ | a collapsed update query idempotency, should return identical results for the same query parameters | 135 ms |
+| ✓ | a collapsed update query with invalid index range, should return an error when startIndex is greater than endIndex | 74 ms |
+| ✓ | a collapsed update query with invalid index range, should return an error when indices are negative | 69 ms |
+| ✓ | a collapsed update query with invalid index range, should return an error when endIndex is beyond the indexed range | 85 ms |
 
 ### Dust generation update queries
 
@@ -340,14 +351,14 @@ File name: `tests/integration/basic/queries/dust-generation-update-queries.test.
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | a collapsed update query with valid index range, should return a collapsed update for a valid index range | 345 ms |
-| ✓ | a collapsed update query with valid index range, should respond with a collapsed update according to the expected schema | 69 ms |
-| ✓ | a collapsed update query with valid index range, should return a collapsed update for the full genesis dust range | 365 ms |
-| ✓ | a collapsed update query with equal start and end indices, should return a valid update when startIndex equals endIndex | 65 ms |
-| ✓ | a collapsed update query idempotency, should return identical results for the same query parameters | 128 ms |
-| ✓ | a collapsed update query with invalid index range, should return an error when startIndex is greater than endIndex | 63 ms |
-| ✓ | a collapsed update query with invalid index range, should return an error when indices are negative | 63 ms |
-| ✓ | a collapsed update query with invalid index range, should return an error when endIndex is beyond the indexed range | 2520 ms |
+| ✓ | a collapsed update query with valid index range, should return a collapsed update for a valid index range | 361 ms |
+| ✓ | a collapsed update query with valid index range, should respond with a collapsed update according to the expected schema | 76 ms |
+| ✓ | a collapsed update query with valid index range, should return a collapsed update for the full genesis dust range | 1184 ms |
+| ✓ | a collapsed update query with equal start and end indices, should return a valid update when startIndex equals endIndex | 66 ms |
+| ✓ | a collapsed update query idempotency, should return identical results for the same query parameters | 130 ms |
+| ✓ | a collapsed update query with invalid index range, should return an error when startIndex is greater than endIndex | 71 ms |
+| ✓ | a collapsed update query with invalid index range, should return an error when indices are negative | 82 ms |
+| ✓ | a collapsed update query with invalid index range, should return an error when endIndex is beyond the indexed range | 2969 ms |
 
 ### Dust generations queries
 
@@ -358,14 +369,14 @@ File name: `tests/integration/basic/queries/dust-generations-queries.test.ts`
 | Status | Name | Duration |
 | :---: | --- | ---: |
 | ✓ | a dust generations query with a valid Cardano reward address, should return dust generations for a registered address | 321 ms |
-| ✓ | a dust generations query with a valid Cardano reward address, should respond with dust generations according to the expected schema | 77 ms |
-| ✓ | a dust generations query with a valid Cardano reward address, should return registrations with valid fields for a registered address | 85 ms |
-| ✓ | a dust generations query with multiple addresses, should return dust generations for multiple addresses | 79 ms |
-| ✓ | a dust generations query with non-registered address, should return empty registrations for a non-registered address | 85 ms |
-| ✓ | a dust generations query with invalid input, should return an empty result for an empty addresses array | 64 ms |
-| ✓ | a dust generations query with invalid input, should return an error for a malformed address | 262 ms |
+| ✓ | a dust generations query with a valid Cardano reward address, should respond with dust generations according to the expected schema | 75 ms |
+| ✓ | a dust generations query with a valid Cardano reward address, should return registrations with valid fields for a registered address | 81 ms |
+| ✓ | a dust generations query with multiple addresses, should return dust generations for multiple addresses | 83 ms |
+| ✓ | a dust generations query with non-registered address, should return empty registrations for a non-registered address | 81 ms |
+| ✓ | a dust generations query with invalid input, should return an empty result for an empty addresses array | 62 ms |
+| ✓ | a dust generations query with invalid input, should return an error for a malformed address | 317 ms |
 | ✓ | a dustGenerations query with a multi-UTXO stake key (#926), should aggregate nightBalance across all backing cNIGHT UTXOs | 152 ms |
-| ✓ | backwards compatibility with dustGenerationStatus, should return consistent data from both endpoints for a registered address | 72 ms |
+| ✓ | backwards compatibility with dustGenerationStatus, should return consistent data from both endpoints for a registered address | 82 ms |
 
 ### Dust queries
 
@@ -375,21 +386,21 @@ File name: `tests/integration/basic/queries/dust-queries.test.ts`
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | a dust generation status query with a valid Cardano reward address, should respond with a dust generation status response according to the requested schema | 296 ms |
-| ✓ | a dust generation status query with a valid Cardano reward address, should report registered status for a registered Cardano reward address | 82 ms |
-| ✓ | a dust generation status query with a valid Cardano reward address, should give the DUST destination address for the expected network when Cardano reward address is registered | 87 ms |
-| ✓ | a dust generation status query with a valid Cardano reward address, should correctly indicate registration status for a non-registered key | 72 ms |
-| ✓ | a dust generation status query with a valid Cardano reward address, should indicate zero generation for registered address without cNIGHT balance | 74 ms |
-| ✓ | a dust generation status query with a valid Cardano reward address, should report the correct value of max capacity for registered address with cNIGHT | 75 ms |
-| ✓ | a dust generation status query with a valid Cardano reward address, should correctly indicate deregistered status for a previously registered Cardano reward address | 84 ms |
-| ✓ | a dust generation status query with multiple valid Cardano reward addresses, should return statuses for multiple Cardano reward addresses in order | 147 ms |
-| ✓ | a dust generation status query with multiple valid Cardano reward addresses, should respond with dust generation statuses according to the requested schema for multiple addresses | 97 ms |
-| ✓ | a dust generation status query with multiple valid Cardano reward addresses, should return an error given the number of addresses is greater than 10 | 66 ms |
-| ✓ | a dust generation status query with malformed reward addresses, should return an error when the address is in plain hex string format | 69 ms |
-| ✓ | a dust generation status query with empty list of reward addresses, should return an empty list of dust generation statuses | 66 ms |
-| ✓ | a dust generation status query with a Cardano payment address, should return an error as only Cardano reward addresses are supported | 63 ms |
-| ✓ | a dust generation status query with a Cardano reward address not meant for this network, should return an error reporting the target network mismatch | 70 ms |
-| ✓ | a dust generation status query with duplicate reward addresses, should handle duplicate Cardano reward addresses appropriately | 82 ms |
+| ✓ | a dust generation status query with a valid Cardano reward address, should respond with a dust generation status response according to the requested schema | 309 ms |
+| ✓ | a dust generation status query with a valid Cardano reward address, should report registered status for a registered Cardano reward address | 79 ms |
+| ✓ | a dust generation status query with a valid Cardano reward address, should give the DUST destination address for the expected network when Cardano reward address is registered | 139 ms |
+| ✓ | a dust generation status query with a valid Cardano reward address, should correctly indicate registration status for a non-registered key | 83 ms |
+| ✓ | a dust generation status query with a valid Cardano reward address, should indicate zero generation for registered address without cNIGHT balance | 78 ms |
+| ✓ | a dust generation status query with a valid Cardano reward address, should report the correct value of max capacity for registered address with cNIGHT | 83 ms |
+| ✓ | a dust generation status query with a valid Cardano reward address, should correctly indicate deregistered status for a previously registered Cardano reward address | 76 ms |
+| ✓ | a dust generation status query with multiple valid Cardano reward addresses, should return statuses for multiple Cardano reward addresses in order | 127 ms |
+| ✓ | a dust generation status query with multiple valid Cardano reward addresses, should respond with dust generation statuses according to the requested schema for multiple addresses | 90 ms |
+| ✓ | a dust generation status query with multiple valid Cardano reward addresses, should return an error given the number of addresses is greater than 10 | 75 ms |
+| ✓ | a dust generation status query with malformed reward addresses, should return an error when the address is in plain hex string format | 60 ms |
+| ✓ | a dust generation status query with empty list of reward addresses, should return an empty list of dust generation statuses | 61 ms |
+| ✓ | a dust generation status query with a Cardano payment address, should return an error as only Cardano reward addresses are supported | 76 ms |
+| ✓ | a dust generation status query with a Cardano reward address not meant for this network, should return an error reporting the target network mismatch | 75 ms |
+| ✓ | a dust generation status query with duplicate reward addresses, should handle duplicate Cardano reward addresses appropriately | 81 ms |
 
 ### Graphql http compression
 
@@ -399,10 +410,10 @@ File name: `tests/integration/basic/queries/graphql-http-compression.test.ts`
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | a GraphQL HTTP request with Accept-Encoding: gzip, should return a gzip-compressed response | 296 ms |
-| ✓ | a GraphQL HTTP request with Accept-Encoding: br, should return a brotli-compressed response | 71 ms |
-| ✓ | a GraphQL HTTP request with Accept-Encoding: zstd, should return a zstd-compressed response | 73 ms |
-| ✓ | a GraphQL HTTP request with Accept-Encoding: identity, should return an uncompressed response | 297 ms |
+| ✓ | a GraphQL HTTP request with Accept-Encoding: gzip, should return a gzip-compressed response | 325 ms |
+| ✓ | a GraphQL HTTP request with Accept-Encoding: br, should return a brotli-compressed response | 79 ms |
+| ✓ | a GraphQL HTTP request with Accept-Encoding: zstd, should return a zstd-compressed response | 81 ms |
+| ✓ | a GraphQL HTTP request with Accept-Encoding: identity, should return an uncompressed response | 257 ms |
 
 ### Spo epoch series queries
 
@@ -412,16 +423,16 @@ File name: `tests/integration/basic/queries/spo-epoch-series-queries.test.ts`
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | a registered totals series query with an epoch span within the maximum, should accept a range covering a single epoch | 322 ms |
-| ✓ | a registered totals series query with an epoch span within the maximum, should accept a range whose span equals the maximum | 76 ms |
-| ✓ | a registered totals series query with an epoch span within the maximum, should accept a permitted span that does not start at epoch zero | 74 ms |
-| ✓ | a registered totals series query with an epoch span exceeding the maximum, should reject a range one epoch beyond the maximum span | 70 ms |
-| ✓ | a registered totals series query with an epoch span exceeding the maximum, should reject a reversed range whose span exceeds the maximum | 69 ms |
-| ✓ | a registered totals series query with an epoch span exceeding the maximum, should reject a range far beyond the maximum span without returning data | 67 ms |
-| ✓ | a registered SPO series query with an epoch span exceeding the maximum, should reject a range beyond the maximum span | 64 ms |
-| ✓ | a registered SPO series query with an epoch span exceeding the maximum, should accept a range whose span equals the maximum | 141 ms |
-| ✓ | a registered presence query with an epoch span exceeding the maximum, should reject a range beyond the maximum span | 69 ms |
-| ✓ | a registered presence query with an epoch span exceeding the maximum, should accept a range whose span equals the maximum | 79 ms |
+| ✓ | a registered totals series query with an epoch span within the maximum, should accept a range covering a single epoch | 309 ms |
+| ✓ | a registered totals series query with an epoch span within the maximum, should accept a range whose span equals the maximum | 80 ms |
+| ✓ | a registered totals series query with an epoch span within the maximum, should accept a permitted span that does not start at epoch zero | 79 ms |
+| ✓ | a registered totals series query with an epoch span exceeding the maximum, should reject a range one epoch beyond the maximum span | 66 ms |
+| ✓ | a registered totals series query with an epoch span exceeding the maximum, should reject a reversed range whose span exceeds the maximum | 71 ms |
+| ✓ | a registered totals series query with an epoch span exceeding the maximum, should reject a range far beyond the maximum span without returning data | 65 ms |
+| ✓ | a registered SPO series query with an epoch span exceeding the maximum, should reject a range beyond the maximum span | 71 ms |
+| ✓ | a registered SPO series query with an epoch span exceeding the maximum, should accept a range whose span equals the maximum | 242 ms |
+| ✓ | a registered presence query with an epoch span exceeding the maximum, should reject a range beyond the maximum span | 63 ms |
+| ✓ | a registered presence query with an epoch span exceeding the maximum, should accept a range whose span equals the maximum | 82 ms |
 
 ### Transaction queries
 
@@ -431,29 +442,29 @@ File name: `tests/integration/basic/queries/transaction-queries.test.ts`
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | a transaction query by hash, should return the transaction with that hash, given that transaction exists | 2944 ms |
-| ✓ | a transaction query by hash, should return an empty transaction list, given a transaction with that hash doesn't exist | 68 ms |
-| ✓ | a transaction query by hash, should return an error, given a hash is invalid (malformed) | 505 ms |
-| ✓ | a transaction query by hash, should return an error when called with an empty offset object | 72 ms |
-| ✓ | a transaction query by identifier, should return the transaction with that identifier, given that transaction exists | 2333 ms |
-| ✓ | a transaction query by identifier, should return an empty list of transactions, given a transaction with that identifier doesn't exist | 73 ms |
-| ✓ | a transaction query by identifier, should return an error, given an invalid identifier | 192 ms |
-| ✓ | a transaction query by hash and identifier, should return an error, as only one parameter at a time can be used | 64 ms |
+| ✓ | a transaction query by hash, should return the transaction with that hash, given that transaction exists | 3488 ms |
+| ✓ | a transaction query by hash, should return an empty transaction list, given a transaction with that hash doesn't exist | 74 ms |
+| ✓ | a transaction query by hash, should return an error, given a hash is invalid (malformed) | 591 ms |
+| ✓ | a transaction query by hash, should return an error when called with an empty offset object | 64 ms |
+| ✓ | a transaction query by identifier, should return the transaction with that identifier, given that transaction exists | 3220 ms |
+| ✓ | a transaction query by identifier, should return an empty list of transactions, given a transaction with that identifier doesn't exist | 94 ms |
+| ✓ | a transaction query by identifier, should return an error, given an invalid identifier | 228 ms |
+| ✓ | a transaction query by hash and identifier, should return an error, as only one parameter at a time can be used | 80 ms |
 
 #### Genesis Transactions
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | transaction queries to the genesis block transactions, should return utxos related to 4 pre-fund wallets | 2375 ms |
-| ✓ | transaction queries to the genesis block transactions, should return utxos with 1 token type | 2213 ms |
-| ✓ | transaction queries to the genesis block transactions, should return utxos sorted by outputIndex in ascending order | 2185 ms |
-| ✓ | transaction queries to the genesis block transactions, should return system transactions when queried by hash | 2531 ms |
-| ✓ | transaction queries to the genesis block transactions, should not contain RegularTransaction-specific fields on system transactions | 2149 ms |
-| ✓ | schema validation, should respond with full transaction data according to the expected schema | 10 ms |
-| ✓ | schema validation, should respond with system transactions according to the expected schema | 1 ms |
+| ✓ | transaction queries to the genesis block transactions, should return utxos related to 4 pre-fund wallets | 2512 ms |
+| ✓ | transaction queries to the genesis block transactions, should return utxos with 1 token type | 2370 ms |
+| ✓ | transaction queries to the genesis block transactions, should return utxos sorted by outputIndex in ascending order | 2406 ms |
+| ✓ | transaction queries to the genesis block transactions, should return system transactions when queried by hash | 2765 ms |
+| ✓ | transaction queries to the genesis block transactions, should not contain RegularTransaction-specific fields on system transactions | 2339 ms |
+| ✓ | schema validation, should respond with full transaction data according to the expected schema | 7 ms |
+| ✓ | schema validation, should respond with system transactions according to the expected schema | 0 ms |
 | ✓ | schema validation, should contain both regular and system transactions | 0 ms |
-| ✓ | schema validation, should respond with regular transactions according to the expected schema | 3 ms |
-| ✓ | schema validation, should respond with nested ledger events and unshielded outputs according to the expected schema | 2 ms |
+| ✓ | schema validation, should respond with regular transactions according to the expected schema | 2 ms |
+| ✓ | schema validation, should respond with nested ledger events and unshielded outputs according to the expected schema | 1 ms |
 
 ### Zswap collapsed update queries
 
@@ -463,14 +474,14 @@ File name: `tests/integration/basic/queries/zswap-collapsed-update-queries.test.
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | a collapsed update query with valid index range, should return a collapsed update for a valid index range | 326 ms |
+| ✓ | a collapsed update query with valid index range, should return a collapsed update for a valid index range | 319 ms |
 | ✓ | a collapsed update query with valid index range, should respond with a collapsed update according to the expected schema | 77 ms |
-| ✓ | a collapsed update query with valid index range, should return a collapsed update for the full genesis zswap range | 395 ms |
-| ✓ | a collapsed update query with equal start and end indices, should return a valid update when startIndex equals endIndex | 71 ms |
-| ✓ | a collapsed update query idempotency, should return identical results for the same query parameters | 139 ms |
-| ✓ | a collapsed update query with invalid index range, should return an error when startIndex is greater than endIndex | 68 ms |
-| ✓ | a collapsed update query with invalid index range, should return an error when indices are negative | 63 ms |
-| ✓ | a collapsed update query with invalid index range, should return an error when endIndex is beyond the indexed range | 69 ms |
+| ✓ | a collapsed update query with valid index range, should return a collapsed update for the full genesis zswap range | 871 ms |
+| ✓ | a collapsed update query with equal start and end indices, should return a valid update when startIndex equals endIndex | 83 ms |
+| ✓ | a collapsed update query idempotency, should return identical results for the same query parameters | 168 ms |
+| ✓ | a collapsed update query with invalid index range, should return an error when startIndex is greater than endIndex | 80 ms |
+| ✓ | a collapsed update query with invalid index range, should return an error when indices are negative | 84 ms |
+| ✓ | a collapsed update query with invalid index range, should return an error when endIndex is beyond the indexed range | 76 ms |
 
 ### Block subscriptions
 
@@ -480,15 +491,15 @@ File name: `tests/integration/basic/subscriptions/block-subscriptions.test.ts`
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | a subscription to block updates without parameters, should stream blocks starting from the latest block | 4610 ms |
-| ✓ | a subscription to block updates without parameters, should stream blocks adhering to the expected schema | 948 ms |
-| ✓ | a subscription to block updates by hash, should stream blocks starting from the block with that hash, given that hash exists | 2152 ms |
-| ✓ | a subscription to block updates by hash, should return an error message, given that hash doesn't exist | 695 ms |
-| ✓ | a subscription to block updates by hash, should return an error message, given that hash is invalid | 677 ms |
-| ✓ | a subscription to block updates by height, should stream blocks from the block with that height, given that height exists | 1035 ms |
-| ✓ | a subscription to block updates by height, should return an error message, given that height is higher than the latest block height | 962 ms |
-| ✓ | a subscription to block updates by height, should return an error message, given that height is invalid | 682 ms |
-| ✓ | a subscription to block updates by height and hash, should return an error message, as only one parameter at a time can be used | 694 ms |
+| ✓ | a subscription to block updates without parameters, should stream blocks starting from the latest block | 6705 ms |
+| ✓ | a subscription to block updates without parameters, should stream blocks adhering to the expected schema | 968 ms |
+| ✓ | a subscription to block updates by hash, should stream blocks starting from the block with that hash, given that hash exists | 1626 ms |
+| ✓ | a subscription to block updates by hash, should return an error message, given that hash doesn't exist | 707 ms |
+| ✓ | a subscription to block updates by hash, should return an error message, given that hash is invalid | 704 ms |
+| ✓ | a subscription to block updates by height, should stream blocks from the block with that height, given that height exists | 1052 ms |
+| ✓ | a subscription to block updates by height, should return an error message, given that height is higher than the latest block height | 931 ms |
+| ✓ | a subscription to block updates by height, should return an error message, given that height is invalid | 691 ms |
+| ✓ | a subscription to block updates by height and hash, should return an error message, as only one parameter at a time can be used | 684 ms |
 | ↓ | regular transaction fees, should report ledger paidFees and estimatedFees on regular transactions | — |
 
 ### Bridge pool subscriptions
@@ -547,9 +558,9 @@ File name: `tests/integration/basic/subscriptions/contract-subscriptions.test.ts
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | a subscription to contract action updates without parameters, should stream contract actions from the latest available block | 814 ms |
-| ✓ | a subscription to contract action updates without parameters, should stream contract actions adhering to the expected schema | 768 ms |
-| ✓ | a subscription to contract action updates with block hash offset, should stream historical and new contract actions from a specific block hash | 758 ms |
+| ✓ | a subscription to contract action updates without parameters, should stream contract actions from the latest available block | 824 ms |
+| ✓ | a subscription to contract action updates without parameters, should stream contract actions adhering to the expected schema | 776 ms |
+| ✓ | a subscription to contract action updates with block hash offset, should stream historical and new contract actions from a specific block hash | 871 ms |
 
 ### Dust generations subscriptions
 
@@ -586,11 +597,11 @@ File name: `tests/integration/basic/subscriptions/dust-ledger-subscriptions.test
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | a subscription to dust ledger events without offset (default replay), streams events in ledger order | 926 ms |
-| ✓ | subscription with explicit offset, streams events in ledger order starting from the specified ID | 940 ms |
-| ✓ | subscription with explicit offset, validates historical dust events against schema | 987 ms |
-| ✓ | subscription error handling, should return an error for unknown field | 691 ms |
-| ✓ | subscription error handling, rejects negative offset ID with an error | 702 ms |
+| ✓ | a subscription to dust ledger events without offset (default replay), streams events in ledger order | 1005 ms |
+| ✓ | subscription with explicit offset, streams events in ledger order starting from the specified ID | 1050 ms |
+| ✓ | subscription with explicit offset, validates historical dust events against schema | 980 ms |
+| ✓ | subscription error handling, should return an error for unknown field | 690 ms |
+| ✓ | subscription error handling, rejects negative offset ID with an error | 732 ms |
 
 ### Dust nullifier subscriptions
 
@@ -600,11 +611,11 @@ File name: `tests/integration/basic/subscriptions/dust-nullifier-subscriptions.t
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | streaming dust nullifier transactions with block range, should stream transactions within a block range and complete | 965 ms |
-| ✓ | subscription error handling, should return an error for empty nullifier prefixes | 676 ms |
-| ✓ | subscription error handling, should return an error when fromBlock is greater than toBlock | 692 ms |
-| ✓ | transactionHash on dust nullifier events (#1114), first event transactionHash resolves via transactions(offset) | 1019 ms |
-| ✓ | transaction reference on dust nullifier events (#1115), first event transaction.hash matches transactionHash | 892 ms |
+| ✓ | streaming dust nullifier transactions with block range, should stream transactions within a block range and complete | 980 ms |
+| ✓ | subscription error handling, should return an error for empty nullifier prefixes | 682 ms |
+| ✓ | subscription error handling, should return an error when fromBlock is greater than toBlock | 693 ms |
+| ✓ | transactionHash on dust nullifier events (#1114), first event transactionHash resolves via transactions(offset) | 1118 ms |
+| ✓ | transaction reference on dust nullifier events (#1115), first event transaction.hash matches transactionHash | 1006 ms |
 
 ### Shielded nullifier subscriptions
 
@@ -614,12 +625,12 @@ File name: `tests/integration/basic/subscriptions/shielded-nullifier-subscriptio
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | streaming shielded nullifier transactions with block range, should stream transactions within a block range and complete | 918 ms |
-| ✓ | subscription error handling, should return an error for empty nullifier prefixes | 709 ms |
-| ✓ | subscription error handling, should return an error for an empty-string nullifier prefix element | 685 ms |
-| ✓ | subscription error handling, should return an error when fromBlock is greater than toBlock | 690 ms |
-| ✓ | transactionHash on shielded nullifier events (#1114), first event transactionHash resolves via transactions(offset) | 1044 ms |
-| ✓ | transaction reference on shielded nullifier events (#1115), first event transaction.hash matches transactionHash | 905 ms |
+| ✓ | streaming shielded nullifier transactions with block range, should stream transactions within a block range and complete | 996 ms |
+| ✓ | subscription error handling, should return an error for empty nullifier prefixes | 692 ms |
+| ✓ | subscription error handling, should return an error for an empty-string nullifier prefix element | 706 ms |
+| ✓ | subscription error handling, should return an error when fromBlock is greater than toBlock | 711 ms |
+| ✓ | transactionHash on shielded nullifier events (#1114), first event transactionHash resolves via transactions(offset) | 1073 ms |
+| ✓ | transaction reference on shielded nullifier events (#1115), first event transaction.hash matches transactionHash | 935 ms |
 
 ### Shielded transaction subscriptions
 
@@ -629,17 +640,17 @@ File name: `tests/integration/basic/subscriptions/shielded-transaction-subscript
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | opening a session with viewing key, should return a session ID, given a valid viewing key | 797 ms |
-| ✓ | opening a session with viewing key, should return an error, given an unsupported hex format viewing key | 1193 ms |
-| ✓ | opening a session with viewing key, should return an error, given an invalid viewing key | 697 ms |
-| ✓ | opening a session with viewing key, should return an error, given a valid viewing key meant for a different network | 1354 ms |
-| ✓ | closing a session with session ID, should terminate the session successfully, given a valid session ID | 866 ms |
-| ✓ | closing a session with session ID, should return an error, given an invalid session ID | 708 ms |
-| ✓ | a subscription to wallet updates providing viewing key only, should stream wallet events starting from the beginning, given there are relevant transactions | 2743 ms |
-| ✓ | a subscription to wallet updates providing viewing key only, should stream shielded transaction events adhering to the expected schema | 3756 ms |
-| ✓ | a subscription to wallet updates providing viewing key only, should be able to use highestZswapEndIndex from progress event in collapsed update query | 1168 ms |
+| ✓ | opening a session with viewing key, should return a session ID, given a valid viewing key | 794 ms |
+| ✓ | opening a session with viewing key, should return an error, given an unsupported hex format viewing key | 699 ms |
+| ✓ | opening a session with viewing key, should return an error, given an invalid viewing key | 675 ms |
+| ✓ | opening a session with viewing key, should return an error, given a valid viewing key meant for a different network | 1361 ms |
+| ✓ | closing a session with session ID, should terminate the session successfully, given a valid session ID | 820 ms |
+| ✓ | closing a session with session ID, should return an error, given an invalid session ID | 675 ms |
+| ✓ | a subscription to wallet updates providing viewing key only, should stream wallet events starting from the beginning, given there are relevant transactions | 2784 ms |
+| ✓ | a subscription to wallet updates providing viewing key only, should stream shielded transaction events adhering to the expected schema | 3746 ms |
+| ✓ | a subscription to wallet updates providing viewing key only, should be able to use highestZswapEndIndex from progress event in collapsed update query | 1229 ms |
 | ↓ | a subscription to wallet updates providing viewing key only, should report the chain tip protocol version in the progress event | — |
-| ✓ | a subscription to wallet updates providing viewing key only, should reject shieldedTransactions subscription when using expired session ID | 951 ms |
+| ✓ | a subscription to wallet updates providing viewing key only, should reject shieldedTransactions subscription when using expired session ID | 991 ms |
 
 ### Subscription quotas
 
@@ -649,11 +660,11 @@ File name: `tests/integration/basic/subscriptions/subscription-quotas.test.ts`
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | per-connection concurrent subscription cap, should reject a subscription beyond the per-connection cap | 1712 ms |
-| ✓ | per-connection concurrent subscription cap, should free a slot when an active subscription is closed | 2717 ms |
-| ✓ | per-session subscription creation rate limit, should reject shielded subscription creations beyond the per-session rate limit | 1865 ms |
-| ✓ | per-session subscription creation rate limit, should allow a new shielded subscription after the rate limit refills | 9919 ms |
-| ✓ | per-session subscription creation rate limit, should keep a live shielded subscription streaming while creations are rate-limited | 34915 ms |
+| ✓ | per-connection concurrent subscription cap, should reject a subscription beyond the per-connection cap | 1725 ms |
+| ✓ | per-connection concurrent subscription cap, should free a slot when an active subscription is closed | 2712 ms |
+| ✓ | per-session subscription creation rate limit, should reject shielded subscription creations beyond the per-session rate limit | 1852 ms |
+| ✓ | per-session subscription creation rate limit, should allow a new shielded subscription after the rate limit refills | 10009 ms |
+| ✓ | per-session subscription creation rate limit, should keep a live shielded subscription streaming while creations are rate-limited | 34917 ms |
 
 ### Unshielded transaction subscriptions
 
@@ -663,18 +674,18 @@ File name: `tests/integration/basic/subscriptions/unshielded-transaction-subscri
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | a subscription to unshielded transaction events by address, should stream unshielded transaction events related to that address, given that address has transactions | 197 ms |
-| ✓ | a subscription to unshielded transaction events by address, should stream unshielded transaction events up to highest transaction id | 9536 ms |
-| ✓ | a subscription to unshielded transaction events by address, should stream unshielded transaction events that adhere to the expected schema | 156 ms |
-| ✓ | a subscription to unshielded transaction events by address, should only return a transaction progress message with highest transaction = 0, given that address does not have transactions | 5070 ms |
+| ✓ | a subscription to unshielded transaction events by address, should stream unshielded transaction events related to that address, given that address has transactions | 209 ms |
+| ✓ | a subscription to unshielded transaction events by address, should stream unshielded transaction events up to highest transaction id | 7350 ms |
+| ✓ | a subscription to unshielded transaction events by address, should stream unshielded transaction events that adhere to the expected schema | 151 ms |
+| ✓ | a subscription to unshielded transaction events by address, should only return a transaction progress message with highest transaction = 0, given that address does not have transactions | 5055 ms |
 | ↓ | a subscription to unshielded transaction events by address, should report the chain tip protocol version in the progress update, given that address does not have transactions | — |
-| ✓ | a subscription to unshielded transaction events by address, should return an error message, given the address provided is in hex format | 101 ms |
-| ✓ | a subscription to unshielded transaction events by address, should return an error message, given the address provided is for another network | 698 ms |
-| ✓ | a subscription to unshielded transaction events by address and transaction id, should return a stream of transactions containing that address, starting from transaction id = 0 | 7951 ms |
-| ✓ | a subscription to unshielded transaction events by address and transaction id, should return an error message, given the transaction id provided is negative | 110 ms |
-| ✓ | a subscription to unshielded transaction events by address and transaction id, should only return a transaction progress message without streaming transactions, given that the transaction id provided is bigger number | 5054 ms |
-| ✓ | a subscription to unshielded transaction events by address and transaction id, should start a transaction stream from the given transaction id | 5248 ms |
-| ✓ | a subscription to unshielded transaction events by address and transaction id, should return an error message, given the address is provided in hex format | 102 ms |
+| ✓ | a subscription to unshielded transaction events by address, should return an error message, given the address provided is in hex format | 108 ms |
+| ✓ | a subscription to unshielded transaction events by address, should return an error message, given the address provided is for another network | 743 ms |
+| ✓ | a subscription to unshielded transaction events by address and transaction id, should return a stream of transactions containing that address, starting from transaction id = 0 | 5540 ms |
+| ✓ | a subscription to unshielded transaction events by address and transaction id, should return an error message, given the transaction id provided is negative | 125 ms |
+| ✓ | a subscription to unshielded transaction events by address and transaction id, should only return a transaction progress message without streaming transactions, given that the transaction id provided is bigger number | 5060 ms |
+| ✓ | a subscription to unshielded transaction events by address and transaction id, should start a transaction stream from the given transaction id | 5292 ms |
+| ✓ | a subscription to unshielded transaction events by address and transaction id, should return an error message, given the address is provided in hex format | 82 ms |
 
 ### Wallet connect options
 
@@ -684,9 +695,9 @@ File name: `tests/integration/basic/subscriptions/wallet-connect-options.test.ts
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | opening a session with startIndex, should accept startIndex = 0 (no-op equivalent of unset options) | 785 ms |
-| ✓ | opening a session with startIndex, should skip historical scan when startIndex equals the current tip | 1577 ms |
-| ✓ | opening a session with startIndex, should accept startIndex past the current tip (fast-forward) | 1568 ms |
+| ✓ | opening a session with startIndex, should accept startIndex = 0 (no-op equivalent of unset options) | 784 ms |
+| ✓ | opening a session with startIndex, should skip historical scan when startIndex equals the current tip | 1665 ms |
+| ✓ | opening a session with startIndex, should accept startIndex past the current tip (fast-forward) | 1627 ms |
 
 ### Websocket keepalive
 
@@ -696,8 +707,8 @@ File name: `tests/integration/basic/subscriptions/websocket-keepalive.test.ts`
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | an idle socket without the client keepalive, should be closed while idle past the idle limit | 152604 ms |
-| ✓ | an idle socket with the client keepalive, should stay open while idle past the idle limit | 150637 ms |
+| ✓ | an idle socket without the client keepalive, should be closed while idle past the idle limit | 152611 ms |
+| ✓ | an idle socket with the client keepalive, should stay open while idle past the idle limit | 150644 ms |
 
 ### Zswap events subscriptions
 
@@ -708,10 +719,10 @@ File name: `tests/integration/basic/subscriptions/zswap-events-subscriptions.tes
 | Status | Name | Duration |
 | :---: | --- | ---: |
 | ✓ | a subscription to zswap ledger events without offset (default replay), streams events in ledger order | 914 ms |
-| ✓ | subscription with explicit offset, streams events starting from the specified ID | 1229 ms |
-| ✓ | subscription with explicit offset, validates historical zswap events against schema | 818 ms |
-| ✓ | subscription error handling, should return an error for unknown field | 684 ms |
-| ✓ | subscription error handling, rejects negative offset ID with an error | 688 ms |
+| ✓ | subscription with explicit offset, streams events starting from the specified ID | 2363 ms |
+| ✓ | subscription with explicit offset, validates historical zswap events against schema | 1124 ms |
+| ✓ | subscription error handling, should return an error for unknown field | 765 ms |
+| ✓ | subscription error handling, rejects negative offset ID with an error | 701 ms |
 
 ## E2E results
 
@@ -738,15 +749,15 @@ File name: `tests/e2e/contract-actions-sequential.test.ts`
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | a transaction to deploy a counter smart contract, should be reported by the indexer through a transaction query by hash | 85 ms |
-| ✓ | a transaction to deploy a counter smart contract, should be reported by the indexer through a block query by hash | 86 ms |
-| ✓ | a transaction to deploy a counter smart contract, should be reported by the indexer through a contract action query by address | 81 ms |
-| ✓ | a transaction to call the store circuit on the deployed counter smart contract, should be reported by the indexer through a transaction query by hash | 78 ms |
-| ✓ | a transaction to call the store circuit on the deployed counter smart contract, should be reported by the indexer through a block query by hash | 85 ms |
-| ✓ | a transaction to call the store circuit on the deployed counter smart contract, should be reported by the indexer through a contract action query by address | 76 ms |
-| ✓ | a transaction to update the counter smart contract, should be reported by the indexer through a transaction query by hash | 78 ms |
-| ✓ | a transaction to update the counter smart contract, should be reported by the indexer through a block query by hash | 175 ms |
-| ✓ | a transaction to update the counter smart contract, should be reported by the indexer through a contract action query by address | 182 ms |
+| ✓ | a transaction to deploy a counter smart contract, should be reported by the indexer through a transaction query by hash | 108 ms |
+| ✓ | a transaction to deploy a counter smart contract, should be reported by the indexer through a block query by hash | 164 ms |
+| ✓ | a transaction to deploy a counter smart contract, should be reported by the indexer through a contract action query by address | 79 ms |
+| ✓ | a transaction to call the store circuit on the deployed counter smart contract, should be reported by the indexer through a transaction query by hash | 86 ms |
+| ✓ | a transaction to call the store circuit on the deployed counter smart contract, should be reported by the indexer through a block query by hash | 120 ms |
+| ✓ | a transaction to call the store circuit on the deployed counter smart contract, should be reported by the indexer through a contract action query by address | 100 ms |
+| ✓ | a transaction to update the counter smart contract, should be reported by the indexer through a transaction query by hash | 88 ms |
+| ✓ | a transaction to update the counter smart contract, should be reported by the indexer through a block query by hash | 216 ms |
+| ✓ | a transaction to update the counter smart contract, should be reported by the indexer through a contract action query by address | 196 ms |
 
 ### Custom unshielded token transactions
 
@@ -756,13 +767,13 @@ File name: `tests/e2e/custom-unshielded-token-transactions.test.ts`
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | a successful unshielded transaction transferring 1 token between two addresses, should be reported by the indexer through a block query by hash | 154 ms |
-| ✓ | a successful unshielded transaction transferring 1 token between two addresses, should be reported by the indexer through a transaction query by hash | 138 ms |
+| ✓ | a successful unshielded transaction transferring 1 token between two addresses, should be reported by the indexer through a block query by hash | 121 ms |
+| ✓ | a successful unshielded transaction transferring 1 token between two addresses, should be reported by the indexer through a transaction query by hash | 103 ms |
 | ✓ | a successful unshielded transaction transferring 1 token between two addresses, should be reported by the indexer through an unshielded transaction event for the source address | 1 ms |
-| ✓ | a successful unshielded transaction transferring 1 token between two addresses, should be reported by the indexer through an unshielded transaction event for the destination address | 1 ms |
-| ✓ | a successful unshielded transaction transferring 1 token between two addresses, should have transferred 1 token from the source to the destination address | 81 ms |
-| ✓ | a successful unshielded transaction transferring 1 token between two addresses, should report the token type under test on every created and spent output | 86 ms |
-| ✓ | a successful unshielded transaction transferring 1 token between two addresses, should be reported by the indexer through a progress update event for the source address | 15013 ms |
+| ✓ | a successful unshielded transaction transferring 1 token between two addresses, should be reported by the indexer through an unshielded transaction event for the destination address | 2 ms |
+| ✓ | a successful unshielded transaction transferring 1 token between two addresses, should have transferred 1 token from the source to the destination address | 109 ms |
+| ✓ | a successful unshielded transaction transferring 1 token between two addresses, should report the token type under test on every created and spent output | 158 ms |
+| ✓ | a successful unshielded transaction transferring 1 token between two addresses, should be reported by the indexer through a progress update event for the source address | 45031 ms |
 | ✓ | a successful unshielded transaction transferring 1 token between two addresses, should be reported by the indexer through a progress update event for the destination address | 2 ms |
 
 ### Night transactions
@@ -773,19 +784,19 @@ File name: `tests/e2e/night-transactions.test.ts`
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | a successful unshielded transaction transferring 1 STAR between two addresses, should be reported by the indexer through a block query by hash | 115 ms |
-| ✓ | a successful unshielded transaction transferring 1 STAR between two addresses, should be reported by the indexer through a transaction query by hash | 85 ms |
-| ✓ | a successful unshielded transaction transferring 1 STAR between two addresses, should be reported by the indexer through an unshielded transaction event for the source address | 5 ms |
-| ✓ | a successful unshielded transaction transferring 1 STAR between two addresses, should be reported by the indexer through an unshielded transaction event for the destination address | 13 ms |
-| ✓ | a successful unshielded transaction transferring 1 STAR between two addresses, should have transferred 1 STAR from the source to the destination address | 93 ms |
-| ✓ | a successful unshielded transaction transferring 1 STAR between two addresses, should report the token type under test on every created and spent output | 98 ms |
-| ✓ | a successful unshielded transaction transferring 1 STAR between two addresses, should be reported by the indexer through a progress update event for the source address | 25019 ms |
-| ✓ | a successful unshielded transaction transferring 1 STAR between two addresses, should be reported by the indexer through a progress update event for the destination address | 2 ms |
-| ✓ | the genesis block of a chain minted with NIGHT alone, should report the all-zeros NIGHT token type on its outputs | 2 ms |
-| ✓ | the dust activity of a confirmed NIGHT transaction, should increase the dust commitment Merkle tree end index | 365 ms |
-| ✓ | a confirmed unshielded transfer streamed to address subscriptions, should emit UnshieldedTransaction only for the target wallet (A > B1) | 46052 ms |
-| ✓ | a confirmed unshielded transfer streamed to address subscriptions, should emit UnshieldedTransaction only for the target wallet (A > B2) | 16990 ms |
-| ✓ | an address with no transaction history, should emit only ProgressUpdate for empty wallet | 2766 ms |
+| ✓ | a successful unshielded transaction transferring 1 STAR between two addresses, should be reported by the indexer through a block query by hash | 113 ms |
+| ✓ | a successful unshielded transaction transferring 1 STAR between two addresses, should be reported by the indexer through a transaction query by hash | 88 ms |
+| ✓ | a successful unshielded transaction transferring 1 STAR between two addresses, should be reported by the indexer through an unshielded transaction event for the source address | 2 ms |
+| ✓ | a successful unshielded transaction transferring 1 STAR between two addresses, should be reported by the indexer through an unshielded transaction event for the destination address | 2 ms |
+| ✓ | a successful unshielded transaction transferring 1 STAR between two addresses, should have transferred 1 STAR from the source to the destination address | 100 ms |
+| ✓ | a successful unshielded transaction transferring 1 STAR between two addresses, should report the token type under test on every created and spent output | 96 ms |
+| ✓ | a successful unshielded transaction transferring 1 STAR between two addresses, should be reported by the indexer through a progress update event for the source address | 30017 ms |
+| ✓ | a successful unshielded transaction transferring 1 STAR between two addresses, should be reported by the indexer through a progress update event for the destination address | 1 ms |
+| ✓ | the genesis block of a chain minted with NIGHT alone, should report the all-zeros NIGHT token type on its outputs | 1 ms |
+| ✓ | the dust activity of a confirmed NIGHT transaction, should increase the dust commitment Merkle tree end index | 335 ms |
+| ✓ | a confirmed unshielded transfer streamed to address subscriptions, should emit UnshieldedTransaction only for the target wallet (A > B1) | 36793 ms |
+| ✓ | a confirmed unshielded transfer streamed to address subscriptions, should emit UnshieldedTransaction only for the target wallet (A > B2) | 16875 ms |
+| ✓ | an address with no transaction history, should emit only ProgressUpdate for empty wallet | 2689 ms |
 
 ### Segment probe contract actions
 
@@ -795,12 +806,12 @@ File name: `tests/e2e/segment-probe-contract-actions.test.ts`
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | a transaction to deploy a segment-split smart contract, should be reported by the indexer through a transaction query by hash | 77 ms |
-| ✓ | a transaction to deploy a segment-split smart contract, should be reported by the indexer through a block query by hash | 104 ms |
-| ✓ | a transaction to deploy a segment-split smart contract, should be reported by the indexer through a contract action query by address | 77 ms |
-| ✓ | a transaction to call the burnWithGuaranteed circuit on the deployed segment-split smart contract, should be reported by the indexer through a transaction query by hash | 73 ms |
-| ✓ | a transaction to call the burnWithGuaranteed circuit on the deployed segment-split smart contract, should be reported by the indexer through a block query by hash | 75 ms |
-| ✓ | a transaction to call the burnWithGuaranteed circuit on the deployed segment-split smart contract, should be reported by the indexer through a contract action query by address | 612 ms |
+| ✓ | a transaction to deploy a segment-split smart contract, should be reported by the indexer through a transaction query by hash | 100 ms |
+| ✓ | a transaction to deploy a segment-split smart contract, should be reported by the indexer through a block query by hash | 106 ms |
+| ✓ | a transaction to deploy a segment-split smart contract, should be reported by the indexer through a contract action query by address | 115 ms |
+| ✓ | a transaction to call the burnWithGuaranteed circuit on the deployed segment-split smart contract, should be reported by the indexer through a transaction query by hash | 103 ms |
+| ✓ | a transaction to call the burnWithGuaranteed circuit on the deployed segment-split smart contract, should be reported by the indexer through a block query by hash | 512 ms |
+| ✓ | a transaction to call the burnWithGuaranteed circuit on the deployed segment-split smart contract, should be reported by the indexer through a contract action query by address | 92 ms |
 
 ### Shielded transactions
 
@@ -810,14 +821,14 @@ File name: `tests/e2e/shielded-transactions.test.ts`
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | a successful shielded transaction transferring 1 Shielded Token between two wallets, should be reported by the indexer through a block query by hash | 145 ms |
-| ✓ | a successful shielded transaction transferring 1 Shielded Token between two wallets, should be reported by the indexer through a transaction query by hash | 84 ms |
-| ✓ | a successful shielded transaction transferring 1 Shielded Token between two wallets, should stream Zswap events followed by DustSpendProcessed after a shielded transaction | 851 ms |
-| ✓ | a successful shielded transaction transferring 1 Shielded Token between two wallets, should increase the zswap Merkle tree end index | 594 ms |
-| ✓ | a successful shielded transaction transferring 1 Shielded Token between two wallets, should increase the dust commitment Merkle tree end index | 83 ms |
-| ✓ | a confirmed shielded transfer streamed to wallet sessions by viewing key, should stream the transaction to the source viewing key with a matching hash | 1148 ms |
-| ✓ | a confirmed shielded transfer streamed to wallet sessions by viewing key, should stream the transaction to the destination viewing key with a matching hash | 895 ms |
-| ✓ | a confirmed shielded transfer streamed to wallet sessions by viewing key, should not stream the transaction to an unrelated viewing key | 20752 ms |
+| ✓ | a successful shielded transaction transferring 1 Shielded Token between two wallets, should be reported by the indexer through a block query by hash | 217 ms |
+| ✓ | a successful shielded transaction transferring 1 Shielded Token between two wallets, should be reported by the indexer through a transaction query by hash | 148 ms |
+| ✓ | a successful shielded transaction transferring 1 Shielded Token between two wallets, should stream Zswap events followed by DustSpendProcessed after a shielded transaction | 1736 ms |
+| ✓ | a successful shielded transaction transferring 1 Shielded Token between two wallets, should increase the zswap Merkle tree end index | 415 ms |
+| ✓ | a successful shielded transaction transferring 1 Shielded Token between two wallets, should increase the dust commitment Merkle tree end index | 122 ms |
+| ✓ | a confirmed shielded transfer streamed to wallet sessions by viewing key, should stream the transaction to the source viewing key with a matching hash | 1141 ms |
+| ✓ | a confirmed shielded transfer streamed to wallet sessions by viewing key, should stream the transaction to the destination viewing key with a matching hash | 1142 ms |
+| ✓ | a confirmed shielded transfer streamed to wallet sessions by viewing key, should not stream the transaction to an unrelated viewing key | 20879 ms |
 
 ### Subscription polling
 
@@ -847,11 +858,11 @@ File name: `tests/e2e/unshielded-balance-e2e.test.ts`
 
 File name: `tests/e2e/toolkit/dust-balance.test.ts`
 
-#### Dust Balance Query Using Toolkit
+#### Dust Balance Query Using Moth
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | a dust balance query with a valid wallet seed, should respond with a dust balance according to the requested schema | 34928 ms |
+| ✓ | a dust balance query with a valid wallet seed, should respond with a dust balance according to the requested schema | 34619 ms |
 
 ### Toolkit: Key material
 
@@ -861,21 +872,20 @@ File name: `tests/e2e/toolkit/key-material.test.ts`
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | a midnight shielded address, should show with the expected prefix for the current network ID | 52 ms |
-| ✓ | a midnight shielded address, should show with the expected prefix for all network IDs | 335 ms |
-| ✓ | a midnight unshielded address, should show with the expected prefix for the current network ID | 47 ms |
-| ✓ | a midnight unshielded address, should show with the expected prefix for all network IDs | 303 ms |
-| ✓ | a midnight viewing key, should show with the expected prefix for the current network ID | 44 ms |
-| ✓ | a midnight viewing key, should show with the expected prefix for all network IDs | 270 ms |
+| ✓ | a midnight shielded address, should show with the expected prefix for the current network ID | 53 ms |
+| ✓ | a midnight shielded address, should show with the expected prefix for all network IDs | 338 ms |
+| ✓ | a midnight unshielded address, should show with the expected prefix for the current network ID | 55 ms |
+| ✓ | a midnight unshielded address, should show with the expected prefix for all network IDs | 348 ms |
+| ✓ | a midnight viewing key, should show with the expected prefix for the current network ID | 42 ms |
+| ✓ | a midnight viewing key, should show with the expected prefix for all network IDs | 309 ms |
 
 ### Toolkit: Show wallet queries
 
 File name: `tests/e2e/toolkit/show-wallet-queries.test.ts`
 
-#### Show Wallet Queries Using Toolkit
+#### Show Wallet Queries Using Moth
 
 | Status | Name | Duration |
 | :---: | --- | ---: |
-| ✓ | private wallet state query using toolkit, should respond with a private wallet state according to the requested schema | 30892 ms |
-| ✓ | public wallet state query using toolkit, should respond with a public wallet state according to the requested schema | 88 ms |
-
+| ✓ | private wallet state query using moth, should respond with a private wallet state according to the requested schema | 37100 ms |
+| ✓ | public wallet state query using moth, should respond with a public wallet state according to the requested schema | 79 ms |
