@@ -604,8 +604,9 @@ function parseStartBlockHeight(): number | undefined {
 
 /**
  * Regenerates the qa/tests/data/static/${TARGET_ENV} test data files
- * (contract-actions.jsonc, unshielded-token-types.jsonc and, where the
- * indexer supports it, contract-events.jsonc) from whatever is currently in
+ * (contract-actions.jsonc, unshielded-token-types.jsonc,
+ * token-holding-contracts.jsonc and, where the indexer supports it,
+ * contract-events.jsonc) from whatever is currently in
  * tmp_scan/${TARGET_ENV}_blocks.jsonl.
  *
  * Called from a `finally` block in main() so it always runs when the process
@@ -616,8 +617,8 @@ function parseStartBlockHeight(): number | undefined {
  * mask the scan's own outcome. (It still can't run after an unstoppable
  * `kill -9`, since no JS runs at all in that case.)
  *
- * With `localOnly` the contract-events harvest (the only remote step) is
- * skipped and that file is left untouched; without it the run is tied to
+ * With `localOnly` the contract-events and token-holding contracts harvests
+ * (the only remote steps) are skipped and those files are left untouched; without it the run is tied to
  * `gracefulFinalization` so a forced exit can supersede it.
  */
 async function finalizeTestData({ localOnly = false } = {}): Promise<void> {
