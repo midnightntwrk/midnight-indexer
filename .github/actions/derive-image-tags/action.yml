@@ -1,0 +1,101 @@
+name: Derive image tags
+description: >-
+  Resolve the indexer, node and node-toolkit image tags for the checked-out
+  commit. Single source of truth: build-indexer-images pushes
+  <cargo-version>-<sha8> for main and <semver> for a v* tag, and every consumer
+  has to agree with it. Derived in three places once, which agreed only by
+  convention.
+
+inputs:
+  indexer_tag:
+    description: Override the indexer tag (empty derives it from the commit)
+    required: false
+    default: ""
+  node_tag:
+    description: Override the node tag (empty reads the last line of NODE_VERSIONS)
+    required: false
+    default: ""
+  node_toolkit_tag:
+    description: Override the node toolkit tag (empty pairs it with the node tag)
+    required: false
+    default: ""
+
+outputs:
+  indexer_tag:
+    description: Indexer image tag
+    value: ${{ steps.resolve.outputs.indexer_tag }}
+  node_tag:
+    description: Node image tag
+    value: ${{ steps.resolve.outputs.node_tag }}
+  node_toolkit_tag:
+    description: Node toolkit image tag
+    value: ${{ steps.resolve.outputs.node_toolkit_tag }}
+
+runs:
+  using: composite
+  steps:
+    - name: Read crate version
+      id: version
+      shell: bash
+      run: |
+        version=$(grep '^version.*=' Cargo.toml | sed -E 's/version.*=.*"(.*)"/\1/')
+        printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+    - name: Setup Docker metadata
+      id: meta
+      uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+      env:
+        DOCKER_METADATA_SHORT_SHA_LENGTH: 8
+      with:
+        tags: |
+          type=semver,pattern={{version}}
+          ${{ github.ref_type != 'tag' && format('type=sha,prefix={0}-,format=short', steps.version.outputs.version) || '' }}
+
+    - name: Resolve tags
+      id: resolve
+      shell: bash
+      env:
+        META_TAGS: ${{ steps.meta.outputs.tags }}
+        INDEXER_TAG_INPUT: ${{ inputs.indexer_tag }}
+        NODE_TAG_INPUT: ${{ inputs.node_tag }}
+        NODE_TOOLKIT_TAG_INPUT: ${{ inputs.node_toolkit_tag }}
+      run: |
+        set -eu
+
+        # A tag reaches $GITHUB_OUTPUT as `name=value` on one line, so a newline
+        # in it sets arbitrary further outputs. NODE_VERSIONS and Cargo.toml are
+        # both file contents, i.e. whatever the last commit put there.
+        emit() {
+          case "$2" in
+            "")                echo "::error::empty $1"; exit 1 ;;
+            *[!A-Za-z0-9._-]*) echo "::error::$1 '$2' has characters outside [A-Za-z0-9._-]"; exit 1 ;;
+          esac
+          printf '%s=%s\n' "$1" "$2" >> "$GITHUB_OUTPUT"
+          echo "$1=$2"
+        }
+
+        # metadata-action emits one tag per line. Drop blanks and the floating
+        # `latest` a release build adds, then take the first.
+        if [ -n "$INDEXER_TAG_INPUT" ]; then
+          indexer_tag="$INDEXER_TAG_INPUT"
+        else
+          indexer_tag=$(printf '%s\n' "$META_TAGS" | grep -v '^$' | grep -v '^latest$' | head -n1 || true)
+          if [ -z "$indexer_tag" ]; then
+            echo "::error::could not derive an indexer tag; metadata-action produced:"
+            printf '%s\n' "$META_TAGS"
+            exit 1
+          fi
+        fi
+        emit indexer_tag "$indexer_tag"
+
+        if [ -n "$NODE_TAG_INPUT" ]; then
+          node_tag="$NODE_TAG_INPUT"
+        else
+          node_tag=$(tail -n 1 NODE_VERSIONS)
+        fi
+        emit node_tag "$node_tag"
+
+        # Paired 1:1 with the node tag: the toolkit publishes a matching tag for
+        # every node release, and running a node with its own toolkit version
+        # keeps test-data generation consistent with the node under test.
+        emit node_toolkit_tag "${NODE_TOOLKIT_TAG_INPUT:-$node_tag}"
