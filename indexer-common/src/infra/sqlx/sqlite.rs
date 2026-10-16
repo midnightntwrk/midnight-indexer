@@ -57,13 +57,13 @@ mod tests {
             .context("create pool")?;
 
         sqlx::query("CREATE TABLE test (id BYTEA PRIMARY KEY)")
-            .execute(&*pool)
+            .execute(pool.writer())
             .await
             .context("create table")?;
 
         sqlx::query("INSERT INTO test (id) VALUES ($1)")
             .bind(U128BeBytes::from(42))
-            .execute(&*pool)
+            .execute(pool.writer())
             .await
             .context("insert into test table")?;
 
