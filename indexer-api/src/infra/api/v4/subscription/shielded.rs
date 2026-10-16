@@ -37,6 +37,7 @@ use futures::{
 };
 use indexer_common::domain::{Subscriber, WalletIndexed};
 use log::{debug, warn};
+use secrecy::ExposeSecret;
 use std::{future::ready, marker::PhantomData, pin::pin};
 use stream_cancel::{StreamExt as _, Trigger, Tripwire};
 use tokio::time::sleep;
@@ -149,15 +150,15 @@ where
     {
         cx.get_metrics().wallets_connected.increment(1);
 
-        let session_id = session_id
-            .try_into()
+        let session = session_id
+            .into_bytes()
             .map_err_into_client_error(|| "invalid session ID")?;
 
         let wallet_id = cx
             .get_storage::<S>()
-            .resolve_session_id(&session_id)
+            .resolve_session(session.expose_secret(), cx.get_session_token_ttl())
             .await
-            .map_err_into_server_error(|| "resolve session ID")?
+            .map_err_into_server_error(|| "resolve session")?
             .some_or_client_error(|| "unknown or expired session ID")?;
 
         // Only acquire a per-session quota bucket for a known session, so that arbitrary session
