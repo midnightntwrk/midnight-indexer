@@ -95,8 +95,10 @@ describe('show wallet queries using toolkit', () => {
         const walletAddress = addressInfo.unshielded;
 
         log.debug(`Querying public wallet state for address: ${walletAddress}`);
-        const publicWalletState: PublicWalletState =
-          await toolkit.showPublicWalletState(walletAddress);
+        const publicWalletState: PublicWalletState = await toolkit.showPublicWalletState(
+          walletAddress,
+          walletSeed,
+        );
 
         expect(publicWalletState).toBeDefined();
 
