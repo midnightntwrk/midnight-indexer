@@ -68,6 +68,11 @@ infra:
     # SPO features locally, any non-empty placeholder is accepted at startup,
     # e.g. APP__INFRA__SPO_NODE__BLOCKFROST_ID=dummy-not-using-spo
     #
+    # blockfrost_base_url selects a Blockfrost-compatible API, including the
+    # version path; it defaults to hosted Blockfrost for the network named by
+    # the blockfrost_id prefix.
+    # blockfrost_base_url: "http://localhost:3000/api/v0"
+    #
     # http_pool:
     #   max_idle_per_host: 4
     #   idle_timeout: "30s"
