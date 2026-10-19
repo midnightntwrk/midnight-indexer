@@ -668,17 +668,17 @@ mod tests {
 
     #[tokio::test]
     async fn midnight_transaction_block_of_undeployed_runtime_3_0_0() {
-        let details = decode("undeployed-5", "3.0.0-f3e7c3915ca4", &mut None)
+        let details = decode("undeployed-6", "3.0.0-f3e7c3915ca4", &mut None)
             .await
             .unwrap();
         assert_eq!(
             summary(&details),
             [
-                "timestamp Some(1791530850001)",
-                "R 3643 6d69646e..9f26c705 ApplyExtrinsic(4) fully 6e4d24b6",
+                "timestamp Some(1792411188002)",
+                "R 3643 6d69646e..c90c2406 ApplyExtrinsic(4) fully 7b894f1f",
                 "registrations: 2",
-                "registrations first: (ApplyExtrinsic(1), 1, Registration { cardano_stake_key: dc2064a8…, dust_address: 0270cc28… })",
-                "registrations last: (ApplyExtrinsic(1), 2, MappingAdded { cardano_stake_key: dc2064a8…, dust_address: 0270cc28…, utxo_id: 04000000…, utxo_index: 1 })",
+                "registrations first: (ApplyExtrinsic(1), 1, Registration { cardano_stake_key: 53a8fd52…, dust_address: 02cc3fb2… })",
+                "registrations last: (ApplyExtrinsic(1), 2, MappingAdded { cardano_stake_key: 53a8fd52…, dust_address: 02cc3fb2…, utxo_id: 05000000…, utxo_index: 1 })",
                 "bridge events: 0",
             ]
         );
@@ -687,16 +687,16 @@ mod tests {
     #[tokio::test]
     async fn session_rotation_block_of_undeployed_runtime_3_0_0() {
         let mut authorities = Some(vec![[1; 32]]);
-        let details = decode("undeployed-30", "3.0.0-f3e7c3915ca4", &mut authorities)
+        let details = decode("undeployed-8", "3.0.0-f3e7c3915ca4", &mut authorities)
             .await
             .unwrap();
         assert_eq!(
             summary(&details),
             [
-                "timestamp Some(1791531000006)",
+                "timestamp Some(1792411200001)",
                 "registrations: 2",
-                "registrations first: (ApplyExtrinsic(2), 4, Registration { cardano_stake_key: 7b685542…, dust_address: 026c07a2… })",
-                "registrations last: (ApplyExtrinsic(2), 5, MappingAdded { cardano_stake_key: 7b685542…, dust_address: 026c07a2…, utxo_id: 1d000000…, utxo_index: 1 })",
+                "registrations first: (ApplyExtrinsic(2), 4, Registration { cardano_stake_key: 41b82fa6…, dust_address: 028425c6… })",
+                "registrations last: (ApplyExtrinsic(2), 5, MappingAdded { cardano_stake_key: 41b82fa6…, dust_address: 028425c6…, utxo_id: 07000000…, utxo_index: 1 })",
                 "bridge events: 0",
             ]
         );
@@ -716,7 +716,7 @@ mod tests {
             ("devnet-0", "1.0.300", V8),
             ("devnet-2", "1.0.300", V8),
             ("devnet-8464", "1.0.300", V8),
-            ("undeployed-5", "3.0.0-f3e7c3915ca4", V9),
+            ("undeployed-6", "3.0.0-f3e7c3915ca4", V9),
         ];
         for (name, metadata_dir, ledger_version) in blocks {
             let details = decode(name, metadata_dir, &mut None).await?;
