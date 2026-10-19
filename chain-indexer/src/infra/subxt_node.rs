@@ -44,7 +44,7 @@ use std::{future::ready, time::Duration};
 use subxt::{
     OnlineClient, SubstrateConfig,
     config::{
-        Hash, RpcConfigFor,
+        RpcConfigFor,
         substrate::{ConsensusEngineId, DigestItem, SubstrateHeader},
     },
     rpcs::{
@@ -72,15 +72,13 @@ pub(crate) struct ContentSource {
 
 const AURA_ENGINE_ID: ConsensusEngineId = [b'a', b'u', b'r', b'a'];
 const BABE_ENGINE_ID: ConsensusEngineId = [b'B', b'A', b'B', b'E'];
-
-/// Name of the node runtime API reporting the active block-production engine, declared in
-/// `midnight-primitives-consensus-engine` and implemented alongside the pallet driving the
-/// Aura→BABE transition. Its presence in a block's runtime guarantees the correctness of Aura
-/// and BABE pre-runtime digests during the transition, so BABE digests are only trusted for
-/// author derivation where it exists.
-const CONSENSUS_ENGINE_RUNTIME_API: &str = "ConsensusEngineApi";
 const CATCH_UP_LOG_INTERVAL: u64 = 1_000;
-
+/// `spec_version` of the first runtime with `pallet-consensus-engine`, [`ACTIVATION_SPEC_VERSION`]
+/// in `midnight-primitives-consensus-engine`. From this version on the pallet rejects a block whose
+/// Aura and BABE pre-runtime digests are out of layout, so BABE digests are trusted.
+///
+/// [`ACTIVATION_SPEC_VERSION`]: https://github.com/midnightntwrk/midnight-node/blob/e1efdccc1c2f065772620f51dfec26d2aaf54dab/primitives/consensus-engine/src/lib.rs#L30
+const CONSENSUS_ENGINE_ACTIVATION_SPEC_VERSION: u32 = 3_000_000;
 /// One GRANDPA session worth of blocks. Blocks within this distance of the finalized tip are
 /// fetched by hash (backward traversal) to avoid any risk of ingesting non-canonical blocks.
 /// Blocks further back are fetched by height with parent hash verification.
@@ -239,13 +237,7 @@ impl SubxtNode {
         let author = authorities
             .as_ref()
             .map(|authorities| {
-                // The state metadata can only be newer than the runtime that authored the
-                // block, so this can never enable BABE recognition too late.
-                let babe_supported = block
-                    .metadata_ref()
-                    .runtime_api_trait_by_name(CONSENSUS_ENGINE_RUNTIME_API)
-                    .is_some();
-                extract_block_author(&header, authorities, content_node_version, babe_supported)
+                author_from_digest_logs(&header.digest.logs, authorities, protocol_version)
             })
             .transpose()?
             .flatten();
@@ -734,65 +726,43 @@ async fn receive_block(
     finalized_blocks.try_next().await
 }
 
-/// Check an authority set against a block header's digest logs to determine the author of that
-/// block.
-fn extract_block_author<H>(
-    header: &SubstrateHeader<H>,
-    authorities: &[[u8; 32]],
-    content_node_version: NodeVersion,
-    babe_supported: bool,
-) -> Result<Option<BlockAuthor>, SubxtNodeError>
-where
-    H: Hash,
-{
-    author_from_digest_logs(
-        &header.digest.logs,
-        authorities,
-        content_node_version,
-        babe_supported,
-    )
-}
-
-/// Determine the block author from the pre-runtime digest logs, taking the first log with a
-/// recognized consensus engine that yields an author, in digest order (mirroring polkadot-js
-/// `extractAuthor`): Aura carries the slot (the author is the slot modulo the authority-set
-/// length), BABE carries the authority index explicitly in all of its pre-digest variants. BABE
-/// digests are only recognized if `babe_supported`, i.e. if the block's runtime guarantees
-/// their correctness (see [CONSENSUS_ENGINE_RUNTIME_API]); otherwise they are skipped like any
-/// unrecognized engine.
+/// Determine the block author from the pre-runtime digest logs of a block executed by the runtime
+/// of `protocol_version`, by the rule of the node's `authoring_engine`.
+///
+/// The first Aura or BABE pre-runtime digest names the authoring engine. Aura carries the slot, and
+/// the author is the slot modulo the authority-set length. BABE carries the authority index in all
+/// of its pre-digest variants. Before [CONSENSUS_ENGINE_ACTIVATION_SPEC_VERSION] nothing enforced
+/// the digest layout, so BABE digests are skipped and the block is Aura's. `protocol_version` comes
+/// from the block's MNSV digest, which the executing runtime writes and an author cannot forge.
 fn author_from_digest_logs(
     logs: &[DigestItem],
     authorities: &[[u8; 32]],
-    content_node_version: NodeVersion,
-    babe_supported: bool,
+    protocol_version: ProtocolVersion,
 ) -> Result<Option<BlockAuthor>, SubxtNodeError> {
+    use DigestItem::PreRuntime;
+
     if authorities.is_empty() {
         return Ok(None);
     }
 
-    for log in logs {
-        let DigestItem::PreRuntime(engine_id, pre_digest) = log else {
-            continue;
-        };
-
-        let author = match *engine_id {
-            AURA_ENGINE_ID => {
-                let slot = runtimes::decode_slot(pre_digest, content_node_version)?;
+    let babe_pre_digest_is_authoritative =
+        u32::from(protocol_version) >= CONSENSUS_ENGINE_ACTIVATION_SPEC_VERSION;
+    let author = logs.iter().find_map(|log| match log {
+        // Aura assigns slots to authorities round-robin.
+        PreRuntime(AURA_ENGINE_ID, pre_digest) => Some(
+            runtimes::decode_slot(pre_digest, protocol_version.node_version()).map(|slot| {
                 let index = slot % authorities.len() as u64;
                 authorities.get(index as usize).copied().map(Into::into)
-            }
-
-            BABE_ENGINE_ID if babe_supported => babe_author(pre_digest, authorities)?,
-
-            _ => None,
-        };
-
-        if author.is_some() {
-            return Ok(author);
+            }),
+        ),
+        // BABE names the authority by index in every pre-digest variant.
+        PreRuntime(BABE_ENGINE_ID, pre_digest) if babe_pre_digest_is_authoritative => {
+            Some(babe_author(pre_digest, authorities))
         }
-    }
+        _ => None,
+    });
 
-    Ok(None)
+    Ok(author.transpose()?.flatten())
 }
 
 /// Determine the block author from a BABE pre-runtime digest. An out-of-range authority index
@@ -900,9 +870,23 @@ async fn block_header(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use DigestItem::PreRuntime;
+    use ProtocolVersion::*;
     use parity_scale_codec::Encode;
 
     const AUTHORITIES: [[u8; 32]; 3] = [[1; 32], [2; 32], [3; 32]];
+
+    /// A block executed by a runtime before `pallet-consensus-engine`.
+    const BEFORE_ACTIVATION: ProtocolVersion = V2_1(2_001_999);
+    /// A block executed by the first runtime with `pallet-consensus-engine`.
+    const AT_ACTIVATION: ProtocolVersion = V3_0(3_000_000);
+    /// A block executed by the latest supported runtime with `pallet-consensus-engine`.
+    const AFTER_ACTIVATION: ProtocolVersion = V3_0(3_000_999);
+
+    /// An Aura pre-digest: the SCALE-encoded slot.
+    fn aura_pre_digest(slot: u64) -> Vec<u8> {
+        slot.encode()
+    }
 
     /// A BABE pre-digest prefix: variant tag, then the SCALE-encoded authority index, then
     /// trailing payload (slot, VRF signature) which must be ignored.
@@ -915,12 +899,20 @@ mod tests {
 
     #[test]
     fn author_from_aura_digest() {
-        let logs = vec![DigestItem::PreRuntime(AURA_ENGINE_ID, 4u64.encode())];
+        let logs = vec![PreRuntime(AURA_ENGINE_ID, aura_pre_digest(4))];
 
-        let author = author_from_digest_logs(&logs, &AUTHORITIES, NodeVersion::V2_0, false)
-            .expect("author can be determined");
-
-        assert_eq!(author, Some([2; 32].into()));
+        // Aura digests are not version-gated.
+        // After the flip `pallet-consensus-engine` rejects blocks carrying one.
+        for protocol_version in [
+            V2_0(2_000_000),
+            BEFORE_ACTIVATION,
+            AT_ACTIVATION,
+            AFTER_ACTIVATION,
+        ] {
+            let author = author_from_digest_logs(&logs, &AUTHORITIES, protocol_version)
+                .expect("author can be determined");
+            assert_eq!(author, Some(AUTHORITIES[1].into()), "{protocol_version:?}");
+        }
     }
 
     #[test]
@@ -929,59 +921,99 @@ mod tests {
             let author = babe_author(&babe_pre_digest(tag, 2), &AUTHORITIES)
                 .expect("author can be determined");
 
-            assert_eq!(author, Some([3; 32].into()));
+            assert_eq!(author, Some(AUTHORITIES[2].into()));
         }
     }
 
     #[test]
-    fn babe_digest_is_skipped_if_babe_not_supported() {
-        let logs = vec![DigestItem::PreRuntime(
-            BABE_ENGINE_ID,
-            babe_pre_digest(2, 2),
-        )];
-        let author = author_from_digest_logs(&logs, &AUTHORITIES, NodeVersion::V2_0, false)
-            .expect("skipped digest is not an error");
-        assert_eq!(author, None);
+    fn author_from_babe_digest() {
+        let logs = vec![PreRuntime(BABE_ENGINE_ID, babe_pre_digest(2, 2))];
 
+        // Before activation the BABE digest is skipped.
+        // From activation on, a BABE-only digest is the layout of every block (AFTER the flip).
+        for (protocol_version, expected) in [
+            (V2_0(2_000_000), None),
+            (BEFORE_ACTIVATION, None),
+            (AT_ACTIVATION, Some(AUTHORITIES[2].into())),
+            (AFTER_ACTIVATION, Some(AUTHORITIES[2].into())),
+        ] {
+            let author = author_from_digest_logs(&logs, &AUTHORITIES, protocol_version)
+                .expect("skipped digest is not an error");
+            assert_eq!(author, expected, "{protocol_version:?}");
+        }
+    }
+
+    // At the enactment block of the upgrade to the first runtime with `pallet-consensus-engine`,
+    // the state already holds that runtime, but the previous runtime executed the block, so a BABE
+    // digest placed ahead of the Aura one is not trusted.
+    #[test]
+    fn babe_first_in_a_block_executed_before_activation_is_aura() {
         let logs = vec![
-            DigestItem::PreRuntime(BABE_ENGINE_ID, babe_pre_digest(2, 2)),
-            DigestItem::PreRuntime(AURA_ENGINE_ID, 4u64.encode()),
+            PreRuntime(BABE_ENGINE_ID, babe_pre_digest(2, 2)),
+            PreRuntime(AURA_ENGINE_ID, aura_pre_digest(4)),
         ];
-        let author = author_from_digest_logs(&logs, &AUTHORITIES, NodeVersion::V2_0, false)
+        let author = author_from_digest_logs(&logs, &AUTHORITIES, BEFORE_ACTIVATION)
             .expect("author can be determined");
-        assert_eq!(author, Some([2; 32].into()));
+        assert_eq!(author, Some(AUTHORITIES[1].into()));
     }
 
     #[test]
     fn first_pre_runtime_digest_in_digest_order_wins() {
-        let logs = vec![
-            DigestItem::PreRuntime(BABE_ENGINE_ID, babe_pre_digest(2, 2)),
-            DigestItem::PreRuntime(AURA_ENGINE_ID, 4u64.encode()),
+        // Aura first, then the BABE marker: the pre-flip layout `pallet-consensus-engine` enforces.
+        let mut logs = vec![
+            PreRuntime(AURA_ENGINE_ID, aura_pre_digest(4)),
+            PreRuntime(BABE_ENGINE_ID, babe_pre_digest(2, 2)),
         ];
-        let author = author_from_digest_logs(&logs, &AUTHORITIES, NodeVersion::V2_0, true)
-            .expect("author can be determined");
-        assert_eq!(author, Some([3; 32].into()));
+        for protocol_version in [BEFORE_ACTIVATION, AT_ACTIVATION, AFTER_ACTIVATION] {
+            let author = author_from_digest_logs(&logs, &AUTHORITIES, protocol_version)
+                .expect("author can be determined");
+            assert_eq!(author, Some(AUTHORITIES[1].into()), "{protocol_version:?}");
+        }
 
+        // BABE first: skipped before activation, so Aura names the author.
+        // From activation on, BABE does.
+        logs.reverse();
+        for (protocol_version, expected) in [
+            (BEFORE_ACTIVATION, AUTHORITIES[1]),
+            (AT_ACTIVATION, AUTHORITIES[2]),
+            (AFTER_ACTIVATION, AUTHORITIES[2]),
+        ] {
+            let author = author_from_digest_logs(&logs, &AUTHORITIES, protocol_version)
+                .expect("author can be determined");
+            assert_eq!(author, Some(expected.into()), "{protocol_version:?}");
+        }
+    }
+
+    #[test]
+    fn first_pre_runtime_digest_decides_without_fallback() {
+        // Index 7 is outside the authority set, so the BABE digest yields no author.
         let logs = vec![
-            DigestItem::PreRuntime(AURA_ENGINE_ID, 4u64.encode()),
-            DigestItem::PreRuntime(BABE_ENGINE_ID, babe_pre_digest(2, 2)),
+            PreRuntime(BABE_ENGINE_ID, babe_pre_digest(2, 7)),
+            PreRuntime(AURA_ENGINE_ID, aura_pre_digest(4)),
         ];
-        let author = author_from_digest_logs(&logs, &AUTHORITIES, NodeVersion::V2_0, true)
-            .expect("author can be determined");
-        assert_eq!(author, Some([2; 32].into()));
+        // Before activation the BABE digest is skipped, so the Aura digest names the author.
+        for (protocol_version, expected) in [
+            (BEFORE_ACTIVATION, Some(AUTHORITIES[1].into())),
+            (AT_ACTIVATION, None),
+            (AFTER_ACTIVATION, None),
+        ] {
+            let author = author_from_digest_logs(&logs, &AUTHORITIES, protocol_version)
+                .expect("out-of-range index is not an error");
+            assert_eq!(author, expected, "{protocol_version:?}");
+        }
     }
 
     #[test]
     fn unrecognized_engine_is_skipped() {
         let logs = vec![
-            DigestItem::PreRuntime(*b"test", vec![0xaa]),
-            DigestItem::PreRuntime(AURA_ENGINE_ID, 4u64.encode()),
+            PreRuntime(*b"test", vec![0xaa]),
+            PreRuntime(AURA_ENGINE_ID, aura_pre_digest(4)),
         ];
 
-        let author = author_from_digest_logs(&logs, &AUTHORITIES, NodeVersion::V2_0, true)
+        let author = author_from_digest_logs(&logs, &AUTHORITIES, V2_0(2_000_000))
             .expect("author can be determined");
 
-        assert_eq!(author, Some([2; 32].into()));
+        assert_eq!(author, Some(AUTHORITIES[1].into()));
     }
 
     #[test]
@@ -1013,7 +1045,7 @@ mod tests {
 
     #[test]
     fn no_pre_runtime_digest_yields_no_author() {
-        let author = author_from_digest_logs(&[], &AUTHORITIES, NodeVersion::V2_0, true)
+        let author = author_from_digest_logs(&[], &AUTHORITIES, V2_0(2_000_000))
             .expect("no digest is not an error");
 
         assert_eq!(author, None);
@@ -1021,9 +1053,9 @@ mod tests {
 
     #[test]
     fn empty_authorities_yield_no_author() {
-        let logs = vec![DigestItem::PreRuntime(AURA_ENGINE_ID, 4u64.encode())];
+        let logs = vec![PreRuntime(AURA_ENGINE_ID, aura_pre_digest(4))];
 
-        let author = author_from_digest_logs(&logs, &[], NodeVersion::V2_0, true)
+        let author = author_from_digest_logs(&logs, &[], V2_0(2_000_000))
             .expect("empty authorities are not an error");
 
         assert_eq!(author, None);
