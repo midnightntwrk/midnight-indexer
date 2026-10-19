@@ -18,7 +18,7 @@ use crate::{
         extrinsic::{Applied, EventIndex, Phase},
     },
     infra::subxt_node::{
-        OnlineClientAtBlock, SubxtNodeError,
+        ConsensusEngine, OnlineClientAtBlock, SubxtNodeError,
         runtimes::{
             AtBlock, BlockDetails, CallExt, EventExt, SystemTransaction, Transaction, transactions,
         },
@@ -44,7 +44,7 @@ use runtime::runtime_types::{
 use subxt::{SubstrateConfig, client::OfflineClientAtBlockT, error::RuntimeApiError};
 
 pub async fn make_block_details(
-    authorities: &mut Option<Vec<[u8; 32]>>,
+    authorities: &mut Option<(ConsensusEngine, Vec<[u8; 32]>)>,
     client: &AtBlock<impl OfflineClientAtBlockT<SubstrateConfig>>,
     block: BlockRef,
     extrinsics: Vec<Vec<u8>>,
@@ -325,6 +325,24 @@ pub async fn fetch_authorities(
         .decode()
         .map_err(|error| SubxtNodeError::DecodeAuthorities(error.into()))?;
     let authorities = authorities.0.into_iter().map(|a| a.0).collect();
+
+    Ok(authorities)
+}
+
+pub async fn fetch_babe_authorities(
+    block: &OnlineClientAtBlock,
+) -> Result<Vec<[u8; 32]>, SubxtNodeError> {
+    let authorities = block
+        .storage()
+        .entry(runtime::storage().babe().authorities())
+        .map_err(|error| SubxtNodeError::FetchAuthorities(error.into()))?
+        .fetch(())
+        .await
+        .map_err(|error| SubxtNodeError::FetchAuthorities(error.into()))?
+        .decode()
+        .map_err(|error| SubxtNodeError::DecodeAuthorities(error.into()))?;
+    // Each BABE authority is paired with its weight, which author resolution does not use.
+    let authorities = authorities.0.into_iter().map(|(a, _)| a.0).collect();
 
     Ok(authorities)
 }

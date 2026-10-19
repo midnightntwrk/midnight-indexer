@@ -45,7 +45,11 @@ use subxt::{
     OnlineClient, SubstrateConfig,
     config::{
         RpcConfigFor,
-        substrate::{ConsensusEngineId, DigestItem, SubstrateHeader},
+        substrate::{
+            ConsensusEngineId, DigestItem,
+            DigestItem::{Consensus, PreRuntime},
+            SubstrateHeader,
+        },
     },
     rpcs::{
         LegacyRpcMethods,
@@ -72,6 +76,12 @@ pub(crate) struct ContentSource {
 
 const AURA_ENGINE_ID: ConsensusEngineId = [b'a', b'u', b'r', b'a'];
 const BABE_ENGINE_ID: ConsensusEngineId = [b'B', b'A', b'B', b'E'];
+
+/// Variant index of `NextEpochData` in BABE's `ConsensusLog`, fixed by BABE's digest encoding
+/// ([`sp_consensus_babe::ConsensusLog`]).
+///
+/// [`sp_consensus_babe::ConsensusLog`]: https://github.com/paritytech/polkadot-sdk/blob/polkadot-stable2609/substrate/primitives/consensus/babe/src/lib.rs#L125-L126
+const BABE_NEXT_EPOCH_DATA: u8 = 1;
 const CATCH_UP_LOG_INTERVAL: u64 = 1_000;
 /// `spec_version` of the first runtime with `pallet-consensus-engine`, [`ACTIVATION_SPEC_VERSION`]
 /// in `midnight-primitives-consensus-engine`. From this version on the pallet rejects a block whose
@@ -182,9 +192,11 @@ impl SubxtNode {
 
     async fn make_block(
         &mut self,
-        authorities: &mut Option<Vec<[u8; 32]>>,
+        authorities: &mut Option<(ConsensusEngine, Vec<[u8; 32]>)>,
         block: OnlineClientAtBlock,
     ) -> Result<Block, SubxtNodeError> {
+        use ConsensusEngine::*;
+
         let hash = block.block_hash().0.into();
         let height = block.block_number();
         let header = block_header(&block).await?;
@@ -230,16 +242,43 @@ impl SubxtNode {
             "making block"
         );
 
-        // Fetch authorities if `None`, either initially or because of a `NewSession` event (below).
-        // The set that signed this block is in its parent's state, under the runtime that executed
-        // this block. Genesis has no parent and no author.
-        if authorities.is_none() && height > 0 {
-            let parent = client_at(&self.online_client, header.parent_hash).await?;
-            *authorities = Some(runtimes::fetch_authorities(content_node_version, &parent).await?);
+        // The engine that authored this block decides which authority set holds its author.
+        let engine =
+            authoring_digest(&header.digest.logs, protocol_version).map(|(engine, _)| engine);
+
+        // A BABE block that starts an epoch is authored from that epoch's set. A block whose engine
+        // differs from the cached set's, such as the first BABE block, needs its own engine's set.
+        if engine == Some(Babe) && starts_epoch(&header.digest.logs)
+            || authorities
+                .as_ref()
+                .is_some_and(|(cached, _)| Some(*cached) != engine)
+        {
+            *authorities = None;
+        }
+
+        if authorities.is_none() {
+            *authorities = match engine {
+                // An Aura rotation applies from the next block, so this block's set is in its
+                // parent's state, addressed by the runtime that executed this block.
+                Some(Aura) => {
+                    let parent = client_at(&self.online_client, header.parent_hash).await?;
+                    let authorities =
+                        runtimes::fetch_authorities(content_node_version, &parent).await?;
+                    Some((Aura, authorities))
+                }
+                // A BABE block's own state holds the set of the epoch it belongs to.
+                Some(Babe) => Some((
+                    Babe,
+                    runtimes::fetch_babe_authorities(state_node_version, &block).await?,
+                )),
+                // Only genesis lacks an authoring digest: the node's import rejects any other block
+                // without one.
+                None => None,
+            };
         }
         let author = authorities
             .as_ref()
-            .map(|authorities| {
+            .map(|(_, authorities)| {
                 author_from_digest_logs(&header.digest.logs, authorities, protocol_version)
             })
             .transpose()?
@@ -673,6 +712,9 @@ pub enum SubxtNodeError {
     #[error("cannot decode authorities")]
     DecodeAuthorities(#[source] Box<subxt::error::StorageValueError>),
 
+    #[error("node version {0} has no BABE authorities")]
+    NoBabeAuthorities(NodeVersion),
+
     #[error("invalid BABE pre-runtime digest variant tag {0}")]
     InvalidBabePreDigestTag(u8),
 
@@ -723,43 +765,70 @@ async fn receive_block(
     finalized_blocks.try_next().await
 }
 
-/// Determine the block author from the pre-runtime digest logs of a block executed by the runtime
-/// of `protocol_version`, by the rule of the node's `authoring_engine`.
+/// A block-production consensus engine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConsensusEngine {
+    Aura,
+    Babe,
+}
+
+/// The first Aura or BABE pre-runtime digest of a block executed by the runtime of
+/// `protocol_version`, naming the engine that authored the block, by the rule of the node's
+/// `authoring_engine`.
 ///
-/// The first Aura or BABE pre-runtime digest names the authoring engine. Aura carries the slot, and
-/// the author is the slot modulo the authority-set length. BABE carries the authority index in all
-/// of its pre-digest variants. Before [CONSENSUS_ENGINE_ACTIVATION_SPEC_VERSION] nothing enforced
-/// the digest layout, so BABE digests are skipped and the block is Aura's. `protocol_version` comes
-/// from the block's MNSV digest, which the executing runtime writes and an author cannot forge.
+/// Before [CONSENSUS_ENGINE_ACTIVATION_SPEC_VERSION] nothing enforced the digest layout, so BABE
+/// digests are skipped and the block is Aura's. `protocol_version` comes from the block's MNSV
+/// digest, which the executing runtime writes and an author cannot forge.
+fn authoring_digest(
+    logs: &[DigestItem],
+    protocol_version: ProtocolVersion,
+) -> Option<(ConsensusEngine, &[u8])> {
+    use ConsensusEngine::*;
+
+    let babe_pre_digest_is_authoritative =
+        u32::from(protocol_version) >= CONSENSUS_ENGINE_ACTIVATION_SPEC_VERSION;
+    logs.iter().find_map(|log| match log {
+        PreRuntime(AURA_ENGINE_ID, pre_digest) => Some((Aura, pre_digest.as_slice())),
+        PreRuntime(BABE_ENGINE_ID, pre_digest) if babe_pre_digest_is_authoritative => {
+            Some((Babe, pre_digest.as_slice()))
+        }
+        _ => None,
+    })
+}
+
+/// Whether the block starts a new epoch, read from the next epoch's set (`NextEpochData`) the block
+/// announces. From node 3.0 on, every session rotation starts an epoch, under Aura as well as BABE.
+fn starts_epoch(logs: &[DigestItem]) -> bool {
+    logs.iter().any(|log| {
+        matches!(log, Consensus(BABE_ENGINE_ID, data) if data.first() == Some(&BABE_NEXT_EPOCH_DATA))
+    })
+}
+
+/// Determine the block author from the authoring digest of a block executed by the runtime of
+/// `protocol_version` (see [authoring_digest]).
 fn author_from_digest_logs(
     logs: &[DigestItem],
     authorities: &[[u8; 32]],
     protocol_version: ProtocolVersion,
 ) -> Result<Option<BlockAuthor>, SubxtNodeError> {
-    use DigestItem::PreRuntime;
-
     if authorities.is_empty() {
         return Ok(None);
     }
 
-    let babe_pre_digest_is_authoritative =
-        u32::from(protocol_version) >= CONSENSUS_ENGINE_ACTIVATION_SPEC_VERSION;
-    let author = logs.iter().find_map(|log| match log {
+    use ConsensusEngine::*;
+    let author = match authoring_digest(logs, protocol_version) {
         // Aura assigns slots to authorities round-robin.
-        PreRuntime(AURA_ENGINE_ID, pre_digest) => Some(
-            runtimes::decode_slot(pre_digest, protocol_version.node_version()).map(|slot| {
-                let index = slot % authorities.len() as u64;
-                authorities.get(index as usize).copied().map(Into::into)
-            }),
-        ),
-        // BABE names the authority by index in every pre-digest variant.
-        PreRuntime(BABE_ENGINE_ID, pre_digest) if babe_pre_digest_is_authoritative => {
-            Some(babe_author(pre_digest, authorities))
+        Some((Aura, pre_digest)) => {
+            let slot = runtimes::decode_slot(pre_digest, protocol_version.node_version())?;
+            let index = slot % authorities.len() as u64;
+            authorities.get(index as usize).copied().map(Into::into)
         }
-        _ => None,
-    });
+        // BABE names the authority by index in every pre-digest variant.
+        Some((Babe, pre_digest)) => babe_author(pre_digest, authorities)?,
+        None => None,
+    };
 
-    Ok(author.transpose()?.flatten())
+    Ok(author)
 }
 
 /// Determine the block author from a BABE pre-runtime digest. An out-of-range authority index
@@ -878,7 +947,6 @@ async fn client_at(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use DigestItem::PreRuntime;
     use ProtocolVersion::*;
     use parity_scale_codec::Encode;
 
@@ -921,6 +989,20 @@ mod tests {
                 .expect("author can be determined");
             assert_eq!(author, Some(AUTHORITIES[1].into()), "{protocol_version:?}");
         }
+    }
+
+    #[test]
+    fn epoch_start_is_read_from_the_next_epoch_data_digest() {
+        let next_epoch_data = Consensus(BABE_ENGINE_ID, vec![BABE_NEXT_EPOCH_DATA, 0xaa]);
+        assert!(starts_epoch(&[next_epoch_data]));
+
+        // `OnDisabled`, another BABE consensus log.
+        assert!(!starts_epoch(&[Consensus(BABE_ENGINE_ID, vec![2, 0xaa])]));
+        assert!(!starts_epoch(&[Consensus(
+            AURA_ENGINE_ID,
+            vec![BABE_NEXT_EPOCH_DATA]
+        )]));
+        assert!(!starts_epoch(&[]));
     }
 
     #[test]
