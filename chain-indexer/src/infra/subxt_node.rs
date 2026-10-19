@@ -231,8 +231,11 @@ impl SubxtNode {
         );
 
         // Fetch authorities if `None`, either initially or because of a `NewSession` event (below).
-        if authorities.is_none() {
-            *authorities = Some(runtimes::fetch_authorities(state_node_version, &block).await?);
+        // The set that signed this block is in its parent's state, under the runtime that executed
+        // this block. Genesis has no parent and no author.
+        if authorities.is_none() && height > 0 {
+            let parent = client_at(&self.online_client, header.parent_hash).await?;
+            *authorities = Some(runtimes::fetch_authorities(content_node_version, &parent).await?);
         }
         let author = authorities
             .as_ref()
@@ -256,13 +259,7 @@ impl SubxtNode {
         // the previous runtime's metadata), fed this block's raw, metadata-independent bytes. Away
         // from enactment blocks the two runtimes are equal and no parent client is needed.
         let content_source = if content_node_version != state_node_version {
-            let parent = block
-                .online_client()
-                .at_block(header.parent_hash)
-                .await
-                .map_err(|error| {
-                    SubxtNodeError::GetOnlineClientAt(header.parent_hash, error.into())
-                })?;
+            let parent = client_at(&self.online_client, header.parent_hash).await?;
             let legacy_rpc_methods = LegacyRpcMethods::<RpcConfigFor<SubstrateConfig>>::new(
                 self.rpc_client.to_owned().into(),
             );
@@ -865,6 +862,17 @@ async fn block_header(
         .block_header()
         .await
         .map_err(|error| SubxtNodeError::GetBlockHeader(error.into()))
+}
+
+/// The client at the block with `hash`, bound to that block's runtime.
+async fn client_at(
+    client: &OnlineClient<SubstrateConfig>,
+    hash: H256,
+) -> Result<OnlineClientAtBlock, SubxtNodeError> {
+    client
+        .at_block(hash)
+        .await
+        .map_err(|error| SubxtNodeError::GetOnlineClientAt(hash, error.into()))
 }
 
 #[cfg(test)]
