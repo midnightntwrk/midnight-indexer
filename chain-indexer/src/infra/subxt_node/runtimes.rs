@@ -25,7 +25,7 @@ use crate::{
         BlockRef, DParameter, DustRegistrationEvent, TermsAndConditions,
         extrinsic::{Applied, EventIndex, ExtrinsicIndex, Phase, divergence},
     },
-    infra::subxt_node::{ContentSource, OnlineClientAtBlock, SubxtNodeError},
+    infra::subxt_node::{ConsensusEngine, ContentSource, OnlineClientAtBlock, SubxtNodeError},
 };
 use futures::future::try_join;
 use indexer_common::domain::{ByteVec, NodeVersion, TransactionHash, bridge::BridgeEvent};
@@ -69,7 +69,7 @@ impl Transaction {
 /// Make block details depending on the given protocol version: fetch the block's raw extrinsics
 /// and events, and decode them.
 pub async fn make_block_details(
-    authorities: &mut Option<Vec<[u8; 32]>>,
+    authorities: &mut Option<(ConsensusEngine, Vec<[u8; 32]>)>,
     node_version: NodeVersion,
     block: &OnlineClientAtBlock,
     content: Option<ContentSource>,
@@ -130,7 +130,7 @@ pub async fn make_block_details(
 
 /// Decode block details from raw extrinsics and events depending on the given protocol version.
 pub async fn decode_block_details(
-    authorities: &mut Option<Vec<[u8; 32]>>,
+    authorities: &mut Option<(ConsensusEngine, Vec<[u8; 32]>)>,
     node_version: NodeVersion,
     client: &AtBlock<impl OfflineClientAtBlockT<SubstrateConfig>>,
     block: BlockRef,
@@ -196,6 +196,18 @@ pub async fn fetch_authorities(
         V2_0 => v2_0_0::fetch_authorities(block).await,
         V2_1 => v2_1_100::fetch_authorities(block).await,
         V3_0 => v3_0_0::fetch_authorities(block).await,
+    }
+}
+
+/// Fetch the BABE authorities depending on the given node version. Only node 3.0 runs BABE.
+pub async fn fetch_babe_authorities(
+    node_version: NodeVersion,
+    block: &OnlineClientAtBlock,
+) -> Result<Vec<[u8; 32]>, SubxtNodeError> {
+    use NodeVersion::*;
+    match node_version {
+        V0_22 | V1_0 | V2_0 | V2_1 => Err(SubxtNodeError::NoBabeAuthorities(node_version)),
+        V3_0 => v3_0_0::fetch_babe_authorities(block).await,
     }
 }
 
@@ -449,7 +461,7 @@ mod tests {
         metadata_dir: &str,
         extrinsics: Vec<Vec<u8>>,
         events: Vec<u8>,
-        authorities: &mut Option<Vec<[u8; 32]>>,
+        authorities: &mut Option<(ConsensusEngine, Vec<[u8; 32]>)>,
     ) -> Result<BlockDetails, SubxtNodeError> {
         let config = SubstrateConfig::builder()
             .set_metadata_for_spec_versions([(spec_version, metadata(metadata_dir).into())])
@@ -490,7 +502,7 @@ mod tests {
     async fn decode(
         name: &str,
         metadata_dir: &str,
-        authorities: &mut Option<Vec<[u8; 32]>>,
+        authorities: &mut Option<(ConsensusEngine, Vec<[u8; 32]>)>,
     ) -> Result<BlockDetails, SubxtNodeError> {
         let fixture = fixture(name);
         let block = BlockRef {
@@ -665,7 +677,7 @@ mod tests {
 
     #[tokio::test]
     async fn session_rotation_block_of_undeployed_runtime_3_0_0() {
-        let mut authorities = Some(vec![[1; 32]]);
+        let mut authorities = Some((ConsensusEngine::Aura, vec![[1; 32]]));
         let details = decode("undeployed-8", "3.0.0-f3e7c3915ca4", &mut authorities)
             .await
             .unwrap();
