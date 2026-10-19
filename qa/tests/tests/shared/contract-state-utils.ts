@@ -33,6 +33,24 @@ export function ownBlock(action: ContractActionStateAt): BlockReference {
   return { height: block.height, hash: block.hash, protocolVersion };
 }
 
+/** Whether two block references name the same block on the same protocol version. */
+export function sameBlock(a: BlockReference, b: BlockReference): boolean {
+  return a.height === b.height && a.hash === b.hash && a.protocolVersion === b.protocolVersion;
+}
+
+/**
+ * Whether `stateAt` can anchor a state translated at a hard fork the environment does not declare
+ * in ledger-hard-fork.jsonc: a block after the action's own, on a different protocol version.
+ * Without the fixture the fork block is unknown, so this is the most a test can check there.
+ */
+export function isUndeclaredForkAnchor(
+  stateAt: BlockReference,
+  action: ContractActionStateAt,
+): boolean {
+  const own = ownBlock(action);
+  return stateAt.height > own.height && stateAt.protocolVersion !== own.protocolVersion;
+}
+
 export function forkBlock(fork: LedgerHardForkInfo): BlockReference {
   const { height, hash, 'protocol-version': protocolVersion } = fork['fork-block'];
   return { height, hash, protocolVersion };
