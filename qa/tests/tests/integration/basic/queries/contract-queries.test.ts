@@ -26,6 +26,7 @@ import {
   ContractStateAtSchema,
   ContractUpdateActionSchema,
 } from '@utils/indexer/graphql/schema';
+import type { BlockReference, ContractActionStateAt } from '@utils/indexer/graphql/schema';
 import { GET_CONTRACT_ACTION_STATE_AT } from '@utils/indexer/graphql/contract-queries';
 import { GET_CONTRACT_STATE_AT } from '@utils/indexer/graphql/contract-type-queries';
 import { GET_TRANSACTION_CONTRACT_ACTIONS_STATE_AT } from '@utils/indexer/graphql/transaction-queries';
@@ -36,12 +37,14 @@ import dataProvider, {
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { NodeRpcClient } from '@utils/node/rpc-client';
 import { contractEventsSurfacePresent } from '@utils/indexer/contract-events-support';
+import { stateAtFieldPresent } from '@utils/indexer/state-at-support';
 import {
   CONTRACT_STATE_V6_TAG,
   CONTRACT_STATE_V8_TAG,
   contractStateTag,
   currentStateAt,
   forkBlock,
+  isUndeclaredForkAnchor,
   ownBlock,
 } from 'tests/shared/contract-state-utils';
 
@@ -685,14 +688,32 @@ describe('contract queries', () => {
   describe('the block a contract state is anchored at', () => {
     const fork = dataProvider.getLedgerHardFork();
     let knownContract: string | null = null;
+    let stateAtPresent = false;
 
-    beforeAll(() => {
+    beforeAll(async () => {
+      stateAtPresent = await stateAtFieldPresent();
       try {
         knownContract = dataProvider.getKnownContractAddress();
       } catch (error) {
         log.warn(error);
       }
     });
+
+    /**
+     * Where the current state of a contract whose latest action is `latest` must be anchored.
+     * Without a hard fork fixture, an anchor after the action on a different protocol version
+     * is taken as an undeclared fork the action predates.
+     */
+    function expectCurrentStateAt(stateAt: BlockReference, latest: ContractActionStateAt) {
+      if (!fork && isUndeclaredForkAnchor(stateAt, latest)) {
+        log.warn(
+          `state anchored at ${stateAt.height} (protocol ${stateAt.protocolVersion}), after a ` +
+            'hard fork not declared in ledger-hard-fork.jsonc',
+        );
+        return;
+      }
+      expect(stateAt).toEqual(currentStateAt(latest, fork));
+    }
 
     /**
      * The latest contract action's state is anchored at the block it was last written: the
@@ -705,6 +726,7 @@ describe('contract queries', () => {
      */
     test('should anchor the latest contract action state at the block it was last written', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Query', 'ContractAction', 'StateAt'] };
+      if (!stateAtPresent) return ctx.skip(true, 'stateAt field not present');
       if (!knownContract) return ctx.skip(true, 'no known contract fixture on this env');
 
       const response = await indexerHttpClient.getContractAction(
@@ -716,7 +738,7 @@ describe('contract queries', () => {
       expect(response).toBeSuccess();
       const action = ContractActionStateAtSchema.parse(response.data?.contractAction);
       expect(action.address).toBe(knownContract);
-      expect(action.stateAt).toEqual(currentStateAt(action, fork));
+      expectCurrentStateAt(action.stateAt, action);
     });
 
     /**
@@ -729,6 +751,7 @@ describe('contract queries', () => {
      */
     test('should anchor the contract state at the block of its latest action', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Query', 'Contract', 'StateAt'] };
+      if (!stateAtPresent) return ctx.skip(true, 'stateAt field not present');
       if (!knownContract) return ctx.skip(true, 'no known contract fixture on this env');
 
       const response = await indexerHttpClient.getContract(
@@ -740,7 +763,7 @@ describe('contract queries', () => {
       expect(response).toBeSuccess();
       const contract = ContractStateAtSchema.parse(response.data?.contract);
       expect(contract.actions).toHaveLength(1);
-      expect(contract.stateAt).toEqual(currentStateAt(contract.actions[0], fork));
+      expectCurrentStateAt(contract.stateAt, contract.actions[0]);
     });
 
     /**
@@ -754,6 +777,7 @@ describe('contract queries', () => {
      */
     test('should anchor every recorded contract action at its own block', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Query', 'Contract', 'Transaction', 'StateAt'] };
+      if (!stateAtPresent) return ctx.skip(true, 'stateAt field not present');
       if (!knownContract) return ctx.skip(true, 'no known contract fixture on this env');
 
       const contractResponse = await indexerHttpClient.getContract(
@@ -765,15 +789,20 @@ describe('contract queries', () => {
       const { actions } = ContractStateAtSchema.parse(contractResponse.data?.contract);
       expect(actions.length).toBeGreaterThan(0);
 
-      for (const action of actions) {
+      const txResponses = await Promise.all(
+        actions.map((action) =>
+          indexerHttpClient.getTransactionByOffset(
+            { hash: action.transaction.hash },
+            GET_TRANSACTION_CONTRACT_ACTIONS_STATE_AT,
+          ),
+        ),
+      );
+      for (const [i, action] of actions.entries()) {
         expect(action.stateAt, `Contract.actions item ${action.transaction.hash}`).toEqual(
           ownBlock(action),
         );
 
-        const txResponse = await indexerHttpClient.getTransactionByOffset(
-          { hash: action.transaction.hash },
-          GET_TRANSACTION_CONTRACT_ACTIONS_STATE_AT,
-        );
+        const txResponse = txResponses[i];
         expect(txResponse).toBeSuccess();
         const txActions = z
           .array(ContractActionStateAtSchema)
@@ -799,8 +828,10 @@ describe.runIf(env.getCurrentEnvironmentName() === EnvironmentName.DEVNET)(
     let fork: LedgerHardForkInfo;
     let address: string;
     let actions: LedgerHardForkInfo['untouched-contracts'][number]['contract-actions'];
+    let stateAtPresent = false;
 
-    beforeAll(() => {
+    beforeAll(async () => {
+      stateAtPresent = await stateAtFieldPresent();
       const declared = dataProvider.getLedgerHardFork();
       if (!declared) throw new Error('devnet must declare the hard fork it crossed');
       fork = declared;
@@ -870,18 +901,13 @@ describe.runIf(env.getCurrentEnvironmentName() === EnvironmentName.DEVNET)(
        */
       test('should anchor the translated state at the fork block', async (ctx: TestContext) => {
         ctx.task!.meta.custom = { labels: ['Query', 'ContractAction', 'Contract', 'HardFork'] };
+        if (!stateAtPresent) return ctx.skip(true, 'stateAt field not present');
         const latest = actions.at(-1)!;
 
-        const actionResponse = await indexerHttpClient.getContractAction(
-          address,
-          undefined,
-          GET_CONTRACT_ACTION_STATE_AT,
-        );
-        const contractResponse = await indexerHttpClient.getContract(
-          address,
-          {},
-          GET_CONTRACT_STATE_AT,
-        );
+        const [actionResponse, contractResponse] = await Promise.all([
+          indexerHttpClient.getContractAction(address, undefined, GET_CONTRACT_ACTION_STATE_AT),
+          indexerHttpClient.getContract(address, {}, GET_CONTRACT_STATE_AT),
+        ]);
 
         expect(actionResponse).toBeSuccess();
         const action = ContractActionStateAtSchema.parse(actionResponse.data?.contractAction);
@@ -934,18 +960,14 @@ describe.runIf(env.getCurrentEnvironmentName() === EnvironmentName.DEVNET)(
         ctx.task!.meta.custom = {
           labels: ['Query', 'Contract', 'ByHeight', 'StateAt', 'HardFork'],
         };
+        if (!stateAtPresent) return ctx.skip(true, 'stateAt field not present');
         const forkHeight = fork['fork-block'].height;
         const latest = actions.at(-1)!;
 
-        const before = await indexerHttpClient.getContract(
-          address,
-          { offset: { height: forkHeight - 1 } },
-          GET_CONTRACT_STATE_AT,
-        );
-        const at = await indexerHttpClient.getContract(
-          address,
-          { offset: { height: forkHeight } },
-          GET_CONTRACT_STATE_AT,
+        const [before, at] = await Promise.all(
+          [forkHeight - 1, forkHeight].map((height) =>
+            indexerHttpClient.getContract(address, { offset: { height } }, GET_CONTRACT_STATE_AT),
+          ),
         );
 
         expect(before).toBeSuccess();
@@ -998,6 +1020,7 @@ describe.runIf(env.getCurrentEnvironmentName() === EnvironmentName.DEVNET)(
        */
       test('should list the recorded actions anchored at their own blocks', async (ctx: TestContext) => {
         ctx.task!.meta.custom = { labels: ['Query', 'Contract', 'StateAt', 'HardFork'] };
+        if (!stateAtPresent) return ctx.skip(true, 'stateAt field not present');
 
         const response = await indexerHttpClient.getContract(address, {}, GET_CONTRACT_STATE_AT);
 
