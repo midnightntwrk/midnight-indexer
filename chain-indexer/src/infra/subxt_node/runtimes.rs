@@ -647,7 +647,7 @@ mod tests {
 
     #[tokio::test]
     async fn midnight_transaction_block_of_undeployed_runtime_3_0_0() {
-        let details = decode("undeployed-5", "3.0.0-a7d5fef33021", &mut None)
+        let details = decode("undeployed-5", "3.0.0-f3e7c3915ca4", &mut None)
             .await
             .unwrap();
         assert_eq!(
@@ -666,7 +666,7 @@ mod tests {
     #[tokio::test]
     async fn session_rotation_block_of_undeployed_runtime_3_0_0() {
         let mut authorities = Some(vec![[1; 32]]);
-        let details = decode("undeployed-30", "3.0.0-a7d5fef33021", &mut authorities)
+        let details = decode("undeployed-30", "3.0.0-f3e7c3915ca4", &mut authorities)
             .await
             .unwrap();
         assert_eq!(
@@ -695,7 +695,7 @@ mod tests {
             ("devnet-0", "1.0.400", V8),
             ("devnet-2", "1.0.400", V8),
             ("devnet-8464", "1.0.400", V8),
-            ("undeployed-5", "3.0.0-a7d5fef33021", V9),
+            ("undeployed-5", "3.0.0-f3e7c3915ca4", V9),
         ];
         for (name, metadata_dir, ledger_version) in blocks {
             let details = decode(name, metadata_dir, &mut None).await?;
@@ -969,7 +969,7 @@ mod tests {
         ("2.0.0-rc.4", 2_000_000),
         ("2.1.0-rc.4", 2_001_000),
         ("2.1.101", 2_001_100),
-        ("3.0.0-a7d5fef33021", 3_000_000),
+        ("3.0.0-f3e7c3915ca4", 3_000_000),
     ];
 
     /// `STATE_KEY_STORAGE_KEY` against the statically typed `Midnight::StateKey` address of every
@@ -1018,7 +1018,7 @@ mod tests {
             &STATE_KEY_STORAGE_KEY,
             &state_key,
             |value| value,
-            "3.0.0-a7d5fef33021",
+            "3.0.0-f3e7c3915ca4",
             3_000_000,
         );
     }
