@@ -128,10 +128,14 @@ jobs:
       - name: Pre-pull Docker images
         run: |
           NODE_VERSION=$(tail -n 1 NODE_VERSIONS)
-          echo "Pre-pulling midnight-node:$NODE_VERSION..."
-          docker pull "midnightntwrk/midnight-node:$NODE_VERSION" || \
-          docker pull "midnightntwrk/midnight-node:$NODE_VERSION" || \
-          docker pull "midnightntwrk/midnight-node:$NODE_VERSION"
+          # Node 3.0.0 builds are published to GHCR only.
+          # Native e2e runs the node image under its Docker Hub name.
+          NODE_IMAGE="ghcr.io/midnightntwrk/midnight-node:$NODE_VERSION"
+          echo "Pre-pulling $NODE_IMAGE..."
+          docker pull "$NODE_IMAGE" || \
+          docker pull "$NODE_IMAGE" || \
+          docker pull "$NODE_IMAGE"
+          docker tag "$NODE_IMAGE" "midnightntwrk/midnight-node:$NODE_VERSION"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master

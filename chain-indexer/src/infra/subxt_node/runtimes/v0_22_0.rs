@@ -18,7 +18,7 @@ use crate::{
         extrinsic::{Applied, EventIndex, Phase},
     },
     infra::subxt_node::{
-        OnlineClientAtBlock, SubxtNodeError,
+        ConsensusEngine, OnlineClientAtBlock, SubxtNodeError,
         runtimes::{
             AtBlock, BlockDetails, CallExt, EventExt, SystemTransaction, Transaction, transactions,
         },
@@ -41,7 +41,7 @@ use runtime::runtime_types::{
 use subxt::{SubstrateConfig, client::OfflineClientAtBlockT, error::RuntimeApiError};
 
 pub async fn make_block_details(
-    authorities: &mut Option<Vec<[u8; 32]>>,
+    authorities: &mut Option<(ConsensusEngine, Vec<[u8; 32]>)>,
     client: &AtBlock<impl OfflineClientAtBlockT<SubstrateConfig>>,
     block: BlockRef,
     extrinsics: Vec<Vec<u8>>,
