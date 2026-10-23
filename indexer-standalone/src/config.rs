@@ -200,6 +200,8 @@ pub struct SpoNodeConfig {
     pub url: String,
     #[serde(alias = "blockfrostId")]
     pub blockfrost_id: String,
+    #[serde(default, alias = "blockfrostBaseUrl")]
+    pub blockfrost_base_url: Option<String>,
     #[serde(with = "humantime_serde")]
     pub reconnect_max_delay: Duration,
     pub reconnect_max_attempts: usize,
@@ -212,6 +214,7 @@ impl From<SpoNodeConfig> for spo_client::Config {
         Self {
             url: config.url,
             blockfrost_id: secrecy::SecretString::from(config.blockfrost_id),
+            blockfrost_base_url: config.blockfrost_base_url,
             reconnect_max_delay: config.reconnect_max_delay,
             reconnect_max_attempts: config.reconnect_max_attempts,
             http_pool: config.http_pool,

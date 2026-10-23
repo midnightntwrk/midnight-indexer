@@ -18,7 +18,7 @@ use crate::{
     },
     utils::remove_hex_prefix,
 };
-use blockfrost::{BlockfrostAPI, BlockfrostError};
+use blockfrost::{BlockFrostSettings, BlockfrostAPI, BlockfrostError};
 use http::{
     HeaderMap,
     header::{InvalidHeaderValue, USER_AGENT},
@@ -49,6 +49,12 @@ pub struct Config {
     pub url: String,
 
     pub blockfrost_id: SecretString,
+
+    /// Base URL of a Blockfrost-compatible API, including the version path, e.g.
+    /// `http://localhost:3000/api/v0`. When unset, the hosted Blockfrost URL for the
+    /// network named by the `blockfrost_id` prefix is used.
+    #[serde(default)]
+    pub blockfrost_base_url: Option<String>,
 
     #[serde(with = "humantime_serde")]
     pub reconnect_max_delay: Duration,
@@ -106,6 +112,7 @@ pub struct SPOClient {
     blockfrost: BlockfrostAPI,
     http: HttpClient,
     blockfrost_id: SecretString,
+    blockfrost_base_url: String,
 }
 
 // We will try to eliminate the 0x from any hex string out of this function.
@@ -115,6 +122,7 @@ impl SPOClient {
         let Config {
             url,
             blockfrost_id,
+            blockfrost_base_url,
             reconnect_max_delay,
             reconnect_max_attempts,
             http_pool,
@@ -123,6 +131,9 @@ impl SPOClient {
         if blockfrost_id.expose_secret().is_empty() {
             return Err(SPOClientError::MissingBlockfrostId);
         }
+
+        let blockfrost_base_url =
+            resolve_blockfrost_base_url(blockfrost_base_url.as_deref(), &blockfrost_id)?;
 
         let retry_policy = ExponentialBackoff::from_millis(10)
             .max_delay(reconnect_max_delay)
@@ -140,10 +151,15 @@ impl SPOClient {
             .await
             .map_err(|error| SPOClientError::UnexpectedResponse(error.to_string()))?;
 
+        // Both Blockfrost clients must target the same base URL, so the crate's own
+        // project-id based URL selection is overridden.
+        let mut blockfrost_settings = BlockFrostSettings::new();
+        blockfrost_settings.base_url = Some(blockfrost_base_url.clone());
+
         // Keep the user agent Blockfrost has seen from this client since day one.
         let blockfrost = BlockfrostAPI::new_with_client(
             blockfrost_id.expose_secret(),
-            Default::default(),
+            blockfrost_settings,
             tuned_client_builder(&http_pool).user_agent("midnight-spo-indexer/1.0"),
         )
         .map_err(|error| SPOClientError::UnexpectedResponse(error.to_string()))?;
@@ -162,6 +178,7 @@ impl SPOClient {
             epoch_duration,
             slots_per_epoch,
             blockfrost_id,
+            blockfrost_base_url,
         })
     }
 
@@ -371,8 +388,7 @@ impl SPOClient {
 
     /// Minimal pool stake data from Blockfrost /pools/{pool_id}.
     pub async fn get_pool_data(&self, pool_id: &str) -> Result<PoolStakeData, SPOClientError> {
-        let base = self.blockfrost_base_url();
-        let url = format!("{base}/pools/{pool_id}");
+        let url = format!("{}/pools/{pool_id}", self.blockfrost_base_url);
         let resp = self
             .http
             .get(&url)
@@ -392,22 +408,6 @@ impl SPOClient {
             .await
             .map_err(|error| SPOClientError::UnexpectedResponse(error.to_string()))?;
         Ok(PoolStakeData::from_json(&v))
-    }
-
-    fn blockfrost_base_url(&self) -> &'static str {
-        let id = self.blockfrost_id.expose_secret();
-        if id.starts_with("mainnet") {
-            "https://cardano-mainnet.blockfrost.io/api/v0"
-        } else if id.starts_with("preprod") {
-            "https://cardano-preprod.blockfrost.io/api/v0"
-        } else if id.starts_with("preview") {
-            "https://cardano-preview.blockfrost.io/api/v0"
-        } else if id.starts_with("testnet") {
-            "https://cardano-testnet.blockfrost.io/api/v0"
-        } else {
-            // Default to preview.
-            "https://cardano-preview.blockfrost.io/api/v0"
-        }
     }
 }
 
@@ -445,6 +445,37 @@ fn parse_lovelace(v: &serde_json::Value, field: &str) -> Option<i64> {
         Err(error) => {
             log::warn!("blockfrost {field} is not a valid i64 ({raw:?}): {error}");
             None
+        }
+    }
+}
+
+/// Resolve the Blockfrost base URL: a configured URL wins, otherwise the hosted
+/// Blockfrost URL for the network named by the project id prefix (preview if none).
+/// The result carries no trailing slash, so endpoint paths can be appended directly.
+fn resolve_blockfrost_base_url(
+    configured: Option<&str>,
+    blockfrost_id: &SecretString,
+) -> Result<String, SPOClientError> {
+    match configured.map(str::trim).filter(|url| !url.is_empty()) {
+        Some(url) => {
+            let invalid =
+                |reason: String| SPOClientError::InvalidBlockfrostBaseUrl(url.to_owned(), reason);
+            let parsed = reqwest::Url::parse(url).map_err(|error| invalid(error.to_string()))?;
+            // A missing scheme such as `localhost:3000/api/v0` parses with `localhost` as
+            // the scheme, so require HTTP(S) explicitly.
+            if !matches!(parsed.scheme(), "http" | "https") {
+                return Err(invalid("scheme must be http or https".to_owned()));
+            }
+            Ok(url.trim_end_matches('/').to_owned())
+        }
+
+        None => {
+            let id = blockfrost_id.expose_secret();
+            let network = ["mainnet", "preprod", "preview", "testnet"]
+                .into_iter()
+                .find(|network| id.starts_with(network))
+                .unwrap_or("preview");
+            Ok(format!("https://cardano-{network}.blockfrost.io/api/v0"))
         }
     }
 }
@@ -501,6 +532,53 @@ pub enum SPOClientError {
     #[error("blockfrost_id must be configured")]
     MissingBlockfrostId,
 
+    #[error("invalid blockfrost_base_url {0}: {1}")]
+    InvalidBlockfrostBaseUrl(String, String),
+
     #[error("cannot create HTTP header")]
     InvalidHeaderValue(#[from] InvalidHeaderValue),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SPOClientError, resolve_blockfrost_base_url};
+    use secrecy::SecretString;
+
+    fn resolve(configured: Option<&str>, id: &str) -> Result<String, SPOClientError> {
+        resolve_blockfrost_base_url(configured, &SecretString::from(id))
+    }
+
+    #[test]
+    fn test_resolve_blockfrost_base_url_defaults_to_hosted_blockfrost() {
+        for (id, expected) in [
+            ("mainnetABC", "https://cardano-mainnet.blockfrost.io/api/v0"),
+            ("preprodABC", "https://cardano-preprod.blockfrost.io/api/v0"),
+            ("previewABC", "https://cardano-preview.blockfrost.io/api/v0"),
+            ("testnetABC", "https://cardano-testnet.blockfrost.io/api/v0"),
+            ("dummy", "https://cardano-preview.blockfrost.io/api/v0"),
+        ] {
+            assert_eq!(resolve(None, id).unwrap(), expected);
+            assert_eq!(resolve(Some(" "), id).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn test_resolve_blockfrost_base_url_uses_configured_url() {
+        for configured in ["http://dingo:3000/api/v0", "http://dingo:3000/api/v0/"] {
+            assert_eq!(
+                resolve(Some(configured), "mainnetABC").unwrap(),
+                "http://dingo:3000/api/v0"
+            );
+        }
+    }
+
+    #[test]
+    fn test_resolve_blockfrost_base_url_rejects_invalid_url() {
+        for configured in ["/api/v0", "localhost:3000/api/v0", "ftp://dingo/api/v0"] {
+            assert!(matches!(
+                resolve(Some(configured), "previewABC"),
+                Err(SPOClientError::InvalidBlockfrostBaseUrl(..))
+            ));
+        }
+    }
 }
