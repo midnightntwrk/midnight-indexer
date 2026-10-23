@@ -24,11 +24,15 @@ node ──subxt──▶ chain-indexer ──writes──▶ DB ◀─reads/wri
   `WalletIndexed`.
 - **indexer-api** serves GraphQL queries and subscriptions (reads) **and owns the wallet-lifecycle
   writes** - it is read-heavy, not read-only. `connect` upserts the wallet into the `wallets` table
-  (the encrypted viewing key, a fresh `session_id`, and the scan start index) and returns the
-  session ID; `disconnect` nulls the session; and the shielded subscription periodically writes a
-  `keep_wallet_active` heartbeat. A newly connected wallet is picked up by wallet-indexer **polling
-  the active wallet set**, not via a connect event; subscriptions then stream that wallet's
-  relevant transactions.
+  (the encrypted viewing key, a random `session_id` kept if one is already set, and the scan start
+  index) and returns a sealed session token: the viewing key, start index and issue time encrypted
+  with the shared server-side cipher, so any indexer-api instance with the same secret resolves it
+  by upserting the wallet itself. Several tokens can be live for one viewing key. `disconnect`
+  nulls the `session_id` only for a legacy 32-byte session ID; a token cannot be revoked and
+  expires after `session_token_ttl`. The shielded subscription periodically writes a
+  `keep_wallet_active` heartbeat. A newly connected wallet is picked up by wallet-indexer
+  **polling the active wallet set**, not via a connect event; subscriptions then stream that
+  wallet's relevant transactions.
 - **spo-indexer** indexes stake-pool data via Blockfrost.
 
 ## NATS is a signal bus, not a data bus
