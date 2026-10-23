@@ -68,6 +68,8 @@ pub struct ApplicationConfig {
     pub gc_bound: Duration,
     #[serde(default = "gc_interval_default")]
     pub gc_interval: NonZeroU32,
+    #[serde(default = "chain_app::gc_catch_up_interval_default")]
+    pub gc_catch_up_interval: NonZeroU32,
     #[serde(default)]
     pub arena_metrics_interval: u32,
     #[serde(default = "ledger_state_retention_default")]
@@ -119,6 +121,7 @@ impl From<ApplicationConfig> for chain_app::Config {
             caught_up_leeway,
             gc_bound,
             gc_interval,
+            gc_catch_up_interval,
             arena_metrics_interval,
             ledger_state_retention,
             ..
@@ -131,6 +134,7 @@ impl From<ApplicationConfig> for chain_app::Config {
             caught_up_leeway,
             gc_bound,
             gc_interval,
+            gc_catch_up_interval,
             arena_metrics_interval,
             ledger_state_retention,
         }
