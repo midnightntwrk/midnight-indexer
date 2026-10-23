@@ -79,14 +79,16 @@ mod tests {
 
     #[test]
     fn test_debug_and_display_redacted() {
-        let secret = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"; // gitleaks:allow nosemgrep: generic.secrets.security.detected-generic-secret.detected-generic-secret
-        let session_id = SessionId::from(secret);
+        // Built, not spelled out: a 64-hex literal reads as a committed secret
+        // to gitleaks and opengrep.
+        let secret = "0123456789abcdef".repeat(4);
+        let session_id = SessionId::from(secret.as_str());
 
         let debug = format!("{session_id:?}");
-        assert!(!debug.contains(secret), "secret in Debug: {debug}");
+        assert!(!debug.contains(&secret), "secret in Debug: {debug}");
 
         let display = session_id.to_string();
-        assert!(!display.contains(secret), "secret in Display: {display}");
+        assert!(!display.contains(&secret), "secret in Display: {display}");
     }
 
     #[test]
