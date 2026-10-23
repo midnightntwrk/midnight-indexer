@@ -86,12 +86,19 @@ By default it connects to a local Midnight Node at `ws://localhost:9944` and exp
 |---|---|---|
 | APP__APPLICATION__NETWORK_ID | Network ID | `undeployed` |
 | APP__INFRA__STORAGE__CNN_URL | SQlite connection URL | `/data/indexer.sqlite` |
+| APP__INFRA__STORAGE__CREATE_IF_MISSING | Allow creating the index database; when false, reject missing or zero-byte files | `true` |
+| APP__INFRA__LEDGER_DB__CREATE_IF_MISSING | Allow creating the ledger database; when false, reject missing or zero-byte files | `true` |
 | APP__INFRA__NODE__URL | WebSocket Endpoint of Midnight Node | `ws://localhost:9944` |
 | APP__INFRA__API__PORT | Port of the GraphQL API | `8088` |
 | APP__INFRA__SECRET | Hex-encoded 32-byte secret to encrypt stored sensitive data | - |
 | APP__INFRA__SPO_NODE__BLOCKFROST_ID | Blockfrost API key (required, must be non-empty; needed by spo-indexer which is included in the standalone binary). Use any non-empty placeholder if you are not exercising SPO features. | - |
 
 For the full set of configuration options see [config.yaml](indexer-standalone/config.yaml).
+
+Fresh installations create both SQLite databases by default. After initialization, operators can
+set both `CREATE_IF_MISSING` options to `false` to fail startup if either file is missing or has
+zero bytes. Errors include the affected database path. This guard does not validate the schema,
+detect missing indexed data in a non-empty database, or apply to in-memory databases.
 
 ### Cloud Mode
 
