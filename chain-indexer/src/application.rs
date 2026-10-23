@@ -61,7 +61,7 @@ pub struct Config {
 
     /// Time budget for one storage-core gc-v1 mark-and-sweep pass, per block covered by that pass.
     /// The pass gets `gc_bound * gc_interval`. Set to "0s" to disable garbage collection — but note
-    /// that is not safe during a long re-index, since retention-window unpersists keep producing
+    /// that is not safe during a long reindex, since retention-window unpersists keep producing
     /// garbage that then never gets reclaimed.
     #[serde(with = "humantime_serde")]
     pub gc_bound: Duration,
@@ -126,7 +126,7 @@ pub async fn run(
     // Refuse to resume a database written before contract states were referenced by ledger-arena
     // key. Those rows carried the state as a blob in columns that no longer exist, and the blobs
     // cannot be recreated: their arena nodes were garbage collected and nothing can replay the
-    // chain for them. Failing here turns "you must re-index" into an actionable message instead of
+    // chain for them. Failing here turns "you must reindex" into an actionable message instead of
     // contract states silently reading back empty.
     if storage
         .contract_actions_without_state_keys_exist()
@@ -136,7 +136,7 @@ pub async fn run(
         bail!(
             "found contract actions with no contract state key; they were indexed by a version \
              that stored contract states as blobs, which cannot be converted. Wipe both the \
-             indexer database and the ledger DB and re-index from genesis; see docs/re-indexing.md"
+             indexer database and the ledger DB and reindex from genesis; see docs/reindexing.md"
         );
     }
 
@@ -493,6 +493,8 @@ where
     let (mut block, transactions) = block.try_into().context("convert node block into domain")?;
 
     let ledger_version = block.protocol_version.ledger_version();
+    // Whether this block translates the ledger state, taken before the state is replaced.
+    let translated = block.height != 0 && ledger_state.ledger_version() != ledger_version;
     ledger_state = if block.height == 0 {
         // The genesis block establishes the chain's ledger version. The inherited
         // bootstrap state was created at OLDEST and is replaced by the genesis state below, so
@@ -521,12 +523,21 @@ where
         ledger_state
             .apply_transactions(
                 transactions,
+                BlockRef {
+                    hash: block.hash,
+                    height: block.height,
+                },
                 block.parent_hash,
                 block.timestamp,
                 *parent_block_timestamp,
                 should_bump_first_regular_tblock(block.height, block.protocol_version),
             )
-            .context("apply transactions to ledger state")
+            .with_context(|| {
+                format!(
+                    "apply transactions of block {} at height {} to ledger state",
+                    block.hash, block.height
+                )
+            })
     };
 
     // Apply transactions to ledger state with special handling for genesis block.
@@ -628,7 +639,7 @@ where
     //
     // Ordering arena-flush before SQL-commit means a crash between them can never leave a key in
     // SQL without its node; the benign inverse — a rooted node with no row referencing it — is
-    // possible and permanent. Re-indexing a block yields the *same* content-addressed key and a
+    // possible and permanent. Reindexing a block yields the *same* content-addressed key and a
     // second `persist()`, taking the root count from 1 to 2. That is semantically free because
     // these roots are never unpersisted, so the write path needs no dedup logic. Note this is the
     // exact inverse of the ledger-state retention invariant above, where a double persist *would*
@@ -638,6 +649,35 @@ where
         .context("capture contract state keys")?;
     metrics.record_uncaptured_contract_states(uncaptured);
     let transactions = transactions;
+
+    // At a hard fork, capture the translated state key of every contract without an action in this
+    // block, immediately after the contract state keys above.
+    let contract_state_translations = if translated {
+        let latest_actions = storage
+            .get_latest_contract_actions()
+            .await
+            .context("get latest contract actions")?;
+        let contracts_in_block = transactions
+            .iter()
+            .filter_map(|transaction| match transaction {
+                Transaction::Regular(transaction) => Some(&transaction.contract_actions),
+                _ => None,
+            })
+            .flatten()
+            .map(|action| action.address.clone())
+            .collect::<HashSet<_>>();
+        let contract_state_translations = ledger_state
+            .contract_state_translations(latest_actions, &contracts_in_block)
+            .context("record contract state translations at fork block")?;
+        info!(
+            count = contract_state_translations.len(),
+            height = block.height;
+            "recorded contract state translations at fork block"
+        );
+        contract_state_translations
+    } else {
+        vec![]
+    };
 
     // Determine whether caught up, also allowing to fall back a little in that state.
     // Use saturating subtraction to handle the case where streams are temporarily out of order.
@@ -681,6 +721,7 @@ where
             &block.dust_registration_events,
             &ledger_state_key,
             system_parameters_change.as_ref(),
+            &contract_state_translations,
         )
         .await
         .context("save block")?;
@@ -691,6 +732,7 @@ where
             height: block.height,
             max_transaction_id,
             caught_up: *caught_up,
+            protocol_version: block.protocol_version.into(),
         })
         .await
         .context("publish BlockIndexed event")?;

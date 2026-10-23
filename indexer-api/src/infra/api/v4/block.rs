@@ -211,6 +211,33 @@ where
     }
 }
 
+/// A block's height, hash and protocol version. Query `block` with the hash for the full block.
+#[derive(Debug, SimpleObject)]
+pub struct BlockReference {
+    /// The block height.
+    height: u32,
+    /// The block hash.
+    hash: HexEncoded,
+    /// The protocol version.
+    protocol_version: u32,
+}
+
+impl From<domain::BlockReference> for BlockReference {
+    fn from(block: domain::BlockReference) -> Self {
+        let domain::BlockReference {
+            height,
+            hash,
+            protocol_version,
+        } = block;
+
+        Self {
+            height,
+            hash: hash.hex_encode(),
+            protocol_version: protocol_version.into(),
+        }
+    }
+}
+
 impl<S> From<domain::Block> for Block<S>
 where
     S: Storage,

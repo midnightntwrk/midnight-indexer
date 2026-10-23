@@ -18,8 +18,8 @@ use crate::{
         ApiError, ApiResult, ContextExt, OptionExt, ResultExt,
         ledger_query_limit::LedgerQueryLimiter,
         v4::{
-            HexEncoded, decode_session_id,
             merkle_tree_collapsed_update::{CollapsedMerkleTree, MerkleTreeCollapsedUpdate},
+            session_id::SessionId,
             transaction::RegularTransaction,
         },
     },
@@ -143,26 +143,31 @@ where
     async fn shielded_transactions<'a>(
         &self,
         cx: &'a Context<'a>,
-        session_id: HexEncoded,
+        #[graphql(secret)] session_id: SessionId,
         index: Option<u64>,
     ) -> Result<impl Stream<Item = ApiResult<ShieldedTransactionsEvent<S>>> + use<'a, S, B>, ApiError>
     {
         cx.get_metrics().wallets_connected.increment(1);
 
-        let session_id =
-            decode_session_id(session_id).map_err_into_client_error(|| "invalid session ID")?;
-
-        let quota_guard = cx
-            .get_subscription_quotas()
-            .try_acquire(cx.get_per_connection_counter(), Some(session_id))
-            .map_err_into_client_error(|| "subscription limit exceeded")?;
+        let session_id = session_id
+            .try_into()
+            .map_err_into_client_error(|| "invalid session ID")?;
 
         let wallet_id = cx
             .get_storage::<S>()
-            .resolve_session_id(session_id)
+            .resolve_session_id(&session_id)
             .await
             .map_err_into_server_error(|| "resolve session ID")?
             .some_or_client_error(|| "unknown or expired session ID")?;
+
+        // Only acquire a per-session quota bucket for a known session, so that arbitrary session
+        // IDs cannot create buckets. The bucket is keyed by wallet ID, so reconnecting with a new
+        // session does not reset it.
+        let quota_guard = cx
+            .get_subscription_quotas()
+            .try_acquire(cx.get_per_connection_counter(), Some(wallet_id))
+            .map_err_into_client_error(|| "subscription limit exceeded")?;
+
         let index = index.unwrap_or_default();
 
         // Build a stream of shielded transaction events by merging relevant transactions and
@@ -227,11 +232,13 @@ where
         .shielded_transactions
         .batch_size;
 
-    let wallet_indexed_events = subscriber
-        .subscribe::<WalletIndexed>()
-        .try_filter(move |wallet_indexed| ready(wallet_indexed.wallet_id == wallet_id));
-
     try_stream! {
+        // Subscribe before reading existing items, so none indexed in between is missed.
+        let wallet_indexed_events = subscriber
+            .subscribe::<WalletIndexed>()
+            .await
+            .try_filter(move |wallet_indexed| ready(wallet_indexed.wallet_id == wallet_id));
+
         // Stream exiting transactions.
         debug!(wallet_id:%, index; "streaming existing transactions");
 
@@ -311,17 +318,29 @@ where
     // Only include a zswap state Merkle tree collapsed update if there is a gap between the queried
     // index and the start index of the transaction.
     let zswap_collapsed_update = if index < transaction.zswap_start_index {
-        // Bound concurrent ledger-DB work (issue #595): hold a permit only around the Merkle-tree
-        // walk, so it is released before this transaction is yielded to the client.
+        // Bound concurrent ledger-DB work (issue #595): hold a permit only while building the
+        // Merkle-tree update, so it is released before this transaction is yielded to the client.
         let _ledger_permit = ledger_query_limiter.acquire().await;
+
+        // Read the highest ledger state after acquiring the permit: the wait for a permit is
+        // unbounded, so a key read before the wait may be garbage collected by the time the ledger
+        // state is loaded.
+        let (height, protocol_version, key) = storage
+            .get_highest_ledger_state()
+            .await
+            .map_err_into_server_error(|| "get highest ledger state")?
+            .some_or_server_error(|| "no ledger state available")?;
+
         let zswap_collapsed_update = ledger_state_cache
+            .at_least(height, &key, protocol_version)
+            .await
+            .map(|(ledger_state, _)| ledger_state)
+            .map_err_into_server_error(|| "load ledger state")?
             .make_zswap_collapsed_update(
                 index,
                 transaction.zswap_start_index - 1,
-                storage,
                 transaction.protocol_version,
             )
-            .await
             .map_err_into_server_error(|| "create zswap state Merkle tree collapsed update")?;
         Some(MerkleTreeCollapsedUpdate::from(zswap_collapsed_update))
     } else {
