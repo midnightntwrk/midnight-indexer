@@ -19,15 +19,24 @@ import '@utils/logging/test-logging-hooks';
 import dataProvider from '@utils/testdata-provider';
 import { ToolkitWrapper, type DustBalance } from '@utils/toolkit/toolkit-wrapper';
 import { DustBalanceSchema } from '@utils/toolkit/schemas';
+import { env } from 'environment/model';
+import { seedFingerprint } from '@utils/moth/moth-backend';
 
 const TOOLKIT_STARTUP_TIMEOUT = 60_000;
+
+// Under TX_BACKEND=moth the balance comes from moth's synced wallet, not the
+// toolkit, so no container is needed. The first read in a worker restores the
+// wallet from the cache global setup warmed, which can outlast a toolkit call
+// against a short local chain.
+const isMoth = env.getTxBackend() === 'moth';
+const DUST_BALANCE_TIMEOUT = isMoth ? 180_000 : TOOLKIT_STARTUP_TIMEOUT;
 
 describe('dust balance query using toolkit', () => {
   let toolkit: ToolkitWrapper;
 
   beforeAll(async () => {
     toolkit = new ToolkitWrapper({});
-    await toolkit.start();
+    if (!isMoth) await toolkit.start();
   }, TOOLKIT_STARTUP_TIMEOUT);
 
   afterAll(async () => {
@@ -50,9 +59,12 @@ describe('dust balance query using toolkit', () => {
           labels: ['Query', 'Dust', 'Toolkit', 'Balance', 'SchemaValidation'],
         };
 
-        const walletSeed = dataProvider.getFundingSeed();
+        // The transfer funding seed is the one global setup warms for moth (the
+        // light seed, when one is configured). It equals the funding seed under
+        // the toolkit backend.
+        const walletSeed = dataProvider.getTransferFundingSeed();
 
-        log.debug(`Querying dust balance for seed: ${walletSeed}`);
+        log.debug(`Querying dust balance for seed fingerprint: ${seedFingerprint(walletSeed)}`);
 
         const dustBalance: DustBalance = await toolkit.getDustBalance(walletSeed);
 
@@ -68,7 +80,7 @@ describe('dust balance query using toolkit', () => {
         expect(dustBalance.total).toBeGreaterThan(0);
         log.debug(`Dust balance total: ${dustBalance.total}`);
       },
-      TOOLKIT_STARTUP_TIMEOUT,
+      DUST_BALANCE_TIMEOUT,
     );
   });
 });
