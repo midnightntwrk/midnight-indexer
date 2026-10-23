@@ -16,4 +16,7 @@ paths = [
   # Added 2026-09-03 when main's custom-unshielded-token e2e suite landed: three
   # 32-byte token-type hashes plus one public qanet address, same class as above.
   '''^qa/tests/data/static/qanet/unshielded-token-types\.jsonc$''',
+  # Added 2026-10-23: devnet twin of the qanet contract list (contract addresses
+  # and token-type hashes snapshotted from a block-scanner run).
+  '''^qa/tests/data/static/devnet/token-holding-contracts\.jsonc$''',
 ]

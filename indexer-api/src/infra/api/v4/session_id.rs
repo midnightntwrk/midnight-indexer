@@ -79,7 +79,7 @@ mod tests {
 
     #[test]
     fn test_debug_and_display_redacted() {
-        let secret = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let secret = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"; // gitleaks:allow
         let session_id = SessionId::from(secret);
 
         let debug = format!("{session_id:?}");
