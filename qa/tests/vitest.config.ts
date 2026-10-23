@@ -14,7 +14,6 @@
 // limitations under the License.
 
 import { defineConfig } from 'vitest/config';
-import XRayJsonReporter from './utils/reporters/custom-xray-json/xray-json-reporter';
 import CustomJUnitReporter from './utils/reporters/custom-junit/custom-junit-reporter';
 
 // Optional cap on Vitest's worker pool. When `VITEST_MAX_WORKERS` is set,
@@ -55,7 +54,6 @@ export default defineConfig({
     // Root-level reporters for all projects
     reporters: [
       'tree',
-      new XRayJsonReporter(),
       new CustomJUnitReporter(),
       [
         'junit',
