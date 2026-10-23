@@ -133,6 +133,8 @@ impl From<ApplicationConfig> for chain_app::Config {
             gc_interval,
             arena_metrics_interval,
             ledger_state_retention,
+            // A Postgres setting; standalone uses SQLite.
+            async_commit_while_catching_up: false,
         }
     }
 }

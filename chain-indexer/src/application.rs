@@ -82,6 +82,16 @@ pub struct Config {
     /// is unpersisted. Must comfortably exceed indexer-api's block-hash snapshot reads, e.g.
     /// the dust generations subscription's max_snapshot_age, or those reads hit culled state.
     pub ledger_state_retention: NonZeroUsize,
+
+    /// Commit without waiting for durability while not caught up. A database crash during catch-up
+    /// then loses only the last blocks indexed, which are indexed again on restart; at the tip every
+    /// commit is durable.
+    #[serde(default = "async_commit_while_catching_up_default")]
+    pub async_commit_while_catching_up: bool,
+}
+
+fn async_commit_while_catching_up_default() -> bool {
+    true
 }
 
 pub async fn run(
@@ -100,6 +110,7 @@ pub async fn run(
         gc_interval,
         arena_metrics_interval,
         ledger_state_retention,
+        async_commit_while_catching_up,
     } = config;
 
     // Get info from highest block.
@@ -266,6 +277,10 @@ pub async fn run(
             let mut blocks_since_arena_metrics = 0;
 
             loop {
+                // Uses the previous block's status, so at most one block commits asynchronously
+                // after catching up.
+                storage.set_async_commit(async_commit_while_catching_up && !caught_up);
+
                 let (next_ledger_state, new_ledger_state_key) = get_and_index_block(
                     caught_up_max_distance,
                     caught_up_leeway,
