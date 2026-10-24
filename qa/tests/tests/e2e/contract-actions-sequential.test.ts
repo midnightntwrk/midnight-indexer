@@ -25,6 +25,7 @@ import {
   IndexerWsClient,
 } from '@utils/indexer/websocket-client';
 import { extractSubscriptionErrorMessage } from '@utils/indexer/subscription-error';
+import { sleep } from '@utils/retry-helper';
 import {
   ToolkitWrapper,
   DeployContractResult,
@@ -195,27 +196,35 @@ describe.sequential('contract actions', () => {
     let unsubscribeWithoutOffset: () => void;
     const streamedWithoutOffset: ContractActionSubscriptionResponse[] = [];
     const subscriptionErrors: string[] = [];
+    let subscriptionSetupError: unknown;
 
     beforeAll(async () => {
       // Subscribe without an offset only once the deploy is below the indexer's tip, so the
-      // deploy is history the subscription must not replay.
-      const deployBlock = await getBlockByHashWithRetry(contractDeployResult['deploy-block-hash']);
-      const deployHeight = deployBlock.data!.block.height;
-      await retry(
-        () => indexerHttpClient.getLatestBlock(),
-        (response) => (response.data?.block.height ?? 0) > deployHeight,
-        TIP_PAST_DEPLOY_ATTEMPTS,
-        TIP_PAST_DEPLOY_DELAY_MS,
-      );
-      wsClient = new IndexerWsClient();
-      await wsClient.connectionInit();
-      unsubscribeWithoutOffset = wsClient.subscribeToContractActionEvents(
-        {
-          next: (payload) => streamedWithoutOffset.push(payload),
-          error: (error) => subscriptionErrors.push(extractSubscriptionErrorMessage(error)),
-        },
-        contractDeployResult['contract-address-untagged'],
-      );
+      // deploy is history the subscription must not replay. The subscription must exist before
+      // the call, but only the no-offset test depends on it: a setup failure fails that test.
+      try {
+        const deployBlock = await getBlockByHashWithRetry(
+          contractDeployResult['deploy-block-hash'],
+        );
+        const deployHeight = deployBlock.data!.block.height;
+        await retry(
+          () => indexerHttpClient.getLatestBlock(),
+          (response) => (response.data?.block.height ?? 0) > deployHeight,
+          TIP_PAST_DEPLOY_ATTEMPTS,
+          TIP_PAST_DEPLOY_DELAY_MS,
+        );
+        wsClient = new IndexerWsClient();
+        await wsClient.connectionInit();
+        unsubscribeWithoutOffset = wsClient.subscribeToContractActionEvents(
+          {
+            next: (payload) => streamedWithoutOffset.push(payload),
+            error: (error) => subscriptionErrors.push(extractSubscriptionErrorMessage(error)),
+          },
+          contractDeployResult['contract-address-untagged'],
+        );
+      } catch (error) {
+        subscriptionSetupError = error;
+      }
 
       contractCallResult = await toolkit.callContract(
         'store',
@@ -251,6 +260,7 @@ describe.sequential('contract actions', () => {
       context.task!.meta.custom = {
         labels: ['Subscription', 'ContractAction', 'NoOffset', 'ContractCall'],
       };
+      if (subscriptionSetupError) throw subscriptionSetupError;
 
       await retry(
         async () => streamedWithoutOffset.length + subscriptionErrors.length,
@@ -259,7 +269,7 @@ describe.sequential('contract actions', () => {
         2000,
       ).catch(() => log.warn('No contract action streamed without an offset'));
       // Anything replayed or streamed twice would arrive alongside the call.
-      await new Promise((resolve) => setTimeout(resolve, 5000));
+      await sleep(5000);
 
       expect(subscriptionErrors).toEqual([]);
       const streamed = streamedWithoutOffset.map((msg) => {
