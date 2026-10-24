@@ -1481,7 +1481,14 @@ async function fetchContractUnshieldedBalances(
       throw new Error(body.errors?.[0]?.message ?? "no data in response");
     }
 
-    return body.data.contractAction?.unshieldedBalances ?? [];
+    if (!body.data.contractAction) {
+      console.warn(
+        `[WARN ] - contractAction returned null for ${address}, a contract ` +
+          "seen in the scanned blocks; treating it as holding no balance",
+      );
+      return [];
+    }
+    return body.data.contractAction.unshieldedBalances;
   }, `contractAction balances query for ${address}`);
 }
 
