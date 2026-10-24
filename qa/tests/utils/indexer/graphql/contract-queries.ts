@@ -71,8 +71,8 @@ export const GET_CONTRACT_ACTION_BY_OFFSET = `query GetContractActionByOffset($A
     }
 }`;
 
-// stateAt has its own queries rather than joining the shared bodies above, so the existing
-// contract-action tests keep their signal on indexers without the field (pre-4.4).
+// stateAt has its own queries rather than joining the shared bodies above, which the existing
+// contract-action tests use unchanged.
 export const CONTRACT_ACTION_STATE_AT_BODY = `
     __typename
     address

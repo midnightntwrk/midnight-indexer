@@ -340,7 +340,7 @@ export const CONTRACT_ACTIONS_SUBSCRIPTION_FROM_BLOCK_BY_OFFSET = `subscription 
     }
 }`;
 
-// Without stateAt, so the no-offset test keeps its signal on indexers without the field (pre-4.4).
+// Only the fields the no-offset test checks: address, transaction and block height.
 export const CONTRACT_ACTIONS_WITH_HEIGHT_FROM_LATEST_BLOCK = `subscription ContractActionsWithHeightFromLatestBlock($ADDRESS: HexEncoded!) {
     contractActions(address: $ADDRESS) {
         __typename

@@ -36,7 +36,6 @@ import type { BlockOffset, ContractActionWithHeightResponse } from '@utils/index
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { extractSubscriptionErrorMessage } from '@utils/indexer/subscription-error';
 import { NodeRpcClient } from '@utils/node/rpc-client';
-import { stateAtFieldPresent } from '@utils/indexer/state-at-support';
 import { sleep } from '@utils/retry-helper';
 import {
   CONTRACT_STATE_V6_TAG,
@@ -55,8 +54,6 @@ const NO_REPLAY_WAIT_MS = 8_000;
 
 // Test budgets: each test's timeout is the sum of its worst cases plus a margin, so a failure
 // surfaces as its assertion rather than as a test timeout.
-// The stateAt field probe: 3 attempts of 15 s plus 2 s between them.
-const STATE_AT_PROBE_MS = 47_000;
 // One node or indexer request (the node RPC client's own timeout).
 const RPC_MS = 10_000;
 // Streaming a contract's history from genesis up to the indexer tip.
@@ -360,7 +357,6 @@ describe('contract action subscriptions', () => {
           log.warn(error);
           return ctx.skip(true, (error as Error).message);
         }
-        if (!(await stateAtFieldPresent())) return ctx.skip(true, 'stateAt field not present');
         const fork = dataProvider.getLedgerHardFork();
         const nodeClient = new NodeRpcClient();
         const tip = await indexerHttpClient.getLatestBlock();
@@ -429,8 +425,8 @@ describe('contract action subscriptions', () => {
           `last state streamed up to the indexer tip ${tipHeight} vs the node's there`,
         ).toBe(nodeState);
       },
-      // Probe, tip, node state, stream, settle and the node checks of one re-emission.
-      STATE_AT_PROBE_MS + 6 * RPC_MS + STREAM_HISTORY_MS + NO_REPLAY_WAIT_MS + 15_000,
+      // Tip, node state, stream, settle and the node checks of one re-emission.
+      6 * RPC_MS + STREAM_HISTORY_MS + NO_REPLAY_WAIT_MS + 15_000,
     );
   });
 
@@ -458,7 +454,6 @@ describe('contract action subscriptions', () => {
           ctx.task!.meta.custom = {
             labels: ['Subscription', 'ContractAction', 'StateAt', 'HardFork'],
           };
-          if (!(await stateAtFieldPresent())) return ctx.skip(true, 'stateAt field not present');
           const fork = dataProvider.getLedgerHardFork();
           if (!fork) throw new Error('devnet must declare the hard fork it crossed');
           const { 'contract-address': address, 'contract-actions': actions } =
@@ -503,8 +498,8 @@ describe('contract action subscriptions', () => {
           expect(reEmitted.transaction.block.height).toBe(latest['block-height']);
           expect(reEmitted.state).toBe(nodeState);
         },
-        // Probe, node state, stream to the re-emission at the fork and settle.
-        STATE_AT_PROBE_MS + RPC_MS + FORK_STREAM_MS + NO_REPLAY_WAIT_MS + 15_000,
+        // Node state, stream to the re-emission at the fork and settle.
+        RPC_MS + FORK_STREAM_MS + NO_REPLAY_WAIT_MS + 15_000,
       );
     },
   );

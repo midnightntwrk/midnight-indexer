@@ -37,7 +37,6 @@ import dataProvider, {
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { NodeRpcClient } from '@utils/node/rpc-client';
 import { contractEventsSurfacePresent } from '@utils/indexer/contract-events-support';
-import { stateAtFieldPresent } from '@utils/indexer/state-at-support';
 import {
   CONTRACT_STATE_V6_TAG,
   CONTRACT_STATE_V8_TAG,
@@ -692,10 +691,8 @@ describe('contract queries', () => {
     // assertion rather than the test timeout.
     const NODE_CHECKED_TEST_MS = 120_000;
     let knownContract: string | null = null;
-    let stateAtPresent = false;
 
-    beforeAll(async () => {
-      stateAtPresent = await stateAtFieldPresent();
+    beforeAll(() => {
       try {
         knownContract = dataProvider.getKnownContractAddress();
       } catch (error) {
@@ -750,7 +747,6 @@ describe('contract queries', () => {
       'should anchor the latest contract action state at the block it was last written',
       async (ctx: TestContext) => {
         ctx.task!.meta.custom = { labels: ['Query', 'ContractAction', 'StateAt'] };
-        if (!stateAtPresent) return ctx.skip(true, 'stateAt field not present');
         if (!knownContract) return ctx.skip(true, 'no known contract fixture on this env');
 
         await expectCurrentStateConfirmedByNode(async () => {
@@ -781,7 +777,6 @@ describe('contract queries', () => {
       'should anchor the contract state at the block of its latest action',
       async (ctx: TestContext) => {
         ctx.task!.meta.custom = { labels: ['Query', 'Contract', 'StateAt'] };
-        if (!stateAtPresent) return ctx.skip(true, 'stateAt field not present');
         if (!knownContract) return ctx.skip(true, 'no known contract fixture on this env');
 
         await expectCurrentStateConfirmedByNode(async () => {
@@ -810,7 +805,6 @@ describe('contract queries', () => {
      */
     test('should anchor every recorded contract action at its own block', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Query', 'Contract', 'Transaction', 'StateAt'] };
-      if (!stateAtPresent) return ctx.skip(true, 'stateAt field not present');
       if (!knownContract) return ctx.skip(true, 'no known contract fixture on this env');
 
       const contractResponse = await indexerHttpClient.getContract(
@@ -861,10 +855,8 @@ describe.runIf(env.getCurrentEnvironmentName() === EnvironmentName.DEVNET)(
     let fork: LedgerHardForkInfo;
     let address: string;
     let actions: LedgerHardForkInfo['untouched-contracts'][number]['contract-actions'];
-    let stateAtPresent = false;
 
-    beforeAll(async () => {
-      stateAtPresent = await stateAtFieldPresent();
+    beforeAll(() => {
       const declared = dataProvider.getLedgerHardFork();
       if (!declared) throw new Error('devnet must declare the hard fork it crossed');
       fork = declared;
@@ -934,7 +926,6 @@ describe.runIf(env.getCurrentEnvironmentName() === EnvironmentName.DEVNET)(
        */
       test('should anchor the translated state at the fork block', async (ctx: TestContext) => {
         ctx.task!.meta.custom = { labels: ['Query', 'ContractAction', 'Contract', 'HardFork'] };
-        if (!stateAtPresent) return ctx.skip(true, 'stateAt field not present');
         const latest = actions.at(-1)!;
 
         const [actionResponse, contractResponse] = await Promise.all([
@@ -993,7 +984,6 @@ describe.runIf(env.getCurrentEnvironmentName() === EnvironmentName.DEVNET)(
         ctx.task!.meta.custom = {
           labels: ['Query', 'Contract', 'ByHeight', 'StateAt', 'HardFork'],
         };
-        if (!stateAtPresent) return ctx.skip(true, 'stateAt field not present');
         const forkHeight = fork['fork-block'].height;
         const latest = actions.at(-1)!;
 
@@ -1053,7 +1043,6 @@ describe.runIf(env.getCurrentEnvironmentName() === EnvironmentName.DEVNET)(
        */
       test('should list the recorded actions anchored at their own blocks', async (ctx: TestContext) => {
         ctx.task!.meta.custom = { labels: ['Query', 'Contract', 'StateAt', 'HardFork'] };
-        if (!stateAtPresent) return ctx.skip(true, 'stateAt field not present');
 
         const response = await indexerHttpClient.getContract(address, {}, GET_CONTRACT_STATE_AT);
 
