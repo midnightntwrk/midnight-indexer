@@ -245,11 +245,11 @@ function requestShutdown(signal: string): void {
  * Ctrl+C never silently discards a long scan.
  *
  * Only the local files are written. The graceful path may be stuck in the
- * contract-events harvest against the indexer, and repeating that harvest
- * here would stall the same way; the forced path never touches the network,
- * so it always completes. The checkpoint is synchronous because nothing else
- * runs after it; the local write is awaited and the process exits with
- * status 1 as soon as it settles, whatever the graceful path was doing.
+ * contract-events or token-holding contracts harvest against the indexer, and
+ * repeating them here would stall the same way; the forced path never touches
+ * the network, so it always completes. The checkpoint is synchronous because
+ * nothing else runs after it; the local write is awaited and the process exits
+ * with status 1 as soon as it settles, whatever the graceful path was doing.
  */
 function forceExit(signal: string): void {
   if (forcedExitStarted) process.exit(1);
@@ -618,8 +618,9 @@ function parseStartBlockHeight(): number | undefined {
  * `kill -9`, since no JS runs at all in that case.)
  *
  * With `localOnly` the contract-events and token-holding contracts harvests
- * (the only remote steps) are skipped and those files are left untouched; without it the run is tied to
- * `gracefulFinalization` so a forced exit can supersede it.
+ * (the only remote steps) are skipped and those files are left untouched;
+ * without it the run is tied to `gracefulFinalization` so a forced exit can
+ * supersede it.
  */
 async function finalizeTestData({ localOnly = false } = {}): Promise<void> {
   if (!testDataFolder) return;

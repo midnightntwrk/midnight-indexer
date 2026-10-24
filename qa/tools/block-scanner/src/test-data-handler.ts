@@ -311,7 +311,10 @@ function validateNonEmptyArray<T>(array: T[], arrayName: string): void {
 
 /** Options controlling how a test data refresh runs. */
 export interface UpdateTestDataOptions {
-  /** Skip the contract-events harvest (the only remote step) and leave that file untouched. */
+  /**
+   * Skip the contract-events and token-holding contracts harvests (the only
+   * remote steps) and leave those files untouched.
+   */
   readonly localOnly?: boolean;
   /** Aborted when another refresh has taken over; nothing is written once it fires. */
   readonly signal?: AbortSignal;
@@ -1331,9 +1334,9 @@ async function fetchContractEventTypes(
  * caller leaves an existing curated fixture untouched. Transient query
  * failures are retried and then fail the generation run instead of being
  * mistaken for missing support — a stale fixture must not silently survive a
- * refresh. Because this is the only remote-I/O step of the refresh, the
- * caller runs it before writing any file, keeping the previous snapshot
- * fully intact when the harvest fails.
+ * refresh. Like the other remote-I/O step of the refresh (the token-holding
+ * contracts harvest), the caller runs it before writing any file, keeping the
+ * previous snapshot fully intact when the harvest fails.
  *
  * @param blocks - The scanned blocks
  * @returns The contracts with their emitted event types, or null when the
