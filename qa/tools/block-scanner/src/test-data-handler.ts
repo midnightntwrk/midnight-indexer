@@ -1104,13 +1104,18 @@ const MAX_TOKEN_HOLDING_CONTRACTS = 5;
 
 /**
  * Collects the distinct contract addresses seen in the scanned blocks, in scan
- * order (first seen first).
+ * order (first seen first), or with `mostRecentFirst` by their latest contract
+ * action (last seen first, highest block first).
  *
  * @param blocks - The scanned blocks
+ * @param options - `mostRecentFirst` selects the last-seen ordering
  * @returns The distinct contract addresses
  */
-function collectContractAddresses(blocks: Block[]): string[] {
-  const addresses: Set<string> = new Set();
+function collectContractAddresses(
+  blocks: Block[],
+  { mostRecentFirst = false } = {},
+): string[] {
+  const actions: { height: number; address: string }[] = [];
   for (const block of blocks) {
     for (const transaction of block.transactions) {
       if (
@@ -1118,13 +1123,22 @@ function collectContractAddresses(blocks: Block[]): string[] {
         transaction.contractActions
       ) {
         for (const contractAction of transaction.contractActions) {
-          addresses.add(contractAction.address);
+          actions.push({
+            height: block.height,
+            address: contractAction.address,
+          });
         }
       }
     }
   }
 
-  return [...addresses];
+  if (mostRecentFirst) {
+    // Reversing first keeps later actions of the same block ahead after the
+    // stable sort by height.
+    actions.reverse().sort((a, b) => b.height - a.height);
+  }
+
+  return [...new Set(actions.map((action) => action.address))];
 }
 
 /**
@@ -1499,7 +1513,9 @@ async function harvestTokenHoldingContracts(
   try {
     // Most recently active first: recent contracts are the most likely to
     // still hold tokens.
-    const addresses = collectContractAddresses(blocks).reverse();
+    const addresses = collectContractAddresses(blocks, {
+      mostRecentFirst: true,
+    });
     const graphqlUrl = `${INDEXER_HTTP_URL}/api/${INDEXER_API_VERSION}/graphql`;
 
     console.info(
