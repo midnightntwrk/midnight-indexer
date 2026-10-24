@@ -367,6 +367,7 @@ export async function updateTestDataFiles(
     // failure then aborts the refresh with the previous snapshot fully intact,
     // instead of leaving a mix of refreshed and stale files behind.
     let contractsWithEvents: ContractWithEvents[] | null = null;
+    let listedHolders: TokenHoldingContractsDataFile | null = null;
     let tokenHoldingContracts: TokenHoldingContract[] | null = null;
     if (localOnly) {
       console.info(
@@ -377,7 +378,15 @@ export async function updateTestDataFiles(
       const blocks: Block[] = parseBlockData(sourceBlockData);
       validateNonEmptyArray(blocks, "Blocks array");
       contractsWithEvents = await harvestContractEvents(blocks);
-      tokenHoldingContracts = await harvestTokenHoldingContracts(blocks);
+      listedHolders = loadTokenHoldingContractsDataFile(folderPath);
+      tokenHoldingContracts = await harvestTokenHoldingContracts(
+        blocks,
+        new Set(
+          listedHolders.map((holder) =>
+            holder["contract-address"].toLowerCase(),
+          ),
+        ),
+      );
     }
 
     // The forced-exit refresh wrote the files while this one was waiting on
@@ -401,8 +410,12 @@ export async function updateTestDataFiles(
     if (contractsWithEvents !== null) {
       writeContractEventsDataFile(folderPath, contractsWithEvents);
     }
-    if (tokenHoldingContracts !== null) {
-      writeTokenHoldingContractsDataFile(folderPath, tokenHoldingContracts);
+    if (listedHolders !== null && tokenHoldingContracts !== null) {
+      writeTokenHoldingContractsDataFile(
+        folderPath,
+        listedHolders,
+        tokenHoldingContracts,
+      );
     }
 
     console.info("[INFO ] - All test data files updated successfully");
@@ -1098,8 +1111,8 @@ const GRAPHQL_RETRY_DELAY_MS = 1_000;
 const CONTRACT_EVENTS_PAGE_SIZE = 100;
 
 // The token-holding contracts harvest stops once this many contracts with a
-// positive balance are found: a few are enough for the regression tests, and
-// stopping early keeps the number of queries low on chains with many contracts.
+// positive balance, not yet listed in the data file, are found: a few are
+// enough per run, and stopping early keeps the number of queries low.
 const MAX_TOKEN_HOLDING_CONTRACTS = 5;
 
 /**
@@ -1492,35 +1505,38 @@ function pickTokenType(balances: ContractBalance[]): string {
 }
 
 /**
- * Harvests the token-holding contracts data from the indexer without touching
- * any file: the contract addresses discovered in the scanned blocks are queried
- * via contractAction, most recently active first, and the first
- * MAX_TOKEN_HOLDING_CONTRACTS contracts with a positive unshielded balance are
- * returned; the remaining addresses are not queried.
+ * Harvests new token-holding contracts from the indexer without touching any
+ * file: the contract addresses discovered in the scanned blocks that are not
+ * already listed are queried via contractAction, most recently active first,
+ * and the first MAX_TOKEN_HOLDING_CONTRACTS contracts with a positive
+ * unshielded balance are returned; the remaining addresses are not queried.
  *
- * Returns null when no contract with a positive balance is found, so the
- * caller leaves an existing fixture untouched: an indexer affected by #1245
- * reports an empty unshieldedBalances for every contract, and overwriting the
- * fixture with an empty list would make the regression test skip instead of
- * fail. Transient query failures are retried and then fail the generation run.
+ * Returns null when no new contract with a positive balance is found, so the
+ * caller leaves the existing fixture untouched: an indexer affected by #1245
+ * reports an empty unshieldedBalances for every contract, and writing an
+ * empty fixture would make the regression test skip instead of fail.
+ * Transient query failures are retried and then fail the generation run.
  *
  * @param blocks - The scanned blocks
- * @returns The token-holding contracts, or null when none was found
+ * @param listedAddresses - Lower-case addresses already in the data file
+ * @returns The new token-holding contracts, or null when none was found
  */
 async function harvestTokenHoldingContracts(
   blocks: Block[],
+  listedAddresses: Set<string>,
 ): Promise<TokenHoldingContract[] | null> {
   try {
     // Most recently active first: recent contracts are the most likely to
     // still hold tokens.
     const addresses = collectContractAddresses(blocks, {
       mostRecentFirst: true,
-    });
+    }).filter((address) => !listedAddresses.has(address.toLowerCase()));
     const graphqlUrl = `${INDEXER_HTTP_URL}/api/${INDEXER_API_VERSION}/graphql`;
 
     console.info(
-      `[INFO ] - Looking for up to ${MAX_TOKEN_HOLDING_CONTRACTS} token-holding ` +
-        `contract(s) among ${addresses.length} contract(s)`,
+      `[INFO ] - Looking for up to ${MAX_TOKEN_HOLDING_CONTRACTS} new token-holding ` +
+        `contract(s) among ${addresses.length} unlisted contract(s) ` +
+        `(${listedAddresses.size} already listed)`,
     );
 
     const tokenHoldingContracts: TokenHoldingContract[] = [];
@@ -1544,8 +1560,8 @@ async function harvestTokenHoldingContracts(
 
     if (tokenHoldingContracts.length === 0) {
       console.warn(
-        "[WARN ] - No contract with a positive unshielded balance found; " +
-          "leaving any existing token-holding contracts data file untouched",
+        "[WARN ] - No new contract with a positive unshielded balance found; " +
+          "leaving the token-holding contracts data file untouched",
       );
       return null;
     }
@@ -1563,39 +1579,88 @@ async function harvestTokenHoldingContracts(
 }
 
 /**
- * Writes the harvested token-holding contracts to the token-holding contracts
- * data file.
+ * Loads the current token-holding contracts data file of the target
+ * environment, with its comments, or the template when the file does not exist
+ * yet. The file is merged into, never replaced: it can hold hand-written
+ * entries (e.g. boundary amounts) that no scan would find again.
  *
  * @param destinationPath - Path to the test data folder
- * @param tokenHoldingContracts - The harvested token-holding contracts
+ * @returns The listed token-holding contracts
+ * @throws ParseError / ValidationError when the existing file is not a valid
+ *         JSONC array, so a broken file is never overwritten
+ */
+function loadTokenHoldingContractsDataFile(
+  destinationPath: string,
+): TokenHoldingContractsDataFile {
+  const { targetFilePath, templateFilePath } = buildFilePaths(
+    path.join(destinationPath, `${TARGET_ENV}`),
+    `token-holding-contracts.jsonc`,
+  );
+  if (!fs.existsSync(targetFilePath)) {
+    return loadTemplateFile<TokenHoldingContractsDataFile>(templateFilePath);
+  }
+
+  const content = readFileContent(targetFilePath);
+  let listed: unknown;
+  try {
+    listed = commentJson.parse(content);
+  } catch (error) {
+    throw new ParseError(`Failed to parse ${targetFilePath}`, content, {
+      originalError: error,
+    });
+  }
+  if (!Array.isArray(listed)) {
+    throw new ValidationError(`${targetFilePath} must hold a JSON array`, {
+      targetFilePath,
+    });
+  }
+  return listed as TokenHoldingContractsDataFile;
+}
+
+/**
+ * Appends the newly harvested token-holding contracts to the listed ones and
+ * writes the token-holding contracts data file. Existing entries, their
+ * comments and the file header are kept as they are.
+ *
+ * @param destinationPath - Path to the test data folder
+ * @param listedHolders - The listed contracts, as loaded by
+ *        loadTokenHoldingContractsDataFile
+ * @param newHolders - The newly harvested token-holding contracts
  */
 function writeTokenHoldingContractsDataFile(
   destinationPath: string,
-  tokenHoldingContracts: TokenHoldingContract[],
+  listedHolders: TokenHoldingContractsDataFile,
+  newHolders: TokenHoldingContract[],
 ): void {
   try {
     // Ensure the target directory exists
     const targetDir: string = ensureTargetDirectory(destinationPath);
-
-    // Build file paths
-    const targetFileName = `token-holding-contracts.jsonc`;
-    const { targetFilePath, templateFilePath } = buildFilePaths(
+    const { targetFilePath } = buildFilePaths(
       targetDir,
-      targetFileName,
+      `token-holding-contracts.jsonc`,
     );
 
-    // Load template and populate with data to preserve comments
-    const templateArray: TokenHoldingContractsDataFile =
-      loadTemplateFile<TokenHoldingContractsDataFile>(templateFilePath);
+    // The date tells generated entries apart from hand-written ones, whose
+    // header may carry its own snapshot date.
+    const harvestDate = new Date().toISOString().slice(0, 10);
+    for (const holder of newHolders) {
+      Object.assign(holder, {
+        [Symbol.for("before:contract-address")]: [
+          {
+            type: "LineComment",
+            value: ` Harvested by block-scanner on ${harvestDate}.`,
+            inline: false,
+          },
+        ],
+      });
+      listedHolders.push(holder);
+    }
 
-    templateArray.length = 0;
-    templateArray.push(...tokenHoldingContracts);
-
-    // Write the data to the target folder
     writeJsonFile<TokenHoldingContractsDataFile>(
       targetFilePath,
-      templateArray,
-      `Token-holding contracts data file updated: ${destinationPath}/${TARGET_ENV}/token-holding-contracts.jsonc`,
+      listedHolders,
+      `Token-holding contracts data file updated (${newHolders.length} added, ` +
+        `${listedHolders.length} listed): ${destinationPath}/${TARGET_ENV}/token-holding-contracts.jsonc`,
     );
   } catch (error) {
     if (error instanceof TestDataHandlerError) {
