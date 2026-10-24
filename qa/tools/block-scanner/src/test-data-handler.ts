@@ -374,9 +374,10 @@ export async function updateTestDataFiles(
           "harvests (remote); leaving any existing data files untouched",
       );
     } else {
-      contractsWithEvents = await harvestContractEvents(sourceBlockData);
-      tokenHoldingContracts =
-        await harvestTokenHoldingContracts(sourceBlockData);
+      const blocks: Block[] = parseBlockData(sourceBlockData);
+      validateNonEmptyArray(blocks, "Blocks array");
+      contractsWithEvents = await harvestContractEvents(blocks);
+      tokenHoldingContracts = await harvestTokenHoldingContracts(blocks);
     }
 
     // The forced-exit refresh wrote the files while this one was waiting on
@@ -1105,13 +1106,10 @@ const MAX_TOKEN_HOLDING_CONTRACTS = 5;
  * Collects the distinct contract addresses seen in the scanned blocks, in scan
  * order (first seen first).
  *
- * @param sourceBlockData - The data containing the scanned blocks
+ * @param blocks - The scanned blocks
  * @returns The distinct contract addresses
  */
-function collectContractAddresses(sourceBlockData: string): string[] {
-  const blocks: Block[] = parseBlockData(sourceBlockData);
-  validateNonEmptyArray(blocks, "Blocks array");
-
+function collectContractAddresses(blocks: Block[]): string[] {
   const addresses: Set<string> = new Set();
   for (const block of blocks) {
     for (const transaction of block.transactions) {
@@ -1310,16 +1308,16 @@ async function fetchContractEventTypes(
  * caller runs it before writing any file, keeping the previous snapshot
  * fully intact when the harvest fails.
  *
- * @param sourceBlockData - The data containing the scanned blocks
+ * @param blocks - The scanned blocks
  * @returns The contracts with their emitted event types, or null when the
  *          contract-events surface is not present
  */
 async function harvestContractEvents(
-  sourceBlockData: string,
+  blocks: Block[],
 ): Promise<ContractWithEvents[] | null> {
   try {
     // Collect the distinct contract addresses seen on chain
-    const addresses = collectContractAddresses(sourceBlockData);
+    const addresses = collectContractAddresses(blocks);
 
     const graphqlUrl = `${INDEXER_HTTP_URL}/api/${INDEXER_API_VERSION}/graphql`;
 
@@ -1492,16 +1490,16 @@ function pickTokenType(balances: ContractBalance[]): string {
  * fixture with an empty list would make the regression test skip instead of
  * fail. Transient query failures are retried and then fail the generation run.
  *
- * @param sourceBlockData - The data containing the scanned blocks
+ * @param blocks - The scanned blocks
  * @returns The token-holding contracts, or null when none was found
  */
 async function harvestTokenHoldingContracts(
-  sourceBlockData: string,
+  blocks: Block[],
 ): Promise<TokenHoldingContract[] | null> {
   try {
     // Most recently active first: recent contracts are the most likely to
     // still hold tokens.
-    const addresses = collectContractAddresses(sourceBlockData).reverse();
+    const addresses = collectContractAddresses(blocks).reverse();
     const graphqlUrl = `${INDEXER_HTTP_URL}/api/${INDEXER_API_VERSION}/graphql`;
 
     console.info(
