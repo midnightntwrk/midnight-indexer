@@ -15,6 +15,7 @@
 
 import type { BlockReference, ContractActionStateAt } from '@utils/indexer/graphql/schema';
 import type { LedgerHardForkInfo } from '@utils/testdata-provider';
+import type { NodeRpcClient } from '@utils/node/rpc-client';
 
 // Tagged-serialization prefixes of a contract state in the ledger 8 and ledger 9 encodings.
 // Fork tests also assert the node's states carry them, so a renamed tag fails loudly there.
@@ -39,17 +40,41 @@ export function sameBlock(a: BlockReference, b: BlockReference): boolean {
 }
 
 /**
- * Whether `stateAt` can anchor a state translated at a hard fork the environment does not declare
- * in ledger-hard-fork.jsonc: a block after the action's own, on a different protocol version.
- * Without the fixture the fork block is unknown, so this is the most a test can check there.
+ * Checks `state`, anchored at `stateAt`, against the node, which the indexer under test cannot
+ * influence, so the check holds on every environment, whether or not it declares a hard fork:
+ * - `stateAt` is the node's block at that height and the state is the node's state there;
+ * - an anchor other than the action's own block is a later block on a newer protocol version
+ *   where the node's state changed without an action: a translation at a hard fork, not any
+ *   block the state merely still holds at.
  */
-export function isUndeclaredForkAnchor(
+export async function expectAnchorConfirmedByNode(
+  node: NodeRpcClient,
+  address: string,
+  state: string,
   stateAt: BlockReference,
   action: ContractActionStateAt,
-): boolean {
+): Promise<void> {
+  const label = `state anchored at ${stateAt.height}`;
+  expect(strip0x(await node.getBlockHash(stateAt.height)), `${label}: node block hash`).toBe(
+    stateAt.hash,
+  );
+  expect(state, `${label}: node state there`).toBe(
+    await node.getContractState(address, stateAt.hash),
+  );
   const own = ownBlock(action);
-  return stateAt.height > own.height && stateAt.protocolVersion !== own.protocolVersion;
+  if (sameBlock(stateAt, own)) return;
+  expect(stateAt.height, `${label}: after the action's block ${own.height}`).toBeGreaterThan(
+    own.height,
+  );
+  expect(stateAt.protocolVersion, `${label}: protocol version`).not.toBe(own.protocolVersion);
+  const parentHash = await node.getBlockHash(stateAt.height - 1);
+  expect(
+    await node.getContractState(address, parentHash!),
+    `${label}: node state must change there`,
+  ).not.toBe(state);
 }
+
+const strip0x = (hex: string | null) => hex?.replace(/^0x/, '') ?? null;
 
 export function forkBlock(fork: LedgerHardForkInfo): BlockReference {
   const { height, hash, 'protocol-version': protocolVersion } = fork['fork-block'];

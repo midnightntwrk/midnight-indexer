@@ -43,8 +43,8 @@ import {
   CONTRACT_STATE_V8_TAG,
   contractStateTag,
   currentStateAt,
+  expectAnchorConfirmedByNode,
   forkBlock,
-  isUndeclaredForkAnchor,
   ownBlock,
 } from 'tests/shared/contract-state-utils';
 
@@ -687,6 +687,10 @@ describe('contract queries', () => {
 
   describe('the block a contract state is anchored at', () => {
     const fork = dataProvider.getLedgerHardFork();
+    const nodeClient = new NodeRpcClient();
+    // Up to 3 query attempts plus 6 node requests of up to 10 s each, so a slow node fails an
+    // assertion rather than the test timeout.
+    const NODE_CHECKED_TEST_MS = 120_000;
     let knownContract: string | null = null;
     let stateAtPresent = false;
 
@@ -700,19 +704,36 @@ describe('contract queries', () => {
     });
 
     /**
-     * Where the current state of a contract whose latest action is `latest` must be anchored.
-     * Without a hard fork fixture, an anchor after the action on a different protocol version
-     * is taken as an undeclared fork the action predates.
+     * Runs `query` for the known contract's current state and checks it against the node, which
+     * the indexer under test cannot influence: the state must be the node's at the indexer tip
+     * read just before the query, so a state the node has since replaced fails (#1605: the
+     * pre-fork encoding served after a fork), and the node must confirm its stateAt. On a chain
+     * that declares its hard fork, stateAt must also be the block the fixture predicts. A query
+     * that saw a block past that tip raced a new write to the contract and is repeated.
      */
-    function expectCurrentStateAt(stateAt: BlockReference, latest: ContractActionStateAt) {
-      if (!fork && isUndeclaredForkAnchor(stateAt, latest)) {
-        log.warn(
-          `state anchored at ${stateAt.height} (protocol ${stateAt.protocolVersion}), after a ` +
-            'hard fork not declared in ledger-hard-fork.jsonc',
+    async function expectCurrentStateConfirmedByNode(
+      query: () => Promise<{
+        state: string;
+        stateAt: BlockReference;
+        latest: ContractActionStateAt;
+      }>,
+    ) {
+      for (let attempt = 1; ; attempt++) {
+        const tip = await indexerHttpClient.getLatestBlock();
+        expect(tip).toBeSuccess();
+        const { height: tipHeight, hash: tipHash } = tip.data!.block;
+        const { state, stateAt, latest } = await query();
+        if (Math.max(stateAt.height, latest.transaction.block.height) > tipHeight) {
+          expect(attempt, 'contract written during every query attempt').toBeLessThan(3);
+          continue;
+        }
+        expect(state, `state vs the node's at the indexer tip ${tipHeight}`).toBe(
+          await nodeClient.getContractState(knownContract!, tipHash),
         );
+        await expectAnchorConfirmedByNode(nodeClient, knownContract!, state, stateAt, latest);
+        if (fork) expect(stateAt).toEqual(currentStateAt(latest, fork));
         return;
       }
-      expect(stateAt).toEqual(currentStateAt(latest, fork));
     }
 
     /**
@@ -721,50 +742,62 @@ describe('contract queries', () => {
      *
      * @given a contract known to exist on the chain
      * @when its latest contract action is queried by address without an offset
-     * @then stateAt names the height, hash and protocol version of the action's own block
-     * @and on a chain that crossed a hard fork after the action, it names the fork block instead
+     * @then its state is the node's state at the indexer tip and at the block stateAt names
+     * @and stateAt names the action's own block, or a later block on a newer protocol version
+     *      where the node's state changed: the fork block on a chain that crossed one after it
      */
-    test('should anchor the latest contract action state at the block it was last written', async (ctx: TestContext) => {
-      ctx.task!.meta.custom = { labels: ['Query', 'ContractAction', 'StateAt'] };
-      if (!stateAtPresent) return ctx.skip(true, 'stateAt field not present');
-      if (!knownContract) return ctx.skip(true, 'no known contract fixture on this env');
+    test(
+      'should anchor the latest contract action state at the block it was last written',
+      async (ctx: TestContext) => {
+        ctx.task!.meta.custom = { labels: ['Query', 'ContractAction', 'StateAt'] };
+        if (!stateAtPresent) return ctx.skip(true, 'stateAt field not present');
+        if (!knownContract) return ctx.skip(true, 'no known contract fixture on this env');
 
-      const response = await indexerHttpClient.getContractAction(
-        knownContract,
-        undefined,
-        GET_CONTRACT_ACTION_STATE_AT,
-      );
-
-      expect(response).toBeSuccess();
-      const action = ContractActionStateAtSchema.parse(response.data?.contractAction);
-      expect(action.address).toBe(knownContract);
-      expectCurrentStateAt(action.stateAt, action);
-    });
+        await expectCurrentStateConfirmedByNode(async () => {
+          const response = await indexerHttpClient.getContractAction(
+            knownContract!,
+            undefined,
+            GET_CONTRACT_ACTION_STATE_AT,
+          );
+          expect(response).toBeSuccess();
+          const action = ContractActionStateAtSchema.parse(response.data?.contractAction);
+          expect(action.address).toBe(knownContract);
+          return { state: action.state, stateAt: action.stateAt, latest: action };
+        });
+      },
+      NODE_CHECKED_TEST_MS,
+    );
 
     /**
      * A contract's current state is anchored where its latest action's state is.
      *
      * @given a contract known to exist on the chain
      * @when the contract is queried by address without an offset
-     * @then its stateAt names the block of its latest action
-     * @and on a chain that crossed a hard fork after that action, it names the fork block instead
+     * @then its state is the node's state at the indexer tip and at the block stateAt names
+     * @and stateAt names the block of its latest action, or a later block on a newer protocol
+     *      version where the node's state changed: the fork block on a chain that crossed one
      */
-    test('should anchor the contract state at the block of its latest action', async (ctx: TestContext) => {
-      ctx.task!.meta.custom = { labels: ['Query', 'Contract', 'StateAt'] };
-      if (!stateAtPresent) return ctx.skip(true, 'stateAt field not present');
-      if (!knownContract) return ctx.skip(true, 'no known contract fixture on this env');
+    test(
+      'should anchor the contract state at the block of its latest action',
+      async (ctx: TestContext) => {
+        ctx.task!.meta.custom = { labels: ['Query', 'Contract', 'StateAt'] };
+        if (!stateAtPresent) return ctx.skip(true, 'stateAt field not present');
+        if (!knownContract) return ctx.skip(true, 'no known contract fixture on this env');
 
-      const response = await indexerHttpClient.getContract(
-        knownContract,
-        { actionsLimit: 1 },
-        GET_CONTRACT_STATE_AT,
-      );
-
-      expect(response).toBeSuccess();
-      const contract = ContractStateAtSchema.parse(response.data?.contract);
-      expect(contract.actions).toHaveLength(1);
-      expectCurrentStateAt(contract.stateAt, contract.actions[0]);
-    });
+        await expectCurrentStateConfirmedByNode(async () => {
+          const response = await indexerHttpClient.getContract(
+            knownContract!,
+            { actionsLimit: 1 },
+            GET_CONTRACT_STATE_AT,
+          );
+          expect(response).toBeSuccess();
+          const contract = ContractStateAtSchema.parse(response.data?.contract);
+          expect(contract.actions).toHaveLength(1);
+          return { state: contract.state, stateAt: contract.stateAt, latest: contract.actions[0] };
+        });
+      },
+      NODE_CHECKED_TEST_MS,
+    );
 
     /**
      * Recorded contract actions keep the state written by their own transaction, so each is
