@@ -28,18 +28,22 @@ import {
   ContractActionStateAtSchema,
   ContractActionUnionSchema,
 } from '@utils/indexer/graphql/schema';
-import { CONTRACT_ACTIONS_STATE_AT_SUBSCRIPTION } from '@utils/indexer/graphql/subscriptions';
-import type { BlockOffset, GraphQLResponse } from '@utils/indexer/indexer-types';
+import {
+  CONTRACT_ACTIONS_STATE_AT_SUBSCRIPTION,
+  CONTRACT_ACTIONS_WITH_HEIGHT_FROM_LATEST_BLOCK,
+} from '@utils/indexer/graphql/subscriptions';
+import type { BlockOffset, ContractActionWithHeightResponse } from '@utils/indexer/indexer-types';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { extractSubscriptionErrorMessage } from '@utils/indexer/subscription-error';
 import { NodeRpcClient } from '@utils/node/rpc-client';
 import { stateAtFieldPresent } from '@utils/indexer/state-at-support';
+import { sleep } from '@utils/retry-helper';
 import {
   CONTRACT_STATE_V6_TAG,
   CONTRACT_STATE_V8_TAG,
   contractStateTag,
+  expectAnchorConfirmedByNode,
   forkBlock,
-  isUndeclaredForkAnchor,
   ownBlock,
   sameBlock,
 } from 'tests/shared/contract-state-utils';
@@ -49,29 +53,16 @@ import {
 // How long a subscription without offset is observed to confirm nothing is replayed.
 const NO_REPLAY_WAIT_MS = 8_000;
 
-// Without stateAt, so the no-offset test keeps its signal on indexers without the field (pre-4.4).
-const CONTRACT_ACTIONS_WITH_HEIGHT_FROM_LATEST_BLOCK = `subscription ContractActionsWithHeightFromLatestBlock($ADDRESS: HexEncoded!) {
-    contractActions(address: $ADDRESS) {
-        __typename
-        address
-        transaction {
-            hash
-            block {
-                height
-            }
-        }
-    }
-}`;
-
-type ContractActionWithHeightResponse = GraphQLResponse<{
-  contractActions: {
-    __typename: string;
-    address: string;
-    transaction: { hash: string; block: { height: number } };
-  };
-}>;
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+// Test budgets: each test's timeout is the sum of its worst cases plus a margin, so a failure
+// surfaces as its assertion rather than as a test timeout.
+// The stateAt field probe: 3 attempts of 15 s plus 2 s between them.
+const STATE_AT_PROBE_MS = 47_000;
+// One node or indexer request (the node RPC client's own timeout).
+const RPC_MS = 10_000;
+// Streaming a contract's history from genesis up to the indexer tip.
+const STREAM_HISTORY_MS = 30_000;
+// Streaming from before the devnet fork to the re-emission at the fork block.
+const FORK_STREAM_MS = 90_000;
 
 describe('contract action subscriptions', () => {
   let indexerWsClient: IndexerWsClient;
@@ -128,23 +119,26 @@ describe('contract action subscriptions', () => {
 
   /**
    * Streams contract actions (with their stateAt, unless another `query` is given) from `offset`,
-   * or from the latest block without one, until `count` actions arrived, an error arrived or
-   * `timeoutMs` passed, then for `settleMs` more to catch anything streamed after them.
+   * or from the latest block without one, until `done(received)` holds, the stream errored or
+   * completed, or `timeoutMs` passed, then for `settleMs` more to catch anything streamed after.
+   * A contract action stream never ends by itself, so `completed` is a failure to assert on.
    */
   async function streamContractActions(
     contractAddress: string,
     offset: BlockOffset | undefined,
-    count: number,
+    done: (received: ContractActionSubscriptionResponse[]) => boolean,
     timeoutMs: number,
     settleMs = 0,
     query = CONTRACT_ACTIONS_STATE_AT_SUBSCRIPTION,
   ) {
     const received: ContractActionSubscriptionResponse[] = [];
     const errors: string[] = [];
+    let completed = false;
     const unsubscribe = indexerWsClient.subscribeToContractActionEvents(
       {
         next: (payload) => received.push(payload),
         error: (error) => errors.push(extractSubscriptionErrorMessage(error)),
+        complete: () => (completed = true),
       },
       contractAddress,
       offset,
@@ -152,14 +146,22 @@ describe('contract action subscriptions', () => {
     );
     try {
       const deadline = Date.now() + timeoutMs;
-      while (received.length < count && errors.length === 0 && Date.now() < deadline) {
+      while (!done(received) && !errors.length && !completed && Date.now() < deadline) {
         await sleep(500);
       }
       await sleep(settleMs);
+      indexerWsClient.assertSocketAlive();
     } finally {
       unsubscribe();
     }
-    return { received, errors };
+    return { received, errors, completed };
+  }
+
+  /** The state of the last streamed action anchored at or below `height`. */
+  function lastStateUpTo(received: ContractActionSubscriptionResponse[], height: number) {
+    return received
+      .map((msg) => ContractActionStateAtSchema.safeParse(msg.data?.contractActions).data)
+      .findLast((action) => action && action.stateAt.height <= height)?.state;
   }
 
   describe('a subscription to contract action updates without parameters', () => {
@@ -171,7 +173,7 @@ describe('contract action subscriptions', () => {
      * @given a known contract address with existing contract actions
      * @and the height of the latest indexed block
      * @when we subscribe to contract action events without a block offset
-     * @then the subscription is accepted without errors
+     * @then the subscription is accepted without errors and stays open
      * @and no contract action below that height is replayed
      */
     test('should not replay existing contract actions', async (ctx: TestContext) => {
@@ -189,18 +191,19 @@ describe('contract action subscriptions', () => {
       expect(latestBlock).toBeSuccess();
       const tipHeight = latestBlock.data!.block.height;
 
-      const { received, errors } = await streamContractActions(
+      const { received, errors, completed } = await streamContractActions(
         contractAddress!,
         undefined,
-        Infinity,
+        () => false,
         NO_REPLAY_WAIT_MS,
         0,
         CONTRACT_ACTIONS_WITH_HEIGHT_FROM_LATEST_BLOCK,
       );
 
       // On a static chain nothing arrives, so the subscription's acceptance shows only as the
-      // absence of errors.
+      // absence of errors on a stream that is still open.
       expect(errors).toEqual([]);
+      expect(completed, 'subscription without offset completed').toBe(false);
       // Hosted environments may index new actions for this contract while we wait; those are
       // allowed, as are actions in the tip block itself, where the stream starts. Each must come
       // from the tip read before subscribing or a later block.
@@ -333,66 +336,102 @@ describe('contract action subscriptions', () => {
   describe('a subscription to contract action updates with the block their state is anchored at', () => {
     /**
      * Every streamed contract action names the block its state is anchored at: its own block,
-     * or the hard fork block for the re-emission of a contract's latest pre-fork action.
+     * or the hard fork block for the re-emission of a contract's latest pre-fork action. The
+     * node, not the indexer, decides whether a re-emission was due and where.
      *
      * @given a known contract address with existing contract actions
+     * @and the node's state of the contract at the indexer tip
      * @when contract actions are streamed from block height 0
      * @then each action's stateAt names the height, hash and protocol version of its own block
      * @and an action anchored elsewhere is a single re-emission of an action already streamed,
-     *      at the hard fork block of a chain that crossed one
+     *      at a later block on a newer protocol version where the node's state changed to the
+     *      re-emitted one: the hard fork block of a chain that declares it
      * @and no action is streamed twice at its own block
+     * @and the last state streamed up to the tip is the node's state there
      */
-    test('should anchor each streamed contract action at the block its state was written', async (ctx: TestContext) => {
-      ctx.task!.meta.custom = { labels: ['Subscription', 'ContractAction', 'StateAt'] };
-      let contractAddress: string;
-      try {
-        contractAddress = dataProvider.getKnownContractAddress();
-      } catch (error) {
-        log.warn(error);
-        return ctx.skip(true, (error as Error).message);
-      }
-      if (!(await stateAtFieldPresent())) return ctx.skip(true, 'stateAt field not present');
-      const fork = dataProvider.getLedgerHardFork();
-
-      const { received, errors } = await streamContractActions(
-        contractAddress,
-        { height: 0 },
-        Infinity,
-        NO_REPLAY_WAIT_MS,
-      );
-
-      expect(errors).toEqual([]);
-      expect(received.length).toBeGreaterThan(0);
-      // A transaction can hold several actions on the contract, so an action is keyed by its
-      // transaction, kind and state rather than by its transaction alone.
-      const streamed = new Set<string>();
-      const reEmitted = new Set<string>();
-      for (const msg of received) {
-        const action = ContractActionStateAtSchema.parse(msg.data?.contractActions);
-        const { hash } = action.transaction;
-        const key = `${hash}:${action.__typename}:${action.state}`;
-        if (sameBlock(action.stateAt, ownBlock(action))) {
-          expect(streamed.has(key), `action of tx ${hash} streamed twice`).toBe(false);
-          streamed.add(key);
-          continue;
+    test(
+      'should anchor each streamed contract action at the block its state was written',
+      async (ctx: TestContext) => {
+        ctx.task!.meta.custom = { labels: ['Subscription', 'ContractAction', 'StateAt'] };
+        let contractAddress: string;
+        try {
+          contractAddress = dataProvider.getKnownContractAddress();
+        } catch (error) {
+          log.warn(error);
+          return ctx.skip(true, (error as Error).message);
         }
-        // Anchored away from its own block: only the re-emission of an earlier action at a fork.
-        expect(
-          [...streamed].some((seen) => seen.startsWith(`${hash}:`)),
-          `action of tx ${hash} anchored at ${action.stateAt.height} before it was streamed`,
-        ).toBe(true);
-        expect(reEmitted.has(hash), `action of tx ${hash} re-emitted twice`).toBe(false);
-        reEmitted.add(hash);
-        if (fork) {
-          expect(action.stateAt, `re-emission of tx ${hash}`).toEqual(forkBlock(fork));
-        } else {
+        if (!(await stateAtFieldPresent())) return ctx.skip(true, 'stateAt field not present');
+        const fork = dataProvider.getLedgerHardFork();
+        const nodeClient = new NodeRpcClient();
+        const tip = await indexerHttpClient.getLatestBlock();
+        expect(tip).toBeSuccess();
+        const { height: tipHeight, hash: tipHash } = tip.data!.block;
+        const nodeState = await nodeClient.getContractState(contractAddress, tipHash);
+
+        const { received, errors, completed } = await streamContractActions(
+          contractAddress,
+          { height: 0 },
+          (soFar) => lastStateUpTo(soFar, tipHeight) === nodeState,
+          STREAM_HISTORY_MS,
+          NO_REPLAY_WAIT_MS,
+        );
+
+        expect(errors).toEqual([]);
+        expect(completed, 'subscription from genesis completed').toBe(false);
+        expect(received.length).toBeGreaterThan(0);
+        // Own-block items are keyed by transaction, not by state, so a re-emission wrongly anchored
+        // at its own block cannot pass as another action of its transaction: a transaction's
+        // actions arrive together, in one encoding, each once.
+        const streamed = new Map<string, { tag: string; items: string[] }>();
+        const reEmitted = new Set<string>();
+        let previousTx: string | undefined;
+        for (const msg of received) {
+          const action = ContractActionStateAtSchema.parse(msg.data?.contractActions);
+          const { hash } = action.transaction;
+          const item = `${action.__typename}:${action.state}`;
+          const tag = contractStateTag(action.state);
+          if (sameBlock(action.stateAt, ownBlock(action))) {
+            const tx = streamed.get(hash);
+            if (!tx) streamed.set(hash, { tag, items: [item] });
+            else {
+              expect(previousTx, `action of tx ${hash} streamed again after other items`).toBe(
+                hash,
+              );
+              expect(tx.items, `action of tx ${hash} streamed twice`).not.toContain(item);
+              expect(tag, `action of tx ${hash} in another encoding than its transaction`).toBe(
+                tx.tag,
+              );
+              tx.items.push(item);
+            }
+            previousTx = hash;
+            continue;
+          }
+          // Anchored away from its own block: only the re-emission of an earlier action at a fork.
+          previousTx = undefined;
           expect(
-            isUndeclaredForkAnchor(action.stateAt, action),
-            `re-emission of tx ${hash} at ${action.stateAt.height} without a protocol change`,
+            streamed.has(hash),
+            `action of tx ${hash} anchored at ${action.stateAt.height} before it was streamed`,
           ).toBe(true);
+          expect(reEmitted.has(hash), `action of tx ${hash} re-emitted twice`).toBe(false);
+          reEmitted.add(hash);
+          await expectAnchorConfirmedByNode(
+            nodeClient,
+            contractAddress,
+            action.state,
+            action.stateAt,
+            action,
+          );
+          if (fork) expect(action.stateAt, `re-emission of tx ${hash}`).toEqual(forkBlock(fork));
         }
-      }
-    });
+        // Catches a missing re-emission: the stream would end on a state the node has replaced.
+        expect(
+          lastStateUpTo(received, tipHeight),
+          `last state streamed up to the indexer tip ${tipHeight} vs the node's there`,
+        ).toBe(nodeState);
+      },
+      // Probe, tip, node state, stream, settle and the node checks of one re-emission.
+      STATE_AT_PROBE_MS + 6 * RPC_MS + STREAM_HISTORY_MS + NO_REPLAY_WAIT_MS + 15_000,
+    );
   });
 
   // Expected blocks, hashes and states come from the hard fork fixture and the node, never from
@@ -413,54 +452,60 @@ describe('contract action subscriptions', () => {
        *      [v8] state at the fork block, and stateAt naming the fork block (protocol version
        *      2001000), which differs from the transaction's block
        */
-      test('should re-emit the latest pre-fork action once at the fork block', async (ctx: TestContext) => {
-        ctx.task!.meta.custom = {
-          labels: ['Subscription', 'ContractAction', 'StateAt', 'HardFork'],
-        };
-        if (!(await stateAtFieldPresent())) return ctx.skip(true, 'stateAt field not present');
-        const fork = dataProvider.getLedgerHardFork();
-        if (!fork) throw new Error('devnet must declare the hard fork it crossed');
-        const { 'contract-address': address, 'contract-actions': actions } =
-          fork['untouched-contracts'][0];
-        const latest = actions.at(-1)!;
-        const nodeState = await new NodeRpcClient().getContractState(
-          address,
-          fork['fork-block'].hash,
-        );
-        expect(contractStateTag(nodeState), 'node state tag at the fork').toBe(
-          CONTRACT_STATE_V8_TAG,
-        );
+      test(
+        'should re-emit the latest pre-fork action once at the fork block',
+        async (ctx: TestContext) => {
+          ctx.task!.meta.custom = {
+            labels: ['Subscription', 'ContractAction', 'StateAt', 'HardFork'],
+          };
+          if (!(await stateAtFieldPresent())) return ctx.skip(true, 'stateAt field not present');
+          const fork = dataProvider.getLedgerHardFork();
+          if (!fork) throw new Error('devnet must declare the hard fork it crossed');
+          const { 'contract-address': address, 'contract-actions': actions } =
+            fork['untouched-contracts'][0];
+          const latest = actions.at(-1)!;
+          const nodeState = await new NodeRpcClient().getContractState(
+            address,
+            fork['fork-block'].hash,
+          );
+          expect(contractStateTag(nodeState), 'node state tag at the fork').toBe(
+            CONTRACT_STATE_V8_TAG,
+          );
 
-        const { received, errors } = await streamContractActions(
-          address,
-          { height: actions[0]['block-height'] },
-          actions.length + 1,
-          90_000,
-          NO_REPLAY_WAIT_MS,
-        );
+          const { received, errors, completed } = await streamContractActions(
+            address,
+            { height: actions[0]['block-height'] },
+            (soFar) => soFar.length > actions.length,
+            FORK_STREAM_MS,
+            NO_REPLAY_WAIT_MS,
+          );
 
-        expect(errors).toEqual([]);
-        const streamed = received.map((msg) =>
-          ContractActionStateAtSchema.parse(msg.data?.contractActions),
-        );
-        expect(streamed.map((action) => action.transaction.hash)).toEqual([
-          ...actions.map((action) => action['transaction-hash']),
-          latest['transaction-hash'],
-        ]);
-        streamed.slice(0, -1).forEach((action, i) => {
-          expect(contractStateTag(action.state)).toBe(CONTRACT_STATE_V6_TAG);
-          expect(action.stateAt).toEqual(ownBlock(action));
-          expect(action.stateAt).toMatchObject({
-            height: actions[i]['block-height'],
-            hash: actions[i]['block-hash'],
+          expect(errors).toEqual([]);
+          expect(completed, 'subscription from before the fork completed').toBe(false);
+          const streamed = received.map((msg) =>
+            ContractActionStateAtSchema.parse(msg.data?.contractActions),
+          );
+          expect(streamed.map((action) => action.transaction.hash)).toEqual([
+            ...actions.map((action) => action['transaction-hash']),
+            latest['transaction-hash'],
+          ]);
+          streamed.slice(0, -1).forEach((action, i) => {
+            expect(contractStateTag(action.state)).toBe(CONTRACT_STATE_V6_TAG);
+            expect(action.stateAt).toEqual(ownBlock(action));
+            expect(action.stateAt).toMatchObject({
+              height: actions[i]['block-height'],
+              hash: actions[i]['block-hash'],
+            });
           });
-        });
-        const reEmitted = streamed.at(-1)!;
-        expect(reEmitted.stateAt).toEqual(forkBlock(fork));
-        expect(reEmitted.stateAt.hash).not.toBe(reEmitted.transaction.block.hash);
-        expect(reEmitted.transaction.block.height).toBe(latest['block-height']);
-        expect(reEmitted.state).toBe(nodeState);
-      }, 120_000);
+          const reEmitted = streamed.at(-1)!;
+          expect(reEmitted.stateAt).toEqual(forkBlock(fork));
+          expect(reEmitted.stateAt.hash).not.toBe(reEmitted.transaction.block.hash);
+          expect(reEmitted.transaction.block.height).toBe(latest['block-height']);
+          expect(reEmitted.state).toBe(nodeState);
+        },
+        // Probe, node state, stream to the re-emission at the fork and settle.
+        STATE_AT_PROBE_MS + RPC_MS + FORK_STREAM_MS + NO_REPLAY_WAIT_MS + 15_000,
+      );
     },
   );
 });
