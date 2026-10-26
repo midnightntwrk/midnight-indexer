@@ -274,10 +274,11 @@ export const BlockReferenceSchema = z.object({
 
 // A contract action with the block its state is anchored at (stateAt) and the block of
 // its own transaction, as returned by the dedicated stateAt queries and subscription.
+// The state is the empty string for an action whose transaction failed (API docs).
 export const ContractActionStateAtSchema = z.object({
   __typename: z.enum(['ContractDeploy', 'ContractCall', 'ContractUpdate']),
   address: Hash64,
-  state: VarLenghtHex,
+  state: VarLenghtHex.or(z.literal('')),
   stateAt: BlockReferenceSchema,
   transaction: z.object({
     hash: Hash64,

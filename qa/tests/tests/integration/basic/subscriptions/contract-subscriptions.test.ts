@@ -154,11 +154,15 @@ describe('contract action subscriptions', () => {
     return { received, errors, completed };
   }
 
-  /** The state of the last streamed action anchored at or below `height`. */
+  /**
+   * The state of the last streamed action anchored at or below `height`, skipping actions of
+   * failed transactions, whose state is empty.
+   */
   function lastStateUpTo(received: ContractActionSubscriptionResponse[], height: number) {
     return received
       .map((msg) => ContractActionStateAtSchema.safeParse(msg.data?.contractActions).data)
-      .findLast((action) => action && action.stateAt.height <= height)?.state;
+      .findLast((action) => action && action.state !== '' && action.stateAt.height <= height)
+      ?.state;
   }
 
   describe('a subscription to contract action updates without parameters', () => {
