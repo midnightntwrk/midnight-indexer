@@ -51,7 +51,7 @@
 //! Docker, plus these images (see `NODE_VERSIONS` and the `*_TAG` overrides):
 //!
 //! - `midnight-node:1.0.300` -- ledger-8 chain-spec source.
-//! - `midnight-node:2.1.0-rc.4` + matching toolkit -- the migration node.
+//! - `midnight-node:2.1.100-rc.1` + matching toolkit -- the migration node.
 //! - `midnight-node-toolkit:1.0.300` -- ledger-8 toolkit for the pre-fork contract deploy
 //!   (`FROM_TOOLKIT_TAG`, paired with `FROM_NODE_TAG` unless overridden).
 //!
