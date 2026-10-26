@@ -318,17 +318,29 @@ where
     // Only include a zswap state Merkle tree collapsed update if there is a gap between the queried
     // index and the start index of the transaction.
     let zswap_collapsed_update = if index < transaction.zswap_start_index {
-        // Bound concurrent ledger-DB work (issue #595): hold a permit only around the Merkle-tree
-        // walk, so it is released before this transaction is yielded to the client.
+        // Bound concurrent ledger-DB work (issue #595): hold a permit only while building the
+        // Merkle-tree update, so it is released before this transaction is yielded to the client.
         let _ledger_permit = ledger_query_limiter.acquire().await;
+
+        // Read the highest ledger state after acquiring the permit: the wait for a permit is
+        // unbounded, so a key read before the wait may be garbage collected by the time the ledger
+        // state is loaded.
+        let (height, protocol_version, key) = storage
+            .get_highest_ledger_state()
+            .await
+            .map_err_into_server_error(|| "get highest ledger state")?
+            .some_or_server_error(|| "no ledger state available")?;
+
         let zswap_collapsed_update = ledger_state_cache
+            .at_least(height, &key, protocol_version)
+            .await
+            .map(|(ledger_state, _)| ledger_state)
+            .map_err_into_server_error(|| "load ledger state")?
             .make_zswap_collapsed_update(
                 index,
                 transaction.zswap_start_index - 1,
-                storage,
                 transaction.protocol_version,
             )
-            .await
             .map_err_into_server_error(|| "create zswap state Merkle tree collapsed update")?;
         Some(MerkleTreeCollapsedUpdate::from(zswap_collapsed_update))
     } else {
