@@ -24,7 +24,8 @@ runs:
           exit 0
         fi
         echo "Diffing $BASE_SHA...$HEAD_SHA"
-        if ! changed=$(git diff --name-only "$BASE_SHA"..."$HEAD_SHA"); then
+        # --no-renames lists both paths of a moved file, so a move into qa/ is not qa-only.
+        if ! changed=$(git diff --no-renames --name-only "$BASE_SHA"..."$HEAD_SHA"); then
           echo "::warning::Could not diff $BASE_SHA...$HEAD_SHA; treating as non-qa."
           echo "non_qa=true" >> "$GITHUB_OUTPUT"
           exit 0
