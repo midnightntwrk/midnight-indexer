@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - *(deps)* Bump rustls-webpki and webpki roots for emSign advisories (#1691)
 - *(.github/workflows)* Suffix the latest tag in per-arch image builds (#1690)
 - *(deps)* Resolve current RustSec advisories (#1700)
+- *(deps)* Bump zstd crates for RUSTSEC-2026-0391, -0398, -0403, -0410 (#1704)
 
 ## [4.3.800-rc.2] - 2026-10-07
 
