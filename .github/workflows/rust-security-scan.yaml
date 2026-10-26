@@ -28,7 +28,8 @@ on:
 jobs:
   # Detects whether the PR touches anything outside `qa/**`. A qa-only PR cannot change the Rust
   # dependency graph, so it skips the scan; a job skipped by `if` still satisfies the required
-  # check. Pushes to main and release branches always scan.
+  # check. Pushes to main and release branches always scan, and so does a PR whose detection
+  # fails, so a failed detection never passes as qa-only.
   changes:
     runs-on: ubuntu-latest
     outputs:
@@ -46,7 +47,7 @@ jobs:
   rust-security-scan:
     runs-on: ubuntu-latest
     needs: [changes]
-    if: needs.changes.outputs.non_qa == 'true'
+    if: ${{!cancelled() && needs.changes.outputs.non_qa != 'false'}}
 
     steps:
       - name: Checkout repository
