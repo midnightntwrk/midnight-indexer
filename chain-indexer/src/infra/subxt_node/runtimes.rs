@@ -559,7 +559,7 @@ mod tests {
     // indexer serves for its block 0.
     #[tokio::test]
     async fn genesis_block_of_devnet_runtime_1_0_300() {
-        let details = decode("devnet-0", "1.0.300").await.unwrap();
+        let details = decode("devnet-0", "1.0.400").await.unwrap();
         assert_eq!(
             summary(&details),
             [
@@ -598,7 +598,7 @@ mod tests {
 
     #[tokio::test]
     async fn registrations_block_of_devnet_runtime_1_0_300() {
-        let details = decode("devnet-2", "1.0.300").await.unwrap();
+        let details = decode("devnet-2", "1.0.400").await.unwrap();
         assert_eq!(
             summary(&details),
             [
@@ -614,7 +614,7 @@ mod tests {
 
     #[tokio::test]
     async fn midnight_transaction_block_of_devnet_runtime_1_0_300() {
-        let details = decode("devnet-8464", "1.0.300").await.unwrap();
+        let details = decode("devnet-8464", "1.0.400").await.unwrap();
         assert_eq!(
             summary(&details),
             [
@@ -647,7 +647,7 @@ mod tests {
 
         let mut checked = 0;
         for name in ["devnet-0", "devnet-2", "devnet-8464"] {
-            let details = decode(name, "1.0.300").await?;
+            let details = decode(name, "1.0.400").await?;
             for (_, transaction, outcome) in details.transactions {
                 use Transaction::*;
 
@@ -914,7 +914,7 @@ mod tests {
 
     const RUNTIMES: [(&str, u32); 5] = [
         ("0.22.0", 22_000),
-        ("1.0.300", 1_000_300),
+        ("1.0.400", 1_000_300),
         ("2.0.0-rc.4", 2_000_000),
         ("2.1.0-rc.4", 2_001_000),
         ("2.1.100-rc.1", 2_001_100),
