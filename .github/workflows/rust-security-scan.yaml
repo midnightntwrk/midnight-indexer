@@ -41,25 +41,7 @@ jobs:
 
       - name: Detect non-qa changes
         id: filter
-        env:
-          EVENT_NAME: ${{github.event_name}}
-          BASE_SHA: ${{github.event.pull_request.base.sha}}
-          HEAD_SHA: ${{github.event.pull_request.head.sha}}
-        run: |
-          if [ "$EVENT_NAME" != "pull_request" ]; then
-            echo "Non-PR event; running the scan."
-            echo "non_qa=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "Diffing $BASE_SHA...$HEAD_SHA"
-          changed=$(git diff --name-only "$BASE_SHA"..."$HEAD_SHA")
-          echo "Changed files:"
-          echo "$changed"
-          if echo "$changed" | grep -vE '^qa/' | grep -q .; then
-            echo "non_qa=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "non_qa=false" >> "$GITHUB_OUTPUT"
-          fi
+        uses: ./.github/actions/detect-non-qa-changes
 
   rust-security-scan:
     runs-on: ubuntu-latest

@@ -1,0 +1,35 @@
+name: Detect non-qa changes
+description: >-
+  Sets `non_qa` to 'true' when a pull request touches anything outside `qa/**`, and to
+  'false' when it only touches `qa/**`. Non-PR events always get 'true'. Needs a checkout
+  with `fetch-depth: 0`.
+outputs:
+  non_qa:
+    description: "'true' when files outside qa/ changed, 'false' otherwise"
+    value: ${{steps.filter.outputs.non_qa}}
+runs:
+  using: composite
+  steps:
+    - name: Detect non-qa changes
+      id: filter
+      shell: bash
+      env:
+        EVENT_NAME: ${{github.event_name}}
+        BASE_SHA: ${{github.event.pull_request.base.sha}}
+        HEAD_SHA: ${{github.event.pull_request.head.sha}}
+      run: |
+        if [ "$EVENT_NAME" != "pull_request" ]; then
+          echo "Non-PR event; treating as non-qa."
+          echo "non_qa=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        echo "Diffing $BASE_SHA...$HEAD_SHA"
+        changed=$(git diff --name-only "$BASE_SHA"..."$HEAD_SHA")
+        echo "Changed files:"
+        echo "$changed"
+        non_qa_files=$(grep -vE '^(qa/|$)' <<<"$changed" || true)
+        if [ -n "$non_qa_files" ]; then
+          echo "non_qa=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "non_qa=false" >> "$GITHUB_OUTPUT"
+        fi
