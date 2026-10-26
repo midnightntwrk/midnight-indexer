@@ -32,6 +32,8 @@ jobs:
   # fails, so a failed detection never passes as qa-only.
   changes:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       non_qa: ${{steps.filter.outputs.non_qa}}
     steps:
