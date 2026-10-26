@@ -320,8 +320,8 @@ impl Cursor {
 
     /// The cursor after streaming the given transaction.
     fn after(self, transaction: &domain::RegularTransaction) -> Self {
-        // The end index is "exclusive", i.e. the next free index; hence no +1 here!
         Self {
+            // Exclusive already: the next free zswap index.
             index: transaction.zswap_end_index,
             from_transaction_id: transaction.id + 1,
         }
