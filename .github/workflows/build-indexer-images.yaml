@@ -38,7 +38,7 @@ env:
 jobs:
   build-and-push:
     name: Build and push (${{ matrix.image.name }}, ${{ matrix.platform.arch }})
-    runs-on: ubuntu-latest-16-core-x64
+    runs-on: ${{ matrix.platform.runner }}
     permissions:
       packages: write
     strategy:
@@ -55,16 +55,18 @@ jobs:
             description: Midnight Indexer
           - name: spo-indexer
             description: Midnight SPO Indexer
-        # Each (image, arch) is an independent parallel job publishing an arch-suffixed tag.
-        # amd64 keeps the existing (warm) buildcache ref and builds natively; arm64 builds in
-        # parallel under QEMU. Neither blocks the other, and each -amd64/-arm64 tag is available
-        # as soon as that arch finishes. The downstream merge-manifests job then assembles the
-        # unsuffixed tag into a real multi-arch manifest referencing both arches.
+        # Each (image, arch) is an independent parallel job publishing an arch-suffixed tag, built
+        # natively on a runner of that arch (the same runner labels midnight-node uses). amd64 keeps
+        # the existing (warm) buildcache ref. Neither blocks the other, and each -amd64/-arm64 tag is
+        # available as soon as that arch finishes. The downstream merge-manifests job then assembles
+        # the unsuffixed tag into a real multi-arch manifest referencing both arches.
         platform:
           - arch: amd64
+            runner: ubuntu-latest-16-core-x64
             suffix: "-amd64"
             cache_scope: ""
           - arch: arm64
+            runner: ubuntu-latest-8-core-arm64
             suffix: "-arm64"
             cache_scope: "-arm64"
     steps:
@@ -116,12 +118,6 @@ jobs:
             org.opencontainers.image.source=https://github.com/midnightntwrk/midnight-indexer/
             org.opencontainers.image.title=${{ matrix.image.name }}
             org.opencontainers.image.description=${{ matrix.image.description }}
-
-      - name: Setup QEMU
-        if: matrix.platform.arch == 'arm64'
-        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
-        with:
-          image: tonistiigi/binfmt:qemu-v8.1.5
 
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
