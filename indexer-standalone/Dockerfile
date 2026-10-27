@@ -24,7 +24,7 @@ FROM chef AS builder
 SHELL ["/bin/bash", "-c"]
 ARG PROFILE=release
 COPY --from=planner /build/recipe.json recipe.json
-RUN cargo chef cook --profile $PROFILE --recipe-path recipe.json
+RUN cargo chef cook --locked --profile $PROFILE --recipe-path recipe.json
 COPY --from=auditable /usr/local/cargo/bin/cargo-auditable /usr/local/cargo/bin/
 COPY . .
 RUN cargo auditable build -p indexer-standalone --locked --features standalone --profile $PROFILE && \
