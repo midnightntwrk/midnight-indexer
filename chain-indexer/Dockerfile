@@ -29,7 +29,7 @@ RUN cargo auditable build -p chain-indexer --locked --features cloud --profile $
 
 FROM debian:trixie-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad AS runtime
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates=20250419 && \
+    apt-get install -y --no-install-recommends ca-certificates=20250419+deb13u1 && \
     rm -rf /var/lib/apt/lists/*
 RUN useradd -u 10001 -d /nonexistent -s /usr/sbin/nologin -M -c "" appuser && \
     passwd -l appuser && \
