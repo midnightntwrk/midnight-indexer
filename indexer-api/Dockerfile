@@ -45,7 +45,8 @@ RUN useradd -u 10001 -d /nonexistent -s /usr/sbin/nologin -M -c "" appuser && \
 # Root-owned, so the service can run and read these but not replace them; it only writes
 # to the directories created for it above.
 COPY --from=builder /runtime /
-USER appuser
+# appuser, by UID: Kubernetes runAsNonRoot can only verify a numeric user.
+USER 10001
 WORKDIR /opt/indexer-api
 ENTRYPOINT ["entrypoint.sh"]
 EXPOSE 8088
