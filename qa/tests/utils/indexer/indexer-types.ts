@@ -26,6 +26,15 @@ export type TransactionResponse = GraphQLResponse<{ transactions: Transaction[] 
 
 export type ContractActionResponse = GraphQLResponse<{ contractAction: ContractAction }>;
 
+/** A contract action streamed by CONTRACT_ACTIONS_WITH_HEIGHT_FROM_LATEST_BLOCK. */
+export type ContractActionWithHeightResponse = GraphQLResponse<{
+  contractActions: {
+    __typename: string;
+    address: string;
+    transaction: { hash: string; block: { height: number } };
+  };
+}>;
+
 export interface ZswapMerkleTreeCollapsedUpdateResult {
   startIndex: number;
   endIndex: number;
