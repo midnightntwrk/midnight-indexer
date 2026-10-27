@@ -36,8 +36,52 @@ env:
   CARGO_CHEF_VERSION: 0.1.78
 
 jobs:
+  # cargo-chef and cargo-auditable run inside every image build, but their locked dependencies are
+  # outside the workspace Cargo.lock that rust-security-scan checks. Check the exact pinned
+  # versions here, so an advisory against a build tool blocks image publishing, not pull requests.
+  check-build-tools:
+    name: Check build tools for advisories
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        with:
+          # Same pin as rust-security-scan; see the note there before bumping.
+          tool: cargo-deny@0.20.2
+
+      - name: Fetch the pinned build tools
+        run: |
+          for tool in "cargo-chef@$CARGO_CHEF_VERSION" "cargo-auditable@$CARGO_AUDITABLE_VERSION"; do
+            name=${tool%@*}
+            version=${tool#*@}
+            checksum=$(curl -fsSL -A "midnight-indexer-ci" "https://crates.io/api/v1/crates/$name/$version" |
+              jq -r .version.checksum)
+            curl -fsSL -o "$name.crate" "https://static.crates.io/crates/$name/$name-$version.crate"
+            echo "$checksum  $name.crate" | sha256sum -c -
+            mkdir "$name"
+            tar -xzf "$name.crate" -C "$name" --strip-components 1
+          done
+
+      - name: Run cargo-deny on their lockfiles
+        # --locked checks the Cargo.lock each crate ships, which is what `cargo install --locked`
+        # builds. -Aunmaintained matches rust-security-scan. Ignores are for build tools only;
+        # remove each once a pinned release ships a lockfile without it.
+        run: |
+          cat > build-tools-deny.toml <<'EOF'
+          [advisories]
+          ignore = [
+            { id = "RUSTSEC-2026-0190", reason = "anyhow 1.0.102 in cargo-chef 0.1.78's lockfile; cargo-chef never calls Error::downcast_mut, and no cargo-chef release locks anyhow >= 1.0.103 yet" },
+            { id = "RUSTSEC-2026-0204", reason = "crossbeam-epoch 0.9.18 in cargo-chef 0.1.78's lockfile, reached only through ignore's directory walker, which never formats Atomic/Shared pointers; no cargo-chef release locks >= 0.9.20 yet" },
+          ]
+          EOF
+          for name in cargo-chef cargo-auditable; do
+            cargo deny --manifest-path "$name/Cargo.toml" --locked --config build-tools-deny.toml \
+              check -Aunmaintained advisories
+          done
+
   build-and-push:
     name: Build and push (${{ matrix.image.name }}, ${{ matrix.platform.arch }})
+    needs: check-build-tools
     runs-on: ${{ matrix.platform.runner }}
     permissions:
       packages: write
