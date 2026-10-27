@@ -32,7 +32,17 @@ updates:
   - package-ecosystem: "docker"
     labels:
       - "bot:dependencies"
-    directory: "/"
+    # Each component keeps its Dockerfile in its own directory; "/" alone matches none of them.
+    # Only digest- or version-pinned images are bumped; the cargo-chef builder tag embeds
+    # $RUST_VERSION, so it is bumped by hand alongside rust-toolchain.toml.
+    directories:
+      - "/chain-indexer"
+      - "/indexer-api"
+      - "/indexer-standalone"
+      - "/indexer-tests"
+      - "/spo-indexer"
+      - "/wallet-indexer"
+      - "/qa/tests/utils/compact"
     schedule:
       interval: "weekly"
     cooldown:
