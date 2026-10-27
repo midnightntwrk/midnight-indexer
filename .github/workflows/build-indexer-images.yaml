@@ -33,7 +33,7 @@ env:
   # justfile reads this line for local image builds, so keep it a plain `key: value`.
   CARGO_AUDITABLE_VERSION: 0.7.7
   # Builds the cargo chef dependency layer. Pinned: bump deliberately; the justfile reads this too.
-  CARGO_CHEF_VERSION: 0.1.77
+  CARGO_CHEF_VERSION: 0.1.78
 
 jobs:
   build-and-push:
