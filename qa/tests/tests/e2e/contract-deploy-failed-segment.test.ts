@@ -200,6 +200,9 @@ describe
        * @given one deploy intent passed twice to send-intent
        * @when the built transaction is deserialized before submission
        * @then it carries two deploy actions, so a second, unapplicable deploy is really in it
+       *
+       * Both deploys come from the same intent, so they share one contract address: the count
+       * covers both deploys, and the one address stands for both.
        */
       test(
         'should carry two deploys of the same contract',
