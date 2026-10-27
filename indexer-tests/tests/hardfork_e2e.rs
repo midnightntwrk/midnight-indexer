@@ -50,9 +50,9 @@
 //!
 //! Docker, plus these images (see `NODE_VERSIONS` and the `*_TAG` overrides):
 //!
-//! - `midnight-node:1.0.0` -- ledger-8 chain-spec source.
+//! - `midnight-node:1.0.300` -- ledger-8 chain-spec source.
 //! - `midnight-node:2.1.0-rc.4` + matching toolkit -- the migration node.
-//! - `midnight-node-toolkit:1.0.0` -- ledger-8 toolkit for the pre-fork contract deploy
+//! - `midnight-node-toolkit:1.0.300` -- ledger-8 toolkit for the pre-fork contract deploy
 //!   (`FROM_TOOLKIT_TAG`, paired with `FROM_NODE_TAG` unless overridden).
 //!
 //! Ignored by default: it pulls/boots containers and takes a few minutes. It runs
@@ -90,7 +90,7 @@ use tokio::{
 };
 
 /// Ledger-8 node whose `dev` preset provides the fork-from chain-spec.
-const FROM_NODE_TAG: &str = "1.0.0";
+const FROM_NODE_TAG: &str = "1.0.300";
 
 /// Genesis-funded dev wallet the test transacts from.
 const SOURCE_SEED: &str = "0000000000000000000000000000000000000000000000000000000000000001";
