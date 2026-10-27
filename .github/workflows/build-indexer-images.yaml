@@ -41,6 +41,8 @@ jobs:
     runs-on: ${{ matrix.platform.runner }}
     permissions:
       packages: write
+    env:
+      PROFILE: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || inputs.profile || 'dev' }}
     strategy:
       fail-fast: false
       matrix:
@@ -122,28 +124,83 @@ jobs:
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
-      - name: Build and push Docker Image
+      # Build into the local Docker daemon and check the image before anything is published. The
+      # push below then rebuilds from this builder's cache, so the image is only built once.
+      - name: Build Docker Image for checks
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        env:
-          PROFILE: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || inputs.profile || 'dev' }}
         with:
           context: .
           file: ./${{ matrix.image.name }}/Dockerfile
-          push: true
-          build-args: |
+          # Export the image to the runner's Docker daemon (`buildx build --load`) instead of
+          # leaving it in the BuildKit container, so syft can read it as docker:<tag>. Not pushed:
+          # `local/` below is only a tag name. Works because each job builds a single platform.
+          load: true
+          # Anchored here and reused by the push step below, so both builds match and share a cache.
+          build-args: &build-args |
             PROFILE=${{ env.PROFILE }}
             RUST_VERSION=${{ env.TOOLCHAIN }}
             CARGO_AUDITABLE_VERSION=${{ env.CARGO_AUDITABLE_VERSION }}
             CARGO_CHEF_VERSION=${{ env.CARGO_CHEF_VERSION }}
           platforms: linux/${{ matrix.platform.arch }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: |
+          tags: local/${{ matrix.image.name }}:check
+          cache-from: &cache-from |
             type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.image.name }}:buildcache${{ matrix.platform.cache_scope }}
             type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.image.name }}:buildcache-${{ env.PROFILE }}${{ matrix.platform.cache_scope }}
+
+      - name: Install Syft
+        id: syft
+        uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+
+      # The point of building with cargo auditable: an image scanner must see the binary's crates.
+      - name: Check the image SBOM lists the Rust crates
+        env:
+          SYFT: ${{ steps.syft.outputs.cmd }}
+          IMAGE: local/${{ matrix.image.name }}:check
+        run: |
+          "$SYFT" scan "docker:$IMAGE" -o syft-json=sbom.syft.json
+          crates=$(jq '[.artifacts[] | select(.type == "rust-crate")] | length' sbom.syft.json)
+          echo "syft found $crates Rust crates in $IMAGE"
+          if [ "$crates" -eq 0 ]; then
+            echo "::error::syft found no Rust crates in $IMAGE; its cargo auditable data is missing or unreadable"
+            exit 1
+          fi
+
+      - name: Build and push Docker Image
+        id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ./${{ matrix.image.name }}/Dockerfile
+          push: true
+          build-args: *build-args
+          platforms: linux/${{ matrix.platform.arch }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: *cache-from
           cache-to: |
             type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.image.name }}:buildcache${{ matrix.platform.cache_scope }},mode=max
             type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.image.name }}:buildcache-${{ env.PROFILE }}${{ matrix.platform.cache_scope }},mode=max
+
+      # The check above scanned the local build, whose digest differs from the published image
+      # (labels, attestations). Record the SBOM of what was actually pushed, by digest, so the
+      # artifact can be matched to the image. Every target registry receives the same digest.
+      # Informational only (the gate is the check before the push): the image is already
+      # published, so a failure here must not fail the job and hold back merge-manifests.
+      - name: Generate SBOM for the published image
+        continue-on-error: true
+        env:
+          SYFT: ${{ steps.syft.outputs.cmd }}
+          IMAGE: ghcr.io/midnightntwrk/${{ matrix.image.name }}@${{ steps.push.outputs.digest }}
+          PLATFORM: linux/${{ matrix.platform.arch }}
+        run: |
+          "$SYFT" scan "registry:$IMAGE" --platform "$PLATFORM" -o spdx-json=sbom.spdx.json
+
+      - name: Upload SBOM
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom-${{ matrix.image.name }}-${{ matrix.platform.arch }}
+          path: sbom.spdx.json
 
   merge-manifests:
     name: Merge multi-arch manifest (${{ matrix.image.name }})
