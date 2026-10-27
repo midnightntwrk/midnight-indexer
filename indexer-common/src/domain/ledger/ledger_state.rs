@@ -2809,6 +2809,7 @@ mod tests {
             ledger_db::init(ledger_db::Config {
                 cache_max_nodes: 1_024,
                 cnn_url: sqlite_ledger_db_file,
+                create_if_missing: true,
             })
             .await
             .expect("ledger DB can be initialized");
@@ -2991,6 +2992,7 @@ mod tests {
             ledger_db::init(ledger_db::Config {
                 cache_max_nodes: 1_024,
                 cnn_url: sqlite_ledger_db_file,
+                create_if_missing: true,
             })
             .await
             .expect("ledger DB can be initialized");
@@ -3131,6 +3133,7 @@ mod tests {
             ledger_db::init(ledger_db::Config {
                 cache_max_nodes: 1_024,
                 cnn_url: sqlite_ledger_db_file,
+                create_if_missing: true,
             })
             .await
             .expect("ledger DB can be initialized");
@@ -3580,6 +3583,7 @@ mod tests {
         ledger_db::init(ledger_db::Config {
             cache_max_nodes: 1_024,
             cnn_url: sqlite_ledger_db_file,
+            create_if_missing: true,
         })
         .await
         .context("init ledger db")?;
@@ -4359,6 +4363,7 @@ mod root_count_repair_tests {
         ledger_db::init(ledger_db::Config {
             cache_max_nodes: 1_024,
             cnn_url,
+            create_if_missing: true,
         })
         .await
         .context("init ledger DB")?;
