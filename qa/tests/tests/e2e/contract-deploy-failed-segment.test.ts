@@ -27,6 +27,7 @@ import {
   type DeployContractResult,
   type DuplicateDeployResult,
 } from '@utils/toolkit/toolkit-wrapper';
+import { sameHash } from './test-utils';
 
 const TOOLKIT_STARTUP_TIMEOUT = 300_000;
 const CRAFT_TIMEOUT = 900_000;
@@ -42,11 +43,6 @@ const POLL_MS = 3_000;
 const BLOCKS_PAST_TX_BLOCK = 3;
 // How far past the pre-submission height the transaction's block is looked for.
 const BLOCK_SEARCH_DEPTH = 40;
-
-function sameHash(a: string | undefined, b: string | undefined): boolean {
-  const n = (h: string | undefined) => (h ?? '').trim().toLowerCase().replace(/^0x/, '');
-  return n(a) !== '' && n(a) === n(b);
-}
 
 function majorVersion(version: string): string {
   return version.trim().replace(/^v/, '').split('.')[0];
