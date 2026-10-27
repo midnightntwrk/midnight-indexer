@@ -26,6 +26,9 @@ import log from '@utils/logging/logger';
  */
 export class NonRetryableError extends Error {}
 
+/** Resolves after `ms` milliseconds. */
+export const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 /**
  * Options for configuring retry behavior
  */
@@ -122,7 +125,7 @@ export async function retry<T>(fn: () => Promise<T>, options: RetryOptions = {})
         log.warn(`${attemptMessage}\n${errorMessage}\n${retryMessage}`);
 
         // Wait before the next attempt (this is why the function must be async)
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        await sleep(delayMs);
       }
     }
   }

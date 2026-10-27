@@ -13,6 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import { CONTRACT_ACTION_STATE_AT_BODY } from './contract-queries';
+
 export const TRANSACTION_RESULT_BODY_FRAGMENT = `     status
       segments {
         id
@@ -96,5 +98,14 @@ export const TRANSACTION_BODY_FRAGMENT = `   ${REGULAR_TRANSACTION_FRAGMENT}
 export const GET_TRANSACTION_BY_OFFSET = `query GetTransactionByOffset($OFFSET: TransactionOffset!){
   transactions(offset: $OFFSET){
     ${TRANSACTION_BODY_FRAGMENT}
+  }
+}`;
+
+export const GET_TRANSACTION_CONTRACT_ACTIONS_STATE_AT = `query GetTransactionContractActionsStateAt($OFFSET: TransactionOffset!) {
+  transactions(offset: $OFFSET) {
+    hash
+    contractActions {
+      ${CONTRACT_ACTION_STATE_AT_BODY}
+    }
   }
 }`;
