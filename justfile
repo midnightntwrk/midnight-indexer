@@ -5,6 +5,7 @@ feature := "cloud"
 packages := "indexer-common chain-indexer wallet-indexer indexer-api spo-indexer indexer-standalone indexer-tests"
 rust_version := `grep channel rust-toolchain.toml | sed -r 's/channel = "(.*)"/\1/'`
 latest_node_version := `tail -n 1 NODE_VERSIONS`
+cargo_auditable_version := `grep -E '^\s+CARGO_AUDITABLE_VERSION:' .github/workflows/build-indexer-images.yaml | sed -E 's/.*: *//'`
 
 check:
     for package in {{packages}}; do \
@@ -84,6 +85,7 @@ build-docker-image package profile="dev":
     docker build \
         --build-arg "RUST_VERSION={{rust_version}}" \
         --build-arg "PROFILE={{profile}}" \
+        --build-arg "CARGO_AUDITABLE_VERSION={{cargo_auditable_version}}" \
         -t midnightntwrk/{{package}}:${tag} \
         -t midnightntwrk/{{package}}:latest \
         -f {{package}}/Dockerfile \

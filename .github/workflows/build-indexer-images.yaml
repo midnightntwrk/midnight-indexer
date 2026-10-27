@@ -28,6 +28,11 @@ concurrency:
   group: build-indexer-images
   cancel-in-progress: false
 
+env:
+  # Embeds the crate list in every binary for image scanners. Pinned: bump deliberately. The
+  # justfile reads this line for local image builds, so keep it a plain `key: value`.
+  CARGO_AUDITABLE_VERSION: 0.7.7
+
 jobs:
   build-and-push:
     name: Build and push (${{ matrix.image.name }}, ${{ matrix.platform.arch }})
@@ -130,6 +135,7 @@ jobs:
           build-args: |
             PROFILE=${{ env.PROFILE }}
             RUST_VERSION=${{ env.TOOLCHAIN }}
+            CARGO_AUDITABLE_VERSION=${{ env.CARGO_AUDITABLE_VERSION }}
           platforms: linux/${{ matrix.platform.arch }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
