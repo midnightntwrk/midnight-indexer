@@ -27,7 +27,7 @@ RUN cargo auditable build -p chain-indexer --locked --features cloud --profile $
     mkdir -p /runtime/opt/chain-indexer && \
     mv /build/chain-indexer/config.yaml /runtime/opt/chain-indexer
 
-FROM debian:trixie-slim@sha256:f6e2cfac5cf956ea044b4bd75e6397b4372ad88fe00908045e9a0d21712ae3ba AS runtime
+FROM debian:trixie-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad AS runtime
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates=20250419 && \
     rm -rf /var/lib/apt/lists/*

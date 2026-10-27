@@ -27,7 +27,7 @@ RUN cargo auditable build -p indexer-standalone --locked --features standalone -
     mkdir -p /runtime/opt/indexer-standalone && \
     mv /build/indexer-standalone/config.yaml /runtime/opt/indexer-standalone
 
-FROM debian:trixie-slim@sha256:f6e2cfac5cf956ea044b4bd75e6397b4372ad88fe00908045e9a0d21712ae3ba AS runtime
+FROM debian:trixie-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad AS runtime
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates=20250419 && \
     rm -rf /var/lib/apt/lists/*
