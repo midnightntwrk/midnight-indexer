@@ -32,6 +32,8 @@ env:
   # Embeds the crate list in every binary for image scanners. Pinned: bump deliberately. The
   # justfile reads this line for local image builds, so keep it a plain `key: value`.
   CARGO_AUDITABLE_VERSION: 0.7.7
+  # Builds the cargo chef dependency layer. Pinned: bump deliberately; the justfile reads this too.
+  CARGO_CHEF_VERSION: 0.1.77
 
 jobs:
   build-and-push:
@@ -136,6 +138,7 @@ jobs:
             PROFILE=${{ env.PROFILE }}
             RUST_VERSION=${{ env.TOOLCHAIN }}
             CARGO_AUDITABLE_VERSION=${{ env.CARGO_AUDITABLE_VERSION }}
+            CARGO_CHEF_VERSION=${{ env.CARGO_CHEF_VERSION }}
           platforms: linux/${{ matrix.platform.arch }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

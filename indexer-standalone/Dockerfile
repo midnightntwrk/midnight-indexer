@@ -1,10 +1,20 @@
+FROM rust:1.98.1-trixie@sha256:a8a5f0a1e5fe7dfe1d352591e4a1c7dd2c08fd70475cae872cf3458ba0df0546 AS toolchain
 ARG RUST_VERSION
-FROM lukemathwalker/cargo-chef:0.1.77-rust-$RUST_VERSION-trixie AS chef
+# cargo chef cook runs before rust-toolchain.toml is copied in, so the image's Rust must match it.
+RUN test "$(rustc --version | cut -d ' ' -f 2)" = "${RUST_VERSION:?build arg required}" || \
+    { echo "image has $(rustc --version), rust-toolchain.toml wants ${RUST_VERSION}" >&2; exit 1; }
+
+FROM toolchain AS chef
+ARG CARGO_CHEF_VERSION
+RUN cargo install cargo-chef --locked --version "${CARGO_CHEF_VERSION:?build arg required}" && \
+    rm -rf "$CARGO_HOME/registry"
 WORKDIR /build
 
-FROM chef AS auditable
+# Built from toolchain, not chef, so bumping either tool leaves the other's layer cached.
+FROM toolchain AS auditable
 ARG CARGO_AUDITABLE_VERSION
-RUN cargo install cargo-auditable --locked --version "${CARGO_AUDITABLE_VERSION:?build arg required}"
+RUN cargo install cargo-auditable --locked --version "${CARGO_AUDITABLE_VERSION:?build arg required}" && \
+    rm -rf "$CARGO_HOME/registry"
 
 FROM chef AS planner
 COPY . .
