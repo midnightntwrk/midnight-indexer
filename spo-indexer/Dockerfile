@@ -45,7 +45,9 @@ RUN useradd -u 10001 -d /nonexistent -s /usr/sbin/nologin -M -c "" appuser && \
     passwd -l appuser && \
     mkdir /var/run/spo-indexer && \
     chown appuser:appuser /var/run/spo-indexer
-COPY --from=builder --chown=appuser:appuser /runtime /
+# Root-owned, so the service can run and read these but not replace them; it only writes
+# to the directories created for it above.
+COPY --from=builder /runtime /
 USER appuser
 WORKDIR /opt/spo-indexer
 ENTRYPOINT ["entrypoint.sh"]

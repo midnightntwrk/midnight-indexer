@@ -39,7 +39,9 @@ RUN useradd -u 10001 -d /nonexistent -s /usr/sbin/nologin -M -c "" appuser && \
     passwd -l appuser && \
     mkdir /var/run/indexer-tests && \
     chown appuser:appuser /var/run/indexer-tests
-COPY --from=builder --chown=appuser:appuser /runtime /
+# Root-owned, so the service can run and read these but not replace them; it only writes
+# to the directories created for it above.
+COPY --from=builder /runtime /
 USER appuser
 WORKDIR /opt/indexer-tests
 ENTRYPOINT ["indexer-tests"]
