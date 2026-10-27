@@ -200,6 +200,10 @@ jobs:
         id: syft
         uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
 
+      - name: Install Grype
+        id: grype
+        uses: anchore/scan-action/download-grype@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+
       # The point of building with cargo auditable: an image scanner must see the binary's crates.
       - name: Check the image SBOM lists the Rust crates
         env:
@@ -213,6 +217,15 @@ jobs:
             echo "::error::syft found no Rust crates in $IMAGE; its cargo auditable data is missing or unreadable"
             exit 1
           fi
+
+      # Scan what would ship, before it ships. Only vulnerabilities with a fix fail the build:
+      # an unfixed one in the Debian base can only be waited out. Accepted findings go in a
+      # .grype.yaml at the repository root, with the reason and when to remove them.
+      - name: Scan the image SBOM for vulnerabilities
+        env:
+          GRYPE: ${{ steps.grype.outputs.cmd }}
+        run: |
+          "$GRYPE" sbom:sbom.syft.json --fail-on high --only-fixed
 
       - name: Build and push Docker Image
         id: push
