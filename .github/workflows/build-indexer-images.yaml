@@ -38,7 +38,8 @@ env:
 jobs:
   # cargo-chef and cargo-auditable run inside every image build, but their locked dependencies are
   # outside the workspace Cargo.lock that rust-security-scan checks. Check the exact pinned
-  # versions here, so an advisory against a build tool blocks image publishing, not pull requests.
+  # versions here. No job waits on this one, so an advisory fails the run without holding back
+  # image publishing while a tool bump or an ignore is prepared.
   check-build-tools:
     name: Check build tools for advisories
     runs-on: ubuntu-latest
@@ -83,7 +84,6 @@ jobs:
 
   build-and-push:
     name: Build and push (${{ matrix.image.name }}, ${{ matrix.platform.arch }})
-    needs: check-build-tools
     runs-on: ${{ matrix.platform.runner }}
     permissions:
       packages: write
