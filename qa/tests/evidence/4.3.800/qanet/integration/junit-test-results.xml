@@ -1,790 +1,450 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<testsuites name="vitest tests" tests="303" failures="1" errors="0" time="506.401656046">
-    <testsuite name="tests/integration/basic/queries/block-queries.test.ts" timestamp="2026-10-16T15:36:26.295Z" hostname="alex-laptop-2.local" tests="23" failures="0" errors="0" skipped="3" time="4.185962834">
-        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="block queries &gt; a block query without parameters &gt; should return the latest known block" time="0.41560575">
+<testsuites name="vitest tests" tests="197" failures="1" errors="0" time="699.985136249">
+    <testsuite name="tests/integration/basic/queries/block-queries.test.ts" timestamp="2026-10-27T13:50:39.431Z" hostname="alex-laptop-2.local" tests="20" failures="0" errors="0" skipped="0" time="5.2315185">
+        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="block queries &gt; a block query without parameters &gt; should return the latest known block" time="0.423068791">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="block queries &gt; a block query without parameters &gt; should respond with a block according to the requested schema" time="0.210658167">
+        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="block queries &gt; a block query without parameters &gt; should respond with a block according to the requested schema" time="0.222704958">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="block queries &gt; a block query by hash &gt; should return the block with that hash, given that block exists" time="0.167349416">
+        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="block queries &gt; a block query by hash &gt; should return the block with that hash, given that block exists" time="0.14622775">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="block queries &gt; a block query by hash &gt; should return blocks according to the requested schema" time="0.16642725">
+        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="block queries &gt; a block query by hash &gt; should return blocks according to the requested schema" time="0.159104291">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="block queries &gt; a block query by hash &gt; should return a null block, given a block with that hash doesn&apos;t exist" time="0.0914845">
+        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="block queries &gt; a block query by hash &gt; should return a null block, given a block with that hash doesn&apos;t exist" time="0.067307709">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="block queries &gt; a block query by hash &gt; should return an error, when the hash is invalid (malformed)" time="0.392044">
+        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="block queries &gt; a block query by hash &gt; should return an error, when the hash is invalid (malformed)" time="0.327520208">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="block queries &gt; a block query by height &gt; should return the block with that height, given a valid height" time="0.167142709">
+        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="block queries &gt; a block query by height &gt; should return the block with that height, given a valid height" time="0.147432833">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="block queries &gt; a block query by height &gt; should return a blocks according to the requested schema" time="0.165512416">
+        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="block queries &gt; a block query by height &gt; should return a blocks according to the requested schema" time="0.1627715">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="block queries &gt; a block query by height &gt; should return the genesis block, given height=0 is requested" time="0.351659875">
+        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="block queries &gt; a block query by height &gt; should return the genesis block, given height=0 is requested" time="0.619394209">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="block queries &gt; a block query by height &gt; should return an empty body answer, given that block height requested is the maximum available height" time="0.078533458">
+        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="block queries &gt; a block query by height &gt; should return an empty body answer, given that block height requested is the maximum available height" time="0.070808084">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="block queries &gt; a block query by height &gt; should return an error, given an invalid height" time="0.2370295">
+        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="block queries &gt; a block query by height &gt; should return an error, given an invalid height" time="0.215699459">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="block queries &gt; a block query by height and hash &gt; should return an error, as only one parameter at a time can be used" time="0.349238084">
+        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="block queries &gt; a block query by height and hash &gt; should return an error, as only one parameter at a time can be used" time="0.3487875">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="block queries &gt; block-level tree end indexes &gt; should return non-negative integers for all three tree end index fields" time="0.096155709">
+        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="block queries &gt; block-level tree end indexes &gt; should return non-negative integers for all three tree end index fields" time="0.095149625">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="block queries &gt; block-level tree end indexes &gt; should return non-decreasing tree end indexes from parent to child block" time="0.168969916">
+        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="block queries &gt; block-level tree end indexes &gt; should return non-decreasing tree end indexes from parent to child block" time="0.163164333">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="block queries &gt; per-block dust merkle tree roots &gt; should return different dust generation roots for blocks with different tree sizes" time="0.073843708">
-            <skipped/>
+        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="genesis block &gt; a block query to the genesis block &gt; should contain transactions with pre-fund wallet utxos" time="0.6961315">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="block queries &gt; per-block dust merkle tree roots &gt; should return identical dust roots for repeated queries of the same block" time="0.064388708">
-            <skipped/>
+        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="genesis block &gt; a block query to the genesis block &gt; should contain utxos related to exactly 4 pre-fund wallets" time="0.289452083">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="block queries &gt; per-block dust merkle tree roots &gt; should return equal dust generation roots for parent and child with equal tree sizes" time="0.077039875">
-            <skipped/>
+        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="genesis block &gt; a block query to the genesis block &gt; should contain utxos with exactly 1 token type" time="0.313131917">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="genesis block &gt; a block query to the genesis block &gt; should contain transactions with pre-fund wallet utxos" time="0.196796875">
+        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="genesis block &gt; a block query to the genesis block &gt; should contain utxos sorted by outputIndex in ascending order" time="0.274422708">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="genesis block &gt; a block query to the genesis block &gt; should contain utxos related to exactly 4 pre-fund wallets" time="0.138311">
+        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="genesis block &gt; a block query to the genesis block &gt; should contain valid index ranges on regular transactions" time="0.251377833">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="genesis block &gt; a block query to the genesis block &gt; should contain utxos with exactly 1 token type" time="0.160428417">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="genesis block &gt; a block query to the genesis block &gt; should contain utxos sorted by outputIndex in ascending order" time="0.136155458">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="genesis block &gt; a block query to the genesis block &gt; should contain valid index ranges on regular transactions" time="0.127481292">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="genesis block &gt; a block query to the genesis block &gt; should return block-level end indexes &gt;= max RegularTransaction end indexes" time="0.150952">
+        <testcase classname="tests/integration/basic/queries/block-queries.test.ts" name="genesis block &gt; a block query to the genesis block &gt; should return block-level end indexes &gt;= max RegularTransaction end indexes" time="0.235730625">
         </testcase>
     </testsuite>
-    <testsuite name="tests/integration/basic/queries/bridge-pool-queries.test.ts" timestamp="2026-10-16T15:36:26.298Z" hostname="alex-laptop-2.local" tests="18" failures="0" errors="0" skipped="18" time="0.357689584">
-        <testcase classname="tests/integration/basic/queries/bridge-pool-queries.test.ts" name="bridge pool queries &gt; bridgePoolSummary &gt; should return zero pool totals when no reserve or treasury events are indexed" time="0.00105175">
-            <skipped/>
+    <testsuite name="tests/integration/basic/queries/contract-queries.test.ts" timestamp="2026-10-27T13:50:39.435Z" hostname="alex-laptop-2.local" tests="25" failures="1" errors="0" skipped="0" time="5.026678292">
+        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address &gt; should return success as they are valid contract addresses" time="0.609854333">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/bridge-pool-queries.test.ts" name="bridge pool queries &gt; bridgePoolSummary &gt; should expose lastEventBlockHeight as a positive integer where bridge events exist" time="0.000216333">
-            <skipped/>
+        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address &gt; should return the most recent action for a contract with multiple actions" time="0.09656275">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/bridge-pool-queries.test.ts" name="bridge pool queries &gt; bridgePoolSummary &gt; should return an empty snapshot when atBlock predates all bridge events" time="0.000156666">
-            <skipped/>
+        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address &gt; should return null when contract with that address does not exist" time="0.074885875">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/bridge-pool-queries.test.ts" name="bridge pool queries &gt; bridgePoolSummary &gt; should set reserveTotal to the cumulative sum of ReserveTransfer amounts" time="0">
-            <skipped/>
+        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address &gt; should return an error for malformed addresses" time="1.413705417">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/bridge-pool-queries.test.ts" name="bridge pool queries &gt; bridgePoolSummary &gt; should aggregate treasury inflows separately by INVALID and UNAPPROVED reason" time="0">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/bridge-pool-queries.test.ts" name="bridge pool queries &gt; bridgePoolSummary &gt; should accumulate more pool inflow at a later atBlock than an earlier one" time="0">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/bridge-pool-queries.test.ts" name="bridge pool queries &gt; bridgePoolSummary &gt; should count SubminimalFlushTransfer.count in subminimumTxCount" time="0">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/bridge-pool-queries.test.ts" name="bridge pool queries &gt; bridgePoolSummary &gt; should aggregate UnapprovedTransfer amounts under UNAPPROVED treasury reason" time="0">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/bridge-pool-queries.test.ts" name="bridge pool queries &gt; bridgeReserveInflows &gt; should return an empty list when no ReserveTransfer events are indexed" time="0.000154167">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/bridge-pool-queries.test.ts" name="bridge pool queries &gt; bridgeReserveInflows &gt; should return ReserveTransfer events within the specified block range" time="0">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/bridge-pool-queries.test.ts" name="bridge pool queries &gt; bridgeReserveInflows &gt; should return events with correct BridgeReserveTransfer field shape" time="0">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/bridge-pool-queries.test.ts" name="bridge pool queries &gt; bridgeReserveInflows &gt; should paginate ReserveTransfer events with offset and limit" time="0">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/bridge-pool-queries.test.ts" name="bridge pool queries &gt; bridgeTreasuryInflows &gt; should return an empty list when no treasury-redirected events are indexed" time="0.000095917">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/bridge-pool-queries.test.ts" name="bridge pool queries &gt; bridgeTreasuryInflows &gt; should return all treasury event types when no reason filter is given" time="0">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/bridge-pool-queries.test.ts" name="bridge pool queries &gt; bridgeTreasuryInflows &gt; should return only BridgeInvalidTransfer when reason=INVALID" time="0">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/bridge-pool-queries.test.ts" name="bridge pool queries &gt; bridgeTreasuryInflows &gt; should respect blockHeightFrom and blockHeightTo filters for treasury inflows" time="0">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/bridge-pool-queries.test.ts" name="bridge pool queries &gt; bridgeTreasuryInflows &gt; should return only BridgeUnapprovedTransfer when reason=UNAPPROVED" time="0">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/bridge-pool-queries.test.ts" name="bridge pool queries &gt; bridgeTreasuryInflows &gt; should return only BridgeSubminimalFlushTransfer when reason=SUBMINIMAL_FLUSH" time="0">
-            <skipped/>
-        </testcase>
-    </testsuite>
-    <testsuite name="tests/integration/basic/queries/bridge-queries.test.ts" timestamp="2026-10-16T15:36:26.299Z" hostname="alex-laptop-2.local" tests="15" failures="0" errors="0" skipped="15" time="0.320241625">
-        <testcase classname="tests/integration/basic/queries/bridge-queries.test.ts" name="bridge queries &gt; bridgeEvents &gt; should return an empty list for a recipient address with no bridge activity" time="0.000904375">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/bridge-queries.test.ts" name="bridge queries &gt; bridgeEvents &gt; should return events with the correct shape for BridgeUserTransfer" time="0.00021875">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/bridge-queries.test.ts" name="bridge queries &gt; bridgeEvents &gt; should return only events for the specified recipient address" time="0.000161708">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/bridge-queries.test.ts" name="bridge queries &gt; bridgeEvents &gt; should return events of the known variant types present on chain" time="0.000200458">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/bridge-queries.test.ts" name="bridge queries &gt; bridgeEvents &gt; should paginate results with offset and limit" time="0.000127125">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/bridge-queries.test.ts" name="bridge queries &gt; bridgeEvents &gt; should return only UserTransfer events when filtered by variant USER_TRANSFER" time="0.000089583">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/bridge-queries.test.ts" name="bridge queries &gt; bridgeEvents &gt; should reject a malformed recipient with a GraphQL error" time="0.000142125">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/bridge-queries.test.ts" name="bridge queries &gt; claims via unshieldedTransactions &gt; should surface a BridgeClaimTransaction (recipient, amount) via unshieldedTransactions for a claim recipient" time="0">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/bridge-queries.test.ts" name="bridge queries &gt; bridgeBalance &gt; should return zero balance for an address with no bridge activity" time="0.000129">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/bridge-queries.test.ts" name="bridge queries &gt; bridgeBalance &gt; should return zero balance once an address has fully claimed" time="0.000286791">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/bridge-queries.test.ts" name="bridge queries &gt; bridgeBalance &gt; should set deposited to the sum of UserTransfer amounts for the address" time="0.000212667">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/bridge-queries.test.ts" name="bridge queries &gt; bridgeBalance &gt; should reflect a non-zero remaining-claimable balance after a partial claim" time="0">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/bridge-queries.test.ts" name="bridge queries &gt; bridgeDeposits &gt; should return an empty list for an address with no deposits" time="0.00008525">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/bridge-queries.test.ts" name="bridge queries &gt; bridgeDeposits &gt; should return only UserTransfer events by default (excludes UnapprovedTransfer)" time="0.000077791">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/bridge-queries.test.ts" name="bridge queries &gt; bridgeDeposits &gt; should include UnapprovedTransfer events when includeUnapproved=true" time="0.0000765">
-            <skipped/>
-        </testcase>
-    </testsuite>
-    <testsuite name="tests/integration/basic/queries/contract-event-queries.test.ts" timestamp="2026-10-16T15:36:26.300Z" hostname="alex-laptop-2.local" tests="19" failures="0" errors="0" skipped="19" time="0.317790292">
-        <testcase classname="tests/integration/basic/queries/contract-event-queries.test.ts" name="contract event queries &gt; the contract event GraphQL schema &gt; should expose ContractEvent as an interface with the common fields" time="0.001080167">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-event-queries.test.ts" name="contract event queries &gt; the contract event GraphQL schema &gt; should expose all eleven concrete contract event types" time="0.000262542">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-event-queries.test.ts" name="contract event queries &gt; the contract event GraphQL schema &gt; should expose the ContractEventType enum with eleven variants" time="0.000215917">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-event-queries.test.ts" name="contract event queries &gt; the contract event GraphQL schema &gt; should expose the ContractEventFilter input fields" time="0.00021">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-event-queries.test.ts" name="contract event queries &gt; the contract event GraphQL schema &gt; should expose the FieldPrefixFilter input fields" time="0.00011925">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-event-queries.test.ts" name="contract event queries &gt; a contract events query for an address with no emitted events &gt; should return an empty list" time="0.000114209">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-event-queries.test.ts" name="contract event queries &gt; a contract events query for an address with no emitted events &gt; should return an empty list when filtered by event types" time="0.000201958">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-event-queries.test.ts" name="contract event queries &gt; a contract events query for an address with no emitted events &gt; should return an empty list when filtered by a block range" time="0.0000995">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-event-queries.test.ts" name="contract event queries &gt; a contract events query for an address with no emitted events &gt; should return an empty list when filtered by valid field prefixes" time="0.000367375">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-event-queries.test.ts" name="contract event queries &gt; a contract events query with an invalid filter &gt; should return an error when the contract address is empty" time="0.00013925">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-event-queries.test.ts" name="contract event queries &gt; a contract events query with an invalid filter &gt; should return an error for malformed contract addresses" time="0.000099708">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-event-queries.test.ts" name="contract event queries &gt; a contract events query with an invalid filter &gt; should return an error for an unknown field prefix field name" time="0.0000905">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-event-queries.test.ts" name="contract event queries &gt; a contract events query with an invalid filter &gt; should return an error when a field prefix is not hex" time="0.000074041">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-event-queries.test.ts" name="contract event queries &gt; a contract events query for a contract with emitted events &gt; should return events conforming to the contract event schema" time="0.000113042">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-event-queries.test.ts" name="contract event queries &gt; a contract events query for a contract with emitted events &gt; should return only events of the requested type when filtered" time="0.000116458">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-event-queries.test.ts" name="contract event queries &gt; a contract events query for a contract with emitted events &gt; should filter events by a prefix of an indexed field value" time="0.000228791">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-event-queries.test.ts" name="contract event queries &gt; a contract events query for a contract with emitted events &gt; should combine multiple field prefixes with AND semantics" time="0.00013125">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-event-queries.test.ts" name="contract event queries &gt; a contract events query for a contract with emitted events &gt; should return only events carrying the field for an empty prefix" time="0.0001085">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-event-queries.test.ts" name="contract event queries &gt; a contract events query for a contract with emitted events &gt; should reach every event through each of its indexed fields" time="0.000122583">
-            <skipped/>
-        </testcase>
-    </testsuite>
-    <testsuite name="tests/integration/basic/queries/contract-queries.test.ts" timestamp="2026-10-16T15:36:26.302Z" hostname="alex-laptop-2.local" tests="27" failures="1" errors="0" skipped="1" time="5.970044792">
-        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address &gt; should return success as they are valid contract addresses" time="0.598370833">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address &gt; should return the most recent action for a contract with multiple actions" time="0.587992042">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address &gt; should return null when contract with that address does not exist" time="0.074614792">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address &gt; should return an error for malformed addresses" time="1.224181292">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address &gt; should return non-empty unshieldedBalances for contracts known to hold tokens" time="0.191591875">
+        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address &gt; should return non-empty unshieldedBalances for contracts known to hold tokens" time="0.212865875">
             <failure message="expected 0 to be greater than 0" type="AssertionError">
 AssertionError: expected 0 to be greater than 0
- ❯ tests/integration/basic/queries/contract-queries.test.ts:163:34
+ ❯ tests/integration/basic/queries/contract-queries.test.ts:146:34
             </failure>
             <failure message="expected 0 to be greater than 0" type="AssertionError">
 AssertionError: expected 0 to be greater than 0
- ❯ tests/integration/basic/queries/contract-queries.test.ts:163:34
+ ❯ tests/integration/basic/queries/contract-queries.test.ts:146:34
             </failure>
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return the correct action using exact block hash where it was included" time="0.095808291">
+        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return the correct action using exact block hash where it was included" time="0.162175416">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return the latest state using a future block hash" time="0.088217417">
+        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return the latest state using a future block hash" time="0.10111775">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should respond with a contract action according to the expected schema" time="0.078433042">
+        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should respond with a contract action according to the expected schema" time="0.109533833">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return the correct action using exact block height where it was included" time="0.088962167">
+        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return the correct action using exact block height where it was included" time="0.132382">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return the latest state using a future block height" time="0.106333542">
+        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return the latest state using a future block height" time="0.088382291">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return the most recent contract action for that address before the specified block" time="0.1984035">
+        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return the most recent contract action for that address before the specified block" time="0.212573875">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return null when contract with valid address and valid offset does not exist" time="0.07221925">
+        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return null when contract with valid address and valid offset does not exist" time="0.074697084">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return null when contract with valid address and non-existing hash does not exist" time="0.068104333">
+        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return null when contract with valid address and non-existing hash does not exist" time="0.308044042">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return error when contract with invalid address and valid hash" time="0.081049">
+        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return error when contract with invalid address and valid hash" time="0.06334925">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return error when contract with invalid address and non-existing hash" time="0.089360791">
+        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return error when contract with invalid address and non-existing hash" time="0.066003625">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return error when contract with valid address and invalid hash" time="0.078205625">
+        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return error when contract with valid address and invalid hash" time="0.0647605">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return error when contract with invalid address and invalid hash" time="0.412708833">
+        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return error when contract with invalid address and invalid hash" time="0.32774625">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return null when contract with valid address and valid height does not exist" time="0.079473583">
+        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return null when contract with valid address and valid height does not exist" time="0.065881042">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return null when contract with valid address and non-existing height does not exist" time="0.076666708">
+        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return null when contract with valid address and non-existing height does not exist" time="0.067090625">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return error when contract with invalid address and valid height" time="0.092676459">
+        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return error when contract with invalid address and valid height" time="0.063094792">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return error when contract with invalid address and invalid height" time="0.23658375">
+        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return error when contract with invalid address and invalid height" time="0.207808709">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return error for negative height" time="0.072261291">
+        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return error for negative height" time="0.063798958">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return error for non-integer height" time="0.075506">
+        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return error for non-integer height" time="0.064181583">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return error for extremely large height" time="0.079058375">
+        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return error for extremely large height" time="0.065098708">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return null when using a block hash from before the action existed" time="0.72506925">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; the contractEvents field on contract actions &gt; should expose contractEvents on ContractCall" time="0.00019575">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; the contractEvents field on contract actions &gt; should not expose contractEvents on ContractDeploy or ContractUpdate" time="0.328591083">
+        <testcase classname="tests/integration/basic/queries/contract-queries.test.ts" name="contract queries &gt; a contract query by address and offset &gt; should return null when using a block hash from before the action existed" time="0.309222208">
         </testcase>
     </testsuite>
-    <testsuite name="tests/integration/basic/queries/contract-type-queries.test.ts" timestamp="2026-10-16T15:36:26.304Z" hostname="alex-laptop-2.local" tests="12" failures="0" errors="0" skipped="12" time="0.311003125">
-        <testcase classname="tests/integration/basic/queries/contract-type-queries.test.ts" name="contract type queries &gt; a contract query by address &gt; should return the contract with state, maintenance authority and actions" time="0.000852292">
-            <skipped/>
+    <testsuite name="tests/integration/basic/queries/dust-commitment-update-queries.test.ts" timestamp="2026-10-27T13:50:39.439Z" hostname="alex-laptop-2.local" tests="8" failures="0" errors="0" skipped="0" time="1.660586209">
+        <testcase classname="tests/integration/basic/queries/dust-commitment-update-queries.test.ts" name="dust commitment merkle tree update queries &gt; a collapsed update query with valid index range &gt; should return a collapsed update for a valid index range" time="0.457599667">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-type-queries.test.ts" name="contract type queries &gt; a contract query by address &gt; should return null for a non-existent contract" time="0.00018875">
-            <skipped/>
+        <testcase classname="tests/integration/basic/queries/dust-commitment-update-queries.test.ts" name="dust commitment merkle tree update queries &gt; a collapsed update query with valid index range &gt; should respond with a collapsed update according to the expected schema" time="0.070643375">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-type-queries.test.ts" name="contract type queries &gt; a contract query by address &gt; should error for malformed contract addresses" time="0.000145042">
-            <skipped/>
+        <testcase classname="tests/integration/basic/queries/dust-commitment-update-queries.test.ts" name="dust commitment merkle tree update queries &gt; a collapsed update query with valid index range &gt; should return a collapsed update for the full genesis dust range" time="0.69262225">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-type-queries.test.ts" name="contract type queries &gt; the maintenance authority &gt; should expose a committee of valid verifying keys with threshold and counter" time="0.00011375">
-            <skipped/>
+        <testcase classname="tests/integration/basic/queries/dust-commitment-update-queries.test.ts" name="dust commitment merkle tree update queries &gt; a collapsed update query with equal start and end indices &gt; should return a valid update when startIndex equals endIndex" time="0.073232459">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-type-queries.test.ts" name="contract type queries &gt; the maintenance authority &gt; should map an ECDSA committee verifying key" time="0">
-            <skipped/>
+        <testcase classname="tests/integration/basic/queries/dust-commitment-update-queries.test.ts" name="dust commitment merkle tree update queries &gt; a collapsed update query idempotency &gt; should return identical results for the same query parameters" time="0.160520208">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-type-queries.test.ts" name="contract type queries &gt; the actions sub-query &gt; should bound the actions list by limit" time="0.000136417">
-            <skipped/>
+        <testcase classname="tests/integration/basic/queries/dust-commitment-update-queries.test.ts" name="dust commitment merkle tree update queries &gt; a collapsed update query with invalid index range &gt; should return an error when startIndex is greater than endIndex" time="0.0678235">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-type-queries.test.ts" name="contract type queries &gt; the actions sub-query &gt; should filter actions by type DEPLOY" time="0.000081542">
-            <skipped/>
+        <testcase classname="tests/integration/basic/queries/dust-commitment-update-queries.test.ts" name="dust commitment merkle tree update queries &gt; a collapsed update query with invalid index range &gt; should return an error when indices are negative" time="0.065579042">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-type-queries.test.ts" name="contract type queries &gt; the actions sub-query &gt; should filter actions by type CALL" time="0.000114375">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-type-queries.test.ts" name="contract type queries &gt; the actions sub-query &gt; should filter actions by type UPDATE" time="0">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-type-queries.test.ts" name="contract type queries &gt; point-in-time state via offset &gt; should return state as of a pinned block hash" time="0.0001515">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-type-queries.test.ts" name="contract type queries &gt; point-in-time state via offset &gt; should return state as of a pinned block height" time="0.000255667">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-type-queries.test.ts" name="contract type queries &gt; point-in-time state via offset &gt; should return null when queried at a block before the contract existed" time="0.000165125">
-            <skipped/>
+        <testcase classname="tests/integration/basic/queries/dust-commitment-update-queries.test.ts" name="dust commitment merkle tree update queries &gt; a collapsed update query with invalid index range &gt; should return an error when endIndex is beyond the indexed range" time="0.071173125">
         </testcase>
     </testsuite>
-    <testsuite name="tests/integration/basic/queries/contract-zswap-state-queries.test.ts" timestamp="2026-10-16T15:36:26.305Z" hostname="alex-laptop-2.local" tests="8" failures="0" errors="0" skipped="8" time="0.312070167">
-        <testcase classname="tests/integration/basic/queries/contract-zswap-state-queries.test.ts" name="contract zswap state queries &gt; block.contractZswapState &gt; should return the contract-filtered zswap state for a known contract" time="0.001641667">
-            <skipped/>
+    <testsuite name="tests/integration/basic/queries/dust-generation-update-queries.test.ts" timestamp="2026-10-27T13:50:39.440Z" hostname="alex-laptop-2.local" tests="8" failures="0" errors="0" skipped="0" time="5.092644083">
+        <testcase classname="tests/integration/basic/queries/dust-generation-update-queries.test.ts" name="dust generation merkle tree update queries &gt; a collapsed update query with valid index range &gt; should return a collapsed update for a valid index range" time="0.311356208">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-zswap-state-queries.test.ts" name="contract zswap state queries &gt; block.contractZswapState &gt; should return null for a non-existent contract" time="0.000321458">
-            <skipped/>
+        <testcase classname="tests/integration/basic/queries/dust-generation-update-queries.test.ts" name="dust generation merkle tree update queries &gt; a collapsed update query with valid index range &gt; should respond with a collapsed update according to the expected schema" time="0.077093542">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-zswap-state-queries.test.ts" name="contract zswap state queries &gt; block.contractZswapState &gt; should return identical state for repeated queries pinned to the same block" time="0.000252041">
-            <skipped/>
+        <testcase classname="tests/integration/basic/queries/dust-generation-update-queries.test.ts" name="dust generation merkle tree update queries &gt; a collapsed update query with valid index range &gt; should return a collapsed update for the full genesis dust range" time="0.381799166">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-zswap-state-queries.test.ts" name="contract zswap state queries &gt; block.contractZswapState &gt; should error for malformed contract addresses" time="0.000228541">
-            <skipped/>
+        <testcase classname="tests/integration/basic/queries/dust-generation-update-queries.test.ts" name="dust generation merkle tree update queries &gt; a collapsed update query with equal start and end indices &gt; should return a valid update when startIndex equals endIndex" time="0.069426625">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-zswap-state-queries.test.ts" name="contract zswap state queries &gt; block.contractZswapState &gt; should error for a malformed block-hash offset" time="0.000152">
-            <skipped/>
+        <testcase classname="tests/integration/basic/queries/dust-generation-update-queries.test.ts" name="dust generation merkle tree update queries &gt; a collapsed update query idempotency &gt; should return identical results for the same query parameters" time="0.163196875">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-zswap-state-queries.test.ts" name="contract zswap state queries &gt; block.contractZswapState &gt; should return the zswap state when the block is pinned by height" time="0.000144792">
-            <skipped/>
+        <testcase classname="tests/integration/basic/queries/dust-generation-update-queries.test.ts" name="dust generation merkle tree update queries &gt; a collapsed update query with invalid index range &gt; should return an error when startIndex is greater than endIndex" time="0.061625167">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-zswap-state-queries.test.ts" name="contract zswap state queries &gt; the composed execution-inputs query &gt; should resolve zswap state, ledger parameters and contract state anchored to one block" time="0.000142709">
-            <skipped/>
+        <testcase classname="tests/integration/basic/queries/dust-generation-update-queries.test.ts" name="dust generation merkle tree update queries &gt; a collapsed update query with invalid index range &gt; should return an error when indices are negative" time="0.065772041">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/contract-zswap-state-queries.test.ts" name="contract zswap state queries &gt; the composed execution-inputs query &gt; should return null zswap state and null contract for a non-existent contract" time="0.000208542">
-            <skipped/>
+        <testcase classname="tests/integration/basic/queries/dust-generation-update-queries.test.ts" name="dust generation merkle tree update queries &gt; a collapsed update query with invalid index range &gt; should return an error when endIndex is beyond the indexed range" time="3.960959583">
         </testcase>
     </testsuite>
-    <testsuite name="tests/integration/basic/queries/dust-commitment-update-queries.test.ts" timestamp="2026-10-16T15:36:26.306Z" hostname="alex-laptop-2.local" tests="8" failures="0" errors="0" skipped="0" time="1.973828042">
-        <testcase classname="tests/integration/basic/queries/dust-commitment-update-queries.test.ts" name="dust commitment merkle tree update queries &gt; a collapsed update query with valid index range &gt; should return a collapsed update for a valid index range" time="0.366877417">
+    <testsuite name="tests/integration/basic/queries/dust-generations-queries.test.ts" timestamp="2026-10-27T13:50:39.441Z" hostname="alex-laptop-2.local" tests="9" failures="0" errors="0" skipped="0" time="1.230435125">
+        <testcase classname="tests/integration/basic/queries/dust-generations-queries.test.ts" name="dust generations queries &gt; a dust generations query with a valid Cardano reward address &gt; should return dust generations for a registered address" time="0.3201895">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-commitment-update-queries.test.ts" name="dust commitment merkle tree update queries &gt; a collapsed update query with valid index range &gt; should respond with a collapsed update according to the expected schema" time="0.080827458">
+        <testcase classname="tests/integration/basic/queries/dust-generations-queries.test.ts" name="dust generations queries &gt; a dust generations query with a valid Cardano reward address &gt; should respond with dust generations according to the expected schema" time="0.074253125">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-commitment-update-queries.test.ts" name="dust commitment merkle tree update queries &gt; a collapsed update query with valid index range &gt; should return a collapsed update for the full genesis dust range" time="1.059236916">
+        <testcase classname="tests/integration/basic/queries/dust-generations-queries.test.ts" name="dust generations queries &gt; a dust generations query with a valid Cardano reward address &gt; should return registrations with valid fields for a registered address" time="0.079694916">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-commitment-update-queries.test.ts" name="dust commitment merkle tree update queries &gt; a collapsed update query with equal start and end indices &gt; should return a valid update when startIndex equals endIndex" time="0.101815958">
+        <testcase classname="tests/integration/basic/queries/dust-generations-queries.test.ts" name="dust generations queries &gt; a dust generations query with multiple addresses &gt; should return dust generations for multiple addresses" time="0.074894542">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-commitment-update-queries.test.ts" name="dust commitment merkle tree update queries &gt; a collapsed update query idempotency &gt; should return identical results for the same query parameters" time="0.135242042">
+        <testcase classname="tests/integration/basic/queries/dust-generations-queries.test.ts" name="dust generations queries &gt; a dust generations query with non-registered address &gt; should return empty registrations for a non-registered address" time="0.066263125">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-commitment-update-queries.test.ts" name="dust commitment merkle tree update queries &gt; a collapsed update query with invalid index range &gt; should return an error when startIndex is greater than endIndex" time="0.074182917">
+        <testcase classname="tests/integration/basic/queries/dust-generations-queries.test.ts" name="dust generations queries &gt; a dust generations query with invalid input &gt; should return an empty result for an empty addresses array" time="0.065056125">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-commitment-update-queries.test.ts" name="dust commitment merkle tree update queries &gt; a collapsed update query with invalid index range &gt; should return an error when indices are negative" time="0.069192541">
+        <testcase classname="tests/integration/basic/queries/dust-generations-queries.test.ts" name="dust generations queries &gt; a dust generations query with invalid input &gt; should return an error for a malformed address" time="0.264107">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-commitment-update-queries.test.ts" name="dust commitment merkle tree update queries &gt; a collapsed update query with invalid index range &gt; should return an error when endIndex is beyond the indexed range" time="0.085174584">
+        <testcase classname="tests/integration/basic/queries/dust-generations-queries.test.ts" name="dust generations queries &gt; a dustGenerations query with a multi-UTXO stake key (#926) &gt; should aggregate nightBalance across all backing cNIGHT UTXOs" time="0.193595">
         </testcase>
-    </testsuite>
-    <testsuite name="tests/integration/basic/queries/dust-generation-update-queries.test.ts" timestamp="2026-10-16T15:36:26.306Z" hostname="alex-laptop-2.local" tests="8" failures="0" errors="0" skipped="0" time="4.940470667">
-        <testcase classname="tests/integration/basic/queries/dust-generation-update-queries.test.ts" name="dust generation merkle tree update queries &gt; a collapsed update query with valid index range &gt; should return a collapsed update for a valid index range" time="0.361179459">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-generation-update-queries.test.ts" name="dust generation merkle tree update queries &gt; a collapsed update query with valid index range &gt; should respond with a collapsed update according to the expected schema" time="0.075983417">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-generation-update-queries.test.ts" name="dust generation merkle tree update queries &gt; a collapsed update query with valid index range &gt; should return a collapsed update for the full genesis dust range" time="1.184407583">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-generation-update-queries.test.ts" name="dust generation merkle tree update queries &gt; a collapsed update query with equal start and end indices &gt; should return a valid update when startIndex equals endIndex" time="0.065659167">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-generation-update-queries.test.ts" name="dust generation merkle tree update queries &gt; a collapsed update query idempotency &gt; should return identical results for the same query parameters" time="0.12953525">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-generation-update-queries.test.ts" name="dust generation merkle tree update queries &gt; a collapsed update query with invalid index range &gt; should return an error when startIndex is greater than endIndex" time="0.070658542">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-generation-update-queries.test.ts" name="dust generation merkle tree update queries &gt; a collapsed update query with invalid index range &gt; should return an error when indices are negative" time="0.082228125">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-generation-update-queries.test.ts" name="dust generation merkle tree update queries &gt; a collapsed update query with invalid index range &gt; should return an error when endIndex is beyond the indexed range" time="2.96926125">
+        <testcase classname="tests/integration/basic/queries/dust-generations-queries.test.ts" name="dust generations queries &gt; backwards compatibility with dustGenerationStatus &gt; should return consistent data from both endpoints for a registered address" time="0.091092083">
         </testcase>
     </testsuite>
-    <testsuite name="tests/integration/basic/queries/dust-generations-queries.test.ts" timestamp="2026-10-16T15:36:26.307Z" hostname="alex-laptop-2.local" tests="9" failures="0" errors="0" skipped="0" time="1.25699725">
-        <testcase classname="tests/integration/basic/queries/dust-generations-queries.test.ts" name="dust generations queries &gt; a dust generations query with a valid Cardano reward address &gt; should return dust generations for a registered address" time="0.320988333">
+    <testsuite name="tests/integration/basic/queries/dust-queries.test.ts" timestamp="2026-10-27T13:50:39.441Z" hostname="alex-laptop-2.local" tests="15" failures="0" errors="0" skipped="0" time="37.074840416">
+        <testcase classname="tests/integration/basic/queries/dust-queries.test.ts" name="dust generation status queries &gt; a dust generation status query with a valid Cardano reward address &gt; should respond with a dust generation status response according to the requested schema" time="0.310038625">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-generations-queries.test.ts" name="dust generations queries &gt; a dust generations query with a valid Cardano reward address &gt; should respond with dust generations according to the expected schema" time="0.075186833">
+        <testcase classname="tests/integration/basic/queries/dust-queries.test.ts" name="dust generation status queries &gt; a dust generation status query with a valid Cardano reward address &gt; should report registered status for a registered Cardano reward address" time="0.071824542">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-generations-queries.test.ts" name="dust generations queries &gt; a dust generations query with a valid Cardano reward address &gt; should return registrations with valid fields for a registered address" time="0.080996917">
+        <testcase classname="tests/integration/basic/queries/dust-queries.test.ts" name="dust generation status queries &gt; a dust generation status query with a valid Cardano reward address &gt; should give the DUST destination address for the expected network when Cardano reward address is registered" time="0.068941">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-generations-queries.test.ts" name="dust generations queries &gt; a dust generations query with multiple addresses &gt; should return dust generations for multiple addresses" time="0.083122583">
+        <testcase classname="tests/integration/basic/queries/dust-queries.test.ts" name="dust generation status queries &gt; a dust generation status query with a valid Cardano reward address &gt; should correctly indicate registration status for a non-registered key" time="0.065508625">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-generations-queries.test.ts" name="dust generations queries &gt; a dust generations query with non-registered address &gt; should return empty registrations for a non-registered address" time="0.081112542">
+        <testcase classname="tests/integration/basic/queries/dust-queries.test.ts" name="dust generation status queries &gt; a dust generation status query with a valid Cardano reward address &gt; should indicate zero generation for registered address without cNIGHT balance" time="0.068810541">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-generations-queries.test.ts" name="dust generations queries &gt; a dust generations query with invalid input &gt; should return an empty result for an empty addresses array" time="0.062490708">
+        <testcase classname="tests/integration/basic/queries/dust-queries.test.ts" name="dust generation status queries &gt; a dust generation status query with a valid Cardano reward address &gt; should report the correct value of max capacity for registered address with cNIGHT" time="0.067908084">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-generations-queries.test.ts" name="dust generations queries &gt; a dust generations query with invalid input &gt; should return an error for a malformed address" time="0.317216083">
+        <testcase classname="tests/integration/basic/queries/dust-queries.test.ts" name="dust generation status queries &gt; a dust generation status query with a valid Cardano reward address &gt; should correctly indicate deregistered status for a previously registered Cardano reward address" time="0.077836875">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-generations-queries.test.ts" name="dust generations queries &gt; a dustGenerations query with a multi-UTXO stake key (#926) &gt; should aggregate nightBalance across all backing cNIGHT UTXOs" time="0.152353792">
+        <testcase classname="tests/integration/basic/queries/dust-queries.test.ts" name="dust generation status queries &gt; a dust generation status query with multiple valid Cardano reward addresses &gt; should return statuses for multiple Cardano reward addresses in order" time="0.127413875">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-generations-queries.test.ts" name="dust generations queries &gt; backwards compatibility with dustGenerationStatus &gt; should return consistent data from both endpoints for a registered address" time="0.0818835">
+        <testcase classname="tests/integration/basic/queries/dust-queries.test.ts" name="dust generation status queries &gt; a dust generation status query with multiple valid Cardano reward addresses &gt; should respond with dust generation statuses according to the requested schema for multiple addresses" time="0.089856459">
         </testcase>
-    </testsuite>
-    <testsuite name="tests/integration/basic/queries/dust-queries.test.ts" timestamp="2026-10-16T15:36:26.308Z" hostname="alex-laptop-2.local" tests="15" failures="0" errors="0" skipped="0" time="2.172621958">
-        <testcase classname="tests/integration/basic/queries/dust-queries.test.ts" name="dust generation status queries &gt; a dust generation status query with a valid Cardano reward address &gt; should respond with a dust generation status response according to the requested schema" time="0.309311167">
+        <testcase classname="tests/integration/basic/queries/dust-queries.test.ts" name="dust generation status queries &gt; a dust generation status query with multiple valid Cardano reward addresses &gt; should return an error given the number of addresses is greater than 10" time="0.074900041">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-queries.test.ts" name="dust generation status queries &gt; a dust generation status query with a valid Cardano reward address &gt; should report registered status for a registered Cardano reward address" time="0.078657">
+        <testcase classname="tests/integration/basic/queries/dust-queries.test.ts" name="dust generation status queries &gt; a dust generation status query with malformed reward addresses &gt; should return an error when the address is in plain hex string format" time="0.069068792">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-queries.test.ts" name="dust generation status queries &gt; a dust generation status query with a valid Cardano reward address &gt; should give the DUST destination address for the expected network when Cardano reward address is registered" time="0.139209958">
+        <testcase classname="tests/integration/basic/queries/dust-queries.test.ts" name="dust generation status queries &gt; a dust generation status query with empty list of reward addresses &gt; should return an empty list of dust generation statuses" time="0.066468834">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-queries.test.ts" name="dust generation status queries &gt; a dust generation status query with a valid Cardano reward address &gt; should correctly indicate registration status for a non-registered key" time="0.082627208">
+        <testcase classname="tests/integration/basic/queries/dust-queries.test.ts" name="dust generation status queries &gt; a dust generation status query with a Cardano payment address &gt; should return an error as only Cardano reward addresses are supported" time="0.061900417">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-queries.test.ts" name="dust generation status queries &gt; a dust generation status query with a valid Cardano reward address &gt; should indicate zero generation for registered address without cNIGHT balance" time="0.078320166">
+        <testcase classname="tests/integration/basic/queries/dust-queries.test.ts" name="dust generation status queries &gt; a dust generation status query with a Cardano reward address not meant for this network &gt; should return an error reporting the target network mismatch" time="0.070633334">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-queries.test.ts" name="dust generation status queries &gt; a dust generation status query with a valid Cardano reward address &gt; should report the correct value of max capacity for registered address with cNIGHT" time="0.083270833">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-queries.test.ts" name="dust generation status queries &gt; a dust generation status query with a valid Cardano reward address &gt; should correctly indicate deregistered status for a previously registered Cardano reward address" time="0.07615775">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-queries.test.ts" name="dust generation status queries &gt; a dust generation status query with multiple valid Cardano reward addresses &gt; should return statuses for multiple Cardano reward addresses in order" time="0.127334166">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-queries.test.ts" name="dust generation status queries &gt; a dust generation status query with multiple valid Cardano reward addresses &gt; should respond with dust generation statuses according to the requested schema for multiple addresses" time="0.089538125">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-queries.test.ts" name="dust generation status queries &gt; a dust generation status query with multiple valid Cardano reward addresses &gt; should return an error given the number of addresses is greater than 10" time="0.074762625">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-queries.test.ts" name="dust generation status queries &gt; a dust generation status query with malformed reward addresses &gt; should return an error when the address is in plain hex string format" time="0.059598958">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-queries.test.ts" name="dust generation status queries &gt; a dust generation status query with empty list of reward addresses &gt; should return an empty list of dust generation statuses" time="0.06092075">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-queries.test.ts" name="dust generation status queries &gt; a dust generation status query with a Cardano payment address &gt; should return an error as only Cardano reward addresses are supported" time="0.075862">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-queries.test.ts" name="dust generation status queries &gt; a dust generation status query with a Cardano reward address not meant for this network &gt; should return an error reporting the target network mismatch" time="0.07458725">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/dust-queries.test.ts" name="dust generation status queries &gt; a dust generation status query with duplicate reward addresses &gt; should handle duplicate Cardano reward addresses appropriately" time="0.08073975">
+        <testcase classname="tests/integration/basic/queries/dust-queries.test.ts" name="dust generation status queries &gt; a dust generation status query with duplicate reward addresses &gt; should handle duplicate Cardano reward addresses appropriately" time="0.076186125">
         </testcase>
     </testsuite>
-    <testsuite name="tests/integration/basic/queries/graphql-http-compression.test.ts" timestamp="2026-10-16T15:36:26.309Z" hostname="alex-laptop-2.local" tests="4" failures="0" errors="0" skipped="0" time="0.743972583">
-        <testcase classname="tests/integration/basic/queries/graphql-http-compression.test.ts" name="graphql http response compression &gt; a GraphQL HTTP request with Accept-Encoding: gzip &gt; should return a gzip-compressed response" time="0.325251333">
+    <testsuite name="tests/integration/basic/queries/graphql-http-compression.test.ts" timestamp="2026-10-27T13:50:39.443Z" hostname="alex-laptop-2.local" tests="4" failures="0" errors="0" skipped="0" time="0.71484725">
+        <testcase classname="tests/integration/basic/queries/graphql-http-compression.test.ts" name="graphql http response compression &gt; a GraphQL HTTP request with Accept-Encoding: gzip &gt; should return a gzip-compressed response" time="0.3112795">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/graphql-http-compression.test.ts" name="graphql http response compression &gt; a GraphQL HTTP request with Accept-Encoding: br &gt; should return a brotli-compressed response" time="0.079080958">
+        <testcase classname="tests/integration/basic/queries/graphql-http-compression.test.ts" name="graphql http response compression &gt; a GraphQL HTTP request with Accept-Encoding: br &gt; should return a brotli-compressed response" time="0.067620541">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/graphql-http-compression.test.ts" name="graphql http response compression &gt; a GraphQL HTTP request with Accept-Encoding: zstd &gt; should return a zstd-compressed response" time="0.0813175">
+        <testcase classname="tests/integration/basic/queries/graphql-http-compression.test.ts" name="graphql http response compression &gt; a GraphQL HTTP request with Accept-Encoding: zstd &gt; should return a zstd-compressed response" time="0.072443209">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/graphql-http-compression.test.ts" name="graphql http response compression &gt; a GraphQL HTTP request with Accept-Encoding: identity &gt; should return an uncompressed response" time="0.257228">
-        </testcase>
-    </testsuite>
-    <testsuite name="tests/integration/basic/queries/spo-epoch-series-queries.test.ts" timestamp="2026-10-16T15:36:26.310Z" hostname="alex-laptop-2.local" tests="10" failures="0" errors="0" skipped="0" time="1.129036875">
-        <testcase classname="tests/integration/basic/queries/spo-epoch-series-queries.test.ts" name="SPO epoch series queries &gt; a registered totals series query with an epoch span within the maximum &gt; should accept a range covering a single epoch" time="0.309399125">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/spo-epoch-series-queries.test.ts" name="SPO epoch series queries &gt; a registered totals series query with an epoch span within the maximum &gt; should accept a range whose span equals the maximum" time="0.080274417">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/spo-epoch-series-queries.test.ts" name="SPO epoch series queries &gt; a registered totals series query with an epoch span within the maximum &gt; should accept a permitted span that does not start at epoch zero" time="0.079493292">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/spo-epoch-series-queries.test.ts" name="SPO epoch series queries &gt; a registered totals series query with an epoch span exceeding the maximum &gt; should reject a range one epoch beyond the maximum span" time="0.065769791">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/spo-epoch-series-queries.test.ts" name="SPO epoch series queries &gt; a registered totals series query with an epoch span exceeding the maximum &gt; should reject a reversed range whose span exceeds the maximum" time="0.070530416">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/spo-epoch-series-queries.test.ts" name="SPO epoch series queries &gt; a registered totals series query with an epoch span exceeding the maximum &gt; should reject a range far beyond the maximum span without returning data" time="0.064671958">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/spo-epoch-series-queries.test.ts" name="SPO epoch series queries &gt; a registered SPO series query with an epoch span exceeding the maximum &gt; should reject a range beyond the maximum span" time="0.070804875">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/spo-epoch-series-queries.test.ts" name="SPO epoch series queries &gt; a registered SPO series query with an epoch span exceeding the maximum &gt; should accept a range whose span equals the maximum" time="0.242132834">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/spo-epoch-series-queries.test.ts" name="SPO epoch series queries &gt; a registered presence query with an epoch span exceeding the maximum &gt; should reject a range beyond the maximum span" time="0.063073375">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/spo-epoch-series-queries.test.ts" name="SPO epoch series queries &gt; a registered presence query with an epoch span exceeding the maximum &gt; should accept a range whose span equals the maximum" time="0.081576375">
+        <testcase classname="tests/integration/basic/queries/graphql-http-compression.test.ts" name="graphql http response compression &gt; a GraphQL HTTP request with Accept-Encoding: identity &gt; should return an uncompressed response" time="0.261977208">
         </testcase>
     </testsuite>
-    <testsuite name="tests/integration/basic/queries/transaction-queries.test.ts" timestamp="2026-10-16T15:36:26.311Z" hostname="alex-laptop-2.local" tests="18" failures="0" errors="0" skipped="0" time="22.664677667">
-        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="transaction queries &gt; a transaction query by hash &gt; should return the transaction with that hash, given that transaction exists" time="3.488447458">
+    <testsuite name="tests/integration/basic/queries/spo-epoch-series-queries.test.ts" timestamp="2026-10-27T13:50:39.443Z" hostname="alex-laptop-2.local" tests="10" failures="0" errors="0" skipped="0" time="1.050743125">
+        <testcase classname="tests/integration/basic/queries/spo-epoch-series-queries.test.ts" name="SPO epoch series queries &gt; a registered totals series query with an epoch span within the maximum &gt; should accept a range covering a single epoch" time="0.32129775">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="transaction queries &gt; a transaction query by hash &gt; should return an empty transaction list, given a transaction with that hash doesn&apos;t exist" time="0.07421125">
+        <testcase classname="tests/integration/basic/queries/spo-epoch-series-queries.test.ts" name="SPO epoch series queries &gt; a registered totals series query with an epoch span within the maximum &gt; should accept a range whose span equals the maximum" time="0.075002667">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="transaction queries &gt; a transaction query by hash &gt; should return an error, given a hash is invalid (malformed)" time="0.591409584">
+        <testcase classname="tests/integration/basic/queries/spo-epoch-series-queries.test.ts" name="SPO epoch series queries &gt; a registered totals series query with an epoch span within the maximum &gt; should accept a permitted span that does not start at epoch zero" time="0.071938834">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="transaction queries &gt; a transaction query by hash &gt; should return an error when called with an empty offset object" time="0.064226292">
+        <testcase classname="tests/integration/basic/queries/spo-epoch-series-queries.test.ts" name="SPO epoch series queries &gt; a registered totals series query with an epoch span exceeding the maximum &gt; should reject a range one epoch beyond the maximum span" time="0.063755792">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="transaction queries &gt; a transaction query by identifier &gt; should return the transaction with that identifier, given that transaction exists" time="3.219951625">
+        <testcase classname="tests/integration/basic/queries/spo-epoch-series-queries.test.ts" name="SPO epoch series queries &gt; a registered totals series query with an epoch span exceeding the maximum &gt; should reject a reversed range whose span exceeds the maximum" time="0.066034">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="transaction queries &gt; a transaction query by identifier &gt; should return an empty list of transactions, given a transaction with that identifier doesn&apos;t exist" time="0.094091917">
+        <testcase classname="tests/integration/basic/queries/spo-epoch-series-queries.test.ts" name="SPO epoch series queries &gt; a registered totals series query with an epoch span exceeding the maximum &gt; should reject a range far beyond the maximum span without returning data" time="0.064801792">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="transaction queries &gt; a transaction query by identifier &gt; should return an error, given an invalid identifier" time="0.228224125">
+        <testcase classname="tests/integration/basic/queries/spo-epoch-series-queries.test.ts" name="SPO epoch series queries &gt; a registered SPO series query with an epoch span exceeding the maximum &gt; should reject a range beyond the maximum span" time="0.072087667">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="transaction queries &gt; a transaction query by hash and identifier &gt; should return an error, as only one parameter at a time can be used" time="0.080480958">
+        <testcase classname="tests/integration/basic/queries/spo-epoch-series-queries.test.ts" name="SPO epoch series queries &gt; a registered SPO series query with an epoch span exceeding the maximum &gt; should accept a range whose span equals the maximum" time="0.148976209">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="genesis transactions &gt; transaction queries to the genesis block transactions &gt; should return utxos related to 4 pre-fund wallets" time="2.51212925">
+        <testcase classname="tests/integration/basic/queries/spo-epoch-series-queries.test.ts" name="SPO epoch series queries &gt; a registered presence query with an epoch span exceeding the maximum &gt; should reject a range beyond the maximum span" time="0.069645583">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="genesis transactions &gt; transaction queries to the genesis block transactions &gt; should return utxos with 1 token type" time="2.370213167">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="genesis transactions &gt; transaction queries to the genesis block transactions &gt; should return utxos sorted by outputIndex in ascending order" time="2.405742209">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="genesis transactions &gt; transaction queries to the genesis block transactions &gt; should return system transactions when queried by hash" time="2.765144334">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="genesis transactions &gt; transaction queries to the genesis block transactions &gt; should not contain RegularTransaction-specific fields on system transactions" time="2.338963167">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="genesis transactions &gt; schema validation &gt; should respond with full transaction data according to the expected schema" time="0.006597208">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="genesis transactions &gt; schema validation &gt; should respond with system transactions according to the expected schema" time="0.000379959">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="genesis transactions &gt; schema validation &gt; should contain both regular and system transactions" time="0.000130375">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="genesis transactions &gt; schema validation &gt; should respond with regular transactions according to the expected schema" time="0.001962208">
-        </testcase>
-        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="genesis transactions &gt; schema validation &gt; should respond with nested ledger events and unshielded outputs according to the expected schema" time="0.001086583">
+        <testcase classname="tests/integration/basic/queries/spo-epoch-series-queries.test.ts" name="SPO epoch series queries &gt; a registered presence query with an epoch span exceeding the maximum &gt; should accept a range whose span equals the maximum" time="0.095172">
         </testcase>
     </testsuite>
-    <testsuite name="tests/integration/basic/queries/zswap-collapsed-update-queries.test.ts" timestamp="2026-10-16T15:36:26.312Z" hostname="alex-laptop-2.local" tests="8" failures="0" errors="0" skipped="0" time="1.75984875">
-        <testcase classname="tests/integration/basic/queries/zswap-collapsed-update-queries.test.ts" name="zswap merkle tree collapsed update queries &gt; a collapsed update query with valid index range &gt; should return a collapsed update for a valid index range" time="0.319336916">
+    <testsuite name="tests/integration/basic/queries/transaction-queries.test.ts" timestamp="2026-10-27T13:50:39.444Z" hostname="alex-laptop-2.local" tests="18" failures="0" errors="0" skipped="0" time="24.011377166">
+        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="transaction queries &gt; a transaction query by hash &gt; should return the transaction with that hash, given that transaction exists" time="2.952597">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/zswap-collapsed-update-queries.test.ts" name="zswap merkle tree collapsed update queries &gt; a collapsed update query with valid index range &gt; should respond with a collapsed update according to the expected schema" time="0.076823375">
+        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="transaction queries &gt; a transaction query by hash &gt; should return an empty transaction list, given a transaction with that hash doesn&apos;t exist" time="0.169423459">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/zswap-collapsed-update-queries.test.ts" name="zswap merkle tree collapsed update queries &gt; a collapsed update query with valid index range &gt; should return a collapsed update for the full genesis zswap range" time="0.870958834">
+        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="transaction queries &gt; a transaction query by hash &gt; should return an error, given a hash is invalid (malformed)" time="0.627870166">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/zswap-collapsed-update-queries.test.ts" name="zswap merkle tree collapsed update queries &gt; a collapsed update query with equal start and end indices &gt; should return a valid update when startIndex equals endIndex" time="0.083230541">
+        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="transaction queries &gt; a transaction query by hash &gt; should return an error when called with an empty offset object" time="0.086419542">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/zswap-collapsed-update-queries.test.ts" name="zswap merkle tree collapsed update queries &gt; a collapsed update query idempotency &gt; should return identical results for the same query parameters" time="0.1678825">
+        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="transaction queries &gt; a transaction query by identifier &gt; should return the transaction with that identifier, given that transaction exists" time="2.571184833">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/zswap-collapsed-update-queries.test.ts" name="zswap merkle tree collapsed update queries &gt; a collapsed update query with invalid index range &gt; should return an error when startIndex is greater than endIndex" time="0.079835083">
+        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="transaction queries &gt; a transaction query by identifier &gt; should return an empty list of transactions, given a transaction with that identifier doesn&apos;t exist" time="0.078190209">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/zswap-collapsed-update-queries.test.ts" name="zswap merkle tree collapsed update queries &gt; a collapsed update query with invalid index range &gt; should return an error when indices are negative" time="0.084203334">
+        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="transaction queries &gt; a transaction query by identifier &gt; should return an error, given an invalid identifier" time="0.182590917">
         </testcase>
-        <testcase classname="tests/integration/basic/queries/zswap-collapsed-update-queries.test.ts" name="zswap merkle tree collapsed update queries &gt; a collapsed update query with invalid index range &gt; should return an error when endIndex is beyond the indexed range" time="0.076227625">
+        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="transaction queries &gt; a transaction query by hash and identifier &gt; should return an error, as only one parameter at a time can be used" time="0.0615345">
+        </testcase>
+        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="genesis transactions &gt; transaction queries to the genesis block transactions &gt; should return utxos related to 4 pre-fund wallets" time="2.700582125">
+        </testcase>
+        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="genesis transactions &gt; transaction queries to the genesis block transactions &gt; should return utxos with 1 token type" time="3.146981125">
+        </testcase>
+        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="genesis transactions &gt; transaction queries to the genesis block transactions &gt; should return utxos sorted by outputIndex in ascending order" time="2.884300791">
+        </testcase>
+        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="genesis transactions &gt; transaction queries to the genesis block transactions &gt; should return system transactions when queried by hash" time="3.304227625">
+        </testcase>
+        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="genesis transactions &gt; transaction queries to the genesis block transactions &gt; should not contain RegularTransaction-specific fields on system transactions" time="2.459650708">
+        </testcase>
+        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="genesis transactions &gt; schema validation &gt; should respond with full transaction data according to the expected schema" time="0.016927334">
+        </testcase>
+        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="genesis transactions &gt; schema validation &gt; should respond with system transactions according to the expected schema" time="0.000515875">
+        </testcase>
+        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="genesis transactions &gt; schema validation &gt; should contain both regular and system transactions" time="0.000217375">
+        </testcase>
+        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="genesis transactions &gt; schema validation &gt; should respond with regular transactions according to the expected schema" time="0.00265475">
+        </testcase>
+        <testcase classname="tests/integration/basic/queries/transaction-queries.test.ts" name="genesis transactions &gt; schema validation &gt; should respond with nested ledger events and unshielded outputs according to the expected schema" time="0.001355375">
         </testcase>
     </testsuite>
-    <testsuite name="tests/integration/basic/subscriptions/block-subscriptions.test.ts" timestamp="2026-10-16T15:36:26.313Z" hostname="alex-laptop-2.local" tests="10" failures="0" errors="0" skipped="1" time="14.070617125">
-        <testcase classname="tests/integration/basic/subscriptions/block-subscriptions.test.ts" name="block subscriptions &gt; a subscription to block updates without parameters &gt; should stream blocks starting from the latest block" time="6.704695833">
+    <testsuite name="tests/integration/basic/queries/zswap-collapsed-update-queries.test.ts" timestamp="2026-10-27T13:50:39.446Z" hostname="alex-laptop-2.local" tests="8" failures="0" errors="0" skipped="0" time="2.057832625">
+        <testcase classname="tests/integration/basic/queries/zswap-collapsed-update-queries.test.ts" name="zswap merkle tree collapsed update queries &gt; a collapsed update query with valid index range &gt; should return a collapsed update for a valid index range" time="0.347871625">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/block-subscriptions.test.ts" name="block subscriptions &gt; a subscription to block updates without parameters &gt; should stream blocks adhering to the expected schema" time="0.967843125">
+        <testcase classname="tests/integration/basic/queries/zswap-collapsed-update-queries.test.ts" name="zswap merkle tree collapsed update queries &gt; a collapsed update query with valid index range &gt; should respond with a collapsed update according to the expected schema" time="0.09363975">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/block-subscriptions.test.ts" name="block subscriptions &gt; a subscription to block updates by hash &gt; should stream blocks starting from the block with that hash, given that hash exists" time="1.625717333">
+        <testcase classname="tests/integration/basic/queries/zswap-collapsed-update-queries.test.ts" name="zswap merkle tree collapsed update queries &gt; a collapsed update query with valid index range &gt; should return a collapsed update for the full genesis zswap range" time="0.97321925">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/block-subscriptions.test.ts" name="block subscriptions &gt; a subscription to block updates by hash &gt; should return an error message, given that hash doesn&apos;t exist" time="0.707373125">
+        <testcase classname="tests/integration/basic/queries/zswap-collapsed-update-queries.test.ts" name="zswap merkle tree collapsed update queries &gt; a collapsed update query with equal start and end indices &gt; should return a valid update when startIndex equals endIndex" time="0.163723917">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/block-subscriptions.test.ts" name="block subscriptions &gt; a subscription to block updates by hash &gt; should return an error message, given that hash is invalid" time="0.704285917">
+        <testcase classname="tests/integration/basic/queries/zswap-collapsed-update-queries.test.ts" name="zswap merkle tree collapsed update queries &gt; a collapsed update query idempotency &gt; should return identical results for the same query parameters" time="0.166467084">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/block-subscriptions.test.ts" name="block subscriptions &gt; a subscription to block updates by height &gt; should stream blocks from the block with that height, given that height exists" time="1.051907416">
+        <testcase classname="tests/integration/basic/queries/zswap-collapsed-update-queries.test.ts" name="zswap merkle tree collapsed update queries &gt; a collapsed update query with invalid index range &gt; should return an error when startIndex is greater than endIndex" time="0.10336275">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/block-subscriptions.test.ts" name="block subscriptions &gt; a subscription to block updates by height &gt; should return an error message, given that height is higher than the latest block height" time="0.930755209">
+        <testcase classname="tests/integration/basic/queries/zswap-collapsed-update-queries.test.ts" name="zswap merkle tree collapsed update queries &gt; a collapsed update query with invalid index range &gt; should return an error when indices are negative" time="0.126518208">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/block-subscriptions.test.ts" name="block subscriptions &gt; a subscription to block updates by height &gt; should return an error message, given that height is invalid" time="0.690777041">
+        <testcase classname="tests/integration/basic/queries/zswap-collapsed-update-queries.test.ts" name="zswap merkle tree collapsed update queries &gt; a collapsed update query with invalid index range &gt; should return an error when endIndex is beyond the indexed range" time="0.078554292">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/block-subscriptions.test.ts" name="block subscriptions &gt; a subscription to block updates by height and hash &gt; should return an error message, as only one parameter at a time can be used" time="0.684316417">
+    </testsuite>
+    <testsuite name="tests/integration/basic/subscriptions/block-subscriptions.test.ts" timestamp="2026-10-27T13:50:39.447Z" hostname="alex-laptop-2.local" tests="10" failures="0" errors="0" skipped="1" time="10.16937">
+        <testcase classname="tests/integration/basic/subscriptions/block-subscriptions.test.ts" name="block subscriptions &gt; a subscription to block updates without parameters &gt; should stream blocks starting from the latest block" time="1.907448792">
+        </testcase>
+        <testcase classname="tests/integration/basic/subscriptions/block-subscriptions.test.ts" name="block subscriptions &gt; a subscription to block updates without parameters &gt; should stream blocks adhering to the expected schema" time="0.93324925">
+        </testcase>
+        <testcase classname="tests/integration/basic/subscriptions/block-subscriptions.test.ts" name="block subscriptions &gt; a subscription to block updates by hash &gt; should stream blocks starting from the block with that hash, given that hash exists" time="2.030980625">
+        </testcase>
+        <testcase classname="tests/integration/basic/subscriptions/block-subscriptions.test.ts" name="block subscriptions &gt; a subscription to block updates by hash &gt; should return an error message, given that hash doesn&apos;t exist" time="0.694878916">
+        </testcase>
+        <testcase classname="tests/integration/basic/subscriptions/block-subscriptions.test.ts" name="block subscriptions &gt; a subscription to block updates by hash &gt; should return an error message, given that hash is invalid" time="0.749508708">
+        </testcase>
+        <testcase classname="tests/integration/basic/subscriptions/block-subscriptions.test.ts" name="block subscriptions &gt; a subscription to block updates by height &gt; should stream blocks from the block with that height, given that height exists" time="1.275208959">
+        </testcase>
+        <testcase classname="tests/integration/basic/subscriptions/block-subscriptions.test.ts" name="block subscriptions &gt; a subscription to block updates by height &gt; should return an error message, given that height is higher than the latest block height" time="1.097352083">
+        </testcase>
+        <testcase classname="tests/integration/basic/subscriptions/block-subscriptions.test.ts" name="block subscriptions &gt; a subscription to block updates by height &gt; should return an error message, given that height is invalid" time="0.772316958">
+        </testcase>
+        <testcase classname="tests/integration/basic/subscriptions/block-subscriptions.test.ts" name="block subscriptions &gt; a subscription to block updates by height and hash &gt; should return an error message, as only one parameter at a time can be used" time="0.705926833">
         </testcase>
         <testcase classname="tests/integration/basic/subscriptions/block-subscriptions.test.ts" name="block subscriptions &gt; regular transaction fees &gt; should report ledger paidFees and estimatedFees on regular transactions" time="0">
             <skipped/>
         </testcase>
     </testsuite>
-    <testsuite name="tests/integration/basic/subscriptions/bridge-pool-subscriptions.test.ts" timestamp="2026-10-16T15:36:26.314Z" hostname="alex-laptop-2.local" tests="7" failures="0" errors="0" skipped="7" time="0.9658325">
-        <testcase classname="tests/integration/basic/subscriptions/bridge-pool-subscriptions.test.ts" name="bridge pool subscription &gt; bridgePoolUpdates &gt; should emit current pool summary immediately on subscribe" time="0.648164208">
-            <skipped/>
+    <testsuite name="tests/integration/basic/subscriptions/contract-subscriptions.test.ts" timestamp="2026-10-27T13:50:39.448Z" hostname="alex-laptop-2.local" tests="3" failures="0" errors="0" skipped="0" time="2.456057458">
+        <testcase classname="tests/integration/basic/subscriptions/contract-subscriptions.test.ts" name="contract action subscriptions &gt; a subscription to contract action updates without parameters &gt; should stream contract actions from the latest available block" time="0.8830865">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/bridge-pool-subscriptions.test.ts" name="bridge pool subscription &gt; bridgePoolUpdates &gt; should push an update when a new ReserveTransfer is indexed" time="0">
-            <skipped/>
+        <testcase classname="tests/integration/basic/subscriptions/contract-subscriptions.test.ts" name="contract action subscriptions &gt; a subscription to contract action updates without parameters &gt; should stream contract actions adhering to the expected schema" time="0.779323">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/bridge-pool-subscriptions.test.ts" name="bridge pool subscription &gt; bridgePoolUpdates &gt; should push an update when a new InvalidTransfer is indexed" time="0">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/bridge-pool-subscriptions.test.ts" name="bridge pool subscription &gt; bridgePoolUpdates &gt; should not push a pool update for UserTransfer events (user address, not pool)" time="0">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/bridge-pool-subscriptions.test.ts" name="bridge pool subscription &gt; bridgePoolUpdates &gt; should carry a running pool total in each frame (cumulative consistency)" time="0">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/bridge-pool-subscriptions.test.ts" name="bridge pool subscription &gt; bridgePoolUpdates &gt; should push an update when an UnapprovedTransfer is indexed" time="0">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/bridge-pool-subscriptions.test.ts" name="bridge pool subscription &gt; bridgePoolUpdates &gt; should push an update and increment subminimumTxCount when a flush is indexed" time="0">
-            <skipped/>
+        <testcase classname="tests/integration/basic/subscriptions/contract-subscriptions.test.ts" name="contract action subscriptions &gt; a subscription to contract action updates with block hash offset &gt; should stream historical and new contract actions from a specific block hash" time="0.792509375">
         </testcase>
     </testsuite>
-    <testsuite name="tests/integration/basic/subscriptions/bridge-subscriptions.test.ts" timestamp="2026-10-16T15:36:26.315Z" hostname="alex-laptop-2.local" tests="9" failures="0" errors="0" skipped="9" time="4.156479667">
-        <testcase classname="tests/integration/basic/subscriptions/bridge-subscriptions.test.ts" name="bridge subscriptions &gt; bridgeEvents &gt; should replay historical events from the given cursor id" time="0.654447625">
-            <skipped/>
+    <testsuite name="tests/integration/basic/subscriptions/dust-generations-subscriptions.test.ts" timestamp="2026-10-27T13:50:39.448Z" hostname="alex-laptop-2.local" tests="7" failures="0" errors="0" skipped="0" time="19.071908375">
+        <testcase classname="tests/integration/basic/subscriptions/dust-generations-subscriptions.test.ts" name="dust generations subscription &gt; streaming dust generation entries &gt; should stream dust generation events for a valid dust address in bech32m format" time="2.015736042">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/bridge-subscriptions.test.ts" name="bridge subscriptions &gt; bridgeEvents &gt; should only deliver events matching the recipient filter" time="0.629497042">
-            <skipped/>
+        <testcase classname="tests/integration/basic/subscriptions/dust-generations-subscriptions.test.ts" name="dust generations subscription &gt; fresh subscription dtime delivery (#1167) &gt; fresh startIndex=0 subscription delivers DustGenerationDtimeUpdateItem for a wallet with spent NIGHT" time="6.5727035">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/bridge-subscriptions.test.ts" name="bridge subscriptions &gt; bridgeEvents &gt; should only deliver events matching the variant filter" time="0.631103334">
-            <skipped/>
+        <testcase classname="tests/integration/basic/subscriptions/dust-generations-subscriptions.test.ts" name="dust generations subscription &gt; fresh subscription dtime delivery (#1167) &gt; resumption startIndex&gt;0 delivers only in-range items and completes correctly" time="6.45461275">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/bridge-subscriptions.test.ts" name="bridge subscriptions &gt; bridgeEvents &gt; should resume from cursor without gap or duplication on reconnection" time="0.63857275">
-            <skipped/>
+        <testcase classname="tests/integration/basic/subscriptions/dust-generations-subscriptions.test.ts" name="dust generations subscription &gt; subscription error handling &gt; should return an error for an invalid dust address" time="0.720339042">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/bridge-subscriptions.test.ts" name="bridge subscriptions &gt; bridgeEvents &gt; should deliver BridgeUnapprovedTransfer events via subscription" time="0.654515833">
-            <skipped/>
+        <testcase classname="tests/integration/basic/subscriptions/dust-generations-subscriptions.test.ts" name="dust generations subscription &gt; subscription error handling &gt; should return an error for a valid address that is meant for another networkid" time="0.995103458">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/bridge-subscriptions.test.ts" name="bridge subscriptions &gt; claims via unshieldedTransactions &gt; should observe claims as BridgeClaimTransaction via the unshieldedTransactions query" time="0">
-            <skipped/>
+        <testcase classname="tests/integration/basic/subscriptions/dust-generations-subscriptions.test.ts" name="dust generations subscription &gt; subscription error handling &gt; should return an error for a valid dust address passed in hex format" time="0.699836167">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/bridge-subscriptions.test.ts" name="bridge subscriptions &gt; bridgeBalance &gt; should emit zero balance immediately for an address with no bridge activity" time="0.621768708">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/bridge-subscriptions.test.ts" name="bridge subscriptions &gt; bridgeBalance &gt; should push an updated BridgeBalance when a relevant UserTransfer is indexed" time="0">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/bridge-subscriptions.test.ts" name="bridge subscriptions &gt; bridgeBalance &gt; should push an updated BridgeBalance when a claim reduces the balance" time="0">
-            <skipped/>
+        <testcase classname="tests/integration/basic/subscriptions/dust-generations-subscriptions.test.ts" name="dust generations subscription &gt; transactionHash on dust generation events (#1114) &gt; first item transactionHash resolves via transactions(offset)" time="1.610189875">
         </testcase>
     </testsuite>
-    <testsuite name="tests/integration/basic/subscriptions/contract-event-subscriptions.test.ts" timestamp="2026-10-16T15:36:26.315Z" hostname="alex-laptop-2.local" tests="5" failures="0" errors="0" skipped="5" time="0.345101042">
-        <testcase classname="tests/integration/basic/subscriptions/contract-event-subscriptions.test.ts" name="contract event subscription &gt; a contract events subscription for an address with no emitted events &gt; should complete via the toBlock terminator without delivering events" time="0.0009905">
-            <skipped/>
+    <testsuite name="tests/integration/basic/subscriptions/dust-ledger-subscriptions.test.ts" timestamp="2026-10-27T13:50:39.449Z" hostname="alex-laptop-2.local" tests="5" failures="0" errors="0" skipped="0" time="4.310799792">
+        <testcase classname="tests/integration/basic/subscriptions/dust-ledger-subscriptions.test.ts" name="dust ledger event subscriptions &gt; a subscription to dust ledger events without offset (default replay) &gt; streams events in ledger order" time="0.909800125">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/contract-event-subscriptions.test.ts" name="contract event subscription &gt; a contract events subscription with an invalid filter &gt; should return an error when the contract address is empty" time="0.000401416">
-            <skipped/>
+        <testcase classname="tests/integration/basic/subscriptions/dust-ledger-subscriptions.test.ts" name="dust ledger event subscriptions &gt; subscription with explicit offset &gt; streams events in ledger order starting from the specified ID" time="0.942055333">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/contract-event-subscriptions.test.ts" name="contract event subscription &gt; a contract events subscription with an invalid filter &gt; should return an error for an unknown field prefix field name" time="0.000280667">
-            <skipped/>
+        <testcase classname="tests/integration/basic/subscriptions/dust-ledger-subscriptions.test.ts" name="dust ledger event subscriptions &gt; subscription with explicit offset &gt; validates historical dust events against schema" time="1.044196708">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/contract-event-subscriptions.test.ts" name="contract event subscription &gt; a contract events subscription for a contract with emitted events &gt; should stream events conforming to the contract event schema" time="0.000172042">
-            <skipped/>
+        <testcase classname="tests/integration/basic/subscriptions/dust-ledger-subscriptions.test.ts" name="dust ledger event subscriptions &gt; subscription error handling &gt; should return an error for unknown field" time="0.714061625">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/contract-event-subscriptions.test.ts" name="contract event subscription &gt; a contract events subscription for a contract with emitted events &gt; should stream only events carrying the filtered field" time="0.000246208">
-            <skipped/>
+        <testcase classname="tests/integration/basic/subscriptions/dust-ledger-subscriptions.test.ts" name="dust ledger event subscriptions &gt; subscription error handling &gt; rejects negative offset ID with an error" time="0.699217709">
         </testcase>
     </testsuite>
-    <testsuite name="tests/integration/basic/subscriptions/contract-subscriptions.test.ts" timestamp="2026-10-16T15:36:26.316Z" hostname="alex-laptop-2.local" tests="3" failures="0" errors="0" skipped="0" time="2.472515625">
-        <testcase classname="tests/integration/basic/subscriptions/contract-subscriptions.test.ts" name="contract action subscriptions &gt; a subscription to contract action updates without parameters &gt; should stream contract actions from the latest available block" time="0.824065209">
+    <testsuite name="tests/integration/basic/subscriptions/dust-nullifier-subscriptions.test.ts" timestamp="2026-10-27T13:50:39.450Z" hostname="alex-laptop-2.local" tests="5" failures="0" errors="0" skipped="0" time="4.386144958">
+        <testcase classname="tests/integration/basic/subscriptions/dust-nullifier-subscriptions.test.ts" name="dust nullifier transactions subscription &gt; streaming dust nullifier transactions with block range &gt; should stream transactions within a block range and complete" time="0.93163975">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/contract-subscriptions.test.ts" name="contract action subscriptions &gt; a subscription to contract action updates without parameters &gt; should stream contract actions adhering to the expected schema" time="0.77648575">
+        <testcase classname="tests/integration/basic/subscriptions/dust-nullifier-subscriptions.test.ts" name="dust nullifier transactions subscription &gt; subscription error handling &gt; should return an error for empty nullifier prefixes" time="0.686044166">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/contract-subscriptions.test.ts" name="contract action subscriptions &gt; a subscription to contract action updates with block hash offset &gt; should stream historical and new contract actions from a specific block hash" time="0.870831333">
+        <testcase classname="tests/integration/basic/subscriptions/dust-nullifier-subscriptions.test.ts" name="dust nullifier transactions subscription &gt; subscription error handling &gt; should return an error when fromBlock is greater than toBlock" time="0.677470417">
         </testcase>
-    </testsuite>
-    <testsuite name="tests/integration/basic/subscriptions/dust-generations-subscriptions.test.ts" timestamp="2026-10-16T15:36:26.316Z" hostname="alex-laptop-2.local" tests="13" failures="0" errors="0" skipped="13" time="8.828077875">
-        <testcase classname="tests/integration/basic/subscriptions/dust-generations-subscriptions.test.ts" name="dust generations subscription &gt; a subscription at the latest block hash &gt; should stream a complete generation snapshot for a registered dust address" time="0.619794709">
-            <skipped/>
+        <testcase classname="tests/integration/basic/subscriptions/dust-nullifier-subscriptions.test.ts" name="dust nullifier transactions subscription &gt; transactionHash on dust nullifier events (#1114) &gt; first event transactionHash resolves via transactions(offset)" time="1.100773">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/dust-generations-subscriptions.test.ts" name="dust generations subscription &gt; a subscription pinned to a block hash &gt; should deliver identical events for repeated subscriptions at the same block" time="0.636753958">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/dust-generations-subscriptions.test.ts" name="dust generations subscription &gt; a subscription pinned to a block hash &gt; should snapshot the generation tree at the queried block rather than the tip" time="0.630922459">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/dust-generations-subscriptions.test.ts" name="dust generations subscription &gt; dtime update delivery relative to the cutoff height &gt; should replay owned dtime updates before generation items when the cutoff is zero" time="0.639994542">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/dust-generations-subscriptions.test.ts" name="dust generations subscription &gt; dtime update delivery relative to the cutoff height &gt; should deliver no dtime updates when the cutoff equals the snapshot block height" time="0.627107625">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/dust-generations-subscriptions.test.ts" name="dust generations subscription &gt; subscription error handling &gt; should return an error for an invalid dust address" time="0.627508166">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/dust-generations-subscriptions.test.ts" name="dust generations subscription &gt; subscription error handling &gt; should return an error for a valid address that is meant for another networkid" time="0.621319333">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/dust-generations-subscriptions.test.ts" name="dust generations subscription &gt; subscription error handling &gt; should return an error for a valid dust address passed in hex format" time="0.648779875">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/dust-generations-subscriptions.test.ts" name="dust generations subscription &gt; subscription error handling &gt; should return an error for an unknown block hash" time="0.636666833">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/dust-generations-subscriptions.test.ts" name="dust generations subscription &gt; subscription error handling &gt; should return an error for a malformed block hash" time="0.630744041">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/dust-generations-subscriptions.test.ts" name="dust generations subscription &gt; subscription error handling &gt; should reject a block hash older than the snapshot freshness window" time="0.628414875">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/dust-generations-subscriptions.test.ts" name="dust generations subscription &gt; transactionHash on dust generation events &gt; first item transactionHash resolves via transactions(offset)" time="0.636921584">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/dust-generations-subscriptions.test.ts" name="dust generations progress protocol version &gt; a subscription pinned to a block hash &gt; should report the pinned block protocol version in the progress event" time="0.629407375">
-            <skipped/>
+        <testcase classname="tests/integration/basic/subscriptions/dust-nullifier-subscriptions.test.ts" name="dust nullifier transactions subscription &gt; transaction reference on dust nullifier events (#1115) &gt; first event transaction.hash matches transactionHash" time="0.988447208">
         </testcase>
     </testsuite>
-    <testsuite name="tests/integration/basic/subscriptions/dust-ledger-subscriptions.test.ts" timestamp="2026-10-16T15:36:26.317Z" hostname="alex-laptop-2.local" tests="5" failures="0" errors="0" skipped="0" time="4.458096">
-        <testcase classname="tests/integration/basic/subscriptions/dust-ledger-subscriptions.test.ts" name="dust ledger event subscriptions &gt; a subscription to dust ledger events without offset (default replay) &gt; streams events in ledger order" time="1.004946875">
+    <testsuite name="tests/integration/basic/subscriptions/shielded-nullifier-subscriptions.test.ts" timestamp="2026-10-27T13:50:39.450Z" hostname="alex-laptop-2.local" tests="6" failures="0" errors="0" skipped="0" time="5.128774833">
+        <testcase classname="tests/integration/basic/subscriptions/shielded-nullifier-subscriptions.test.ts" name="shielded nullifier transactions subscription &gt; streaming shielded nullifier transactions with block range &gt; should stream transactions within a block range and complete" time="0.939432625">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/dust-ledger-subscriptions.test.ts" name="dust ledger event subscriptions &gt; subscription with explicit offset &gt; streams events in ledger order starting from the specified ID" time="1.049697">
+        <testcase classname="tests/integration/basic/subscriptions/shielded-nullifier-subscriptions.test.ts" name="shielded nullifier transactions subscription &gt; subscription error handling &gt; should return an error for empty nullifier prefixes" time="0.692298625">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/dust-ledger-subscriptions.test.ts" name="dust ledger event subscriptions &gt; subscription with explicit offset &gt; validates historical dust events against schema" time="0.980262042">
+        <testcase classname="tests/integration/basic/subscriptions/shielded-nullifier-subscriptions.test.ts" name="shielded nullifier transactions subscription &gt; subscription error handling &gt; should return an error for an empty-string nullifier prefix element" time="0.6873375">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/dust-ledger-subscriptions.test.ts" name="dust ledger event subscriptions &gt; subscription error handling &gt; should return an error for unknown field" time="0.689629166">
+        <testcase classname="tests/integration/basic/subscriptions/shielded-nullifier-subscriptions.test.ts" name="shielded nullifier transactions subscription &gt; subscription error handling &gt; should return an error when fromBlock is greater than toBlock" time="0.695078792">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/dust-ledger-subscriptions.test.ts" name="dust ledger event subscriptions &gt; subscription error handling &gt; rejects negative offset ID with an error" time="0.73208575">
+        <testcase classname="tests/integration/basic/subscriptions/shielded-nullifier-subscriptions.test.ts" name="shielded nullifier transactions subscription &gt; transactionHash on shielded nullifier events (#1114) &gt; first event transactionHash resolves via transactions(offset)" time="1.162330292">
         </testcase>
-    </testsuite>
-    <testsuite name="tests/integration/basic/subscriptions/dust-nullifier-subscriptions.test.ts" timestamp="2026-10-16T15:36:26.318Z" hostname="alex-laptop-2.local" tests="5" failures="0" errors="0" skipped="0" time="4.479934917">
-        <testcase classname="tests/integration/basic/subscriptions/dust-nullifier-subscriptions.test.ts" name="dust nullifier transactions subscription &gt; streaming dust nullifier transactions with block range &gt; should stream transactions within a block range and complete" time="0.979947416">
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/dust-nullifier-subscriptions.test.ts" name="dust nullifier transactions subscription &gt; subscription error handling &gt; should return an error for empty nullifier prefixes" time="0.68157725">
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/dust-nullifier-subscriptions.test.ts" name="dust nullifier transactions subscription &gt; subscription error handling &gt; should return an error when fromBlock is greater than toBlock" time="0.692586625">
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/dust-nullifier-subscriptions.test.ts" name="dust nullifier transactions subscription &gt; transactionHash on dust nullifier events (#1114) &gt; first event transactionHash resolves via transactions(offset)" time="1.118101542">
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/dust-nullifier-subscriptions.test.ts" name="dust nullifier transactions subscription &gt; transaction reference on dust nullifier events (#1115) &gt; first event transaction.hash matches transactionHash" time="1.005736667">
+        <testcase classname="tests/integration/basic/subscriptions/shielded-nullifier-subscriptions.test.ts" name="shielded nullifier transactions subscription &gt; transaction reference on shielded nullifier events (#1115) &gt; first event transaction.hash matches transactionHash" time="0.950109833">
         </testcase>
     </testsuite>
-    <testsuite name="tests/integration/basic/subscriptions/shielded-nullifier-subscriptions.test.ts" timestamp="2026-10-16T15:36:26.318Z" hostname="alex-laptop-2.local" tests="6" failures="0" errors="0" skipped="0" time="5.116117917">
-        <testcase classname="tests/integration/basic/subscriptions/shielded-nullifier-subscriptions.test.ts" name="shielded nullifier transactions subscription &gt; streaming shielded nullifier transactions with block range &gt; should stream transactions within a block range and complete" time="0.996307292">
+    <testsuite name="tests/integration/basic/subscriptions/shielded-transaction-subscriptions.test.ts" timestamp="2026-10-27T13:50:39.451Z" hostname="alex-laptop-2.local" tests="10" failures="0" errors="0" skipped="0" time="59.719961375">
+        <testcase classname="tests/integration/basic/subscriptions/shielded-transaction-subscriptions.test.ts" name="shielded transaction subscriptions &gt; opening a session with viewing key &gt; should return a session ID, given a valid viewing key" time="0.78192125">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/shielded-nullifier-subscriptions.test.ts" name="shielded nullifier transactions subscription &gt; subscription error handling &gt; should return an error for empty nullifier prefixes" time="0.6921525">
+        <testcase classname="tests/integration/basic/subscriptions/shielded-transaction-subscriptions.test.ts" name="shielded transaction subscriptions &gt; opening a session with viewing key &gt; should return an error, given an unsupported hex format viewing key" time="0.691519625">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/shielded-nullifier-subscriptions.test.ts" name="shielded nullifier transactions subscription &gt; subscription error handling &gt; should return an error for an empty-string nullifier prefix element" time="0.705742917">
+        <testcase classname="tests/integration/basic/subscriptions/shielded-transaction-subscriptions.test.ts" name="shielded transaction subscriptions &gt; opening a session with viewing key &gt; should return an error, given an invalid viewing key" time="0.696481959">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/shielded-nullifier-subscriptions.test.ts" name="shielded nullifier transactions subscription &gt; subscription error handling &gt; should return an error when fromBlock is greater than toBlock" time="0.711226709">
+        <testcase classname="tests/integration/basic/subscriptions/shielded-transaction-subscriptions.test.ts" name="shielded transaction subscriptions &gt; opening a session with viewing key &gt; should return an error, given a valid viewing key meant for a different network" time="1.249113334">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/shielded-nullifier-subscriptions.test.ts" name="shielded nullifier transactions subscription &gt; transactionHash on shielded nullifier events (#1114) &gt; first event transactionHash resolves via transactions(offset)" time="1.073386208">
+        <testcase classname="tests/integration/basic/subscriptions/shielded-transaction-subscriptions.test.ts" name="shielded transaction subscriptions &gt; closing a session with session ID &gt; should terminate the session successfully, given a valid session ID" time="0.849642416">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/shielded-nullifier-subscriptions.test.ts" name="shielded nullifier transactions subscription &gt; transaction reference on shielded nullifier events (#1115) &gt; first event transaction.hash matches transactionHash" time="0.935424875">
+        <testcase classname="tests/integration/basic/subscriptions/shielded-transaction-subscriptions.test.ts" name="shielded transaction subscriptions &gt; closing a session with session ID &gt; should return an error, given an invalid session ID" time="0.687340167">
         </testcase>
-    </testsuite>
-    <testsuite name="tests/integration/basic/subscriptions/shielded-transaction-subscriptions.test.ts" timestamp="2026-10-16T15:36:26.319Z" hostname="alex-laptop-2.local" tests="11" failures="0" errors="0" skipped="1" time="15.690097333">
-        <testcase classname="tests/integration/basic/subscriptions/shielded-transaction-subscriptions.test.ts" name="shielded transaction subscriptions &gt; opening a session with viewing key &gt; should return a session ID, given a valid viewing key" time="0.7935555">
+        <testcase classname="tests/integration/basic/subscriptions/shielded-transaction-subscriptions.test.ts" name="shielded transaction subscriptions &gt; a subscription to wallet updates providing viewing key only &gt; should stream wallet events starting from the beginning, given there are relevant transactions" time="2.765815">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/shielded-transaction-subscriptions.test.ts" name="shielded transaction subscriptions &gt; opening a session with viewing key &gt; should return an error, given an unsupported hex format viewing key" time="0.699075208">
+        <testcase classname="tests/integration/basic/subscriptions/shielded-transaction-subscriptions.test.ts" name="shielded transaction subscriptions &gt; a subscription to wallet updates providing viewing key only &gt; should stream shielded transaction events adhering to the expected schema" time="3.800823583">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/shielded-transaction-subscriptions.test.ts" name="shielded transaction subscriptions &gt; opening a session with viewing key &gt; should return an error, given an invalid viewing key" time="0.674966083">
+        <testcase classname="tests/integration/basic/subscriptions/shielded-transaction-subscriptions.test.ts" name="shielded transaction subscriptions &gt; a subscription to wallet updates providing viewing key only &gt; should be able to use highestZswapEndIndex from progress event in collapsed update query" time="1.217788417">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/shielded-transaction-subscriptions.test.ts" name="shielded transaction subscriptions &gt; opening a session with viewing key &gt; should return an error, given a valid viewing key meant for a different network" time="1.36106525">
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/shielded-transaction-subscriptions.test.ts" name="shielded transaction subscriptions &gt; closing a session with session ID &gt; should terminate the session successfully, given a valid session ID" time="0.820407833">
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/shielded-transaction-subscriptions.test.ts" name="shielded transaction subscriptions &gt; closing a session with session ID &gt; should return an error, given an invalid session ID" time="0.674984917">
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/shielded-transaction-subscriptions.test.ts" name="shielded transaction subscriptions &gt; a subscription to wallet updates providing viewing key only &gt; should stream wallet events starting from the beginning, given there are relevant transactions" time="2.783696667">
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/shielded-transaction-subscriptions.test.ts" name="shielded transaction subscriptions &gt; a subscription to wallet updates providing viewing key only &gt; should stream shielded transaction events adhering to the expected schema" time="3.746211917">
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/shielded-transaction-subscriptions.test.ts" name="shielded transaction subscriptions &gt; a subscription to wallet updates providing viewing key only &gt; should be able to use highestZswapEndIndex from progress event in collapsed update query" time="1.2286165">
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/shielded-transaction-subscriptions.test.ts" name="shielded transaction subscriptions &gt; a subscription to wallet updates providing viewing key only &gt; should report the chain tip protocol version in the progress event" time="0.648606709">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/shielded-transaction-subscriptions.test.ts" name="shielded transaction subscriptions &gt; a subscription to wallet updates providing viewing key only &gt; should reject shieldedTransactions subscription when using expired session ID" time="0.990980958">
+        <testcase classname="tests/integration/basic/subscriptions/shielded-transaction-subscriptions.test.ts" name="shielded transaction subscriptions &gt; a subscription to wallet updates providing viewing key only &gt; should reject shieldedTransactions subscription when using expired session ID" time="0.986294209">
         </testcase>
     </testsuite>
-    <testsuite name="tests/integration/basic/subscriptions/subscription-quotas.test.ts" timestamp="2026-10-16T15:36:26.320Z" hostname="alex-laptop-2.local" tests="5" failures="0" errors="0" skipped="0" time="52.026889625">
-        <testcase classname="tests/integration/basic/subscriptions/subscription-quotas.test.ts" name="subscription quotas &gt; per-connection concurrent subscription cap &gt; should reject a subscription beyond the per-connection cap" time="1.725332166">
+    <testsuite name="tests/integration/basic/subscriptions/subscription-quotas.test.ts" timestamp="2026-10-27T13:50:39.452Z" hostname="alex-laptop-2.local" tests="5" failures="0" errors="0" skipped="0" time="85.124802416">
+        <testcase classname="tests/integration/basic/subscriptions/subscription-quotas.test.ts" name="subscription quotas &gt; per-connection concurrent subscription cap &gt; should reject a subscription beyond the per-connection cap" time="1.717370417">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/subscription-quotas.test.ts" name="subscription quotas &gt; per-connection concurrent subscription cap &gt; should free a slot when an active subscription is closed" time="2.711683">
+        <testcase classname="tests/integration/basic/subscriptions/subscription-quotas.test.ts" name="subscription quotas &gt; per-connection concurrent subscription cap &gt; should free a slot when an active subscription is closed" time="2.715608459">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/subscription-quotas.test.ts" name="subscription quotas &gt; per-session subscription creation rate limit &gt; should reject shielded subscription creations beyond the per-session rate limit" time="1.8521655">
+        <testcase classname="tests/integration/basic/subscriptions/subscription-quotas.test.ts" name="subscription quotas &gt; per-session subscription creation rate limit &gt; should reject shielded subscription creations beyond the per-session rate limit" time="1.8307775">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/subscription-quotas.test.ts" name="subscription quotas &gt; per-session subscription creation rate limit &gt; should allow a new shielded subscription after the rate limit refills" time="10.008684542">
+        <testcase classname="tests/integration/basic/subscriptions/subscription-quotas.test.ts" name="subscription quotas &gt; per-session subscription creation rate limit &gt; should allow a new shielded subscription after the rate limit refills" time="9.874945542">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/subscription-quotas.test.ts" name="subscription quotas &gt; per-session subscription creation rate limit &gt; should keep a live shielded subscription streaming while creations are rate-limited" time="34.917169125">
-        </testcase>
-    </testsuite>
-    <testsuite name="tests/integration/basic/subscriptions/unshielded-transaction-subscriptions.test.ts" timestamp="2026-10-16T15:36:26.320Z" hostname="alex-laptop-2.local" tests="12" failures="0" errors="0" skipped="1" time="31.378999209">
-        <testcase classname="tests/integration/basic/subscriptions/unshielded-transaction-subscriptions.test.ts" name="unshielded transaction subscriptions &gt; a subscription to unshielded transaction events by address &gt; should stream unshielded transaction events related to that address, given that address has transactions" time="0.209046375">
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/unshielded-transaction-subscriptions.test.ts" name="unshielded transaction subscriptions &gt; a subscription to unshielded transaction events by address &gt; should stream unshielded transaction events up to highest transaction id" time="7.349903833">
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/unshielded-transaction-subscriptions.test.ts" name="unshielded transaction subscriptions &gt; a subscription to unshielded transaction events by address &gt; should stream unshielded transaction events that adhere to the expected schema" time="0.150553416">
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/unshielded-transaction-subscriptions.test.ts" name="unshielded transaction subscriptions &gt; a subscription to unshielded transaction events by address &gt; should only return a transaction progress message with highest transaction = 0, given that address does not have transactions" time="5.054778">
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/unshielded-transaction-subscriptions.test.ts" name="unshielded transaction subscriptions &gt; a subscription to unshielded transaction events by address &gt; should report the chain tip protocol version in the progress update, given that address does not have transactions" time="0.000561833">
-            <skipped/>
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/unshielded-transaction-subscriptions.test.ts" name="unshielded transaction subscriptions &gt; a subscription to unshielded transaction events by address &gt; should return an error message, given the address provided is in hex format" time="0.108064666">
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/unshielded-transaction-subscriptions.test.ts" name="unshielded transaction subscriptions &gt; a subscription to unshielded transaction events by address &gt; should return an error message, given the address provided is for another network" time="0.742574584">
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/unshielded-transaction-subscriptions.test.ts" name="unshielded transaction subscriptions &gt; a subscription to unshielded transaction events by address and transaction id &gt; should return a stream of transactions containing that address, starting from transaction id = 0" time="5.540058083">
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/unshielded-transaction-subscriptions.test.ts" name="unshielded transaction subscriptions &gt; a subscription to unshielded transaction events by address and transaction id &gt; should return an error message, given the transaction id provided is negative" time="0.125010709">
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/unshielded-transaction-subscriptions.test.ts" name="unshielded transaction subscriptions &gt; a subscription to unshielded transaction events by address and transaction id &gt; should only return a transaction progress message without streaming transactions, given that the transaction id provided is bigger number" time="5.059957125">
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/unshielded-transaction-subscriptions.test.ts" name="unshielded transaction subscriptions &gt; a subscription to unshielded transaction events by address and transaction id &gt; should start a transaction stream from the given transaction id" time="5.292459292">
-        </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/unshielded-transaction-subscriptions.test.ts" name="unshielded transaction subscriptions &gt; a subscription to unshielded transaction events by address and transaction id &gt; should return an error message, given the address is provided in hex format" time="0.08162675">
+        <testcase classname="tests/integration/basic/subscriptions/subscription-quotas.test.ts" name="subscription quotas &gt; per-session subscription creation rate limit &gt; should keep a live shielded subscription streaming while creations are rate-limited" time="27.379113666">
         </testcase>
     </testsuite>
-    <testsuite name="tests/integration/basic/subscriptions/wallet-connect-options.test.ts" timestamp="2026-10-16T15:36:26.321Z" hostname="alex-laptop-2.local" tests="3" failures="0" errors="0" skipped="0" time="4.871834375">
-        <testcase classname="tests/integration/basic/subscriptions/wallet-connect-options.test.ts" name="wallet connect options (startIndex) &gt; opening a session with startIndex &gt; should accept startIndex = 0 (no-op equivalent of unset options)" time="0.784356292">
+    <testsuite name="tests/integration/basic/subscriptions/unshielded-transaction-subscriptions.test.ts" timestamp="2026-10-27T13:50:39.452Z" hostname="alex-laptop-2.local" tests="11" failures="0" errors="0" skipped="0" time="80.281534334">
+        <testcase classname="tests/integration/basic/subscriptions/unshielded-transaction-subscriptions.test.ts" name="unshielded transaction subscriptions &gt; a subscription to unshielded transaction events by address &gt; should stream unshielded transaction events related to that address, given that address has transactions" time="0.225387625">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/wallet-connect-options.test.ts" name="wallet connect options (startIndex) &gt; opening a session with startIndex &gt; should skip historical scan when startIndex equals the current tip" time="1.665198125">
+        <testcase classname="tests/integration/basic/subscriptions/unshielded-transaction-subscriptions.test.ts" name="unshielded transaction subscriptions &gt; a subscription to unshielded transaction events by address &gt; should stream unshielded transaction events up to highest transaction id" time="8.60227475">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/wallet-connect-options.test.ts" name="wallet connect options (startIndex) &gt; opening a session with startIndex &gt; should accept startIndex past the current tip (fast-forward)" time="1.627126">
+        <testcase classname="tests/integration/basic/subscriptions/unshielded-transaction-subscriptions.test.ts" name="unshielded transaction subscriptions &gt; a subscription to unshielded transaction events by address &gt; should stream unshielded transaction events that adhere to the expected schema" time="0.158528458">
+        </testcase>
+        <testcase classname="tests/integration/basic/subscriptions/unshielded-transaction-subscriptions.test.ts" name="unshielded transaction subscriptions &gt; a subscription to unshielded transaction events by address &gt; should only return a transaction progress message with highest transaction = 0, given that address does not have transactions" time="5.065341084">
+        </testcase>
+        <testcase classname="tests/integration/basic/subscriptions/unshielded-transaction-subscriptions.test.ts" name="unshielded transaction subscriptions &gt; a subscription to unshielded transaction events by address &gt; should return an error message, given the address provided is in hex format" time="0.112593458">
+        </testcase>
+        <testcase classname="tests/integration/basic/subscriptions/unshielded-transaction-subscriptions.test.ts" name="unshielded transaction subscriptions &gt; a subscription to unshielded transaction events by address &gt; should return an error message, given the address provided is for another network" time="0.592014542">
+        </testcase>
+        <testcase classname="tests/integration/basic/subscriptions/unshielded-transaction-subscriptions.test.ts" name="unshielded transaction subscriptions &gt; a subscription to unshielded transaction events by address and transaction id &gt; should return a stream of transactions containing that address, starting from transaction id = 0" time="8.844764166">
+        </testcase>
+        <testcase classname="tests/integration/basic/subscriptions/unshielded-transaction-subscriptions.test.ts" name="unshielded transaction subscriptions &gt; a subscription to unshielded transaction events by address and transaction id &gt; should return an error message, given the transaction id provided is negative" time="0.137208708">
+        </testcase>
+        <testcase classname="tests/integration/basic/subscriptions/unshielded-transaction-subscriptions.test.ts" name="unshielded transaction subscriptions &gt; a subscription to unshielded transaction events by address and transaction id &gt; should only return a transaction progress message without streaming transactions, given that the transaction id provided is bigger number" time="5.056935625">
+        </testcase>
+        <testcase classname="tests/integration/basic/subscriptions/unshielded-transaction-subscriptions.test.ts" name="unshielded transaction subscriptions &gt; a subscription to unshielded transaction events by address and transaction id &gt; should start a transaction stream from the given transaction id" time="5.27023225">
+        </testcase>
+        <testcase classname="tests/integration/basic/subscriptions/unshielded-transaction-subscriptions.test.ts" name="unshielded transaction subscriptions &gt; a subscription to unshielded transaction events by address and transaction id &gt; should return an error message, given the address is provided in hex format" time="0.107765792">
         </testcase>
     </testsuite>
-    <testsuite name="tests/integration/basic/subscriptions/websocket-keepalive.test.ts" timestamp="2026-10-16T15:36:26.321Z" hostname="alex-laptop-2.local" tests="2" failures="0" errors="0" skipped="0" time="303.256977958">
-        <testcase classname="tests/integration/basic/subscriptions/websocket-keepalive.test.ts" name="websocket keepalive &gt; an idle socket without the client keepalive &gt; should be closed while idle past the idle limit" time="152.611077042">
+    <testsuite name="tests/integration/basic/subscriptions/wallet-connect-options.test.ts" timestamp="2026-10-27T13:50:39.453Z" hostname="alex-laptop-2.local" tests="3" failures="0" errors="0" skipped="0" time="38.666881042">
+        <testcase classname="tests/integration/basic/subscriptions/wallet-connect-options.test.ts" name="wallet connect options (startIndex) &gt; opening a session with startIndex &gt; should accept startIndex = 0 (no-op equivalent of unset options)" time="0.7915305">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/websocket-keepalive.test.ts" name="websocket keepalive &gt; an idle socket with the client keepalive &gt; should stay open while idle past the idle limit" time="150.644463209">
+        <testcase classname="tests/integration/basic/subscriptions/wallet-connect-options.test.ts" name="wallet connect options (startIndex) &gt; opening a session with startIndex &gt; should skip historical scan when startIndex equals the current tip" time="1.592383791">
+        </testcase>
+        <testcase classname="tests/integration/basic/subscriptions/wallet-connect-options.test.ts" name="wallet connect options (startIndex) &gt; opening a session with startIndex &gt; should accept startIndex past the current tip (fast-forward)" time="1.60798225">
         </testcase>
     </testsuite>
-    <testsuite name="tests/integration/basic/subscriptions/zswap-events-subscriptions.test.ts" timestamp="2026-10-16T15:36:26.321Z" hostname="alex-laptop-2.local" tests="5" failures="0" errors="0" skipped="0" time="5.867828667">
-        <testcase classname="tests/integration/basic/subscriptions/zswap-events-subscriptions.test.ts" name="zswap ledger event subscriptions &gt; a subscription to zswap ledger events without offset (default replay) &gt; streams events in ledger order" time="0.913591791">
+    <testsuite name="tests/integration/basic/subscriptions/websocket-keepalive.test.ts" timestamp="2026-10-27T13:50:39.454Z" hostname="alex-laptop-2.local" tests="2" failures="0" errors="0" skipped="0" time="303.253530125">
+        <testcase classname="tests/integration/basic/subscriptions/websocket-keepalive.test.ts" name="websocket keepalive &gt; an idle socket without the client keepalive &gt; should be closed while idle past the idle limit" time="152.605694458">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/zswap-events-subscriptions.test.ts" name="zswap ledger event subscriptions &gt; subscription with explicit offset &gt; streams events starting from the specified ID" time="2.363108084">
+        <testcase classname="tests/integration/basic/subscriptions/websocket-keepalive.test.ts" name="websocket keepalive &gt; an idle socket with the client keepalive &gt; should stay open while idle past the idle limit" time="150.645837583">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/zswap-events-subscriptions.test.ts" name="zswap ledger event subscriptions &gt; subscription with explicit offset &gt; validates historical zswap events against schema" time="1.124430541">
+    </testsuite>
+    <testsuite name="tests/integration/basic/subscriptions/zswap-events-subscriptions.test.ts" timestamp="2026-10-27T13:50:39.454Z" hostname="alex-laptop-2.local" tests="5" failures="0" errors="0" skipped="0" time="4.26386875">
+        <testcase classname="tests/integration/basic/subscriptions/zswap-events-subscriptions.test.ts" name="zswap ledger event subscriptions &gt; a subscription to zswap ledger events without offset (default replay) &gt; streams events in ledger order" time="0.890644541">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/zswap-events-subscriptions.test.ts" name="zswap ledger event subscriptions &gt; subscription error handling &gt; should return an error for unknown field" time="0.764858083">
+        <testcase classname="tests/integration/basic/subscriptions/zswap-events-subscriptions.test.ts" name="zswap ledger event subscriptions &gt; subscription with explicit offset &gt; streams events starting from the specified ID" time="1.064368458">
         </testcase>
-        <testcase classname="tests/integration/basic/subscriptions/zswap-events-subscriptions.test.ts" name="zswap ledger event subscriptions &gt; subscription error handling &gt; rejects negative offset ID with an error" time="0.70065975">
+        <testcase classname="tests/integration/basic/subscriptions/zswap-events-subscriptions.test.ts" name="zswap ledger event subscriptions &gt; subscription with explicit offset &gt; validates historical zswap events against schema" time="0.891921">
+        </testcase>
+        <testcase classname="tests/integration/basic/subscriptions/zswap-events-subscriptions.test.ts" name="zswap ledger event subscriptions &gt; subscription error handling &gt; should return an error for unknown field" time="0.707938167">
+        </testcase>
+        <testcase classname="tests/integration/basic/subscriptions/zswap-events-subscriptions.test.ts" name="zswap ledger event subscriptions &gt; subscription error handling &gt; rejects negative offset ID with an error" time="0.707084208">
         </testcase>
     </testsuite>
 </testsuites>
