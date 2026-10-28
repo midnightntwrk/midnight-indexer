@@ -886,157 +886,167 @@ mod apply_transactions_tblock_tests {
     // it, and the bumped `tblock` is `parent + 12s`.
     const NOW: u64 = 1_800_000_000;
 
-    // One block applied at `NOW` to a fresh ledger state. Times are in seconds; the adjusted
-    // `tblock` is `parent_block_time + 12s`.
-    #[cfg(not(feature = "divergence-halt"))]
-    struct Case {
-        name: &'static str,
-        // Intent TTL and dust `ctime` of each regular transaction.
-        transactions: &'static [(u64, u64)],
-        parent_block_time: u64,
-        bump_first_regular_tblock: bool,
-        expected: Result<Vec<TransactionResult>, Malformed>,
-    }
-
-    // On a runtime that skews, a regular transaction is accepted if well-formed at the block time
-    // or at the adjusted `tblock` until one applies; from then on only at the block time.
-    //
-    // Some cases have the ledger fail a transaction that `apply` takes to be applied on chain,
-    // which is a divergence and panics with `divergence-halt`, so this runs in default builds.
+    // Validity-window retries admit transactions independently of the adjusted-tblock fallback.
+    // Applying still checks TTL against the real block time. Never-valid transactions retain
+    // the initial block-time error, as required by the caller's adjusted-time fallback.
+    // Cases whose ledger result differs from the supplied on-chain outcome run without the
+    // optional divergence-halt feature.
     #[tokio::test(flavor = "multi_thread")]
     #[cfg(not(feature = "divergence-halt"))]
-    async fn regular_transactions_are_accepted_at_the_adjusted_tblock_until_one_applies()
+    async fn well_formed_is_retried_at_the_window_ends_whether_or_not_bumped()
     -> Result<(), BoxError> {
-        use Malformed::{IntentTtlExpired, OutOfDustValidityWindow};
-        use TransactionResult::{Failure, Success};
-
         let _ledger_db = init_ledger_db().await?;
 
         for ledger_version in [LedgerVersion::V8, LedgerVersion::V9] {
-            let protocol_version = skewing_protocol_version(ledger_version);
+            let skewing = skewing_protocol_version(ledger_version);
+            let unskewed = unskewed_protocol_version(ledger_version);
+
+            // Intent TTL and dust ctime in seconds.
+            let dust_ahead = dust_registration(ledger_version, NOW + 60, NOW + 4).await?;
+            let dust_current = dust_registration(ledger_version, NOW + 60, NOW).await?;
+            let ttl_soon = dust_registration(ledger_version, NOW + 2, NOW).await?;
+            let ttl_passed = dust_registration(ledger_version, NOW - 5, NOW - 18).await?;
+            let dust_recent = dust_registration(ledger_version, NOW + 40, NOW - 5).await?;
+            let instant_past = dust_registration(ledger_version, NOW - 5, NOW - 5).await?;
+            let never_valid = dust_registration(ledger_version, NOW + 2, NOW + 4).await?;
+
+            use TransactionResult::{Failure, Success};
             let cases = [
-                // With the parent block in the previous 6s slot the adjusted `tblock` is
-                // `NOW + 6s`. A dust `ctime` of `NOW + 4s` is valid there but not at the block
-                // time, and only the first regular transaction is retried there.
-                Case {
-                    name: "dust ctime ahead, bumped",
-                    transactions: &[(NOW + 60, NOW + 4)],
-                    parent_block_time: NOW - 6,
-                    bump_first_regular_tblock: true,
-                    expected: Ok(vec![Success]),
-                },
-                Case {
-                    name: "dust ctime ahead, not bumped",
-                    transactions: &[(NOW + 60, NOW + 4)],
-                    parent_block_time: NOW - 6,
-                    bump_first_regular_tblock: false,
-                    expected: Err(OutOfDustValidityWindow),
-                },
-                Case {
-                    name: "dust ctime ahead, second transaction",
-                    transactions: &[(NOW + 60, NOW), (NOW + 60, NOW + 4)],
-                    parent_block_time: NOW - 6,
-                    bump_first_regular_tblock: true,
-                    expected: Err(OutOfDustValidityWindow),
-                },
-                // `NOW + 6s` is past an intent TTL of `NOW + 2s`; the block time is not.
-                Case {
-                    name: "ttl before adjusted tblock, bumped",
-                    transactions: &[(NOW + 2, NOW)],
-                    parent_block_time: NOW - 6,
-                    bump_first_regular_tblock: true,
-                    expected: Ok(vec![Success]),
-                },
-                // With the two slots before the block skipped the adjusted `tblock` is `NOW - 6s`,
-                // before the block time, as it is based on the parent block time. An intent TTL of
-                // `NOW - 5s` passes `well_formed` there, and `apply` fails it at the block time.
-                Case {
-                    name: "ttl before block time, bumped",
-                    transactions: &[(NOW - 5, NOW - 18)],
-                    parent_block_time: NOW - 18,
-                    bump_first_regular_tblock: true,
-                    expected: Ok(vec![Failure]),
-                },
-                Case {
-                    name: "ttl before block time, not bumped",
-                    transactions: &[(NOW - 5, NOW - 18)],
-                    parent_block_time: NOW - 18,
-                    bump_first_regular_tblock: false,
-                    expected: Err(IntentTtlExpired),
-                },
-                // A dust `ctime` of `NOW - 5s` is past `NOW - 6s` but valid at the block time.
-                Case {
-                    name: "dust ctime after adjusted tblock, bumped",
-                    transactions: &[(NOW + 40, NOW - 5)],
-                    parent_block_time: NOW - 18,
-                    bump_first_regular_tblock: true,
-                    expected: Ok(vec![Success]),
-                },
-                Case {
-                    name: "dust ctime after adjusted tblock, not bumped",
-                    transactions: &[(NOW + 40, NOW - 5)],
-                    parent_block_time: NOW - 18,
-                    bump_first_regular_tblock: false,
-                    expected: Ok(vec![Success]),
-                },
-                // Malformed at both `tblock`s, with a different error at each: the error at the
-                // block time is reported.
-                Case {
-                    name: "malformed at both, adjusted tblock after the block time",
-                    transactions: &[(NOW + 2, NOW + 4)],
-                    parent_block_time: NOW - 6,
-                    bump_first_regular_tblock: true,
-                    expected: Err(OutOfDustValidityWindow),
-                },
-                Case {
-                    name: "malformed at both, adjusted tblock before the block time",
-                    transactions: &[(NOW - 5, NOW - 5)],
-                    parent_block_time: NOW - 18,
-                    bump_first_regular_tblock: true,
-                    expected: Err(IntentTtlExpired),
-                },
-                // A failed regular transaction leaves the state unchanged, so the next one is
-                // still verified at the adjusted `tblock` `NOW - 6s`: an intent TTL of `NOW - 3s`
-                // passes `well_formed` there, and `apply` fails it at the block time as well.
-                Case {
-                    name: "ttl before block time, after a failed transaction",
-                    transactions: &[(NOW - 5, NOW - 18), (NOW - 3, NOW - 18)],
-                    parent_block_time: NOW - 18,
-                    bump_first_regular_tblock: true,
-                    expected: Ok(vec![Failure, Failure]),
-                },
+                // A dust ctime of `NOW + 4s` is accepted by the validity-window retry,
+                // even without the adjusted-time fallback.
+                (
+                    "dust ahead, first, bumped",
+                    skewing,
+                    vec![&dust_ahead],
+                    NOW - 6,
+                    Ok(vec![Success]),
+                ),
+                (
+                    "dust ahead, first, not bumped",
+                    unskewed,
+                    vec![&dust_ahead],
+                    NOW - 6,
+                    Ok(vec![Success]),
+                ),
+                // An intent TTL of `NOW + 2s` passes at block time, even though the
+                // adjusted `tblock` would be past the TTL.
+                (
+                    "ttl soon, bumped",
+                    skewing,
+                    vec![&ttl_soon],
+                    NOW - 6,
+                    Ok(vec![Success]),
+                ),
+                (
+                    "ttl soon, not bumped",
+                    unskewed,
+                    vec![&ttl_soon],
+                    NOW - 6,
+                    Ok(vec![Success]),
+                ),
+                // With the two slots before the block skipped the bumped `tblock` is `NOW - 6s`,
+                // before the block time: an intent TTL of `NOW - 5s` passes `well_formed` there
+                // and at the retried TTL, but `apply` fails it at the block time.
+                (
+                    "ttl passed, bumped",
+                    skewing,
+                    vec![&ttl_passed],
+                    NOW - 18,
+                    Ok(vec![Failure]),
+                ),
+                (
+                    "ttl passed, not bumped",
+                    unskewed,
+                    vec![&ttl_passed],
+                    NOW - 18,
+                    Ok(vec![Failure]),
+                ),
+                // A dust ctime of `NOW - 5s` passes at block time, even though the
+                // adjusted `tblock` would be before the dust ctime.
+                (
+                    "dust recent, bumped",
+                    skewing,
+                    vec![&dust_recent],
+                    NOW - 18,
+                    Ok(vec![Success]),
+                ),
+                (
+                    "dust recent, not bumped",
+                    unskewed,
+                    vec![&dust_recent],
+                    NOW - 18,
+                    Ok(vec![Success]),
+                ),
+                (
+                    "single valid instant before block time",
+                    skewing,
+                    vec![&instant_past],
+                    NOW - 18,
+                    Ok(vec![Failure]),
+                ),
+                (
+                    "ttl passed, after a failed transaction",
+                    skewing,
+                    vec![&ttl_passed, &ttl_passed],
+                    NOW - 18,
+                    Ok(vec![Failure, Failure]),
+                ),
+                // A dust ctime past the intent TTL is never valid. The caller retains the
+                // error from the initial block-time check, whether or not it tries an adjusted time.
+                (
+                    "never valid, bumped",
+                    skewing,
+                    vec![&never_valid],
+                    NOW - 6,
+                    Err(Malformed::OutOfDustValidityWindow),
+                ),
+                (
+                    "never valid, not bumped",
+                    unskewed,
+                    vec![&never_valid],
+                    NOW - 6,
+                    Err(Malformed::OutOfDustValidityWindow),
+                ),
             ];
 
-            for case in cases {
-                let mut transactions = vec![];
-                for &(ttl, ctime) in case.transactions {
-                    transactions.push(dust_registration(ledger_version, ttl, ctime).await?);
-                }
-                let transactions = transactions
-                    .iter()
-                    .map(|transaction| (transaction, fully_applied as fn(_) -> _))
-                    .collect::<Vec<_>>();
-
+            for (name, protocol_version, transactions, parent_block_time, expected) in cases {
                 assert_eq!(
                     apply(
                         NETWORK_ID,
                         protocol_version,
-                        &transactions,
-                        NOW,
-                        case.parent_block_time,
-                        case.bump_first_regular_tblock,
-                    )?
-                    .map(|transactions| {
-                        transactions
+                        &transactions
                             .iter()
-                            .map(|transaction| regular(transaction).transaction_result.clone())
-                            .collect::<Vec<_>>()
-                    }),
-                    case.expected,
-                    "{ledger_version}: {}",
-                    case.name
+                            .map(|transaction| (*transaction, fully_applied as fn(_) -> _))
+                            .collect::<Vec<_>>(),
+                        NOW,
+                        parent_block_time,
+                        should_bump_first_regular_tblock(1, protocol_version),
+                    )?
+                    .map(|transactions| transactions
+                        .iter()
+                        .map(|transaction| regular(transaction).transaction_result.clone())
+                        .collect::<Vec<_>>()),
+                    expected,
+                    "{ledger_version}: {name}"
                 );
             }
+
+            // As the second regular transaction `dust_ahead` is never bumped and is retried too.
+            // Every test transaction registers the same seeded dust key and the ledger versions
+            // differ on whether the second registration applies, so only `well_formed` admitting
+            // it is checked.
+            let results = apply(
+                NETWORK_ID,
+                skewing,
+                &[(&dust_current, fully_applied), (&dust_ahead, fully_applied)],
+                NOW,
+                NOW - 6,
+                true,
+            )?;
+            assert!(
+                matches!(results, Ok(ref results) if results.len() == 2),
+                "{ledger_version}: dust ahead, second, bumped: {results:?}"
+            );
         }
 
         Ok(())
@@ -1415,6 +1425,16 @@ mod apply_transactions_tblock_tests {
         match ledger_version {
             LedgerVersion::V8 => ProtocolVersion::V1_0(1_000_000),
             LedgerVersion::V9 => ProtocolVersion::V2_0(2_000_000),
+        }
+    }
+
+    // Returns a runtime on the given ledger version that does not skew the first regular
+    // transaction's `tblock`.
+    #[cfg(not(feature = "divergence-halt"))]
+    fn unskewed_protocol_version(ledger_version: LedgerVersion) -> ProtocolVersion {
+        match ledger_version {
+            LedgerVersion::V8 => ProtocolVersion::V1_0(1_000_300),
+            LedgerVersion::V9 => ProtocolVersion::V2_1(2_001_000),
         }
     }
 
