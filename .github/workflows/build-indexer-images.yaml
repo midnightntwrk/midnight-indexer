@@ -205,13 +205,15 @@ jobs:
         uses: anchore/scan-action/download-grype@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
 
       # The point of building with cargo auditable: an image scanner must see the binary's crates.
+      # The SBOM goes to the runner's temp directory: a new file in the build context would change
+      # the push build's `COPY . .` layers and recompile the binary.
       - name: Check the image SBOM lists the Rust crates
         env:
           SYFT: ${{ steps.syft.outputs.cmd }}
           IMAGE: local/${{ matrix.image.name }}:check
         run: |
-          "$SYFT" scan "docker:$IMAGE" -o syft-json=sbom.syft.json
-          crates=$(jq '[.artifacts[] | select(.type == "rust-crate")] | length' sbom.syft.json)
+          "$SYFT" scan "docker:$IMAGE" -o syft-json="$RUNNER_TEMP/sbom.syft.json"
+          crates=$(jq '[.artifacts[] | select(.type == "rust-crate")] | length' "$RUNNER_TEMP/sbom.syft.json")
           echo "syft found $crates Rust crates in $IMAGE"
           if [ "$crates" -eq 0 ]; then
             echo "::error::syft found no Rust crates in $IMAGE; its cargo auditable data is missing or unreadable"
@@ -225,7 +227,7 @@ jobs:
         env:
           GRYPE: ${{ steps.grype.outputs.cmd }}
         run: |
-          "$GRYPE" sbom:sbom.syft.json --fail-on high --only-fixed
+          "$GRYPE" "sbom:$RUNNER_TEMP/sbom.syft.json" --fail-on high --only-fixed
 
       - name: Build and push Docker Image
         id: push
@@ -255,14 +257,14 @@ jobs:
           IMAGE: ghcr.io/midnightntwrk/${{ matrix.image.name }}@${{ steps.push.outputs.digest }}
           PLATFORM: linux/${{ matrix.platform.arch }}
         run: |
-          "$SYFT" scan "registry:$IMAGE" --platform "$PLATFORM" -o spdx-json=sbom.spdx.json
+          "$SYFT" scan "registry:$IMAGE" --platform "$PLATFORM" -o spdx-json="$RUNNER_TEMP/sbom.spdx.json"
 
       - name: Upload SBOM
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sbom-${{ matrix.image.name }}-${{ matrix.platform.arch }}
-          path: sbom.spdx.json
+          path: ${{ runner.temp }}/sbom.spdx.json
 
   merge-manifests:
     name: Merge multi-arch manifest (${{ matrix.image.name }})
