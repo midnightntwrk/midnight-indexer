@@ -42,9 +42,17 @@ jobs:
   check-build-tools:
     name: Check build tools for advisories
     runs-on: ubuntu-latest
-    # No checkout and no GitHub API calls: the job needs no token permissions.
-    permissions: {}
+    permissions:
+      contents: read
     steps:
+      - name: Checkout the cargo-deny config
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing here pushes to git; keep GITHUB_TOKEN out of .git/config for later steps.
+          persist-credentials: false
+          sparse-checkout: .github/deny.toml
+          sparse-checkout-cone-mode: false
+
       - name: Install cargo-deny
         uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
@@ -66,18 +74,10 @@ jobs:
 
       - name: Run cargo-deny on their lockfiles
         # --locked checks the Cargo.lock each crate ships, which is what `cargo install --locked`
-        # builds. -Aunmaintained matches rust-security-scan. Ignores are for build tools only;
-        # remove each once a pinned release ships a lockfile without it.
+        # builds. -Aunmaintained matches rust-security-scan.
         run: |
-          cat > build-tools-deny.toml <<'EOF'
-          [advisories]
-          ignore = [
-            { id = "RUSTSEC-2026-0190", reason = "anyhow 1.0.102 in cargo-chef 0.1.78's lockfile; cargo-chef never calls Error::downcast_mut, and no cargo-chef release locks anyhow >= 1.0.103 yet" },
-            { id = "RUSTSEC-2026-0204", reason = "crossbeam-epoch 0.9.18 in cargo-chef 0.1.78's lockfile, reached only through ignore's directory walker, which never formats Atomic/Shared pointers; no cargo-chef release locks >= 0.9.20 yet" },
-          ]
-          EOF
           for name in cargo-chef cargo-auditable; do
-            cargo deny --manifest-path "$name/Cargo.toml" --locked --config build-tools-deny.toml \
+            cargo deny --manifest-path "$name/Cargo.toml" --locked --config .github/deny.toml \
               check -Aunmaintained advisories
           done
 
