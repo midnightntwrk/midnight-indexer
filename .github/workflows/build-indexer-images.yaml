@@ -230,7 +230,6 @@ jobs:
           "$GRYPE" "sbom:$RUNNER_TEMP/sbom.syft.json" --fail-on high --only-fixed
 
       - name: Build and push Docker Image
-        id: push
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -244,27 +243,10 @@ jobs:
           cache-to: |
             type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.image.name }}:buildcache${{ matrix.platform.cache_scope }},mode=max
             type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.image.name }}:buildcache-${{ env.PROFILE }}${{ matrix.platform.cache_scope }},mode=max
-
-      # The check above scanned the local build, whose digest differs from the published image
-      # (labels, attestations). Record the SBOM of what was actually pushed, by digest, so the
-      # artifact can be matched to the image. Every target registry receives the same digest.
-      # Informational only (the gate is the check before the push): the image is already
-      # published, so a failure here must not fail the job and hold back merge-manifests.
-      - name: Generate SBOM for the published image
-        continue-on-error: true
-        env:
-          SYFT: ${{ steps.syft.outputs.cmd }}
-          IMAGE: ghcr.io/midnightntwrk/${{ matrix.image.name }}@${{ steps.push.outputs.digest }}
-          PLATFORM: linux/${{ matrix.platform.arch }}
-        run: |
-          "$SYFT" scan "registry:$IMAGE" --platform "$PLATFORM" -o spdx-json="$RUNNER_TEMP/sbom.spdx.json"
-
-      - name: Upload SBOM
-        continue-on-error: true
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: sbom-${{ matrix.image.name }}-${{ matrix.platform.arch }}
-          path: ${{ runner.temp }}/sbom.spdx.json
+          # Attaches an SPDX SBOM to the published image, next to its provenance. BuildKit runs this
+          # syft-based scanner image on the final stage; pinned by digest and bumped by hand.
+          attests: |
+            type=sbom,generator=docker/buildkit-syft-scanner:1.12.1@sha256:873a7458c3c8ac8e32c7b796c10e1600b07b963d2aa000a72a2d97aaaa2d6315
 
   merge-manifests:
     name: Merge multi-arch manifest (${{ matrix.image.name }})
