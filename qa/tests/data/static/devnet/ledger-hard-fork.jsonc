@@ -1,0 +1,39 @@
+// The ledger 8 -> 9 hard fork devnet crossed on 2026-09-28 (runtime spec 1000300 at block
+// 169,495 -> 2001000 at block 169,496; a fork, not a reset), and a contract deployed and last
+// called before it. The contract is the reference contract of midnight-indexer#1605: the node
+// serves its state as contract-state[v8] from the fork block on.
+//
+// "Untouched" is a claim about the live chain: if the contract is ever called again, its
+// latest action moves past the fork and this entry must be replaced.
+{
+  "fork-block": {
+    "height": 169496,
+    "hash": "cd6516965be869bac61f5a46170e63d74634d3be0441d811626d16b975086039",
+    "protocol-version": 2001000
+  },
+  "untouched-contracts": [
+    {
+      "contract-address": "7375dc633a1a71ac5f9150f7c234a16cf02af14ec487c9070bdda3f8395cefdc",
+      "contract-actions": [
+        {
+          "action-type": "ContractDeploy",
+          "block-height": 124321,
+          "block-hash": "b02a401a5f2814c78ea73673850eba05ffa237628c945c6cb7fb40425ffb3442",
+          "transaction-hash": "66a494372ff5f2eda0b965dc37d7ddbd5eb9008b683ba2d34b068847763975bb"
+        },
+        {
+          "action-type": "ContractCall",
+          "block-height": 124417,
+          "block-hash": "28c515462923f73ba2f989377abe90d9fe32dbc06c46d7e7861670f720eff510",
+          "transaction-hash": "f5ac1d68d375371a74c58216512490c93673d7917e9ba279cb8def2c519dc9be"
+        },
+        {
+          "action-type": "ContractCall",
+          "block-height": 124423,
+          "block-hash": "0f9dc24fbdf42dbf3a37d7d70c72ce1846ec5e084b5609254008107feb6de46a",
+          "transaction-hash": "87682ee284848db19988f6fdd9470ce1a531bc5f19a4e572e6708928ce649639"
+        }
+      ]
+    }
+  ]
+}

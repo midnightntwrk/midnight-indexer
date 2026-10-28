@@ -19,7 +19,13 @@ import log from '@utils/logging/logger';
 import dataProvider from '@utils/testdata-provider';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { env } from '../../environment/model';
-import { getBlockByHashWithRetry, getTransactionByHashWithRetry } from './test-utils';
+import { getBlockByHashWithRetry, getTransactionByHashWithRetry, retry } from './test-utils';
+import {
+  ContractActionSubscriptionResponse,
+  IndexerWsClient,
+} from '@utils/indexer/websocket-client';
+import { extractSubscriptionErrorMessage } from '@utils/indexer/subscription-error';
+import { sleep } from '@utils/retry-helper';
 import {
   ToolkitWrapper,
   DeployContractResult,
@@ -29,6 +35,11 @@ import { Transaction } from '@utils/indexer/indexer-types';
 
 const TOOLKIT_WRAPPER_TIMEOUT = 120_000; // 2 minutes
 const CONTRACT_ACTION_TIMEOUT = 150_000; // 2.5 minutes
+// The call hook first waits for the indexer's tip to pass the deploy block, up to 30 x 2s.
+const TIP_PAST_DEPLOY_ATTEMPTS = 30;
+const TIP_PAST_DEPLOY_DELAY_MS = 2000;
+const CALL_WITH_TIP_WAIT_TIMEOUT =
+  CONTRACT_ACTION_TIMEOUT + TIP_PAST_DEPLOY_ATTEMPTS * TIP_PAST_DEPLOY_DELAY_MS;
 const TEST_TIMEOUT = 10_000; // 10 seconds
 
 /** Normalize hash for comparison (indexer may return with or without 0x prefix). */
@@ -181,7 +192,40 @@ describe.sequential('contract actions', () => {
   });
 
   describe('a transaction to call the store circuit on the deployed counter smart contract', () => {
+    let wsClient: IndexerWsClient;
+    let unsubscribeWithoutOffset: () => void;
+    const streamedWithoutOffset: ContractActionSubscriptionResponse[] = [];
+    const subscriptionErrors: string[] = [];
+    let subscriptionSetupError: unknown;
+
     beforeAll(async () => {
+      // Subscribe without an offset only once the deploy is below the indexer's tip, so the
+      // deploy is history the subscription must not replay. The subscription must exist before
+      // the call, but only the no-offset test depends on it: a setup failure fails that test.
+      try {
+        const deployBlock = await getBlockByHashWithRetry(
+          contractDeployResult['deploy-block-hash'],
+        );
+        const deployHeight = deployBlock.data!.block.height;
+        await retry(
+          () => indexerHttpClient.getLatestBlock(),
+          (response) => (response.data?.block.height ?? 0) > deployHeight,
+          TIP_PAST_DEPLOY_ATTEMPTS,
+          TIP_PAST_DEPLOY_DELAY_MS,
+        );
+        wsClient = new IndexerWsClient();
+        await wsClient.connectionInit();
+        unsubscribeWithoutOffset = wsClient.subscribeToContractActionEvents(
+          {
+            next: (payload) => streamedWithoutOffset.push(payload),
+            error: (error) => subscriptionErrors.push(extractSubscriptionErrorMessage(error)),
+          },
+          contractDeployResult['contract-address-untagged'],
+        );
+      } catch (error) {
+        subscriptionSetupError = error;
+      }
+
       contractCallResult = await toolkit.callContract(
         'store',
         contractDeployResult,
@@ -196,7 +240,44 @@ describe.sequential('contract actions', () => {
 
       contractCallBlockHash = contractCallResult.blockHash;
       contractCallTransactionHash = contractCallResult.txHash;
-    }, CONTRACT_ACTION_TIMEOUT);
+    }, CALL_WITH_TIP_WAIT_TIMEOUT);
+
+    afterAll(async () => {
+      unsubscribeWithoutOffset?.();
+      await wsClient?.connectionClose();
+    });
+
+    /**
+     * A contract action subscription without an offset starts at the latest block: it streams
+     * the actions indexed after it started and replays none of the contract's earlier ones.
+     *
+     * @given a contract whose deploy is in a block below the indexer's tip
+     * @and a contract action subscription opened for it without an offset
+     * @when the store circuit is called on the contract
+     * @then the subscription streams exactly the call, and not the earlier deploy
+     */
+    test('should stream only the call to a subscription opened without an offset before it', async (context: TestContext) => {
+      context.task!.meta.custom = {
+        labels: ['Subscription', 'ContractAction', 'NoOffset', 'ContractCall'],
+      };
+      if (subscriptionSetupError) throw subscriptionSetupError;
+
+      await retry(
+        async () => streamedWithoutOffset.length + subscriptionErrors.length,
+        (count) => count > 0,
+        15,
+        2000,
+      ).catch(() => log.warn('No contract action streamed without an offset'));
+      // Anything replayed or streamed twice would arrive alongside the call.
+      await sleep(5000);
+
+      expect(subscriptionErrors).toEqual([]);
+      const streamed = streamedWithoutOffset.map((msg) => {
+        const hash = msg.data?.contractActions.transaction?.hash;
+        return sameHash(hash, contractCallTransactionHash) ? 'the call' : hash;
+      });
+      expect(streamed, 'transactions of the streamed contract actions').toEqual(['the call']);
+    }, 60_000);
 
     /**
      * Once a contract call transaction has been submitted to node and confirmed, the indexer should report
