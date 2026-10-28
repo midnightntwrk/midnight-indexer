@@ -24,7 +24,8 @@ FROM chef AS builder
 SHELL ["/bin/bash", "-c"]
 ARG PROFILE=release
 COPY --from=planner /build/recipe.json recipe.json
-RUN cargo chef cook --locked --profile $PROFILE --recipe-path recipe.json
+# Same package and features as the build below, so cargo reuses every dependency compiled here.
+RUN cargo chef cook -p indexer-api --locked --features cloud --profile $PROFILE --recipe-path recipe.json
 COPY --from=auditable /usr/local/cargo/bin/cargo-auditable /usr/local/cargo/bin/
 COPY . .
 RUN cargo auditable build -p indexer-api --locked --features cloud --profile $PROFILE && \
