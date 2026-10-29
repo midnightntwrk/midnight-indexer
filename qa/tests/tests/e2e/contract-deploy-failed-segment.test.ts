@@ -152,8 +152,11 @@ describe
       plainDeploy = await toolkit.deployContract(fundingSeed);
       plainDeployState = await node.findContractState(plainDeploy['contract-address-untagged']);
 
+      // Crafting proves the transaction and can take many blocks, so the search below starts
+      // from the height read just before it is sent, not before it is built.
+      const { txFileName, ...crafted } = await toolkit.craftDuplicateContractIntent(fundingSeed);
       const heightBeforeSubmit = await node.getChainTip();
-      deploy = await toolkit.deployDuplicateContractIntent(fundingSeed);
+      deploy = { ...crafted, transaction: await toolkit.submitCraftedTransaction(txFileName) };
       log.info(
         `duplicate deploy: address=${deploy.contractAddressUntagged} ` +
           `deployActions=${deploy.deployActionsInTx} tx=${deploy.transaction.txHash}`,

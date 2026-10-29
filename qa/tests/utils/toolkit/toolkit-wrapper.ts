@@ -123,12 +123,18 @@ interface LogEntry {
   block_hash?: string;
 }
 
-/** Outcome of {@link ToolkitWrapper.deployDuplicateContractIntent}. */
-export interface DuplicateDeployResult {
+/** Outcome of {@link ToolkitWrapper.craftDuplicateContractIntent}, not yet submitted. */
+export interface CraftedDuplicateDeploy {
   contractAddressUntagged: string;
   contractAddressTagged: string;
   /** Deploy actions the deserialized transaction carries — 2 when both deploys are in. */
   deployActionsInTx: number;
+  /** The built transaction under /out, for {@link ToolkitWrapper.submitCraftedTransaction}. */
+  txFileName: string;
+}
+
+/** A crafted duplicate deploy once submitted. */
+export interface DuplicateDeployResult extends Omit<CraftedDuplicateDeploy, 'txFileName'> {
   transaction: ToolkitTransactionResult;
 }
 
@@ -1187,7 +1193,7 @@ class ToolkitWrapper {
   }
 
   /**
-   * Build and submit one transaction that deploys the same contract twice.
+   * Build, without submitting, one transaction that deploys the same contract twice.
    *
    * `send-intent` merges every `--intent-file` into a single intent, so passing one deploy
    * intent twice makes the second deploy target the address the first just created. That
@@ -1195,11 +1201,15 @@ class ToolkitWrapper {
    * transaction itself is still accepted and finalized — the shape pink-tawny-owl vector B
    * needs (SSE #612 / indexer #1520).
    *
+   * Building and proving takes far longer than a block, so it is kept apart from
+   * {@link submitCraftedTransaction}: a caller can then note the chain height right before the
+   * transaction is sent.
+   *
    * @param fundingSeed - Funding seed for the deploying wallet.
-   * @returns The contract address in both forms, how many times it occurs in the built
-   *          transaction, and the submitted transaction's hash/block.
+   * @returns The contract address in both forms, how many deploys the built transaction
+   *          carries, and the file it was written to.
    */
-  async deployDuplicateContractIntent(fundingSeed: string): Promise<DuplicateDeployResult> {
+  async craftDuplicateContractIntent(fundingSeed: string): Promise<CraftedDuplicateDeploy> {
     const intentDir = '/out/duplicate-deploy-intent';
     const txFileName = 'duplicate_deploy_tx.mn';
 
@@ -1263,14 +1273,23 @@ class ToolkitWrapper {
     );
     const deployActionsInTx = (dump.output.match(/^\s*Deploy\b/gm) ?? []).length;
 
-    const transaction = this.parseTransactionOutput(await this.sendGeneratedTx(txFileName));
-
     return {
       contractAddressUntagged,
       contractAddressTagged,
       deployActionsInTx,
-      transaction,
+      txFileName,
     };
+  }
+
+  /**
+   * Submit a transaction already built under /out, such as one from
+   * {@link craftDuplicateContractIntent}.
+   *
+   * @param txFileName - The transaction file's name under /out.
+   * @returns The submitted transaction's hash/block.
+   */
+  async submitCraftedTransaction(txFileName: string): Promise<ToolkitTransactionResult> {
+    return this.parseTransactionOutput(await this.sendGeneratedTx(txFileName));
   }
 
   /**
