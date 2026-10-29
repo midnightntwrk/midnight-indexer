@@ -74,8 +74,8 @@ first.
    `indexer-common/src/domain/ledger/state_translation_v8_to_v9.rs` is a manual
    re-port of the node's `ledger/helpers/src/state_translation_v8_to_v9.rs` and
    must stay semantically identical to it — the ledger-8→9 fork-boundary block
-   re-derives `ledger_state.root()` and compares it to the node's on-chain
-   migration output, so any drift breaks that block permanently. If the node's
+   re-derives the translated state and compares its key to the node's on-chain
+   `StateKey`, so any drift breaks that block permanently. If the node's
    table or the v9 `INITIAL_PARAMETERS` it seeds change:
 
    - re-port the file and keep the provenance header's node commit current, and

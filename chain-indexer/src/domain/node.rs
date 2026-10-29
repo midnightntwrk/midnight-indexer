@@ -18,9 +18,7 @@ use crate::domain::{
 use futures::Stream;
 use indexer_common::domain::{
     BlockAuthor, BlockHash, ByteVec, NodeVersion, ProtocolVersion, SerializedTransaction,
-    SerializedTransactionIdentifier, TransactionHash,
-    bridge::BridgeEvent,
-    ledger::{self, ZswapMerkleTreeRoot},
+    SerializedTransactionIdentifier, TransactionHash, bridge::BridgeEvent,
 };
 use std::{error::Error as StdError, fmt::Debug};
 
@@ -67,8 +65,8 @@ pub struct Block {
     pub parent_hash: BlockHash,
     pub author: Option<BlockAuthor>,
     pub timestamp: u64,
-    pub zswap_merkle_tree_root: ZswapMerkleTreeRoot,
-    pub ledger_state_root: Option<ByteVec>,
+    /// The node's end-of-block `pallet_midnight::StateKey`: the tagged arena key of its ledger.
+    pub state_key: ByteVec,
     /// Transactions in execution order, each with its phase and how it was applied or why it
     /// failed.
     pub transactions: Vec<(Phase, Transaction, Result<Applied, String>)>,
@@ -78,17 +76,13 @@ pub struct Block {
     pub bridge_events: Vec<(Phase, EventIndex, BridgeEvent)>,
 }
 
-impl TryFrom<Block>
+impl From<Block>
     for (
         domain::Block,
         Vec<(Phase, Transaction, Result<Applied, String>)>,
     )
 {
-    type Error = ledger::Error;
-
-    fn try_from(block: Block) -> Result<Self, Self::Error> {
-        let zswap_merkle_tree_root = block.zswap_merkle_tree_root.serialize()?;
-
+    fn from(block: Block) -> Self {
         let transactions = block.transactions;
         // Phase and event index are not persisted; the order is kept.
         let dust_registration_events = block
@@ -109,8 +103,7 @@ impl TryFrom<Block>
             parent_hash: block.parent_hash,
             author: block.author,
             timestamp: block.timestamp,
-            zswap_merkle_tree_root,
-            ledger_state_root: block.ledger_state_root,
+            zswap_merkle_tree_root: Default::default(),
             dust_registration_events,
             bridge_events,
             ledger_parameters: Default::default(),
@@ -121,7 +114,7 @@ impl TryFrom<Block>
             dust_generation_merkle_tree_root: Default::default(),
         };
 
-        Ok((block, transactions))
+        (block, transactions)
     }
 }
 

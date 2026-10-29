@@ -18,8 +18,8 @@ precondition to wait for. Here the sync itself is the subject.
 ## Test Scope
 
 - **Sync liveness**: the stack indexes blocks and no container exits.
-- **State root agreement**: no `zswap state root mismatch` and no
-  `ledger state root mismatch` in the container logs.
+- **State root agreement**: no `ledger state root mismatch` in the container logs (older
+  images may also report `zswap state root mismatch`).
 - **Migration and decode failures**: surface as a non-zero container exit.
 - **Node compatibility**: an image that cannot talk to the chain's runtime fails here.
 - **Progress reporting**: the rate/estimate maths is covered by fast unit-level cases

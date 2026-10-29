@@ -41,7 +41,7 @@ use runtime::runtime_types::{
         Call::send_mn_system_transaction, Event::SystemTransactionApplied,
     },
 };
-use subxt::{SubstrateConfig, client::OfflineClientAtBlockT, error::RuntimeApiError};
+use subxt::{SubstrateConfig, client::OfflineClientAtBlockT};
 
 pub async fn make_block_details(
     authorities: &mut Option<Vec<[u8; 32]>>,
@@ -331,56 +331,6 @@ pub async fn fetch_authorities(
 pub fn decode_slot(mut slot: &[u8]) -> Result<u64, SubxtNodeError> {
     let slot = runtime::runtime_types::sp_consensus_slots::Slot::decode(&mut slot).map(|x| x.0)?;
     Ok(slot)
-}
-
-pub async fn get_zswap_merkle_tree_root(
-    block: &OnlineClientAtBlock,
-) -> Result<Vec<u8>, SubxtNodeError> {
-    let get_zswap_state_root = runtime::runtime_apis()
-        .midnight_runtime_api()
-        .get_zswap_state_root();
-
-    let root = block.runtime_apis().call(&get_zswap_state_root).await;
-
-    let root = match root {
-        // Retry with online client at parent block if codegen is incompatible which can happen for
-        // runtime updates, because subxt uses next metadata whereas Node uses previous metadata.
-        Err(RuntimeApiError::IncompatibleCodegen) => {
-            let parent_hash = block
-                .block_header()
-                .await
-                .map_err(|error| SubxtNodeError::GetBlockHeader(error.into()))?
-                .parent_hash;
-            let block = block
-                .online_client()
-                .at_block(parent_hash)
-                .await
-                .map_err(|error| SubxtNodeError::GetOnlineClientAt(parent_hash, error.into()))?;
-            block.runtime_apis().call(get_zswap_state_root).await
-        }
-
-        other => other,
-    };
-
-    root.map_err(|error| SubxtNodeError::GetZswapStateRoot(error.into()))?
-        .map_err(|error| SubxtNodeError::GetZswapStateRoot(format!("{error:?}").into()))
-}
-
-pub async fn get_ledger_state_root(
-    block: &OnlineClientAtBlock,
-) -> Result<Option<Vec<u8>>, SubxtNodeError> {
-    let get_ledger_state_root = runtime::runtime_apis()
-        .midnight_runtime_api()
-        .get_ledger_state_root();
-
-    let root = block
-        .runtime_apis()
-        .call(get_ledger_state_root)
-        .await
-        .map_err(|error| SubxtNodeError::GetLedgerStateRoot(error.into()))?
-        .map_err(|error| SubxtNodeError::GetLedgerStateRoot(format!("{error:?}").into()))?;
-
-    Ok(Some(root))
 }
 
 pub async fn get_d_parameter(block: &OnlineClientAtBlock) -> Result<DParameter, SubxtNodeError> {
