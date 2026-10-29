@@ -3530,19 +3530,22 @@ mod tests {
     #[cfg(any(feature = "cloud", feature = "standalone"))]
     #[tokio::test(flavor = "multi_thread")]
     async fn node_state_key_matches_node_at_genesis() -> Result<(), BoxError> {
-        const STATE_KEY_V8: &str = "6d69646e696768743a73746f726167652d6b6579286c65646765722d73746174655b7631335d293a0094da59ebc5abee3d5abc325275ee39df52f01eed96b86ea635c4f18b31f99689";
-        const STATE_KEY_V9: &str = "6d69646e696768743a73746f726167652d6b6579286c65646765722d73746174655b7631385d293a0067100cb9fcfc392a863e7b22751c6baf4602e96deef27c4e5339205586ab44c3";
-
         let _ledger_db = init_ledger_db().await?;
 
-        for (fixture, ledger_version, expected) in [
-            (
-                "v8_genesis_undeployed_0_22_0.raw",
-                LedgerVersion::V8,
-                STATE_KEY_V8,
-            ),
-            ("genesis_state.raw", LedgerVersion::V9, STATE_KEY_V9),
-        ] {
+        for ledger_version in [LedgerVersion::V8, LedgerVersion::V9] {
+            // Exhaustive on purpose: a new ledger version does not compile here until its genesis
+            // and block-0 `StateKey` from a real node are pinned, matching the node's golden test.
+            let (fixture, expected) = match ledger_version {
+                LedgerVersion::V8 => (
+                    "v8_genesis_undeployed_0_22_0.raw",
+                    "6d69646e696768743a73746f726167652d6b6579286c65646765722d73746174655b7631335d293a0094da59ebc5abee3d5abc325275ee39df52f01eed96b86ea635c4f18b31f99689",
+                ),
+                LedgerVersion::V9 => (
+                    "genesis_state.raw",
+                    "6d69646e696768743a73746f726167652d6b6579286c65646765722d73746174655b7631385d293a0067100cb9fcfc392a863e7b22751c6baf4602e96deef27c4e5339205586ab44c3",
+                ),
+            };
+
             let genesis = std::fs::read(format!("{}/tests/{fixture}", env!("CARGO_MANIFEST_DIR")))?;
             let ledger_state = LedgerState::from_genesis(genesis, ledger_version)?;
 

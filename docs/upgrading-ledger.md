@@ -99,6 +99,12 @@ When a chain needs a third concurrent ledger:
    `protocol_version.rs`.
 3. Add per-major match arms wherever ledger types are dispatched in
    `indexer-common/src/domain/ledger/`.
+4. Mirror the node's `Ledger` wrapper for the new major in
+   `indexer-common/src/domain/ledger/node_state_key.rs`, and pin its genesis
+   state and block-0 `StateKey`, read from a real node, in
+   `node_state_key_matches_node_at_genesis`. The chain-indexer validates every
+   block against the node's `StateKey`, so a wrapper that drifts from the node
+   halts indexing; the node pins the same vector in its own golden test.
 
 ## See also
 
