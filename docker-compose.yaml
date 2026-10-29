@@ -235,7 +235,7 @@ services:
 
   node:
     profiles: [cloud, standalone]
-    image: "midnightntwrk/midnight-node:${NODE_TAG:-latest}"
+    image: "${NODE_IMAGE:-midnightntwrk/midnight-node}:${NODE_TAG:-latest}"
     restart: "always"
     ports:
       - "9944:9944"

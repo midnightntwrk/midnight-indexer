@@ -25,6 +25,7 @@ readonly node_version="$1"
 # A node release names the toolkit release it ships with, and the two carry
 # independent version numbers: node-1.0.2 ships toolkit-1.0.0.
 readonly toolkit_version="${2:-$node_version}"
+readonly node_image="ghcr.io/midnightntwrk/midnight-node:$node_version"
 readonly toolkit_image="midnightntwrk/midnight-node-toolkit:$toolkit_version"
 readonly rng_seed="0000000000000000000000000000000000000000000000000000000000000037"
 readonly node_dir="$(pwd)/.node/$node_version"
@@ -190,7 +191,7 @@ docker run \
     -e SIDECHAIN_BLOCK_BENEFICIARY="04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e" \
     -e THRESHOLD=0 \
     -v $node_dir:/node \
-    midnightntwrk/midnight-node:$node_version
+    $node_image
 
 # Wait for node to be ready.
 echo "Waiting for node to be ready..."

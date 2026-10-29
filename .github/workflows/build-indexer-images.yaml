@@ -34,6 +34,7 @@ env:
   CARGO_AUDITABLE_VERSION: 0.7.7
   # Builds the cargo chef dependency layer. Pinned: bump deliberately; the justfile reads this too.
   CARGO_CHEF_VERSION: 0.1.78
+  NODE_IMAGE: ghcr.io/midnightntwrk/midnight-node
 
 jobs:
   # cargo-chef and cargo-auditable run inside every image build, but their locked dependencies are
@@ -413,6 +414,7 @@ jobs:
         run: |
           echo "Compose up with:"
           echo "- Indexer tag: $INDEXER_TAG"
+          echo "- Node image : $NODE_IMAGE"
           echo "- Node tag   : $NODE_TAG"
           echo "- Registry   : ${IMAGE_REGISTRY:-midnightntwrk}"
           docker compose --profile "${{ matrix.profile }}" up -d

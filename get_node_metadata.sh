@@ -16,6 +16,7 @@ if [ -z "$1" ]; then
     exit 1
 fi
 node_version="$1"
+node_image="ghcr.io/midnightntwrk/midnight-node:$node_version"
 
 # Check if subxt is installed and verify version
 if ! command -v subxt &> /dev/null; then
@@ -46,7 +47,7 @@ docker run \
     -e SHOW_CONFIG=false \
     -e CFG_PRESET=dev \
     -e SIDECHAIN_BLOCK_BENEFICIARY="04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e" \
-    midnightntwrk/midnight-node:$node_version
+    $node_image
 
 # Wait for port to be available (max 30 seconds)
 echo "Waiting for node to be ready..."

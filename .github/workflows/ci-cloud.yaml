@@ -15,6 +15,9 @@ concurrency:
   group: ${{github.workflow}}-${{github.head_ref || github.run_id}}
   cancel-in-progress: true
 
+env:
+  NODE_IMAGE: ghcr.io/midnightntwrk/midnight-node
+
 jobs:
   # Detects whether the PR touches anything outside `qa/**`. Subsequent jobs
   # only skip when the PR is qa-only, so qa-only PRs skip Rust CI while this
@@ -111,10 +114,10 @@ jobs:
       - name: Pre-pull Docker images
         run: |
           NODE_VERSION=$(tail -n 1 NODE_VERSIONS)
-          echo "Pre-pulling midnight-node:$NODE_VERSION..."
-          docker pull "midnightntwrk/midnight-node:$NODE_VERSION" || \
-          docker pull "midnightntwrk/midnight-node:$NODE_VERSION" || \
-          docker pull "midnightntwrk/midnight-node:$NODE_VERSION"
+          echo "Pre-pulling $NODE_IMAGE:$NODE_VERSION..."
+          docker pull "$NODE_IMAGE:$NODE_VERSION" || \
+          docker pull "$NODE_IMAGE:$NODE_VERSION" || \
+          docker pull "$NODE_IMAGE:$NODE_VERSION"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master

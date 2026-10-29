@@ -104,6 +104,9 @@ concurrency:
   group: ${{github.workflow}}-${{github.head_ref || github.run_id}}
   cancel-in-progress: true
 
+env:
+  NODE_IMAGE: ghcr.io/midnightntwrk/midnight-node
+
 jobs:
   basic-integration-tests:
     name: Execute basic integration tests
@@ -188,6 +191,7 @@ jobs:
           export APP__INFRA__PUB_SUB__PASSWORD="${APP__INFRA__PUB_SUB__PASSWORD:-$(openssl rand -hex 32)}"
 
           . ./.envrc
+          echo "NODE_IMAGE: $NODE_IMAGE"
           echo "NODE_TAG: $NODE_TAG"
           echo "INDEXER_TAG: $INDEXER_TAG"
           bash ./qa/scripts/startup-localenv-with-data.sh
