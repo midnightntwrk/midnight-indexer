@@ -16,6 +16,7 @@ use crate::{
         spo::{
             CommitteeMember, EpochInfo, EpochPerf, FirstValidEpoch, PoolMetadata, PresenceEvent,
             RegisteredStat, RegisteredTotals, Spo, SpoComposite, SpoIdentity, StakeShare,
+            strip_hex_prefix,
         },
         storage::spo::SpoStorage,
     },
@@ -281,7 +282,12 @@ impl SpoStorage for Storage {
     ) -> Result<Vec<Spo>, sqlx::Error> {
         let rows = if let Some(s) = search {
             let s_like = format!("%{s}%");
-            let s_hex = normalize_hex(s).unwrap_or_else(|| s.to_ascii_lowercase());
+            // Hex columns hold unprefixed hex and both queries match case-insensitively, so only the
+            // prefix needs removing. A bare prefix keeps the raw term rather than matching every row.
+            let s_hex = match strip_hex_prefix(s) {
+                "" => s,
+                h => h,
+            };
             let s_hex_like = format!("%{s_hex}%");
 
             #[cfg(feature = "cloud")]
@@ -1316,24 +1322,4 @@ fn epoch_perf_from_row(row: EpochPerfRow) -> EpochPerf {
         pool_id_hex,
         validator_class,
     }
-}
-
-/// Normalize hex string by stripping 0x prefix and lowercasing.
-fn normalize_hex(input: &str) -> Option<String> {
-    if input.is_empty() {
-        return None;
-    }
-    let s = input
-        .strip_prefix("0x")
-        .unwrap_or(input)
-        .strip_prefix("0X")
-        .unwrap_or(input);
-    if !s.len().is_multiple_of(2) || s.len() > 256 {
-        return None;
-    }
-    // Validate hex characters.
-    if !s.chars().all(|c| c.is_ascii_hexdigit()) {
-        return None;
-    }
-    Some(s.to_ascii_lowercase())
 }
