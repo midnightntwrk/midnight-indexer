@@ -505,6 +505,24 @@ export const ShieldedTransactionEventSchema = z.union([
   ShieldedTransactionsProgressSchema,
 ]);
 
+// RelevantTransaction as selected by SHIELDED_TRANSACTION_SUBSCRIPTION_BY_SESSION_ID_AND_INDEX:
+// the transaction ID the server pages by and the zswap indices the `index` argument filters on.
+export const RelevantTransactionWithIndicesSchema = z.object({
+  __typename: z.literal('RelevantTransaction'),
+  transaction: z.object({
+    id: z.number().int().nonnegative(),
+    hash: Hash64,
+    zswapStartIndex: z.number().int().nonnegative(),
+    zswapEndIndex: z.number().int().nonnegative(),
+  }),
+  zswapCollapsedUpdate: z
+    .object({
+      startIndex: z.number(),
+      endIndex: z.number(),
+    })
+    .nullable(),
+});
+
 // Dust Generations schemas (PR #980)
 export const DustRegistrationSchema = z.object({
   dustAddress: DustAddressBech32m,
