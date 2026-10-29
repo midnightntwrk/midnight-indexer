@@ -125,7 +125,7 @@ jobs:
           ref: ${{ inputs.ref || github.sha }}
 
       - name: Setup Node.js v22.x
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: 22.x
 
@@ -220,7 +220,7 @@ jobs:
           xray_client_secret: ${{ secrets.XRAY_CLIENT_SECRET }}
 
       - name: Upload Integration Test Reports
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: junit-integration-test-reports
@@ -228,7 +228,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload XRay Test Reports
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: xray-integration-test-reports
@@ -236,7 +236,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload logs
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: qa-integration-tests-${{ inputs.target_env }}-logs
@@ -244,7 +244,7 @@ jobs:
             ./qa/tests/logs
 
       - name: Upload API coverage report
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: qa-api-coverage-${{ inputs.target_env }}
