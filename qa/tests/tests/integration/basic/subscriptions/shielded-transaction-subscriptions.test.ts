@@ -37,6 +37,11 @@ import { SHIELDED_TX_PROGRESS_SUBSCRIPTION_BY_SESSION_ID } from '@utils/indexer/
 import { isProgressProtocolVersionSupported } from '@utils/indexer/schema-feature-probe';
 import type { ShieldedTransactionsProgress } from '@utils/indexer/indexer-types';
 import dataProvider from '@utils/testdata-provider';
+import {
+  awaitFirstProgress,
+  collectRelevantTransactions,
+  type StreamedRelevantTransaction,
+} from 'tests/shared/shielded-transactions-utils';
 
 // This is longer because it might take some time when
 // a new verion of the toolkit image is available and
@@ -516,5 +521,122 @@ describe('shielded transaction subscriptions', () => {
         );
       });
     }, 45_000);
+  });
+
+  describe('a subscription starting at a given zswap index', () => {
+    // The `index` argument selects relevant transactions by `zswapStartIndex >= index`.
+    // midnight-indexer#1681 moved paging within that selection from the zswap index to
+    // the transaction ID and kept this filter as it was; these tests pin the filter on
+    // the funding wallet's real history. Collection stops when the stream has been idle
+    // for a while; on a slow environment it may be cut off, so sequence assertions are
+    // only made on what did arrive.
+    const IDLE_MS = 3_000;
+    const MAX_MS = 40_000;
+
+    function expectAscendingAndUnique(transactions: StreamedRelevantTransaction[]): void {
+      const ids = transactions.map((t) => t.id);
+      expect(ids, 'ascending transaction IDs').toEqual([...ids].sort((a, b) => a - b));
+      expect(new Set(ids).size, 'no transaction streamed twice').toBe(ids.length);
+      expect(new Set(transactions.map((t) => t.hash)).size).toBe(ids.length);
+    }
+
+    async function collectFrom(sessionId: string, index: number) {
+      const result = await collectRelevantTransactions(indexerWsClient, sessionId, {
+        index,
+        idleMs: IDLE_MS,
+        maxMs: MAX_MS,
+      });
+      log.debug(
+        `index ${index}: ${result.transactions.length} relevant transactions, settled=${result.settled}`,
+      );
+      return result;
+    }
+
+    /**
+     * @given a wallet session for the funding seed, which has relevant transactions
+     * @when we subscribe to shielded transactions from index 0
+     * @then relevant transactions are streamed in ascending transaction ID order, each once
+     * @and every one has a zswap start index of at least 0 and a start index not above its end index
+     */
+    test('streams each relevant transaction once in ascending transaction ID order from index 0', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Subscription', 'ShieldedTransaction', 'Index'] };
+
+      const viewingKey = await toolkit.showViewingKey(dataProvider.getFundingSeed());
+      const sessionId = await indexerWsClient.openWalletSession(viewingKey);
+
+      const { transactions } = await collectFrom(sessionId, 0);
+
+      expect(transactions.length).toBeGreaterThanOrEqual(1);
+      expectAscendingAndUnique(transactions);
+      transactions.forEach((t) => {
+        expect(t.zswapStartIndex).toBeLessThanOrEqual(t.zswapEndIndex);
+      });
+
+      await indexerWsClient.closeWalletSession(sessionId);
+    });
+
+    /**
+     * @given the relevant transactions streamed from index 0
+     * @when we subscribe again from the zswap start index K of the last one streamed
+     * @then only relevant transactions with a zswap start index of at least K are streamed
+     * @and they are the tail of the sequence streamed from 0, in the same order
+     */
+    test('streams only the relevant transactions whose zswap start index is at least the given index', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Subscription', 'ShieldedTransaction', 'Index'] };
+
+      const viewingKey = await toolkit.showViewingKey(dataProvider.getFundingSeed());
+      const sessionId = await indexerWsClient.openWalletSession(viewingKey);
+
+      const fromZero = await collectFrom(sessionId, 0);
+      expect(fromZero.transactions.length).toBeGreaterThanOrEqual(1);
+      const index = fromZero.transactions.at(-1)!.zswapStartIndex;
+
+      const fromIndex = await collectFrom(sessionId, index);
+
+      expectAscendingAndUnique(fromIndex.transactions);
+      fromIndex.transactions.forEach((t) => {
+        expect(
+          t.zswapStartIndex,
+          `transaction ${t.id} below index ${index}`,
+        ).toBeGreaterThanOrEqual(index);
+      });
+
+      const expectedTail = fromZero.transactions.filter((t) => t.zswapStartIndex >= index);
+      const comparable = Math.min(expectedTail.length, fromIndex.transactions.length);
+      expect(comparable).toBeGreaterThanOrEqual(1);
+      expect(fromIndex.transactions.slice(0, comparable).map((t) => t.id)).toEqual(
+        expectedTail.slice(0, comparable).map((t) => t.id),
+      );
+      if (fromZero.settled && fromIndex.settled) {
+        expect(fromIndex.transactions.map((t) => t.id)).toEqual(expectedTail.map((t) => t.id));
+      }
+
+      await indexerWsClient.closeWalletSession(sessionId);
+    });
+
+    /**
+     * @given the chain's next free zswap index H from the first progress event
+     * @when we subscribe from index H
+     * @then no relevant transaction with a zswap start index below H is streamed; as every
+     *       committed transaction starts below H, usually none is streamed at all
+     */
+    test('streams no relevant transaction starting below the next free zswap index', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Subscription', 'ShieldedTransaction', 'Index'] };
+
+      const viewingKey = await toolkit.showViewingKey(dataProvider.getFundingSeed());
+      const sessionId = await indexerWsClient.openWalletSession(viewingKey);
+
+      const { highestZswapEndIndex } = await awaitFirstProgress(indexerWsClient, sessionId);
+      expect(highestZswapEndIndex).toBeGreaterThan(0);
+
+      const { transactions, settled } = await collectFrom(sessionId, highestZswapEndIndex);
+
+      expect(settled).toBe(true);
+      transactions.forEach((t) => {
+        expect(t.zswapStartIndex).toBeGreaterThanOrEqual(highestZswapEndIndex);
+      });
+
+      await indexerWsClient.closeWalletSession(sessionId);
+    });
   });
 });
