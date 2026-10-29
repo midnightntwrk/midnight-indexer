@@ -318,6 +318,7 @@ describe
        * @given a transaction whose deploys the ledger rolled back
        * @when the indexer is asked for that transaction's contract actions and for the address
        * @then it reports no deploy at all, matching the contract the node does not hold
+       * @and it still reports the ordinary deploy, so the empty answer is not a broken query
        */
       test(
         'should report no deploy for the rolled-back address',
@@ -363,11 +364,27 @@ describe
             `the transaction's deploys were all rolled back, but the indexer reports ${deploys.length} deploy action(s): ${deploys.map((action) => action.address).join(', ')}`,
           ).toBe(0);
 
+          // The ordinary deploy must be found through the same query, so the null below cannot
+          // pass because the query itself stopped finding contracts.
+          const plainAddress = plainDeploy['contract-address-untagged'];
+          const plainDeadline = Date.now() + INDEXED_BUDGET_MS;
+          let plainAction = (await indexer.getContractAction(plainAddress)).data?.contractAction;
+          while (!plainAction && Date.now() < plainDeadline) {
+            await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+            plainAction = (await indexer.getContractAction(plainAddress)).data?.contractAction;
+          }
+          expect(
+            plainAction ?? null,
+            `the indexer reports no contract action for the ordinary deploy ${plainAddress}`,
+          ).not.toBeNull();
+          expect(sameHash(plainAction?.address, plainAddress)).toBe(true);
+
           const actionResponse = await indexer.getContractAction(deploy.contractAddressUntagged);
           expect(actionResponse).toBeSuccess();
           expect(actionResponse.data?.contractAction ?? null).toBeNull();
         },
-        POLLED_ASSERTION_TIMEOUT,
+        // Two polls: the transaction, then the ordinary deploy.
+        POLLED_ASSERTION_TIMEOUT + INDEXED_BUDGET_MS,
       );
 
       // A second, independent witness of the same filter: without it the rolled-back action
