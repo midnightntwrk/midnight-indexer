@@ -16,7 +16,7 @@ use crate::{
         shielded_nullifier::ShieldedNullifierTransaction,
         storage::shielded_nullifiers::ShieldedNullifiersStorage,
     },
-    infra::storage::{Storage, prefix_upper_bound},
+    infra::storage::{Storage, prefix_range},
 };
 use async_stream::try_stream;
 use futures::Stream;
@@ -37,8 +37,6 @@ impl ShieldedNullifiersStorage for Storage {
 
         try_stream! {
             for prefix in &nullifier_prefixes {
-                let upper_bound = prefix_upper_bound(prefix);
-
                 let mut cursor = 0i64;
 
                 loop {
@@ -47,12 +45,9 @@ impl ShieldedNullifiersStorage for Storage {
                         FROM zswap_nullifiers zn
                         JOIN transactions t ON t.id = zn.transaction_id
                         JOIN blocks b ON b.id = zn.block_id
-                        WHERE zn.nullifier >=
+                        WHERE
                     "});
-                    query.push_bind(prefix);
-                    if let Some(upper_bound) = &upper_bound {
-                        query.push(" AND zn.nullifier < ").push_bind(upper_bound);
-                    }
+                    prefix_range(&mut query, "zn.nullifier", prefix);
                     query
                         .push(" AND b.height >= ").push_bind(from_block as i64)
                         .push(" AND b.height <= ").push_bind(to_block.min(i64::MAX as u64) as i64)

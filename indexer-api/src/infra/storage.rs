@@ -28,6 +28,12 @@ mod wallet;
 
 use crate::domain;
 use chacha20poly1305::ChaCha20Poly1305;
+use sqlx::QueryBuilder;
+
+#[cfg(feature = "cloud")]
+type Db = sqlx::Postgres;
+#[cfg(feature = "standalone")]
+type Db = sqlx::Sqlite;
 
 /// Unified storage implementation for PostgreSQL (cloud) and SQLite (standalone). Uses Cargo
 /// features to select the appropriate database backend at build time.
@@ -72,6 +78,16 @@ fn prefix_upper_bound(prefix: &[u8]) -> Option<Vec<u8>> {
         upper[i] += 1;
         upper
     })
+}
+
+/// Append the condition that `column` starts with `prefix`, as a lexicographic range.
+fn prefix_range<'a>(query: &mut QueryBuilder<'a, Db>, column: &'static str, prefix: &'a [u8]) {
+    query.push(format!(" {column} >= ")).push_bind(prefix);
+    if let Some(upper_bound) = prefix_upper_bound(prefix) {
+        query
+            .push(format!(" AND {column} < "))
+            .push_bind(upper_bound);
+    }
 }
 
 #[cfg(test)]

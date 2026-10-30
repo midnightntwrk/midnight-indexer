@@ -19,7 +19,7 @@ use crate::{
         },
         storage::dust_generations::DustGenerationsStorage,
     },
-    infra::storage::{Storage, prefix_upper_bound},
+    infra::storage::{Storage, prefix_range},
 };
 use async_stream::try_stream;
 use fastrace::trace;
@@ -375,8 +375,6 @@ impl DustGenerationsStorage for Storage {
 
         try_stream! {
             for prefix in &nullifier_prefixes {
-                let upper_bound = prefix_upper_bound(prefix);
-
                 let mut cursor = 0i64;
 
                 loop {
@@ -385,12 +383,9 @@ impl DustGenerationsStorage for Storage {
                         FROM dust_nullifiers dn
                         JOIN transactions t ON t.id = dn.transaction_id
                         JOIN blocks b ON b.id = dn.block_id
-                        WHERE dn.nullifier >=
+                        WHERE
                     "});
-                    query.push_bind(prefix);
-                    if let Some(upper_bound) = &upper_bound {
-                        query.push(" AND dn.nullifier < ").push_bind(upper_bound);
-                    }
+                    prefix_range(&mut query, "dn.nullifier", prefix);
                     query
                         .push(" AND b.height >= ").push_bind(from_block as i64)
                         .push(" AND b.height <= ").push_bind(to_block.min(i64::MAX as u64) as i64)
