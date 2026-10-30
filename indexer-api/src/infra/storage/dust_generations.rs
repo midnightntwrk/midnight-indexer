@@ -19,7 +19,7 @@ use crate::{
         },
         storage::dust_generations::DustGenerationsStorage,
     },
-    infra::storage::{Storage, prefix_range},
+    infra::storage::{Storage, lookup_prefixes, prefix_range},
 };
 use async_stream::try_stream;
 use fastrace::trace;
@@ -371,7 +371,7 @@ impl DustGenerationsStorage for Storage {
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<DustNullifierTransaction, sqlx::Error>> + Send {
         let pool = self.pool.clone();
-        let nullifier_prefixes = nullifier_prefixes.to_vec();
+        let nullifier_prefixes = lookup_prefixes(nullifier_prefixes);
 
         try_stream! {
             for prefix in &nullifier_prefixes {

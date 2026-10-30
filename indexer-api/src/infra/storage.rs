@@ -80,6 +80,16 @@ fn prefix_upper_bound(prefix: &[u8]) -> Option<Vec<u8>> {
     })
 }
 
+/// The prefixes a nullifier lookup has to query. An empty prefix has no upper bound and would
+/// match every row, so it is dropped to match nothing instead.
+fn lookup_prefixes(prefixes: &[Vec<u8>]) -> Vec<Vec<u8>> {
+    prefixes
+        .iter()
+        .filter(|prefix| !prefix.is_empty())
+        .cloned()
+        .collect()
+}
+
 /// Append the condition that `column` starts with `prefix`, as a lexicographic range.
 fn prefix_range<'a>(query: &mut QueryBuilder<'a, Db>, column: &'static str, prefix: &'a [u8]) {
     query.push(format!(" {column} >= ")).push_bind(prefix);

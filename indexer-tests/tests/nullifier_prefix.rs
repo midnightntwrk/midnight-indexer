@@ -186,6 +186,8 @@ async fn check_prefixes(dust: bool) {
         (&["ee"], &[]),
         (&["12ff", "ff"], &[2, 7, 3, 5, 8, 10]),
         (&[], &[]),
+        (&[""], &[]),
+        (&["", "00"], &[11]),
     ];
     for &(prefixes, expected_ids) in cases {
         let bytes = prefixes
