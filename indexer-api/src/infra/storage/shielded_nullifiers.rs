@@ -16,7 +16,7 @@ use crate::{
         shielded_nullifier::ShieldedNullifierTransaction,
         storage::shielded_nullifiers::ShieldedNullifiersStorage,
     },
-    infra::storage::Storage,
+    infra::storage::{Storage, prefix_upper_bound},
 };
 use async_stream::try_stream;
 use futures::Stream;
@@ -37,38 +37,30 @@ impl ShieldedNullifiersStorage for Storage {
 
         try_stream! {
             for prefix in &nullifier_prefixes {
-                let mut next_prefix = prefix.clone();
-                if let Some(last) = next_prefix.last_mut() {
-                    if *last < 255 {
-                        *last += 1;
-                    } else {
-                        next_prefix.push(0);
-                    }
-                }
+                let upper_bound = prefix_upper_bound(prefix);
 
                 let mut cursor = 0i64;
 
                 loop {
-                    let query = indoc! {"
+                    let mut query = sqlx::QueryBuilder::new(indoc! {"
                         SELECT zn.id, zn.nullifier, t.id, t.hash, b.height, b.hash
                         FROM zswap_nullifiers zn
                         JOIN transactions t ON t.id = zn.transaction_id
                         JOIN blocks b ON b.id = zn.block_id
-                        WHERE zn.nullifier >= $1 AND zn.nullifier < $2
-                        AND b.height >= $3
-                        AND b.height <= $4
-                        AND zn.id > $5
-                        ORDER BY zn.id
-                        LIMIT $6
-                    "};
+                        WHERE zn.nullifier >=
+                    "});
+                    query.push_bind(prefix);
+                    if let Some(upper_bound) = &upper_bound {
+                        query.push(" AND zn.nullifier < ").push_bind(upper_bound);
+                    }
+                    query
+                        .push(" AND b.height >= ").push_bind(from_block as i64)
+                        .push(" AND b.height <= ").push_bind(to_block.min(i64::MAX as u64) as i64)
+                        .push(" AND zn.id > ").push_bind(cursor)
+                        .push(" ORDER BY zn.id LIMIT ").push_bind(batch_size.get() as i64);
 
-                    let rows = sqlx::query_as::<_, (i64, ByteVec, i64, TransactionHash, i64, ByteVec)>(query)
-                        .bind(&prefix[..])
-                        .bind(&next_prefix[..])
-                        .bind(from_block as i64)
-                        .bind(to_block.min(i64::MAX as u64) as i64)
-                        .bind(cursor)
-                        .bind(batch_size.get() as i64)
+                    let rows = query
+                        .build_query_as::<(i64, ByteVec, i64, TransactionHash, i64, ByteVec)>()
                         .fetch_all(&*pool)
                         .await?;
 

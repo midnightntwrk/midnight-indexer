@@ -19,6 +19,8 @@ mod dust;
 mod dust_generations;
 mod ledger_events;
 mod ledger_state;
+#[cfg(test)]
+mod nullifier_prefix_tests;
 mod shielded_nullifiers;
 mod spo;
 mod system_parameters;
@@ -61,3 +63,17 @@ impl Storage {
 }
 
 impl domain::storage::Storage for Storage {}
+
+/// Exclusive lexicographic upper bound for a byte prefix. Carry through trailing `ff`
+/// bytes and truncate them: `12ff` ends at `13`. An all-`ff` (or empty) prefix has no
+/// finite upper bound.
+fn prefix_upper_bound(prefix: &[u8]) -> Option<Vec<u8>> {
+    let mut upper = prefix.to_vec();
+    while let Some(last) = upper.pop() {
+        if last < u8::MAX {
+            upper.push(last + 1);
+            return Some(upper);
+        }
+    }
+    None
+}
