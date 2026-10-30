@@ -95,7 +95,7 @@ pub struct Config {
     pub ledger_state_retention: NonZeroUsize,
 }
 
-pub fn gc_catch_up_interval_default() -> NonZeroU32 {
+fn gc_catch_up_interval_default() -> NonZeroU32 {
     NonZeroU32::new(500).expect("500 is not zero")
 }
 
