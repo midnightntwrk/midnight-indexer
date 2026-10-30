@@ -21,6 +21,15 @@ import { IndexerWsClient, UnshieldedTxSubscriptionResponse } from '@utils/indexe
 import { ToolkitWrapper, type ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
 import { deriveAddresses } from '@utils/moth/moth-addresses';
 
+/**
+ * Whether two hashes or addresses are the same, ignoring case, surrounding whitespace and a `0x`
+ * prefix (the indexer may return either form). An empty or missing value never matches.
+ */
+export function sameHash(a: string | undefined, b: string | undefined): boolean {
+  const n = (h: string | undefined) => (h ?? '').trim().toLowerCase().replace(/^0x/, '');
+  return n(a) !== '' && n(a) === n(b);
+}
+
 export function retry<T>(
   fn: () => Promise<T>,
   condition: (result: T) => boolean,
