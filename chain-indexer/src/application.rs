@@ -321,9 +321,9 @@ pub async fn run(
                 } else {
                     gc_catch_up_interval
                 };
-                if !gc_bound.is_zero() && blocks_since_gc >= gc_interval.get() {
+                if let Some(budget) = gc_budget(gc_bound, gc_interval, blocks_since_gc) {
                     let started = Instant::now();
-                    let nodes_culled = LedgerState::gc(gc_bound * blocks_since_gc);
+                    let nodes_culled = LedgerState::gc(budget);
                     let elapsed = started.elapsed();
                     blocks_since_gc = 0;
 
@@ -381,6 +381,23 @@ pub async fn run(
             Ok(())
         }
     }
+}
+
+/// The budget for a gc pass if one is due after `blocks_since_gc` blocks, `None` if not or if gc is
+/// disabled. The budget covers `gc_interval` blocks rather than `blocks_since_gc`: the two only
+/// differ right after catching up, when `blocks_since_gc` can be close to `gc_catch_up_interval`,
+/// and that first pass at the tip must not get the long catch-up budget.
+///
+/// - `gc_bound`: Time budget per block of `gc_interval`; zero disables gc.
+/// - `gc_interval`: Blocks between passes currently in effect, for the tip or for catching up.
+/// - `blocks_since_gc`: Blocks indexed since the last pass.
+fn gc_budget(
+    gc_bound: Duration,
+    gc_interval: NonZeroU32,
+    blocks_since_gc: u32,
+) -> Option<Duration> {
+    (!gc_bound.is_zero() && blocks_since_gc >= gc_interval.get())
+        .then(|| gc_bound.saturating_mul(gc_interval.get()))
 }
 
 /// An infinite stream of node blocks, neither with duplicates, nor with gaps or otherwise
@@ -884,7 +901,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{
-        application::node_blocks,
+        application::{gc_budget, gc_catch_up_interval_default, node_blocks},
         domain::{
             BlockRef, SystemParametersChange,
             node::{self, Node},
@@ -901,9 +918,42 @@ mod tests {
     };
     use std::{
         convert::Infallible,
+        num::NonZeroU32,
         sync::{Arc, LazyLock, Mutex},
+        time::Duration,
     };
     use thiserror::Error;
+
+    #[test]
+    fn test_gc_budget() {
+        let bound = Duration::from_millis(200);
+        let interval = NonZeroU32::new(25).unwrap();
+
+        assert_eq!(gc_budget(bound, interval, 24), None);
+        assert_eq!(gc_budget(bound, interval, 25), Some(Duration::from_secs(5)));
+
+        // Right after catching up, blocks_since_gc can be far beyond the tip interval: the pass is
+        // due, but its budget must still cover only the tip interval.
+        assert_eq!(
+            gc_budget(bound, interval, 499),
+            Some(Duration::from_secs(5))
+        );
+
+        // While catching up, a pass covers the whole catch-up interval: with the default config
+        // (gc_bound 200ms, gc_catch_up_interval 500) that is a budget of up to 100s.
+        let catch_up_interval = gc_catch_up_interval_default();
+        assert_eq!(gc_budget(bound, catch_up_interval, 499), None);
+        assert_eq!(
+            gc_budget(bound, catch_up_interval, 500),
+            Some(Duration::from_secs(100))
+        );
+
+        assert_eq!(gc_budget(Duration::ZERO, interval, 25), None);
+        assert_eq!(
+            gc_budget(Duration::MAX, NonZeroU32::MAX, u32::MAX),
+            Some(Duration::MAX)
+        );
+    }
 
     #[tokio::test]
     async fn test_blocks() -> Result<(), BoxError> {
