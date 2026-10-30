@@ -1,7 +1,8 @@
 {
     // A cardano address that is registered for dust production and has cNIGHT balance
-    // Expected status: registered=true, dustAddress not null, nightBalance > 0, generationRate = nightBalance * 8267, currentCapacity = 5000000000 (at max)
-    "registered-with-dust": "stake_test1uq8crzpll5wxkc930kum95m258wynvvyk939gqpxymaqc6q83hn5f",
+    // Expected status: registered=true, dustAddress not null, nightBalance > 0, generationRate = nightBalance * 8267, currentCapacity = nightBalance * 5e9 (at max)
+    // Verified on preview 2026-10-30 via dustGenerationStatus (nightBalance=100000000000); not a QA-controlled wallet
+    "registered-with-dust": "stake_test1uz6x47zhnk6f3nnpeg65st75t6gw7fzxv2hezafxtcgycdgyyhzh8",
     // A cardano address that is registered for dust production but has no cNIGHT balance
     // Expected status: registered=true, dustAddress not null, nightBalance="0", generationRate="0", currentCapacity="0"
     // Note: No dust is generated because there is no cNIGHT to generate from
