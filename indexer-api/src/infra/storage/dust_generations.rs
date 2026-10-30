@@ -387,7 +387,7 @@ impl DustGenerationsStorage for Storage {
                     "});
                     prefix_range(&mut query, "dn.nullifier", prefix);
                     query
-                        .push(" AND b.height >= ").push_bind(from_block as i64)
+                        .push(" AND b.height >= ").push_bind(from_block.min(i64::MAX as u64) as i64)
                         .push(" AND b.height <= ").push_bind(to_block.min(i64::MAX as u64) as i64)
                         .push(" AND dn.id > ").push_bind(cursor)
                         .push(" ORDER BY dn.id LIMIT ").push_bind(batch_size.get() as i64);

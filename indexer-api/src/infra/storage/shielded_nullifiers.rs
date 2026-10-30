@@ -49,7 +49,7 @@ impl ShieldedNullifiersStorage for Storage {
                     "});
                     prefix_range(&mut query, "zn.nullifier", prefix);
                     query
-                        .push(" AND b.height >= ").push_bind(from_block as i64)
+                        .push(" AND b.height >= ").push_bind(from_block.min(i64::MAX as u64) as i64)
                         .push(" AND b.height <= ").push_bind(to_block.min(i64::MAX as u64) as i64)
                         .push(" AND zn.id > ").push_bind(cursor)
                         .push(" ORDER BY zn.id LIMIT ").push_bind(batch_size.get() as i64);

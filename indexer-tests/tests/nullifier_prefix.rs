@@ -245,3 +245,51 @@ async fn dust_prefix_lookup_handles_trailing_ff_with_pagination_and_block_bounds
 async fn shielded_prefix_lookup_handles_trailing_ff_with_pagination_and_block_bounds() {
     check_prefixes(false).await;
 }
+
+#[tokio::test]
+async fn prefix_lookup_beyond_i64_heights_matches_nothing() {
+    let (_database, storage) = storage().await;
+    let prefixes = [vec![0xff]];
+    let batch_size = NonZeroU32::new(64).unwrap();
+
+    let dust = storage
+        .get_dust_nullifier_transactions(&prefixes, u64::MAX, u64::MAX, batch_size)
+        .await
+        .try_collect::<Vec<_>>()
+        .await
+        .expect("query DUST nullifiers");
+    assert!(dust.is_empty());
+
+    let shielded = storage
+        .get_shielded_nullifier_transactions(&prefixes, u64::MAX, u64::MAX, batch_size)
+        .await
+        .try_collect::<Vec<_>>()
+        .await
+        .expect("query shielded nullifiers");
+    assert!(shielded.is_empty());
+}
+
+#[tokio::test]
+async fn prefix_lookup_to_block_beyond_i64_matches_up_to_tip() {
+    let (_database, storage) = storage().await;
+    let prefixes = [vec![0xff]];
+    let batch_size = NonZeroU32::new(64).unwrap();
+
+    let dust = storage
+        .get_dust_nullifier_transactions(&prefixes, 2, u64::MAX, batch_size)
+        .await
+        .map_ok(|row| row.transaction_id)
+        .try_collect::<Vec<_>>()
+        .await
+        .expect("query DUST nullifiers");
+    assert_eq!(dust, [3, 5, 8, 9, 10]);
+
+    let shielded = storage
+        .get_shielded_nullifier_transactions(&prefixes, 2, u64::MAX, batch_size)
+        .await
+        .map_ok(|row| row.transaction_id)
+        .try_collect::<Vec<_>>()
+        .await
+        .expect("query shielded nullifiers");
+    assert_eq!(shielded, [3, 5, 8, 9, 10]);
+}
