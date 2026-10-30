@@ -26,6 +26,9 @@ mod transaction;
 mod unshielded;
 mod wallet;
 
+#[cfg(test)]
+mod nullifier_prefix;
+
 use crate::domain;
 use chacha20poly1305::ChaCha20Poly1305;
 use sqlx::QueryBuilder;

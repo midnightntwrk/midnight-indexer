@@ -13,14 +13,14 @@
 
 #![cfg(any(feature = "cloud", feature = "standalone"))]
 
-use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
-use futures::TryStreamExt;
-use indexer_api::{
+use crate::{
     domain::storage::{
         dust_generations::DustGenerationsStorage, shielded_nullifiers::ShieldedNullifiersStorage,
     },
     infra::storage::Storage,
 };
+use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
+use futures::TryStreamExt;
 use indexer_common::infra::migrations;
 use indoc::indoc;
 #[cfg(feature = "cloud")]
