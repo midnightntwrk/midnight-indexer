@@ -20,7 +20,7 @@ import { env } from 'environment/model';
 import type { TestContext } from 'vitest';
 import dataProvider from '@utils/testdata-provider';
 import { IndexerWsClient } from '@utils/indexer/websocket-client';
-import { ToolkitWrapper, type ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
+import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
 import { deriveAddresses } from '@utils/moth/moth-addresses';
 import {
   allocateSeededTransactionIds,
@@ -37,9 +37,14 @@ import {
 
 // The shielded transactions subscription reads relevant transactions in batches
 // of this size (indexer-api/config.yaml, subscription.shielded_transactions.batch_size).
+// It only sizes the seed: with more equal-index rows than one batch the fixed
+// server has to page across a batch boundary by transaction ID. Detecting the
+// bug does not depend on it, see WITHOUT_COMMITMENTS.
 const BATCH_SIZE = 20;
 
-// Enough relevant transactions without commitments to cross one batch boundary.
+// Relevant transactions without commitments to seed. Every seeded row is one,
+// so whichever row ends a batch, for any batch size, makes the pre-fix server
+// resume at its own zswap start index and stream the batch again.
 const WITHOUT_COMMITMENTS = BATCH_SIZE + 4;
 
 const TOOLKIT_STARTUP_TIMEOUT = 60_000;
@@ -65,12 +70,22 @@ const LIVE_WAIT_TIMEOUT = 600_000;
  * No toolkit or moth path produces such a transaction on a real chain, so this
  * suite seeds them straight into the undeployed stack's Postgres for a fresh
  * wallet, see `seedRelevantTransactions` for how that stays invisible to the
- * indexers, and asserts over the real WebSocket API against the real Postgres
- * query. The in-process tests that came with the fix cover SQLite only.
+ * indexers and what else sees the rows, and asserts over the real WebSocket
+ * API against the real Postgres query. The in-process tests that came with the
+ * fix cover SQLite only.
  *
- * The seeded rows are visible to every API query by their block for as long as
- * they exist, so they are deleted in `afterAll`, and leftovers of an aborted
- * earlier run are deleted up front.
+ * Every seeded row ends at the chain's highest zswap end index N, so the
+ * progress other subscriptions report is unchanged while the rows exist. Each
+ * describe seeds in its `beforeAll` and deletes its own rows in its
+ * `afterAll`, and leftovers of an aborted earlier run are deleted up front.
+ *
+ * This is an e2e suite, not an integration one, for two reasons. The live
+ * re-query needs a real transaction to the wallet, and on the integration
+ * stack, the one restored from `.node/<version>/`, no toolkit transaction
+ * lands at all: the node proposes every block with `HitBlockWeightLimit` and
+ * only its inherents while the transaction waits in the pool. The e2e stack
+ * starts from genesis and lands them. And e2e files run one at a time, so the
+ * seeded rows are never visible to another file while they exist.
  */
 describe
   .skipIf(!env.isUndeployedEnv())
@@ -104,9 +119,11 @@ describe
         if (!walletId) {
           throw new Error(`no wallet row for session ${sessionId}`);
         }
-        // The chain's next free zswap index. Seeding at it keeps the seeded rows
-        // consistent with the real Merkle tree, so no collapsed update is built
-        // over indices the tree does not have.
+        // The chain's next free zswap index, which is also the highest zswap end
+        // index of any indexed transaction. Seeding rows that start and end there
+        // keeps them consistent with the real Merkle tree, so no collapsed update
+        // is built over indices the tree does not have, and leaves the highest
+        // end index, which every subscription reports as progress, as it is.
         const { highestZswapEndIndex } = await awaitFirstProgress(ws, sessionId);
         if (highestZswapEndIndex < 2) {
           throw new Error(
@@ -124,8 +141,8 @@ describe
         let ws: IndexerWsClient;
         let sessionId: string;
         let nextZswapIndex: number;
-        /** One below the subscription index, then WITHOUT_COMMITMENTS equal-index rows, then one with commitments. */
-        let seeded: SeededRelevantTransaction[];
+        /** One starting below the subscription index, then WITHOUT_COMMITMENTS equal-index rows. */
+        let seeded: SeededRelevantTransaction[] = [];
 
         beforeAll(async () => {
           ws = new IndexerWsClient();
@@ -133,37 +150,34 @@ describe
           const wallet = await openFreshWallet(ws);
           ({ sessionId, nextZswapIndex } = wallet);
 
-          const ids = allocateSeededTransactionIds(WITHOUT_COMMITMENTS + 2);
+          const ids = allocateSeededTransactionIds(WITHOUT_COMMITMENTS + 1);
           seeded = await seedRelevantTransactions(wallet.walletId, [
-            // Starts below the subscription index: must be filtered out.
+            // Starts below the subscription index: must be filtered out. Its one
+            // commitment, at N - 1, is one the real tree has.
             { id: ids[0], zswapStartIndex: nextZswapIndex - 1, zswapEndIndex: nextZswapIndex },
-            // Add no commitment: the trigger of #1681, one of them last in the first batch.
-            ...ids.slice(1, WITHOUT_COMMITMENTS + 1).map((id) => ({
+            // Add no commitment: the trigger of #1681. All of them, so the last row
+            // of every batch is one, whatever the server's batch size.
+            ...ids.slice(1).map((id) => ({
               id,
               zswapStartIndex: nextZswapIndex,
               zswapEndIndex: nextZswapIndex,
             })),
-            // Adds commitments again after the run of equal indices.
-            {
-              id: ids[WITHOUT_COMMITMENTS + 1],
-              zswapStartIndex: nextZswapIndex,
-              zswapEndIndex: nextZswapIndex + 2,
-            },
           ]);
         }, 60_000);
 
         afterAll(async () => {
+          await deleteSeededTransactions(seeded.map((row) => row.id));
           await ws?.connectionClose();
         });
 
         /**
-         * @given a wallet with WITHOUT_COMMITMENTS + 1 relevant transactions from zswap index N,
-         *        of which WITHOUT_COMMITMENTS add no commitment, more than one batch
-         * @when we subscribe to shielded transactions from index N
+         * @given a wallet with WITHOUT_COMMITMENTS relevant transactions from zswap index N,
+         *        none of which adds a commitment, more than one batch
+         * @when a shielded transactions subscription is opened from index N
          * @then each of them is streamed exactly once, in ascending transaction ID order
          * @and the stream then goes quiet
          */
-        test('streams each relevant transaction once in transaction ID order, then goes quiet', async (ctx: TestContext) => {
+        test('should stream each relevant transaction once in transaction ID order, then go quiet', async (ctx: TestContext) => {
           ctx.task!.meta.custom = {
             labels: ['Subscription', 'ShieldedTransaction', 'Paging', 'Regression'],
           };
@@ -191,11 +205,11 @@ describe
          * start index, and the transaction ID only pages within that selection.
          *
          * @given the same wallet
-         * @when we subscribe from index 0
+         * @when a shielded transactions subscription is opened from index 0
          * @then the transaction starting below N is streamed as well, first and once
          * @and it alone carries a collapsed Merkle tree update, closing the gap from 0
          */
-        test('streams the transaction below the index too when subscribing from zero', async (ctx: TestContext) => {
+        test('should stream the transaction below the index too, given a subscription from zero', async (ctx: TestContext) => {
           ctx.task!.meta.custom = { labels: ['Subscription', 'ShieldedTransaction', 'Paging'] };
 
           const expectedIds = seeded.map((row) => row.id);
@@ -221,11 +235,9 @@ describe
       describe('a live re-query after a relevant transaction without commitments', () => {
         let ws: IndexerWsClient;
         let collector: RelevantTransactionCollector;
+        let seeded: SeededRelevantTransaction[] = [];
         let first: SeededRelevantTransaction;
         let second: SeededRelevantTransaction;
-        let transfer: ToolkitTransactionResult | undefined;
-        /** Why the trigger transfer did not land, when it did not; the test then skips. */
-        let triggerFailure: string | undefined;
 
         beforeAll(async () => {
           ws = new IndexerWsClient();
@@ -237,6 +249,7 @@ describe
           [first] = await seedRelevantTransactions(walletId, [
             { id: firstId, zswapStartIndex: nextZswapIndex, zswapEndIndex: nextZswapIndex },
           ]);
+          seeded = [first];
 
           collector = new RelevantTransactionCollector(ws, sessionId, nextZswapIndex).start();
           await collector.waitFor(
@@ -245,8 +258,15 @@ describe
             'the existing seeded transaction',
           );
           // Let the server's batch loop run its empty follow-up query and enter the
-          // live phase before the next row exists.
-          await collector.waitUntilIdle({ idleMs: 2_000, maxMs: 10_000 });
+          // live phase before the next row exists. A stream that does not go quiet
+          // here is still in the existing-rows phase, or repeating, and the test
+          // below would not be about the live re-query.
+          const idle = await collector.waitUntilIdle({ idleMs: 2_000, maxMs: 10_000 });
+          expect(
+            idle,
+            `the stream did not go quiet after the existing transaction: ` +
+              `[${collector.transactions.map((t) => t.id).join(', ')}]`,
+          ).toBe(true);
 
           // A second one, indexed after the first was streamed, then a real
           // transaction to this wallet: the wallet-indexer finds it relevant and
@@ -257,28 +277,18 @@ describe
           [second] = await seedRelevantTransactions(walletId, [
             { id: secondId, zswapStartIndex: nextZswapIndex, zswapEndIndex: nextZswapIndex },
           ]);
+          seeded = [first, second];
           const shieldedAddress = (await deriveAddresses(seed, toolkit)).shielded;
-          // The transfer is the test's trigger, not its subject: when the node or
-          // toolkit cannot land it, the test skips with the reason rather than
-          // failing on an environment it cannot assert anything about.
-          try {
-            transfer = await toolkit.generateSingleTx(
-              dataProvider.getTransferFundingSeed(),
-              'shielded',
-              shieldedAddress,
-              1,
-            );
-            log.info(`transfer to the fresh wallet: ${JSON.stringify(transfer)}`);
-            if (transfer.status !== 'confirmed') {
-              triggerFailure = `the trigger transfer was not confirmed: ${transfer.status}`;
-            }
-          } catch (error) {
-            triggerFailure = `the trigger transfer failed: ${String(error).split('\n')[0]}`;
-            log.warn(triggerFailure);
-          }
-          if (triggerFailure) {
-            return;
-          }
+          // The transfer is the test's trigger. On the undeployed stack it has to
+          // land, so a failure here fails the test instead of skipping it.
+          const transfer = await toolkit.generateSingleTx(
+            dataProvider.getTransferFundingSeed(),
+            'shielded',
+            shieldedAddress,
+            1,
+          );
+          log.info(`transfer to the fresh wallet: ${JSON.stringify(transfer)}`);
+          expect(transfer.status, 'the trigger transfer must be confirmed').toBe('confirmed');
 
           await collector.waitFor(
             () => collector.transactions.some((t) => t.id === second.id),
@@ -290,6 +300,7 @@ describe
 
         afterAll(async () => {
           collector?.stop();
+          await deleteSeededTransactions(seeded.map((row) => row.id));
           await ws?.connectionClose();
         });
 
@@ -299,11 +310,10 @@ describe
          * @when another relevant transaction is indexed and the wallet is indexed again
          * @then only the new transaction is streamed; the one already streamed is not repeated
          */
-        test('resumes after the last streamed transaction instead of repeating it', async (ctx: TestContext) => {
+        test('should resume after the last streamed transaction instead of repeating it', async (ctx: TestContext) => {
           ctx.task!.meta.custom = {
             labels: ['Subscription', 'ShieldedTransaction', 'Paging', 'Live', 'Regression'],
           };
-          ctx.skip?.(triggerFailure !== undefined, triggerFailure);
 
           expect(collector.errors).toEqual([]);
           expect(collector.transactions.map((t) => t.id)).toEqual([first.id, second.id]);

@@ -175,27 +175,40 @@ export interface SeededRelevantTransaction extends SeededRelevantTransactionSpec
  * indices, as the shielded transactions subscription reads them, without going
  * through a node. Returns the seeded rows with their generated hashes.
  *
- * The rows are shaped so that nothing but that subscription ever acts on them:
+ * The rows are shaped so that the indexers never act on them and other API
+ * queries see as little of them as possible while they exist:
  *
  * - `transactions.variant` is `System`, although a `regular_transactions` row is
  *   attached. The subscription's query joins `regular_transactions` without
  *   checking the variant, whereas the wallet-indexer scans `transactions` with
- *   `variant = 'Regular'` and would otherwise sweep the seeded rows into its
- *   next batch and move every wallet's `last_indexed_transaction_id` past the
- *   real chain for good.
+ *   `variant = 'Regular'` and no upper ID bound, and would otherwise sweep the
+ *   seeded rows into its next batch and move every wallet's
+ *   `last_indexed_transaction_id` past the real chain for good.
  * - IDs are above `SEEDED_TRANSACTION_ID_BASE`, so they never collide with the
  *   chain-indexer's sequence; `BlockIndexed.max_transaction_id` comes from that
  *   indexer's own inserts, not from the table, so seeded IDs never reach the
  *   wallet-indexer's scan bound either.
+ * - `zswapEndIndex` must not exceed the highest `zswap_end_index` already in
+ *   `regular_transactions`, which this function checks. Every wallet's
+ *   `highestZswapEndIndex` progress value is the MAX over that column, so a
+ *   seeded row above it would inflate the progress of every subscription on
+ *   the stack while it exists. Seeding at the current highest value, as a
+ *   transaction without commitments, also keeps the rows consistent with the
+ *   real Merkle tree.
  * - `raw`, `protocol_version` and the Merkle tree root are copied from the first
  *   real regular transaction so that any column-level consumer sees well-formed
  *   bytes; the hash is random and `identifiers` is empty so no query by hash or
  *   identifier of a real transaction picks a seeded row up.
- * - The rows sit in the block at height 1, which no test queries by height, and
- *   not in the genesis or latest block, which several do. A block query for
- *   height 1 would list a `System` transaction without a system row while the
- *   seeded rows exist, so callers delete them in `afterAll` via
- *   `deleteSeededTransactions`.
+ *
+ * What the rows do affect while they exist: queries that list the transactions
+ * of the block at height 1, where the rows sit (not the genesis or latest
+ * block, which several tests query). The block queries select regular rows and
+ * `System` rows in two halves of a `UNION ALL`, so a seeded row is listed
+ * twice, both times as a well-formed `SystemTransaction`. The block
+ * subscription from genesis in `block-subscriptions.test.ts` passes block 1,
+ * and tolerates that. Keep the window short: seed in the `beforeAll` of the
+ * describe that needs the rows and delete them in its `afterAll` via
+ * `deleteSeededTransactions(ids)`.
  */
 export async function seedRelevantTransactions(
   walletId: string,
@@ -223,6 +236,16 @@ export async function seedRelevantTransactions(
   );
   if (referenceId === '') {
     throw new Error('No regular transaction indexed yet to copy raw bytes from');
+  }
+  const highestZswapEndIndex = Number(
+    await queryScalar('SELECT COALESCE(MAX(zswap_end_index), 0) FROM regular_transactions;'),
+  );
+  const above = specs.filter((spec) => spec.zswapEndIndex > highestZswapEndIndex);
+  if (above.length > 0) {
+    throw new Error(
+      `Seeded zswap end indices must not exceed the highest indexed one, ${highestZswapEndIndex}, ` +
+        `as that would inflate every wallet's progress: ${above.map((s) => s.zswapEndIndex).join(', ')}`,
+    );
   }
 
   const rows = specs.map((spec) => ({ ...spec, hash: randomBytes(32).toString('hex') }));
@@ -256,15 +279,28 @@ export async function seedRelevantTransactions(
 }
 
 /**
- * Delete every row seeded by `seedRelevantTransactions`, in this or any earlier
- * run against the same stack.
+ * Delete rows seeded by `seedRelevantTransactions`: the given IDs, or, without
+ * any, every seeded row of this or any earlier run against the same stack.
  */
-export async function deleteSeededTransactions(): Promise<void> {
+export async function deleteSeededTransactions(ids?: number[]): Promise<void> {
+  if (ids !== undefined) {
+    if (ids.length === 0) {
+      return;
+    }
+    const invalid = ids.filter(
+      (id) => !Number.isSafeInteger(id) || id < SEEDED_TRANSACTION_ID_BASE,
+    );
+    if (invalid.length > 0) {
+      throw new Error(`Not seeded transaction IDs: ${invalid.join(', ')}`);
+    }
+  }
+  const predicate =
+    ids === undefined ? `>= ${SEEDED_TRANSACTION_ID_BASE}` : `IN (${ids.join(', ')})`;
   await runSql(
     [
-      `DELETE FROM relevant_transactions WHERE transaction_id >= ${SEEDED_TRANSACTION_ID_BASE};`,
-      `DELETE FROM regular_transactions WHERE id >= ${SEEDED_TRANSACTION_ID_BASE};`,
-      `DELETE FROM transactions WHERE id >= ${SEEDED_TRANSACTION_ID_BASE};`,
+      `DELETE FROM relevant_transactions WHERE transaction_id ${predicate};`,
+      `DELETE FROM regular_transactions WHERE id ${predicate};`,
+      `DELETE FROM transactions WHERE id ${predicate};`,
     ].join('\n'),
   );
 }
