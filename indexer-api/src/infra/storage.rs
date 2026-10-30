@@ -66,12 +66,27 @@ impl domain::storage::Storage for Storage {}
 /// bytes and truncate them: `12ff` ends at `13`. An all-`ff` (or empty) prefix has no
 /// finite upper bound.
 fn prefix_upper_bound(prefix: &[u8]) -> Option<Vec<u8>> {
-    let mut upper = prefix.to_vec();
-    while let Some(last) = upper.pop() {
-        if last < u8::MAX {
-            upper.push(last + 1);
-            return Some(upper);
-        }
+    prefix.iter().rposition(|&b| b < u8::MAX).map(|i| {
+        let mut upper = prefix[..=i].to_vec();
+        // `rposition` only finds bytes below `0xff`, so this cannot overflow.
+        upper[i] += 1;
+        upper
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::prefix_upper_bound;
+
+    #[test]
+    fn carries_through_trailing_ff() {
+        assert_eq!(prefix_upper_bound(&[]), None);
+        assert_eq!(prefix_upper_bound(&[0x00]), Some(vec![0x01]));
+        assert_eq!(prefix_upper_bound(&[0x12]), Some(vec![0x13]));
+        assert_eq!(prefix_upper_bound(&[0x12, 0xfe]), Some(vec![0x12, 0xff]));
+        assert_eq!(prefix_upper_bound(&[0x12, 0xff]), Some(vec![0x13]));
+        assert_eq!(prefix_upper_bound(&[0x12, 0xff, 0xff]), Some(vec![0x13]));
+        assert_eq!(prefix_upper_bound(&[0xff]), None);
+        assert_eq!(prefix_upper_bound(&[0xff; 32]), None);
     }
-    None
 }
