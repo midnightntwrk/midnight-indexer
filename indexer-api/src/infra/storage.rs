@@ -80,13 +80,24 @@ fn prefix_upper_bound(prefix: &[u8]) -> Option<Vec<u8>> {
     })
 }
 
-/// The prefixes a nullifier lookup has to query. An empty prefix has no upper bound and would
-/// match every row, so it is dropped to match nothing instead.
+/// The prefixes a nullifier lookup has to query, in their given order. An empty prefix has no
+/// upper bound and would match every row, so it is dropped to match nothing instead. A prefix
+/// that repeats or extends another one is dropped too, so no row is returned twice: of equal
+/// prefixes the first is kept, and overlapping prefixes are reduced to the shortest, so rows of
+/// a dropped longer prefix are returned in the position of the shorter one.
 fn lookup_prefixes(prefixes: &[Vec<u8>]) -> Vec<Vec<u8>> {
     prefixes
         .iter()
-        .filter(|prefix| !prefix.is_empty())
-        .cloned()
+        .enumerate()
+        .filter(|&(i, prefix)| {
+            !prefix.is_empty()
+                && !prefixes.iter().enumerate().any(|(j, other)| {
+                    !other.is_empty()
+                        && prefix.starts_with(other)
+                        && (other.len() < prefix.len() || j < i)
+                })
+        })
+        .map(|(_, prefix)| prefix.clone())
         .collect()
 }
 
@@ -102,7 +113,7 @@ fn prefix_range<'a>(query: &mut QueryBuilder<'a, Db>, column: &'static str, pref
 
 #[cfg(test)]
 mod tests {
-    use super::prefix_upper_bound;
+    use super::{lookup_prefixes, prefix_upper_bound};
 
     #[test]
     fn carries_through_trailing_ff() {
@@ -114,5 +125,22 @@ mod tests {
         assert_eq!(prefix_upper_bound(&[0x12, 0xff, 0xff]), Some(vec![0x13]));
         assert_eq!(prefix_upper_bound(&[0xff]), None);
         assert_eq!(prefix_upper_bound(&[0xff; 32]), None);
+    }
+
+    #[test]
+    fn drops_empty_repeated_and_covered_prefixes() {
+        let prefixes = [
+            vec![0x12, 0xff],
+            vec![],
+            vec![0xff],
+            vec![0x12],
+            vec![0xff],
+            vec![0x13],
+            vec![0x12, 0x00, 0x01],
+        ];
+        assert_eq!(
+            lookup_prefixes(&prefixes),
+            [vec![0xff], vec![0x12], vec![0x13]]
+        );
     }
 }
