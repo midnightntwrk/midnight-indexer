@@ -16,7 +16,7 @@ cargo nextest run -p indexer-tests --features standalone --run-ignored all hardf
 ```
 
 It is `#[ignore]`d (it boots containers and takes ~5 minutes) and needs Docker
-plus the `midnight-node:1.0.0` and migration-node/toolkit images. It asserts more
+plus the `midnight-node:1.0.300` and migration-node/toolkit images. It asserts more
 than this runbook does — the node's `DustReapplyCompleted` count, that the
 indexer's rebuilt dust generation tree matches it, that no block in the replay
 window is missing, and that DUST generation is live again afterwards. Use it
@@ -26,7 +26,7 @@ runbook exercises the actual candidate *image*.
 ## Required inputs
 
 - A candidate indexer image tag, built from the release commit.
-- A ledger-8 node image and matching toolkit image (normally `1.0.0`).
+- A ledger-8 node image and matching toolkit image (normally `1.0.300`).
 - The intended ledger-9 migration-node image and matching toolkit image.
 - The authoritative compressed runtime WASM produced by that migration-node
   build. Supplying it explicitly prevents a binary-only image swap from causing
@@ -39,9 +39,9 @@ From the repository root:
 ```bash
 IMAGE_REGISTRY=ghcr.io/midnight-ntwrk \
 INDEXER_TAG=4.4.0-rc.2 \
-FROM_NODE_TAG=1.0.0 \
+FROM_NODE_TAG=1.0.300 \
 TO_NODE_TAG=<ledger-9-node-tag> \
-FROM_TOOLKIT_TAG=1.0.0 \
+FROM_TOOLKIT_TAG=1.0.300 \
 TO_TOOLKIT_TAG=<ledger-9-toolkit-tag> \
 RUNTIME_WASM=/path/to/midnight_node_runtime.compact.compressed.wasm \
 bash qa/scripts/test-hardfork-8to9.sh

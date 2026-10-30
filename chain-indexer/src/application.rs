@@ -59,10 +59,11 @@ pub struct Config {
     pub caught_up_max_distance: u32,
     pub caught_up_leeway: u32,
 
-    /// Time budget for one storage-core gc-v1 mark-and-sweep pass, per block covered by that pass.
-    /// The pass gets `gc_bound * gc_interval`. Set to "0s" to disable garbage collection — but note
-    /// that is not safe during a long re-index, since retention-window unpersists keep producing
-    /// garbage that then never gets reclaimed.
+    /// Time budget for one storage-core gc-v1 mark-and-sweep pass, per block of the interval in
+    /// effect: the pass gets `gc_bound` times `gc_interval` at the tip, or times
+    /// `gc_catch_up_interval` while catching up. Set to "0s" to disable garbage collection — but
+    /// note that is not safe during a long re-index, since retention-window unpersists keep
+    /// producing garbage that then never gets reclaimed.
     #[serde(with = "humantime_serde")]
     pub gc_bound: Duration,
 
@@ -73,6 +74,16 @@ pub struct Config {
     /// per-block passes.
     pub gc_interval: NonZeroU32,
 
+    /// `gc_interval` while not caught up. A completed pass marks the whole live set and scans the
+    /// whole ledger DB, so its cost grows with the arena rather than with the garbage since the
+    /// last pass: fewer, longer passes sync much faster and still keep the arena bounded. The
+    /// longer pauses only matter at the tip, where `gc_interval` applies. Meant to be at least
+    /// `gc_interval`; a smaller value runs gc more often while catching up, not less. A pass holds
+    /// the ledger arena's lock throughout, so in standalone, indexer-api's ledger reads wait for
+    /// up to a whole pass while catching up.
+    #[serde(default = "gc_catch_up_interval_default")]
+    pub gc_catch_up_interval: NonZeroU32,
+
     /// Sample the arena size metrics every N blocks, or never if `0`. Each sample counts the rows in
     /// `ledger_db_nodes`, which is a full scan proportional to the size of the arena, so this is
     /// deliberately opt-in and deliberately not tied to the gc interval.
@@ -82,6 +93,10 @@ pub struct Config {
     /// is unpersisted. Must comfortably exceed indexer-api's block-hash snapshot reads, e.g.
     /// the dust generations subscription's max_snapshot_age, or those reads hit culled state.
     pub ledger_state_retention: NonZeroUsize,
+}
+
+fn gc_catch_up_interval_default() -> NonZeroU32 {
+    NonZeroU32::new(500).expect("500 is not zero")
 }
 
 pub async fn run(
@@ -98,6 +113,7 @@ pub async fn run(
         caught_up_leeway,
         gc_bound,
         gc_interval,
+        gc_catch_up_interval,
         arena_metrics_interval,
         ledger_state_retention,
     } = config;
@@ -304,9 +320,18 @@ pub async fn run(
 
                 // Run a time-bounded mark-and-sweep pass every gc_interval blocks, with the budget
                 // for all of them; skip when disabled.
-                if !gc_bound.is_zero() && blocks_since_gc >= gc_interval.get() {
+                let gc_interval = if caught_up {
+                    gc_interval
+                } else {
+                    gc_catch_up_interval
+                };
+                if let Some(budget) = gc_budget(gc_bound, gc_interval, blocks_since_gc) {
+                    // A pass is synchronous. Its ledger DB calls already hand off this runtime
+                    // worker via `block_in_place`, but the CPU-bound marking between them does
+                    // not, so run the whole pass via `block_in_place` to keep other tasks on this
+                    // worker, e.g. indexer-api's in standalone, from stalling behind it.
                     let started = Instant::now();
-                    let nodes_culled = LedgerState::gc(gc_bound * blocks_since_gc);
+                    let nodes_culled = task::block_in_place(|| LedgerState::gc(budget));
                     let elapsed = started.elapsed();
                     blocks_since_gc = 0;
 
@@ -364,6 +389,23 @@ pub async fn run(
             Ok(())
         }
     }
+}
+
+/// The budget for a gc pass if one is due after `blocks_since_gc` blocks, `None` if not or if gc is
+/// disabled. The budget covers `gc_interval` blocks rather than `blocks_since_gc`: the two only
+/// differ right after catching up, when `blocks_since_gc` can be close to `gc_catch_up_interval`,
+/// and that first pass at the tip must not get the long catch-up budget.
+///
+/// - `gc_bound`: Time budget per block of `gc_interval`; zero disables gc.
+/// - `gc_interval`: Blocks between passes currently in effect, for the tip or for catching up.
+/// - `blocks_since_gc`: Blocks indexed since the last pass.
+fn gc_budget(
+    gc_bound: Duration,
+    gc_interval: NonZeroU32,
+    blocks_since_gc: u32,
+) -> Option<Duration> {
+    (!gc_bound.is_zero() && blocks_since_gc >= gc_interval.get())
+        .then(|| gc_bound.saturating_mul(gc_interval.get()))
 }
 
 /// An infinite stream of node blocks, neither with duplicates, nor with gaps or otherwise
@@ -867,7 +909,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{
-        application::node_blocks,
+        application::{gc_budget, gc_catch_up_interval_default, node_blocks},
         domain::{
             BlockRef, SystemParametersChange,
             node::{self, Node},
@@ -884,9 +926,42 @@ mod tests {
     };
     use std::{
         convert::Infallible,
+        num::NonZeroU32,
         sync::{Arc, LazyLock, Mutex},
+        time::Duration,
     };
     use thiserror::Error;
+
+    #[test]
+    fn test_gc_budget() {
+        let bound = Duration::from_millis(200);
+        let interval = NonZeroU32::new(25).unwrap();
+
+        assert_eq!(gc_budget(bound, interval, 24), None);
+        assert_eq!(gc_budget(bound, interval, 25), Some(Duration::from_secs(5)));
+
+        // Right after catching up, blocks_since_gc can be far beyond the tip interval: the pass is
+        // due, but its budget must still cover only the tip interval.
+        assert_eq!(
+            gc_budget(bound, interval, 499),
+            Some(Duration::from_secs(5))
+        );
+
+        // While catching up, a pass covers the whole catch-up interval: with the default config
+        // (gc_bound 200ms, gc_catch_up_interval 500) that is a budget of up to 100s.
+        let catch_up_interval = gc_catch_up_interval_default();
+        assert_eq!(gc_budget(bound, catch_up_interval, 499), None);
+        assert_eq!(
+            gc_budget(bound, catch_up_interval, 500),
+            Some(Duration::from_secs(100))
+        );
+
+        assert_eq!(gc_budget(Duration::ZERO, interval, 25), None);
+        assert_eq!(
+            gc_budget(Duration::MAX, NonZeroU32::MAX, u32::MAX),
+            Some(Duration::MAX)
+        );
+    }
 
     #[tokio::test]
     async fn test_blocks() -> Result<(), BoxError> {

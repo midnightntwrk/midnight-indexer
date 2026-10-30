@@ -473,17 +473,20 @@ impl TransactionStorage for Storage {
     fn get_relevant_transactions(
         &self,
         wallet_id: Uuid,
-        mut index: u64,
+        index: u64,
+        mut from_transaction_id: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<RegularTransaction, sqlx::Error>> + Send {
+        // Page by transaction ID, not by zswap index: the zswap indices of a transaction without
+        // commitments do not advance.
         let chunks = try_stream! {
             loop {
                 let transactions = self
-                    .get_relevant_transactions(wallet_id, index, batch_size)
+                    .get_relevant_transactions(wallet_id, index, from_transaction_id, batch_size)
                     .await?;
 
                 match transactions.last() {
-                    Some(transaction) => index = transaction.zswap_end_index,
+                    Some(transaction) => from_transaction_id = transaction.id + 1,
                     None => break,
                 }
 
@@ -601,12 +604,14 @@ impl Storage {
     #[trace(properties = {
         "wallet_id": "{wallet_id}",
         "index": "{index}",
+        "from_transaction_id": "{from_transaction_id}",
         "batch_size": "{batch_size}"
     })]
     async fn get_relevant_transactions(
         &self,
         wallet_id: Uuid,
         index: u64,
+        from_transaction_id: u64,
         batch_size: NonZeroU32,
     ) -> Result<Vec<RegularTransaction>, sqlx::Error> {
         #[cfg(feature = "cloud")]
@@ -636,8 +641,9 @@ impl Storage {
             WHERE wallets.id = $1
             AND wallets.session_id IS NOT NULL
             AND regular_transactions.zswap_start_index >= $2
+            AND transactions.id >= $3
             ORDER BY transactions.id
-            LIMIT $3
+            LIMIT $4
         "};
 
         #[cfg(feature = "standalone")]
@@ -666,14 +672,16 @@ impl Storage {
             WHERE wallets.id = $1
             AND wallets.session_id IS NOT NULL
             AND regular_transactions.zswap_start_index >= $2
+            AND transactions.id >= $3
             ORDER BY transactions.id
-            LIMIT $3
+            LIMIT $4
         "};
 
         #[cfg_attr(feature = "cloud", allow(unused_mut))]
         let mut transactions = sqlx::query_as::<_, RegularTransaction>(query)
             .bind(wallet_id)
             .bind(index as i64)
+            .bind(from_transaction_id as i64)
             .bind(batch_size.get() as i64)
             .fetch(&*self.pool)
             .try_collect::<Vec<_>>()
