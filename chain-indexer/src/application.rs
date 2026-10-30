@@ -322,8 +322,12 @@ pub async fn run(
                     gc_catch_up_interval
                 };
                 if let Some(budget) = gc_budget(gc_bound, gc_interval, blocks_since_gc) {
+                    // A pass is synchronous. Its ledger DB calls already hand off this runtime
+                    // worker via `block_in_place`, but the CPU-bound marking between them does
+                    // not, so run the whole pass via `block_in_place` to keep other tasks on this
+                    // worker, e.g. indexer-api's in standalone, from stalling behind it.
                     let started = Instant::now();
-                    let nodes_culled = LedgerState::gc(budget);
+                    let nodes_culled = task::block_in_place(|| LedgerState::gc(budget));
                     let elapsed = started.elapsed();
                     blocks_since_gc = 0;
 
