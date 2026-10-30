@@ -111,8 +111,10 @@ once the image exists.
 ## The compiler pin
 
 `COMPACT_COMPILER_VERSION` in `utils/compact/compact-compiler.ts` defaults to
-**0.30.0**, and it is a pin rather than "latest" for a reason: compiled output
-declares the `@midnight-ntwrk/compact-runtime` version it needs — 0.30.0 emits
+the compactc that `generate_node_data.sh` picks for the node under test, read
+from that script — **0.30.0** for node 1.x and 2.0.x, **0.33.0-rc.2** for node
+2.1.x. It is a pin rather than "latest" for a reason: compiled output declares
+the `@midnight-ntwrk/compact-runtime` version it needs — 0.30.0 emits
 `checkRuntimeVersion('0.15.0')` — and the `midnight-node-toolkit` image bundles
 only a fixed set of those runtimes.
 
