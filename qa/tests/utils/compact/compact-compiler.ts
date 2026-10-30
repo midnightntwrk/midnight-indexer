@@ -20,11 +20,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import log from '@utils/logging/logger';
+import { env } from '../../environment/model';
 
 const execFileAsync = promisify(execFile);
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DOCKERFILE = path.join(HERE, 'compact-toolchain.Dockerfile');
+const GENERATE_NODE_DATA = path.resolve(HERE, '../../../../generate_node_data.sh');
 
 /**
  * The compactc release fixtures are compiled with.
@@ -40,8 +42,39 @@ const DOCKERFILE = path.join(HERE, 'compact-toolchain.Dockerfile');
  * A pre-release is a valid pin (`0.33.0-rc.2`): the toolchain image falls back
  * to fetching one when the toolchain manager does not offer the version, and a
  * newer toolkit can need a runtime no stable compiler emits yet.
+ *
+ * The pin follows the node line under test, using the same rule
+ * `generate_node_data.sh` uses for the chain data, read from that script so the
+ * two cannot drift apart. Set `COMPACT_COMPILER_VERSION` to override it.
  */
-export const COMPACT_COMPILER_VERSION = process.env.COMPACT_COMPILER_VERSION ?? '0.30.0';
+export const COMPACT_COMPILER_VERSION =
+  process.env.COMPACT_COMPILER_VERSION ?? compactcForNode(env.getNodeVersion());
+
+/**
+ * The compactc version `generate_node_data.sh` picks for a node tag, read from
+ * its `case "$node_version" in … esac` block of
+ * `<glob>) default_compactc_version="<version>" ;;` arms, first match wins as in
+ * bash. Throws when the block is missing or no arm matches, so a reworded script
+ * fails here rather than compiling with a guessed compiler.
+ */
+export function compactcForNode(nodeTag: string, script = GENERATE_NODE_DATA): string {
+  const source = fs.readFileSync(script, 'utf8');
+  const block = /case "\$node_version" in\n([\s\S]*?)\n\s*esac/.exec(source)?.[1];
+  if (block === undefined) {
+    throw new Error(`No 'case "$node_version" in' block found in ${path.basename(script)}`);
+  }
+  for (const arm of block.matchAll(/^\s*([^)\s]+)\)\s*default_compactc_version="([^"]+)"\s*;;/gm)) {
+    const [, patterns, version] = arm;
+    if (patterns.split('|').some((pattern) => globToRegExp(pattern).test(nodeTag))) return version;
+  }
+  throw new Error(`No compactc for node ${nodeTag} in ${path.basename(script)}`);
+}
+
+/** A shell glob as an anchored regular expression; supports `*` and `?`. */
+function globToRegExp(glob: string): RegExp {
+  const escaped = glob.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^${escaped.replace(/\*/g, '.*').replace(/\?/g, '.')}$`);
+}
 
 /** The `compact` toolchain-manager release providing the `compact update` that fetches the compiler. */
 const COMPACT_MANAGER_VERSION = process.env.COMPACT_MANAGER_VERSION ?? '0.5.1';
