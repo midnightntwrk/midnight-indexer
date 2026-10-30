@@ -59,10 +59,11 @@ pub struct Config {
     pub caught_up_max_distance: u32,
     pub caught_up_leeway: u32,
 
-    /// Time budget for one storage-core gc-v1 mark-and-sweep pass, per block covered by that pass.
-    /// The pass gets `gc_bound * gc_interval`. Set to "0s" to disable garbage collection — but note
-    /// that is not safe during a long reindex, since retention-window unpersists keep producing
-    /// garbage that then never gets reclaimed.
+    /// Time budget for one storage-core gc-v1 mark-and-sweep pass, per block of the interval in
+    /// effect: the pass gets `gc_bound` times `gc_interval` at the tip, or times
+    /// `gc_catch_up_interval` while catching up. Set to "0s" to disable garbage collection — but
+    /// note that is not safe during a long reindex, since retention-window unpersists keep
+    /// producing garbage that then never gets reclaimed.
     #[serde(with = "humantime_serde")]
     pub gc_bound: Duration,
 
@@ -76,7 +77,10 @@ pub struct Config {
     /// `gc_interval` while not caught up. A completed pass marks the whole live set and scans the
     /// whole ledger DB, so its cost grows with the arena rather than with the garbage since the
     /// last pass: fewer, longer passes sync much faster and still keep the arena bounded. The
-    /// longer pauses only matter at the tip, where `gc_interval` applies.
+    /// longer pauses only matter at the tip, where `gc_interval` applies. Meant to be at least
+    /// `gc_interval`; a smaller value runs gc more often while catching up, not less. A pass holds
+    /// the ledger arena's lock throughout, so in standalone, indexer-api's ledger reads wait for
+    /// up to a whole pass while catching up.
     #[serde(default = "gc_catch_up_interval_default")]
     pub gc_catch_up_interval: NonZeroU32,
 

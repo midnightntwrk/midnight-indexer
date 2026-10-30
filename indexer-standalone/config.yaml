@@ -21,12 +21,14 @@ application:
   blocks_buffer: 10
   caught_up_max_distance: 10
   caught_up_leeway: 5
-  # Budget for one gc pass per block it covers; the pass gets gc_bound * gc_interval.
+  # Budget for one gc pass per block of the interval in effect: the pass gets
+  # gc_bound * gc_interval, or gc_bound * gc_catch_up_interval while catching up.
   gc_bound: "200ms"
   # Run gc every N blocks with N times the budget: same duty cycle, far fewer partial marks.
   gc_interval: 25
   # gc_interval while catching up: passes cost about the same regardless of interval, so sync
-  # runs far fewer of them.
+  # runs far fewer of them. Meant to be at least gc_interval. A pass holds the ledger arena's lock
+  # throughout, so the API's ledger reads wait for up to a whole pass while catching up.
   gc_catch_up_interval: 500
   # Sample the ledger DB node count every N blocks, or never if 0. Each sample is a full scan.
   arena_metrics_interval: 0
