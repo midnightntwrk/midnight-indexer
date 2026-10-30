@@ -19,8 +19,6 @@ mod dust;
 mod dust_generations;
 mod ledger_events;
 mod ledger_state;
-#[cfg(test)]
-mod nullifier_prefix_tests;
 mod shielded_nullifiers;
 mod spo;
 mod system_parameters;

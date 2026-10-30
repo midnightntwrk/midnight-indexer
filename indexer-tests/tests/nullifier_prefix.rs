@@ -11,14 +11,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::Storage;
-use crate::domain::storage::{
-    dust_generations::DustGenerationsStorage, shielded_nullifiers::ShieldedNullifiersStorage,
-};
+#![cfg(any(feature = "cloud", feature = "standalone"))]
+
 use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
 use futures::TryStreamExt;
+use indexer_api::{
+    domain::storage::{
+        dust_generations::DustGenerationsStorage, shielded_nullifiers::ShieldedNullifiersStorage,
+    },
+    infra::storage::Storage,
+};
 use indexer_common::infra::migrations;
 use indoc::indoc;
+#[cfg(feature = "cloud")]
+use sqlx::Postgres as Db;
+#[cfg(feature = "standalone")]
+use sqlx::Sqlite as Db;
 use std::num::NonZeroU32;
 
 #[cfg(feature = "standalone")]
@@ -33,6 +41,7 @@ async fn storage() -> (impl Sized, Storage) {
     migrations::sqlite::run(&pool)
         .await
         .expect("run migrations");
+    insert_spends(&pool).await;
     let storage = Storage::new(ChaCha20Poly1305::new(&[0; 32].into()), pool);
     (dir, storage)
 }
@@ -73,6 +82,7 @@ async fn storage() -> (impl Sized, Storage) {
     migrations::postgres::run(&pool)
         .await
         .expect("run migrations");
+    insert_spends(&pool).await;
     let storage = Storage::new(ChaCha20Poly1305::new(&[0; 32].into()), pool);
     (container, storage)
 }
@@ -105,8 +115,7 @@ fn nullifier(hex: &str) -> Vec<u8> {
     bytes
 }
 
-async fn insert_spends(storage: &Storage) {
-    let pool = &*storage.pool;
+async fn insert_spends(pool: &sqlx::Pool<Db>) {
     for height in 1..=5i64 {
         sqlx::query(indoc! {"
             INSERT INTO blocks (
@@ -161,7 +170,6 @@ async fn insert_spends(storage: &Storage) {
 
 async fn check_prefixes(dust: bool) {
     let (_database, storage) = storage().await;
-    insert_spends(&storage).await;
 
     let cases: &[(&[&str], &[u64])] = &[
         (&["12"], &[2, 4, 7]),

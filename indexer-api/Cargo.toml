@@ -54,9 +54,7 @@ trait-variant      = { workspace = true }
 uuid               = { workspace = true, features = [ "v7" ] }
 
 [dev-dependencies]
-tempfile               = { workspace = true }
-testcontainers         = { workspace = true }
-testcontainers-modules = { workspace = true, features = [ "postgres" ] }
+tempfile = { workspace = true }
 
 [features]
 cloud      = [ "indexer-common/cloud" ]
