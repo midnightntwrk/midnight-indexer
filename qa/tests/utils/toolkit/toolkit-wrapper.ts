@@ -123,6 +123,21 @@ interface LogEntry {
   block_hash?: string;
 }
 
+/** Outcome of {@link ToolkitWrapper.craftDuplicateContractIntent}, not yet submitted. */
+export interface CraftedDuplicateDeploy {
+  contractAddressUntagged: string;
+  contractAddressTagged: string;
+  /** Deploy actions the deserialized transaction carries — 2 when both deploys are in. */
+  deployActionsInTx: number;
+  /** The built transaction under /out, for {@link ToolkitWrapper.submitCraftedTransaction}. */
+  txFileName: string;
+}
+
+/** A crafted duplicate deploy once submitted. */
+export interface DuplicateDeployResult extends Omit<CraftedDuplicateDeploy, 'txFileName'> {
+  transaction: ToolkitTransactionResult;
+}
+
 export interface DeployContractResult {
   'contract-address-untagged': string;
   'contract-address-tagged': string;
@@ -166,6 +181,9 @@ const TOOLKIT_JS_VARIANT = /\/compact-([0-9][^/]*)\//;
 /** The tree a runtime was found in, for reporting: `compact-0.30.0`, `v8`, or `node_modules`. */
 const TOOLKIT_JS_TREE = new RegExp(`^${TOOLKIT_JS_PATH}/([^/]+)/`);
 const DEFAULT_COIN_PUBLIC_SEED = '0000000000000000000000000000000000000000000000000000000000000001';
+// Compiled sample contract shipped inside the toolkit image; `send-intent` resolves the
+// deploy's key files from it.
+const SAMPLE_CONTRACT_DIR = '/test-static/simple-merkle-tree';
 const DEFAULT_RNG_SEED = '0000000000000000000000000000000000000000000000000000000000000037';
 // Default coin/funding seed used by the toolkit minter e2e (matches the node-repo
 // scripts/tests/toolkit-tokens-minter-e2e.sh). Used by deployMintSendUnshielded (#1253).
@@ -1172,6 +1190,127 @@ class ToolkitWrapper {
     log.debug(`Contract address info:\n${JSON.stringify(deploymentResult, null, 2)}`);
 
     return deploymentResult;
+  }
+
+  /**
+   * Build, without submitting, one transaction that deploys the same contract twice.
+   *
+   * `send-intent` merges every `--intent-file` into a single intent, so passing one deploy
+   * intent twice makes the second deploy target the address the first just created. That
+   * second action cannot apply, so its fallible segment is rolled back on chain while the
+   * transaction itself is still accepted and finalized — the shape pink-tawny-owl vector B
+   * needs (SSE #612 / indexer #1520).
+   *
+   * Building and proving takes far longer than a block, so it is kept apart from
+   * {@link submitCraftedTransaction}: a caller can then note the chain height right before the
+   * transaction is sent.
+   *
+   * @param fundingSeed - Funding seed for the deploying wallet.
+   * @returns The contract address in both forms, how many deploys the built transaction
+   *          carries, and the file it was written to.
+   */
+  async craftDuplicateContractIntent(fundingSeed: string): Promise<CraftedDuplicateDeploy> {
+    const intentDir = '/out/duplicate-deploy-intent';
+    const txFileName = 'duplicate_deploy_tx.mn';
+
+    await this.execToolkit(
+      [
+        TOOLKIT_BIN,
+        'generate-sample-intent',
+        '--dest-dir',
+        intentDir,
+        '--src-url',
+        this.getRpcUrl(),
+        'deploy',
+        '--funding-seed',
+        fundingSeed,
+      ],
+      'generate-sample-intent deploy failed',
+    );
+
+    const listing = await this.execToolkit(
+      ['ls', intentDir],
+      'listing the generated deploy intent failed',
+    );
+    const intentNames = listing.output.trim().split(/\s+/).filter(Boolean);
+    if (intentNames.length !== 1) {
+      throw new Error(
+        `expected exactly one generated deploy intent in ${intentDir}, found: ${
+          intentNames.join(', ') || '<none>'
+        }`,
+      );
+    }
+    const intentFile = `${intentDir}/${intentNames[0]}`;
+
+    await this.execToolkit(
+      [
+        TOOLKIT_BIN,
+        'send-intent',
+        '--src-url',
+        this.getRpcUrl(),
+        '--dest-file',
+        `/out/${txFileName}`,
+        '--compiled-contract-dir',
+        SAMPLE_CONTRACT_DIR,
+        '--intent-file',
+        intentFile,
+        '--intent-file',
+        intentFile,
+        '--funding-seed',
+        fundingSeed,
+      ],
+      'send-intent (duplicate deploy) failed',
+    );
+
+    const contractAddressUntagged = await this.getContractAddress(txFileName, 'untagged');
+    const contractAddressTagged = await this.getContractAddress(txFileName, 'tagged');
+
+    // Counted before submitting: if the toolkit ever merged the two intents into a single
+    // deploy, every later assertion would hold for a plain, successful deployment.
+    const dump = await this.execToolkit(
+      [TOOLKIT_BIN, 'show-transaction', '--src-file', `/out/${txFileName}`],
+      'show-transaction (duplicate deploy) failed',
+    );
+    const deployActionsInTx = (dump.output.match(/^\s*Deploy\b/gm) ?? []).length;
+
+    return {
+      contractAddressUntagged,
+      contractAddressTagged,
+      deployActionsInTx,
+      txFileName,
+    };
+  }
+
+  /**
+   * Submit a transaction already built under /out, such as one from
+   * {@link craftDuplicateContractIntent}.
+   *
+   * @param txFileName - The transaction file's name under /out.
+   * @returns The submitted transaction's hash/block.
+   */
+  async submitCraftedTransaction(txFileName: string): Promise<ToolkitTransactionResult> {
+    return this.parseTransactionOutput(await this.sendGeneratedTx(txFileName));
+  }
+
+  /**
+   * The node's own rendering of a block: metadata plus every transaction it carries.
+   *
+   * Used to locate a submitted transaction on chain without asking the indexer, which is
+   * the component under test wherever this is used.
+   */
+  async showBlock(blockNumber: number): Promise<string> {
+    const result = await this.execToolkit(
+      [
+        TOOLKIT_BIN,
+        'show-block',
+        '--src-url',
+        this.getRpcUrl(),
+        '--block-number',
+        String(blockNumber),
+      ],
+      `show-block ${blockNumber} failed`,
+    );
+    return result.output;
   }
 
   // SCAFFOLD for #1253 (for @whankinsiv). Mirrors midnight-node toolkit-tokens-minter-e2e.sh
