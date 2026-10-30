@@ -1,0 +1,8 @@
+# cargo-deny config for the check-build-tools job in build-indexer-images, which audits the lockfiles
+# of the pinned cargo-chef and cargo-auditable. The workspace's own config is deny.toml at the
+# repository root. Remove each ignore once a pinned release ships a lockfile without it.
+[advisories]
+ignore = [
+  { id = "RUSTSEC-2026-0190", reason = "anyhow 1.0.102 in cargo-chef 0.1.78's lockfile; cargo-chef never calls Error::downcast_mut, and no cargo-chef release locks anyhow >= 1.0.103 yet" },
+  { id = "RUSTSEC-2026-0204", reason = "crossbeam-epoch 0.9.18 in cargo-chef 0.1.78's lockfile, reached only through ignore's directory walker, which never formats Atomic/Shared pointers; no cargo-chef release locks >= 0.9.20 yet" },
+]

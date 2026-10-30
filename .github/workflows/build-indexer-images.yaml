@@ -28,12 +28,67 @@ concurrency:
   group: build-indexer-images
   cancel-in-progress: false
 
+env:
+  # Embeds the crate list in every binary for image scanners. Pinned: bump deliberately. The
+  # justfile reads this line for local image builds, so keep it a plain `key: value`.
+  CARGO_AUDITABLE_VERSION: 0.7.7
+  # Builds the cargo chef dependency layer. Pinned: bump deliberately; the justfile reads this too.
+  CARGO_CHEF_VERSION: 0.1.78
+
 jobs:
+  # cargo-chef and cargo-auditable run inside every image build, but their locked dependencies are
+  # outside the workspace Cargo.lock that rust-security-scan checks. Check the exact pinned
+  # versions here. No job waits on this one, so an advisory fails the run without holding back
+  # image publishing while a tool bump or an ignore is prepared.
+  check-build-tools:
+    name: Check build tools for advisories
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout the cargo-deny config
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing here pushes to git; keep GITHUB_TOKEN out of .git/config for later steps.
+          persist-credentials: false
+          sparse-checkout: .github/deny.toml
+          sparse-checkout-cone-mode: false
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        with:
+          # Same pin as rust-security-scan; see the note there before bumping.
+          tool: cargo-deny@0.20.2
+
+      - name: Fetch the pinned build tools
+        run: |
+          for tool in "cargo-chef@$CARGO_CHEF_VERSION" "cargo-auditable@$CARGO_AUDITABLE_VERSION"; do
+            name=${tool%@*}
+            version=${tool#*@}
+            checksum=$(curl -fsSL -A "midnight-indexer-ci" "https://crates.io/api/v1/crates/$name/$version" |
+              jq -r .version.checksum)
+            curl -fsSL -o "$name.crate" "https://static.crates.io/crates/$name/$name-$version.crate"
+            echo "$checksum  $name.crate" | sha256sum -c -
+            mkdir "$name"
+            tar -xzf "$name.crate" -C "$name" --strip-components 1
+          done
+
+      - name: Run cargo-deny on their lockfiles
+        # --locked checks the Cargo.lock each crate ships, which is what `cargo install --locked`
+        # builds. -Aunmaintained matches rust-security-scan.
+        run: |
+          for name in cargo-chef cargo-auditable; do
+            cargo deny --manifest-path "$name/Cargo.toml" --locked --config .github/deny.toml \
+              check -Aunmaintained advisories
+          done
+
   build-and-push:
     name: Build and push (${{ matrix.image.name }}, ${{ matrix.platform.arch }})
-    runs-on: ubuntu-latest-16-core-x64
+    runs-on: ${{ matrix.platform.runner }}
     permissions:
       packages: write
+    env:
+      PROFILE: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || inputs.profile || 'dev' }}
     strategy:
       fail-fast: false
       matrix:
@@ -48,21 +103,26 @@ jobs:
             description: Midnight Indexer
           - name: spo-indexer
             description: Midnight SPO Indexer
-        # Each (image, arch) is an independent parallel job publishing an arch-suffixed tag.
-        # amd64 keeps the existing (warm) buildcache ref and builds natively; arm64 builds in
-        # parallel under QEMU. Neither blocks the other, and each -amd64/-arm64 tag is available
-        # as soon as that arch finishes. The downstream merge-manifests job then assembles the
-        # unsuffixed tag into a real multi-arch manifest referencing both arches.
+        # Each (image, arch) is an independent parallel job publishing an arch-suffixed tag, built
+        # natively on a runner of that arch (the same runner labels midnight-node uses). amd64 keeps
+        # the existing (warm) buildcache ref. Neither blocks the other, and each -amd64/-arm64 tag is
+        # available as soon as that arch finishes. The downstream merge-manifests job then assembles
+        # the unsuffixed tag into a real multi-arch manifest referencing both arches.
         platform:
           - arch: amd64
+            runner: ubuntu-latest-16-core-x64
             suffix: "-amd64"
             cache_scope: ""
           - arch: arm64
+            runner: ubuntu-latest-8-core-arm64
             suffix: "-arm64"
             cache_scope: "-arm64"
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing here pushes to git; keep GITHUB_TOKEN out of .git/config for later steps.
+          persist-credentials: false
 
       - name: Set up environment
         env:
@@ -99,8 +159,9 @@ jobs:
             ghcr.io/midnight-ntwrk/${{ matrix.image.name }}
             ghcr.io/midnightntwrk/${{ matrix.image.name }}
             ${{ github.ref_type == 'tag' && format('midnightntwrk/{0}', matrix.image.name) || '' }}
+          # onlatest arch-suffixes the `latest` tag release tags get, which merge-manifests expects.
           flavor: |
-            suffix=${{ matrix.platform.suffix }}
+            suffix=${{ matrix.platform.suffix }},onlatest=true
           tags: |
             type=semver,pattern={{version}}
             ${{ github.ref_type != 'tag' && format('type=sha,prefix={0}-,format=short', env.VERSION) || '' }}
@@ -109,35 +170,83 @@ jobs:
             org.opencontainers.image.title=${{ matrix.image.name }}
             org.opencontainers.image.description=${{ matrix.image.description }}
 
-      - name: Setup QEMU
-        if: matrix.platform.arch == 'arm64'
-        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
-        with:
-          image: tonistiigi/binfmt:qemu-v8.1.5
-
       - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # Build into the local Docker daemon and check the image before anything is published. The
+      # push below then rebuilds from this builder's cache, so the image is only built once.
+      - name: Build Docker Image for checks
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ./${{ matrix.image.name }}/Dockerfile
+          # Export the image to the runner's Docker daemon (`buildx build --load`) instead of
+          # leaving it in the BuildKit container, so syft can read it as docker:<tag>. Not pushed:
+          # `local/` below is only a tag name. Works because each job builds a single platform.
+          load: true
+          # Anchored here and reused by the push step below, so both builds match and share a cache.
+          build-args: &build-args |
+            PROFILE=${{ env.PROFILE }}
+            RUST_VERSION=${{ env.TOOLCHAIN }}
+            CARGO_AUDITABLE_VERSION=${{ env.CARGO_AUDITABLE_VERSION }}
+            CARGO_CHEF_VERSION=${{ env.CARGO_CHEF_VERSION }}
+          platforms: linux/${{ matrix.platform.arch }}
+          tags: local/${{ matrix.image.name }}:check
+          cache-from: &cache-from |
+            type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.image.name }}:buildcache${{ matrix.platform.cache_scope }}
+            type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.image.name }}:buildcache-${{ env.PROFILE }}${{ matrix.platform.cache_scope }}
+
+      - name: Install Syft
+        id: syft
+        uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+
+      - name: Install Grype
+        id: grype
+        uses: anchore/scan-action/download-grype@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
+
+      # The point of building with cargo auditable: an image scanner must see the binary's crates.
+      # The SBOM goes to the runner's temp directory: a new file in the build context would change
+      # the push build's `COPY . .` layers and recompile the binary.
+      - name: Check the image SBOM lists the Rust crates
+        env:
+          SYFT: ${{ steps.syft.outputs.cmd }}
+          IMAGE: local/${{ matrix.image.name }}:check
+        run: |
+          "$SYFT" scan "docker:$IMAGE" -o syft-json="$RUNNER_TEMP/sbom.syft.json"
+          crates=$(jq '[.artifacts[] | select(.type == "rust-crate")] | length' "$RUNNER_TEMP/sbom.syft.json")
+          echo "syft found $crates Rust crates in $IMAGE"
+          if [ "$crates" -eq 0 ]; then
+            echo "::error::syft found no Rust crates in $IMAGE; its cargo auditable data is missing or unreadable"
+            exit 1
+          fi
+
+      # Scan what would ship, before it ships. Only vulnerabilities with a fix fail the build:
+      # an unfixed one in the Debian base can only be waited out. Accepted findings go in a
+      # .grype.yaml at the repository root, with the reason and when to remove them.
+      - name: Scan the image SBOM for vulnerabilities
+        env:
+          GRYPE: ${{ steps.grype.outputs.cmd }}
+        run: |
+          "$GRYPE" "sbom:$RUNNER_TEMP/sbom.syft.json" --fail-on high --only-fixed
 
       - name: Build and push Docker Image
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        env:
-          PROFILE: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || inputs.profile || 'dev' }}
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: ./${{ matrix.image.name }}/Dockerfile
           push: true
-          build-args: |
-            PROFILE=${{ env.PROFILE }}
-            RUST_VERSION=${{ env.TOOLCHAIN }}
+          build-args: *build-args
           platforms: linux/${{ matrix.platform.arch }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: |
-            type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.image.name }}:buildcache${{ matrix.platform.cache_scope }}
-            type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.image.name }}:buildcache-${{ env.PROFILE }}${{ matrix.platform.cache_scope }}
+          cache-from: *cache-from
           cache-to: |
             type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.image.name }}:buildcache${{ matrix.platform.cache_scope }},mode=max
             type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.image.name }}:buildcache-${{ env.PROFILE }}${{ matrix.platform.cache_scope }},mode=max
+          # Attaches an SPDX SBOM to the published image, next to its provenance. BuildKit runs this
+          # syft-based scanner image on the final stage; pinned by digest and bumped by hand.
+          attests: |
+            type=sbom,generator=docker/buildkit-syft-scanner:1.12.1@sha256:873a7458c3c8ac8e32c7b796c10e1600b07b963d2aa000a72a2d97aaaa2d6315
 
   merge-manifests:
     name: Merge multi-arch manifest (${{ matrix.image.name }})
@@ -157,6 +266,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing here pushes to git; keep GITHUB_TOKEN out of .git/config for later steps.
+          persist-credentials: false
 
       - name: Set up environment
         run: |
@@ -177,7 +289,7 @@ jobs:
           password: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
 
       - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       # Recompute the unsuffixed tags exactly as the build-and-push job did (same images/tags,
       # no suffix). For each tag T we combine the already-published T-amd64 and T-arm64 into a
@@ -219,6 +331,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing here pushes to git; keep GITHUB_TOKEN out of .git/config for later steps.
+          persist-credentials: false
 
       - name: Docker versions
         run: |
