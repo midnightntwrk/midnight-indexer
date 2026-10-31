@@ -83,7 +83,8 @@ static ALLOCATOR: CountingAllocator = CountingAllocator;
 
 // The chain-indexer persists every block's ledger state, unpersists the oldest beyond its
 // retention window and runs gc on an interval. Anything this loop keeps alive grows with the
-// chain, so after a warm-up, heap growth must stay below a small allowance per block.
+// chain, so after a warm-up, at least one measured window must grow the heap by less than a small
+// allowance per block.
 #[tokio::test(flavor = "multi_thread")]
 async fn persisting_ledger_states_does_not_grow_the_heap() -> anyhow::Result<()> {
     let temp_dir = tempfile::tempdir().context("create tempdir")?;
