@@ -291,6 +291,31 @@ impl LedgerState {
         Ok(ledger_state)
     }
 
+    /// Clears the ledger state accrued in memory and loads it lazily again from `key`, its
+    /// persisted key.
+    ///
+    /// A state held across blocks keeps every arena node it has loaded or created in memory. The
+    /// reloaded state holds its root's fields, by-reference ones as lazy handles, until later reads
+    /// load more, served from the ledger DB's node cache where possible.
+    ///
+    /// Call it only between blocks: a reloaded state starts with zero block fullness, which matches
+    /// only after `finalize_apply_transactions` has reset it.
+    ///
+    /// # Errors
+    /// Returns [Error::ReloadLedgerState] if the block fullness is not zero, and an error if `key`
+    /// cannot be deserialized or its state cannot be loaded.
+    pub fn reload(self, key: &SerializedLedgerStateKey) -> Result<Self, Error> {
+        let (Self::V8 { block_fullness, .. } | Self::V9 { block_fullness, .. }) = &self;
+        if *block_fullness != SyntheticCost::default() {
+            return Err(Error::ReloadLedgerState);
+        }
+
+        let ledger_version = self.ledger_version();
+        // Dropping first frees this state's nodes before the load allocates.
+        drop(self);
+        Self::load(key, ledger_version)
+    }
+
     pub fn translate(self, ledger_version: LedgerVersion) -> Result<Self, Error> {
         match (self, ledger_version) {
             (s @ LedgerState::V8 { .. }, LedgerVersion::V8) => Ok(s),
@@ -4556,14 +4581,12 @@ mod well_formed_timestamp_tests {
     use crate::{
         domain::{LedgerVersion, TransactionResult, ledger::LedgerState},
         error::BoxError,
-        testing::{Malformed, NETWORK_ID, dust_registration, init_ledger_db, malformed},
+        testing::{
+            Malformed, NETWORK_ID, NOW, dust_registration, init_ledger_db, malformed, millis,
+        },
     };
     use midnight_ledger_v8::structure::INITIAL_PARAMETERS as INITIAL_PARAMETERS_V8;
     use midnight_ledger_v9::structure::INITIAL_PARAMETERS as INITIAL_PARAMETERS_V9;
-
-    // Arbitrary reference time of every test, in seconds, and the dust `ctime` of every test
-    // transaction. Any value of at least 1 works, so that `NOW - 1` does not underflow.
-    const NOW: u64 = 1_800_000_000;
 
     // Intent TTL, in seconds after `NOW`, of transactions whose window the intent TTL bounds
     // from above. It must lie in `[2, global_ttl - 1]` and be at most `dust_grace_period`: the
@@ -4771,8 +4794,150 @@ mod well_formed_timestamp_tests {
             dust_grace_period.as_seconds().try_into()?,
         ))
     }
+}
 
-    const fn millis(seconds: u64) -> u64 {
-        seconds * 1_000
+#[cfg(all(test, feature = "standalone"))]
+mod reload_tests {
+    use super::{Error, SyntheticCost};
+    use crate::{
+        domain::{LedgerVersion, SerializedLedgerStateKey, TransactionResult, ledger::LedgerState},
+        infra::ledger_db::v1_1::LedgerDb,
+        testing::{NETWORK_ID, NOW, dust_registration, init_ledger_db, millis},
+    };
+    use anyhow::{Context, anyhow, ensure};
+    use midnight_storage_core_v1::storage::default_storage;
+
+    // Blocks each test indexes.
+    const BLOCKS: u64 = 50;
+    // Seconds between consecutive blocks.
+    const BLOCK_TIME: u64 = 6;
+
+    // The devnet genesis state, translated to `ledger_version`. Unlike a new state, it is large
+    // enough that the arena tracks its nodes by reference. The V8 state is persisted before the
+    // translation, as the chain-indexer does at the fork, so the translated state's references to
+    // V8 nodes resolve.
+    fn devnet_genesis(ledger_version: LedgerVersion) -> anyhow::Result<LedgerState> {
+        let raw = std::fs::read(format!(
+            "{}/tests/v8_genesis_devnet_0_22_0.raw",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .context("read v8 devnet genesis fixture")?;
+        let (ledger_state, _) = LedgerState::from_genesis(&raw, LedgerVersion::V8)?.persist()?;
+        Ok(ledger_state.translate(ledger_version)?)
+    }
+
+    // Indexes `BLOCKS` blocks from a new state, the first with a dust registration and the rest
+    // empty, and returns each block's persisted key, reloading after every block when `reload` is
+    // set.
+    async fn index_blocks(
+        ledger_version: LedgerVersion,
+        reload: bool,
+    ) -> anyhow::Result<Vec<SerializedLedgerStateKey>> {
+        // The intent TTL is block 1's timestamp, the latest the ledger accepts it at.
+        let transaction = dust_registration(ledger_version, NOW + BLOCK_TIME, NOW)
+            .await
+            .map_err(|error| anyhow!(error))?;
+        let mut ledger_state = LedgerState::new(NETWORK_ID.try_into()?, ledger_version)?;
+        let mut parent_block_timestamp = millis(NOW);
+        let mut keys = Vec::new();
+
+        for block in 1..=BLOCKS {
+            let block_timestamp = millis(NOW + block * BLOCK_TIME);
+            if block == 1 {
+                let outcome = ledger_state.apply_regular_transaction(
+                    &transaction,
+                    Default::default(),
+                    block_timestamp,
+                    parent_block_timestamp,
+                    block_timestamp,
+                )?;
+                ensure!(
+                    outcome.transaction_result == TransactionResult::Success,
+                    "{ledger_version}: dust registration failed"
+                );
+            }
+            ledger_state.finalize_apply_transactions(block_timestamp)?;
+
+            let (persisted, key) = ledger_state.persist()?;
+            ledger_state = if reload {
+                persisted.reload(&key)?
+            } else {
+                persisted
+            };
+            keys.push(key);
+            parent_block_timestamp = block_timestamp;
+        }
+
+        Ok(keys)
+    }
+
+    // A reloaded state carries on exactly where the held state would, so indexing with a reload
+    // after every block persists the same states.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn reload_keeps_the_state() -> anyhow::Result<()> {
+        let _ledger_db = init_ledger_db().await.map_err(|error| anyhow!(error))?;
+
+        for ledger_version in [LedgerVersion::V8, LedgerVersion::V9] {
+            let held = index_blocks(ledger_version, false).await?;
+            let reloaded = index_blocks(ledger_version, true).await?;
+            assert_eq!(held, reloaded, "{ledger_version:?}");
+        }
+
+        Ok(())
+    }
+
+    // A reload releases every node materialised since the state loaded, so the arena tracks no
+    // more nodes than it did right after loading the genesis state, and fewer than before the reload.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn reload_releases_materialised_nodes() -> anyhow::Result<()> {
+        let _ledger_db = init_ledger_db().await.map_err(|error| anyhow!(error))?;
+
+        for ledger_version in [LedgerVersion::V8, LedgerVersion::V9] {
+            let mut ledger_state = devnet_genesis(ledger_version)?;
+            let genesis = default_storage::<LedgerDb>().arena.size();
+            let mut key = SerializedLedgerStateKey::default();
+            for block in 1..=BLOCKS {
+                ledger_state.finalize_apply_transactions(millis(NOW + block * BLOCK_TIME))?;
+                (ledger_state, key) = ledger_state.persist()?;
+            }
+
+            let held = default_storage::<LedgerDb>().arena.size();
+            let ledger_state = ledger_state.reload(&key)?;
+            let reloaded = default_storage::<LedgerDb>().arena.size();
+            assert!(
+                reloaded < held && reloaded <= genesis,
+                "{ledger_version:?}: the arena tracks {reloaded} nodes after the reload, {held} \
+                 before it and {genesis} after loading the genesis state"
+            );
+            drop(ledger_state);
+        }
+
+        Ok(())
+    }
+
+    // A reload mid-block would drop the cost of the block's transactions so far, so it fails.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn reload_mid_block_fails() -> anyhow::Result<()> {
+        let _ledger_db = init_ledger_db().await.map_err(|error| anyhow!(error))?;
+
+        for ledger_version in [LedgerVersion::V8, LedgerVersion::V9] {
+            let mut ledger_state = devnet_genesis(ledger_version)?;
+            let block_fullness = match &mut ledger_state {
+                LedgerState::V8 { block_fullness, .. } => block_fullness,
+                LedgerState::V9 { block_fullness, .. } => block_fullness,
+            };
+            *block_fullness = SyntheticCost {
+                block_usage: 1,
+                ..Default::default()
+            };
+
+            let result = ledger_state.reload(&SerializedLedgerStateKey::default());
+            assert!(
+                matches!(result, Err(Error::ReloadLedgerState)),
+                "{ledger_version}: {result:?}"
+            );
+        }
+
+        Ok(())
     }
 }

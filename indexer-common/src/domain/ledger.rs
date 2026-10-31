@@ -70,6 +70,9 @@ pub enum Error {
     #[error("cannot load ledger state for key {}", const_hex::encode(.0))]
     LoadLedgerState(SerializedLedgerStateKey, #[source] io::Error),
 
+    #[error("cannot reload a ledger state mid-block, with non-zero block fullness")]
+    ReloadLedgerState,
+
     #[error("cannot load contract state for key {0}")]
     LoadContractState(SerializedContractStateKey, #[source] io::Error),
 

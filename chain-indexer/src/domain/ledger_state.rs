@@ -119,6 +119,15 @@ impl LedgerState {
             .map(Into::into)
     }
 
+    /// Clears the ledger state accrued in memory and loads it lazily again from `key`, its
+    /// persisted key.
+    ///
+    /// # Errors
+    /// Returns [Error::Load] if the state cannot be reloaded, e.g. mid-block or for an unknown `key`.
+    pub fn reload(self, key: &SerializedLedgerStateKey) -> Result<Self, Error> {
+        self.0.reload(key).map_err(Error::Load).map(Into::into)
+    }
+
     pub fn translate(self, ledger_version: LedgerVersion) -> Result<Self, Error> {
         self.0
             .translate(ledger_version)
