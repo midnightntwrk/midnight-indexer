@@ -19,8 +19,8 @@
 #
 # Usage:
 #   IMAGE_REGISTRY=midnightntwrk INDEXER_TAG=<sha> \
-#   FROM_NODE_TAG=1.0.0 TO_NODE_TAG=<2.1.0-local-tag> \
-#   FROM_TOOLKIT_TAG=1.0.0 TO_TOOLKIT_TAG=<2.1.0-local-tag> \
+#   FROM_NODE_TAG=1.0.300 TO_NODE_TAG=<2.1.0-local-tag> \
+#   FROM_TOOLKIT_TAG=1.0.300 TO_TOOLKIT_TAG=<2.1.0-local-tag> \
 #   RUNTIME_WASM=/path/to/midnight_node_runtime.compact.compressed.wasm \
 #     bash qa/scripts/test-hardfork-8to9.sh
 #
@@ -38,7 +38,7 @@
 set -euo pipefail
 
 # --- Configuration ---
-FROM_NODE_TAG="${FROM_NODE_TAG:-1.0.0}"          # ledger-8 node (chain-spec source)
+FROM_NODE_TAG="${FROM_NODE_TAG:-1.0.300}"        # ledger-8 node (chain-spec source)
 TO_NODE_TAG="${TO_NODE_TAG:-2.1.0}"              # ledger-9 migration node (binary + WASM)
 INDEXER_TAG="${INDEXER_TAG:?INDEXER_TAG is required (e.g. dev)}"
 FROM_TOOLKIT_TAG="${FROM_TOOLKIT_TAG:-$FROM_NODE_TAG}"  # toolkit for v8 sends
