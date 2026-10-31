@@ -9,13 +9,15 @@ chain-indexer applies the node's transactions to its **own** `LedgerState`, reco
 merkle roots, and **`bail!`s (halts indexing) on any mismatch** rather than persisting a
 divergent state - `chain-indexer/src/application.rs` (~404-420):
 
-- **Zswap merkle tree root - every block.** `ledger_state.zswap_merkle_tree_root()` is
-  compared to the node's per-block root; mismatch → `bail!`. This is the check that works
-  against every node version.
-- **Full ledger-state root - every block the node supplies one.** When `block.ledger_state_root`
-  is present (Node ≥ 0.22) the recomputed `ledger_state.root()` is compared to it; mismatch →
-  `bail!`. At genesis the state root additionally disambiguates a pre- vs post-block-0 genesis.
-  (A `TODO` retires the zswap-only path once Node < 0.22 support is dropped.)
+- **Full ledger state - every block.** The node stores the tagged arena key of its end-of-block
+  ledger as `pallet_midnight::StateKey` in Substrate storage. The chain-indexer reads it for every
+  block and compares it to `ledger_state.node_state_key()`, the same key computed over its own
+  state (`indexer-common/src/domain/ledger/node_state_key.rs` mirrors the node's ledger wrapper);
+  mismatch → `bail!` with "ledger state root mismatch". At genesis the state key additionally
+  disambiguates a pre- vs post-block-0 genesis.
+
+Reading `StateKey` from Substrate storage rather than asking the node to load its ledger state
+means the guard also works against a node that prunes historical ledger states.
 
 So the model is **fail loud, don't drift**: if the indexer ever computes a root the node
 disagrees with, it stops. There is no after-the-fact `assert!(indexer_root == node_root)`
@@ -23,7 +25,7 @@ anywhere - the guard is the source of truth.
 
 Per-block **dust roots** are computed, stored and served but not cross-checked against the node
 (there is no node dust-root RPC); they are covered transitively by the deterministic re-apply
-that the zswap/state-root match guards each block.
+that the state key match guards each block.
 
 ## How CI exercises the guard
 

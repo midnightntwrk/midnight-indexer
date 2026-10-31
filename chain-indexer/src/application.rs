@@ -528,11 +528,8 @@ async fn index_block<N>(
 where
     N: Node,
 {
-    // Capture the node's zswap merkle tree root (domain type) before `try_into` serializes it, to
-    // compare against the zswap merkle tree root in the ledger state below.
-    let zswap_merkle_tree_root = block.zswap_merkle_tree_root;
-
-    let (mut block, transactions) = block.try_into().context("convert node block into domain")?;
+    let node_state_key = block.state_key.clone();
+    let (mut block, transactions) = block.into();
 
     let ledger_version = block.protocol_version.ledger_version();
     // Whether this block translates the ledger state, taken before the state is replaced.
@@ -584,39 +581,32 @@ where
 
     // Apply transactions to ledger state with special handling for genesis block.
     let (mut transactions, ledger_parameters) = if block.height == 0 {
-        // At genesis compare ledger state roots of genesis and block from node to detect whether
+        // At genesis compare the state keys of genesis and block from node to detect whether
         // genesis already includes transactions (post-block-0) or not (pre-block-0).
+        let genesis_ledger_state = node
+            .fetch_genesis_ledger_state()
+            .await
+            .context("fetch genesis ledger state")?;
+        let genesis_ledger_state = LedgerState::from_genesis(
+            genesis_ledger_state,
+            block.protocol_version.ledger_version(),
+        )
+        .context("create ledger state from genesis")?;
+        let genesis_state_key = genesis_ledger_state
+            .node_state_key()
+            .context("compute genesis state key")?;
 
-        if let Some(ledger_state_root) = block.ledger_state_root.as_ref() {
-            let genesis_ledger_state = node
-                .fetch_genesis_ledger_state()
-                .await
-                .context("fetch genesis ledger state")?;
-            let genesis_ledger_state = LedgerState::from_genesis(
-                genesis_ledger_state,
-                block.protocol_version.ledger_version(),
-            )
-            .context("create ledger state from genesis")?;
-            let genesis_ledger_state_root = genesis_ledger_state
-                .root()
-                .context("compute genesis ledger state root")?;
+        if node_state_key == genesis_state_key {
+            info!("post-block-0: applying transactions to fresh state, then use genesis state");
 
-            if *ledger_state_root == genesis_ledger_state_root {
-                info!("post-block-0: applying transactions to fresh state, then use genesis state");
+            let transactions_ledger_parameters = apply_transactions(&mut ledger_state)?;
+            ledger_state = genesis_ledger_state;
 
-                let transactions_ledger_parameters = apply_transactions(&mut ledger_state)?;
-                ledger_state = genesis_ledger_state;
-
-                transactions_ledger_parameters
-            } else {
-                info!("pre-block-0: applying transactions to genesis state");
-
-                ledger_state = genesis_ledger_state;
-                apply_transactions(&mut ledger_state)?
-            }
+            transactions_ledger_parameters
         } else {
-            // TODO: Remove once support for Node < 0.22 is dropped!
-            // Pre Node 0.22: no ledger_state_root RPC! Ignore genesis state.
+            info!("pre-block-0: applying transactions to genesis state");
+
+            ledger_state = genesis_ledger_state;
             apply_transactions(&mut ledger_state)?
         }
     } else {
@@ -627,6 +617,10 @@ where
 
     *parent_block_timestamp = block.timestamp;
     block.ledger_parameters = ledger_parameters.serialize()?;
+    block.zswap_merkle_tree_root = ledger_state
+        .zswap_merkle_tree_root()
+        .serialize()
+        .context("serialize zswap merkle tree root")?;
     block.zswap_end_index = ledger_state.zswap_first_free();
     // These two are NOT monotonic across the ledger 8 -> 9 boundary: the fork
     // wipes dust state, so both `first_free` counters reset to zero and the
@@ -648,28 +642,16 @@ where
         .dust_generation_merkle_tree_root()
         .context("get dust generation merkle tree root")?;
 
-    // Validate ledger state.
-    // TODO: Only use ledger state root comparison once support for Node < 0.22 is dropped!
-    let ledger_state_root = ledger_state.root().context("get ledger state root")?;
-    if let Some(node_ledger_state_root) = block.ledger_state_root.as_ref()
-        && *node_ledger_state_root != ledger_state_root
-    {
+    // Validate the ledger state against the node's `StateKey`, which commits to the whole
+    // end-of-block ledger state and stays readable after the node prunes historical ledger states.
+    let state_key = ledger_state.node_state_key().context("compute state key")?;
+    if state_key != node_state_key {
         bail!(
             "ledger state root mismatch for block {} at height {}: node={}, indexer={}",
             block.hash,
             block.height,
-            node_ledger_state_root,
-            ledger_state_root,
-        );
-    }
-    let local_zswap_merkle_tree_root = ledger_state.zswap_merkle_tree_root();
-    if local_zswap_merkle_tree_root != zswap_merkle_tree_root {
-        bail!(
-            "zswap state root mismatch for block {} at height {}: node={:?}, indexer={:?}",
-            block.hash,
-            block.height,
-            zswap_merkle_tree_root,
-            local_zswap_merkle_tree_root,
+            node_state_key,
+            state_key,
         );
     }
 
@@ -915,13 +897,9 @@ mod tests {
             node::{self, Node},
         },
     };
-    use fake::{Fake, Faker};
     use futures::{Stream, StreamExt, TryStreamExt, stream};
     use indexer_common::{
-        domain::{
-            BlockHash, ByteArray, ByteVec, NodeVersion, ProtocolVersion,
-            ledger::ZswapMerkleTreeRoot,
-        },
+        domain::{BlockHash, ByteArray, ByteVec, NodeVersion, ProtocolVersion},
         error::BoxError,
     };
     use std::{
@@ -1052,8 +1030,7 @@ mod tests {
         parent_hash: ZERO_HASH,
         author: Default::default(),
         timestamp: Default::default(),
-        zswap_merkle_tree_root: ZswapMerkleTreeRoot::V8(Faker.fake()),
-        ledger_state_root: None,
+        state_key: Default::default(),
         transactions: Default::default(),
         dust_registration_events: Default::default(),
         bridge_events: Default::default(),
@@ -1066,8 +1043,7 @@ mod tests {
         parent_hash: BLOCK_0_HASH,
         author: Default::default(),
         timestamp: Default::default(),
-        zswap_merkle_tree_root: ZswapMerkleTreeRoot::V8(Faker.fake()),
-        ledger_state_root: None,
+        state_key: Default::default(),
         transactions: Default::default(),
         dust_registration_events: Default::default(),
         bridge_events: Default::default(),
@@ -1080,8 +1056,7 @@ mod tests {
         parent_hash: BLOCK_1_HASH,
         author: Default::default(),
         timestamp: Default::default(),
-        zswap_merkle_tree_root: ZswapMerkleTreeRoot::V8(Faker.fake()),
-        ledger_state_root: None,
+        state_key: Default::default(),
         transactions: Default::default(),
         dust_registration_events: Default::default(),
         bridge_events: Default::default(),
@@ -1094,8 +1069,7 @@ mod tests {
         parent_hash: BLOCK_2_HASH,
         author: Default::default(),
         timestamp: Default::default(),
-        zswap_merkle_tree_root: ZswapMerkleTreeRoot::V8(Faker.fake()),
-        ledger_state_root: None,
+        state_key: Default::default(),
         transactions: Default::default(),
         dust_registration_events: Default::default(),
         bridge_events: Default::default(),

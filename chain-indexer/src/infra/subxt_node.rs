@@ -32,8 +32,7 @@ use http::{
 };
 use indexer_common::{
     domain::{
-        BlockAuthor, BlockHash, ByteVec, NodeVersion, ProtocolVersion, ProtocolVersionError,
-        ledger::{self, ZswapMerkleTreeRoot},
+        BlockAuthor, BlockHash, ByteVec, NodeVersion, ProtocolVersion, ProtocolVersionError, ledger,
     },
     error::BoxError,
 };
@@ -85,6 +84,15 @@ const CATCH_UP_LOG_INTERVAL: u64 = 1_000;
 /// fetched by hash (backward traversal) to avoid any risk of ingesting non-canonical blocks.
 /// Blocks further back are fetched by height with parent hash verification.
 const FINALIZATION_SAFETY_MARGIN: u64 = 400;
+
+/// Storage key of `Midnight::StateKey`, i.e. `twox128("Midnight") ++ twox128("StateKey")`. The
+/// item is identical in every supported runtime, hence read raw.
+const STATE_KEY_STORAGE_KEY: [u8; 32] = match const_hex::const_decode_to_array(
+    b"2a760f9a173a6df5cd4373ff49fa999bd3b3812d84b965be98ec477e3575379b",
+) {
+    Ok(key) => key,
+    Err(_) => panic!("invalid StateKey storage key"),
+};
 
 /// A [Node] implementation based on subxt.
 #[derive(Clone)]
@@ -250,13 +258,7 @@ impl SubxtNode {
             .transpose()?
             .flatten();
 
-        // The node's ledger-9 host API detects the v8 StateKey at the 8->9 enactment block and
-        // dispatches this read to the v8 bridge. The MNSV protocol version remains the right
-        // decoder here: that block's committed ledger state is still v8 until apply+1.
-        let zswap_merkle_tree_root =
-            runtimes::get_zswap_merkle_tree_root(state_node_version, &block).await?;
-        let zswap_merkle_tree_root =
-            ZswapMerkleTreeRoot::deserialize(zswap_merkle_tree_root, ledger_version)?;
+        let state_key = self.fetch_state_key(block.block_hash()).await?;
 
         // At a runtime-upgrade enactment block the block reports the next runtime, so subxt binds
         // it to the next runtime's metadata even though its extrinsics and events were produced by
@@ -302,24 +304,20 @@ impl SubxtNode {
 
         // At genesis, Substrate does not emit events (Parity PR #5463). Fetch cNight
         // registrations from pallet storage instead.
-        // Also fetch the ledger state root for genesis ledger state detection.
-        let ledger_state_root =
-            if height == 0 {
-                let genesis_registrations =
-                    runtimes::fetch_genesis_cnight_registrations(state_node_version, &block)
-                        .await?;
-                // Registrations read from storage are part of the genesis state, which is set
-                // before any extrinsic; their index is their position in the read.
-                dust_registration_events.extend(genesis_registrations.into_iter().enumerate().map(
-                    |(position, event)| (Phase::Initialization, position as EventIndex, event),
-                ));
-
-                runtimes::get_ledger_state_root(state_node_version, &block)
-                    .await?
-                    .map(Into::into)
-            } else {
-                None
-            };
+        if height == 0 {
+            let genesis_registrations =
+                runtimes::fetch_genesis_cnight_registrations(state_node_version, &block).await?;
+            // Registrations read from storage are part of the genesis state, which is set before
+            // any extrinsic; their index is their position in the read.
+            dust_registration_events.extend(
+                genesis_registrations
+                    .into_iter()
+                    .enumerate()
+                    .map(|(position, event)| {
+                        (Phase::Initialization, position as EventIndex, event)
+                    }),
+            );
+        }
 
         let transactions = stream::iter(transactions)
             .then(|(phase, transaction, outcome)| async move {
@@ -337,8 +335,7 @@ impl SubxtNode {
             protocol_version,
             author,
             timestamp: timestamp.unwrap_or(0),
-            zswap_merkle_tree_root,
-            ledger_state_root,
+            state_key,
             transactions,
             dust_registration_events,
             bridge_events,
@@ -353,6 +350,25 @@ impl SubxtNode {
         );
 
         Ok(block)
+    }
+
+    /// Fetch the node's `pallet_midnight::StateKey` at the given block from Substrate storage, which
+    /// unlike the ledger state it refers to is not subject to the node's ledger state pruning.
+    #[trace]
+    async fn fetch_state_key(&self, hash: H256) -> Result<ByteVec, SubxtNodeError> {
+        let legacy_rpc_methods = LegacyRpcMethods::<RpcConfigFor<SubstrateConfig>>::new(
+            self.rpc_client.to_owned().into(),
+        );
+
+        let state_key = legacy_rpc_methods
+            .state_get_storage(&STATE_KEY_STORAGE_KEY, Some(hash))
+            .await
+            .map_err(SubxtNodeError::FetchStateKey)?
+            .ok_or(SubxtNodeError::StateKeyNotFound(hash))?;
+        let state_key =
+            Vec::<u8>::decode(&mut state_key.as_slice()).map_err(SubxtNodeError::DecodeStateKey)?;
+
+        Ok(state_key.into())
     }
 
     #[trace]
@@ -654,6 +670,15 @@ pub enum SubxtNodeError {
     #[error("block body not found")]
     BlockBodyNotFound,
 
+    #[error("cannot fetch state key")]
+    FetchStateKey(#[source] subxt::rpcs::Error),
+
+    #[error("state key not found at block {0}")]
+    StateKeyNotFound(H256),
+
+    #[error("cannot decode state key")]
+    DecodeStateKey(#[source] parity_scale_codec::Error),
+
     #[error("cannot fetch events")]
     FetchEvents(#[source] Box<subxt::error::EventsError>),
 
@@ -696,9 +721,6 @@ pub enum SubxtNodeError {
     #[error("cannot decode genesis cNight registration key")]
     DecodeGenesisCnightRegistrationKey(#[source] Box<subxt::error::StorageKeyError>),
 
-    #[error("cannot get zswap state root")]
-    GetZswapStateRoot(#[source] BoxError),
-
     #[error("cannot get D-Parameter")]
     GetDParameter(#[source] BoxError),
 
@@ -707,9 +729,6 @@ pub enum SubxtNodeError {
 
     #[error("cannot hex decode genesis ledger state")]
     HexDecodeGenesisLedgerState(#[source] FromHexError),
-
-    #[error("cannot get ledger state root")]
-    GetLedgerStateRoot(#[source] BoxError),
 
     #[error("cannot fetch system properties")]
     FetchSystemProperties(#[source] subxt::rpcs::Error),

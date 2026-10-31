@@ -207,31 +207,6 @@ pub fn decode_slot(slot: &[u8], node_version: NodeVersion) -> Result<u64, SubxtN
     }
 }
 
-pub async fn get_zswap_merkle_tree_root(
-    node_version: NodeVersion,
-    block: &OnlineClientAtBlock,
-) -> Result<Vec<u8>, SubxtNodeError> {
-    match node_version {
-        NodeVersion::V0_22 => v0_22_0::get_zswap_merkle_tree_root(block).await,
-        NodeVersion::V1_0 => v1_0_300::get_zswap_merkle_tree_root(block).await,
-        NodeVersion::V2_0 => v2_0_0::get_zswap_merkle_tree_root(block).await,
-        NodeVersion::V2_1 => v2_1_0::get_zswap_merkle_tree_root(block).await,
-    }
-}
-
-/// Get the pure ledger state root (without StorableLedgerState wrapping) at the given block.
-pub async fn get_ledger_state_root(
-    node_version: NodeVersion,
-    block: &OnlineClientAtBlock,
-) -> Result<Option<Vec<u8>>, SubxtNodeError> {
-    match node_version {
-        NodeVersion::V0_22 => v0_22_0::get_ledger_state_root(block).await,
-        NodeVersion::V1_0 => v1_0_300::get_ledger_state_root(block).await,
-        NodeVersion::V2_0 => v2_0_0::get_ledger_state_root(block).await,
-        NodeVersion::V2_1 => v2_1_0::get_ledger_state_root(block).await,
-    }
-}
-
 /// Get D-Parameter depending on the given protocol version.
 pub async fn get_d_parameter(
     node_version: NodeVersion,

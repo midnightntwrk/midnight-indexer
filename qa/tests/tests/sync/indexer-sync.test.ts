@@ -338,7 +338,6 @@ describe('indexer sync compatibility', () => {
       const source = readSource('chain-indexer/src/application.rs');
 
       expect(source).toContain('ledger state root mismatch');
-      expect(source).toContain('zswap state root mismatch');
       expect(source).toContain('translate ledger state');
     });
 

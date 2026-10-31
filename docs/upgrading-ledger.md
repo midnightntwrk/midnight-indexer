@@ -74,8 +74,8 @@ first.
    `indexer-common/src/domain/ledger/state_translation_v8_to_v9.rs` is a manual
    re-port of the node's `ledger/helpers/src/state_translation_v8_to_v9.rs` and
    must stay semantically identical to it — the ledger-8→9 fork-boundary block
-   re-derives `ledger_state.root()` and compares it to the node's on-chain
-   migration output, so any drift breaks that block permanently. If the node's
+   re-derives the translated state and compares its key to the node's on-chain
+   `StateKey`, so any drift breaks that block permanently. If the node's
    table or the v9 `INITIAL_PARAMETERS` it seeds change:
 
    - re-port the file and keep the provenance header's node commit current, and
@@ -99,6 +99,12 @@ When a chain needs a third concurrent ledger:
    `protocol_version.rs`.
 3. Add per-major match arms wherever ledger types are dispatched in
    `indexer-common/src/domain/ledger/`.
+4. Mirror the node's `Ledger` wrapper for the new major in
+   `indexer-common/src/domain/ledger/node_state_key.rs`, and pin its genesis
+   state and block-0 `StateKey`, read from a real node, in
+   `node_state_key_matches_node_at_genesis`. The chain-indexer validates every
+   block against the node's `StateKey`, so a wrapper that drifts from the node
+   halts indexing; the node pins the same vector in its own golden test.
 
 ## See also
 

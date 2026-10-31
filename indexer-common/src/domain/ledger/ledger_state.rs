@@ -25,6 +25,7 @@ use crate::{
             ContractState, ContractZswapState, Error, IntentV8, IntentV9, LedgerDbContractState,
             SerializableExt, TaggedSerializableExt, TransactionV8, TransactionV9,
             contract_state::ContractStateArenaKey,
+            node_state_key::{NodeLedgerV8, NodeLedgerV9},
         },
     },
     infra::ledger_db::v1_1,
@@ -346,6 +347,24 @@ impl LedgerState {
                 .as_typed_key()
                 .serialize()
                 .map_err(|error| Error::Serialize("LedgerStateV9", error)),
+        }
+    }
+
+    /// The node's `pallet_midnight::StateKey` for this ledger state as committed at the end of a
+    /// block, i.e. the tagged arena key of the node's ledger wrapper with zero block fullness.
+    pub fn node_state_key(&self) -> Result<ByteVec, Error> {
+        match self {
+            Self::V8 { ledger_state, .. } => default_storage::<v1_1::LedgerDb>()
+                .alloc(NodeLedgerV8::end_of_block(ledger_state.to_owned()))
+                .as_typed_key()
+                .tagged_serialize()
+                .map_err(|error| Error::Serialize("NodeStateKeyV8", error)),
+
+            Self::V9 { ledger_state, .. } => default_storage::<v1_1::LedgerDb>()
+                .alloc(NodeLedgerV9::end_of_block(ledger_state.to_owned()))
+                .as_typed_key()
+                .tagged_serialize()
+                .map_err(|error| Error::Serialize("NodeStateKeyV9", error)),
         }
     }
 
@@ -2844,8 +2863,8 @@ mod tests {
         assert!(ledger_state_v9.translate(LedgerVersion::V8).is_err());
 
         // Characterization guard for the v8 -> v9 translation. `application.rs`
-        // compares exactly this serialized arena root against the node's
-        // `ledger_state_root` at every block, so pinning it locks the re-ported
+        // compares the key of exactly this state against the node's `StateKey`
+        // at every block, so pinning it locks the re-ported
         // table's output — including the placeholder v9 parameters the migration
         // seeds from `ledger_v9 INITIAL_PARAMETERS`. A diff means the table, a
         // ledger-v9 type, or a seeded param drifted.
@@ -3501,6 +3520,41 @@ mod tests {
             expected,
             "re-serializing the reloaded zswap state must be byte-identical to what is stored today"
         );
+
+        Ok(())
+    }
+
+    /// The node's `pallet_midnight::StateKey` at block 0 of an undeployed chain, read from node
+    /// 0.22.0 (ledger 8) and node 2.1.0-rc.4 (ledger 9), is reproduced from the genesis ledger state
+    /// from system properties. This pins the mirrored node ledger wrapper byte for byte.
+    #[cfg(any(feature = "cloud", feature = "standalone"))]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn node_state_key_matches_node_at_genesis() -> Result<(), BoxError> {
+        let _ledger_db = init_ledger_db().await?;
+
+        for ledger_version in [LedgerVersion::V8, LedgerVersion::V9] {
+            // Exhaustive on purpose: a new ledger version does not compile here until its genesis
+            // and block-0 `StateKey` from a real node are pinned, matching the node's golden test.
+            let (fixture, expected) = match ledger_version {
+                LedgerVersion::V8 => (
+                    "v8_genesis_undeployed_0_22_0.raw",
+                    "6d69646e696768743a73746f726167652d6b6579286c65646765722d73746174655b7631335d293a0094da59ebc5abee3d5abc325275ee39df52f01eed96b86ea635c4f18b31f99689",
+                ),
+                LedgerVersion::V9 => (
+                    "genesis_state.raw",
+                    "6d69646e696768743a73746f726167652d6b6579286c65646765722d73746174655b7631385d293a0067100cb9fcfc392a863e7b22751c6baf4602e96deef27c4e5339205586ab44c3",
+                ),
+            };
+
+            let genesis = std::fs::read(format!("{}/tests/{fixture}", env!("CARGO_MANIFEST_DIR")))?;
+            let ledger_state = LedgerState::from_genesis(genesis, ledger_version)?;
+
+            assert_eq!(
+                const_hex::encode(ledger_state.node_state_key()?),
+                expected,
+                "node state key for {fixture} drifted from the node's StateKey at genesis"
+            );
+        }
 
         Ok(())
     }
