@@ -32,7 +32,15 @@ updates:
   - package-ecosystem: "docker"
     labels:
       - "bot:dependencies"
-    directory: "/"
+    # Each component keeps its Dockerfile in its own directory; "/" alone matches none of them.
+    directories:
+      - "/chain-indexer"
+      - "/indexer-api"
+      - "/indexer-standalone"
+      - "/indexer-tests"
+      - "/spo-indexer"
+      - "/wallet-indexer"
+      - "/qa/tests/utils/compact"
     schedule:
       interval: "weekly"
     cooldown:
@@ -41,3 +49,12 @@ updates:
       all:
         patterns:
           - "*"
+    ignore:
+      # The builder's Rust version follows rust-toolchain.toml and is bumped by hand. Digest bumps
+      # arrive only while the pinned release is still rebuilt upstream; once a newer Rust ships, its
+      # digest freezes and only the next Rust bump refreshes the builder.
+      - dependency-name: "rust"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
