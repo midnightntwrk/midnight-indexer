@@ -100,7 +100,7 @@ jobs:
           just feature=standalone lint
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-8-core-x64
     needs: [changes]
     if: ${{!cancelled() && needs.changes.outputs.non_qa != 'false'}}
     timeout-minutes: 15
