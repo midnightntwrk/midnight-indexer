@@ -355,16 +355,21 @@ impl LedgerState {
                 ledger_state,
                 block_fullness,
             } => {
-                let mut ledger_state = Sp::new(ledger_state);
-                ledger_state.persist();
-                default_storage::<v1_1::LedgerDb>().with_backend(|b| b.flush_all_changes_to_db());
+                // The `Sp` holds a clone and drops at the end of this block. Unwrapping it with
+                // `Sp::into_inner` instead would leak its entry in storage-core's `Sp` cache, which
+                // only `Sp::drop` removes, and only once no other `Arc` holds the data.
+                let key = {
+                    let mut ledger_state = Sp::new(ledger_state.clone());
+                    ledger_state.persist();
+                    default_storage::<v1_1::LedgerDb>()
+                        .with_backend(|b| b.flush_all_changes_to_db());
 
-                let key = ledger_state
-                    .as_typed_key()
-                    .serialize()
-                    .map_err(|error| Error::Serialize("TypedArenaKeyV8", error))?;
+                    ledger_state
+                        .as_typed_key()
+                        .serialize()
+                        .map_err(|error| Error::Serialize("TypedArenaKeyV8", error))?
+                };
 
-                let ledger_state = Sp::into_inner(ledger_state).expect("ledger state exists");
                 let ledger_state = LedgerState::V8 {
                     ledger_state,
                     block_fullness,
@@ -377,16 +382,21 @@ impl LedgerState {
                 ledger_state,
                 block_fullness,
             } => {
-                let mut ledger_state = Sp::new(ledger_state);
-                ledger_state.persist();
-                default_storage::<v1_1::LedgerDb>().with_backend(|b| b.flush_all_changes_to_db());
+                // The `Sp` holds a clone and drops at the end of this block. Unwrapping it with
+                // `Sp::into_inner` instead would leak its entry in storage-core's `Sp` cache, which
+                // only `Sp::drop` removes, and only once no other `Arc` holds the data.
+                let key = {
+                    let mut ledger_state = Sp::new(ledger_state.clone());
+                    ledger_state.persist();
+                    default_storage::<v1_1::LedgerDb>()
+                        .with_backend(|b| b.flush_all_changes_to_db());
 
-                let key = ledger_state
-                    .as_typed_key()
-                    .serialize()
-                    .map_err(|error| Error::Serialize("TypedArenaKeyV9", error))?;
+                    ledger_state
+                        .as_typed_key()
+                        .serialize()
+                        .map_err(|error| Error::Serialize("TypedArenaKeyV9", error))?
+                };
 
-                let ledger_state = Sp::into_inner(ledger_state).expect("ledger state exists");
                 let ledger_state = LedgerState::V9 {
                     ledger_state,
                     block_fullness,
