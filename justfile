@@ -38,7 +38,7 @@ lint-fix:
 test:
     # We must build the executables needed by the e2e tests!
     # Selecting the whole workspace with tests resolves the same dependency features as nextest, so nextest and the schema check reuse these artifacts.
-    # Naming the binaries leaves the other feature's builds of the remaining executables in target/debug intact.
+    # Naming the binaries keeps this build from overwriting the other feature's executables in target/debug. Cargo still rebuilds chain-indexer because its integration tests need its binary.
     cargo build --workspace --tests --features {{feature}} --bin indexer-api-cli \
         {{ if feature == "cloud" { "--bin chain-indexer --bin wallet-indexer --bin indexer-api" } else { "--bin indexer-standalone" } }}
     cargo nextest run --workspace --exclude indexer-standalone --features {{feature}}
