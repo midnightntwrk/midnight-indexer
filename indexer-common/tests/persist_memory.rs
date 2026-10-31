@@ -29,24 +29,27 @@ use std::{
     time::Duration,
 };
 
-/// Heap growth allowed per measured block, in bytes. A leaked `Sp` cache entry keeps at least the
-/// ledger state's `Arc` allocation of over 1 KB.
+// Heap growth allowed per measured block, in bytes. A leaked `Sp` cache entry keeps at least the
+// ledger state's `Arc` allocation of over 1 KB.
 const ALLOWED_GROWTH_PER_BLOCK: isize = 512;
-/// Milliseconds between consecutive block timestamps.
+// Milliseconds between consecutive block timestamps.
 const BLOCK_TIME: u64 = 6_000;
-/// Blocks between gc passes, like `gc_interval`.
+// Blocks between gc passes, like `gc_interval`.
 const GC_INTERVAL: u64 = 50;
-/// Blocks persisted while measuring.
-const MEASURED_BLOCKS: u64 = 1_000;
-/// Persisted ledger states kept before the oldest is unpersisted, like `ledger_state_retention`.
+// Persisted ledger states kept before the oldest is unpersisted, like `ledger_state_retention`.
 const RETENTION: usize = 20;
-/// Blocks persisted before measuring, so caches with a fixed bound reach it first.
+// Blocks persisted before measuring, so caches with a fixed bound reach it first.
 const WARM_UP_BLOCKS: u64 = 250;
+// Blocks per measured window, a multiple of `GC_INTERVAL` so every window ends on a gc pass.
+const WINDOW_BLOCKS: u64 = 500;
+// Measured windows. A leak grows the heap in every window, while a transient allocation on another
+// thread lands in one, so the test checks the smallest growth.
+const WINDOWS: usize = 3;
 
-/// Bytes currently allocated through `CountingAllocator`.
+// Bytes currently allocated through `CountingAllocator`, on every thread.
 static LIVE_BYTES: AtomicIsize = AtomicIsize::new(0);
 
-/// The system allocator, counting live bytes in `LIVE_BYTES`.
+// The system allocator, counting live bytes in `LIVE_BYTES`.
 struct CountingAllocator;
 
 unsafe impl GlobalAlloc for CountingAllocator {
@@ -78,9 +81,9 @@ unsafe impl GlobalAlloc for CountingAllocator {
 #[global_allocator]
 static ALLOCATOR: CountingAllocator = CountingAllocator;
 
-/// The chain-indexer persists every block's ledger state, unpersists the oldest beyond its
-/// retention window and runs gc on an interval. Anything this loop keeps alive grows with the
-/// chain, so after a warm-up, heap growth must stay below a small allowance per block.
+// The chain-indexer persists every block's ledger state, unpersists the oldest beyond its
+// retention window and runs gc on an interval. Anything this loop keeps alive grows with the
+// chain, so after a warm-up, heap growth must stay below a small allowance per block.
 #[tokio::test(flavor = "multi_thread")]
 async fn persisting_ledger_states_does_not_grow_the_heap() -> anyhow::Result<()> {
     let temp_dir = tempfile::tempdir().context("create tempdir")?;
@@ -106,26 +109,29 @@ async fn persisting_ledger_states_does_not_grow_the_heap() -> anyhow::Result<()>
             ledger_state = index_next_block(ledger_state, &mut window, &mut block)?;
         }
 
-        let before = LIVE_BYTES.load(Ordering::Relaxed);
-        for _ in 0..MEASURED_BLOCKS {
-            ledger_state = index_next_block(ledger_state, &mut window, &mut block)?;
+        let mut growths = Vec::with_capacity(WINDOWS);
+        for _ in 0..WINDOWS {
+            let before = LIVE_BYTES.load(Ordering::Relaxed);
+            for _ in 0..WINDOW_BLOCKS {
+                ledger_state = index_next_block(ledger_state, &mut window, &mut block)?;
+            }
+            growths.push(LIVE_BYTES.load(Ordering::Relaxed) - before);
         }
-        let growth = LIVE_BYTES.load(Ordering::Relaxed) - before;
 
-        let allowed = ALLOWED_GROWTH_PER_BLOCK * MEASURED_BLOCKS as isize;
+        let allowed = ALLOWED_GROWTH_PER_BLOCK * WINDOW_BLOCKS as isize;
         assert!(
-            growth < allowed,
-            "{ledger_version:?}: persisting {MEASURED_BLOCKS} blocks grew the heap by {growth} bytes, \
-             allowed {allowed}"
+            growths.iter().any(|growth| *growth < allowed),
+            "{ledger_version:?}: every window of {WINDOW_BLOCKS} blocks grew the heap by at least \
+             {allowed} bytes: {growths:?}"
         );
     }
 
     Ok(())
 }
 
-/// Applies the per-block update for the next block, which makes the state distinct, persists it
-/// into `window`, unpersists the oldest state beyond `RETENTION` and runs gc every `GC_INTERVAL`
-/// blocks.
+// Applies the per-block update for the next block, which makes the state distinct, persists it
+// into `window`, unpersists the oldest state beyond `RETENTION` and runs gc every `GC_INTERVAL`
+// blocks.
 fn index_next_block(
     mut ledger_state: LedgerState,
     window: &mut VecDeque<SerializedLedgerStateKey>,
