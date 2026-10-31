@@ -37,15 +37,13 @@ lint-fix:
 
 test:
     # We must build the executables needed by the e2e tests!
-    if [ "{{feature}}" = "cloud" ]; then \
-        cargo build -p chain-indexer -p wallet-indexer -p indexer-api --features cloud; \
-    fi
-    if [ "{{feature}}" = "standalone" ]; then \
-        cargo build -p indexer-standalone --features standalone; \
-    fi
+    # Selecting the whole workspace with tests resolves the same dependency features as nextest, so nextest and the schema check reuse these artifacts.
+    # Naming the binaries keeps this build from overwriting the other feature's executables in target/debug. Cargo still rebuilds chain-indexer because its integration tests need its binary.
+    cargo build --workspace --tests --features {{feature}} --bin indexer-api-cli \
+        {{ if feature == "cloud" { "--bin chain-indexer --bin wallet-indexer --bin indexer-api" } else { "--bin indexer-standalone" } }}
     cargo nextest run --workspace --exclude indexer-standalone --features {{feature}}
     # Check indexer-api schema:
-    cargo run -p indexer-api --features {{feature}} --bin indexer-api-cli print-api-schema-v4 > \
+    "${CARGO_TARGET_DIR:-target}/debug/indexer-api-cli" print-api-schema-v4 > \
         indexer-api/graphql/schema-v4.graphql.check
     @if ! cmp -s indexer-api/graphql/schema-v4.graphql indexer-api/graphql/schema-v4.graphql.check; then \
         echo "schema-v4.graphql has changes!"; exit 1; \
