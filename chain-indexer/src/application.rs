@@ -12,9 +12,10 @@
 // limitations under the License.
 
 mod metrics;
+mod storage;
 
 use crate::{
-    application::metrics::Metrics,
+    application::{metrics::Metrics, storage::RetryingStorage},
     domain::{
         Block, BlockRef, LedgerState, SystemParametersChange, Transaction,
         node::{self, Node},
@@ -102,10 +103,14 @@ fn gc_catch_up_interval_default() -> NonZeroU32 {
 pub async fn run(
     config: Config,
     node: impl Node,
-    mut storage: impl Storage,
+    storage: impl Storage,
     publisher: impl Publisher,
     mut sigterm: Signal,
 ) -> anyhow::Result<()> {
+    // Retry `PoolTimedOut` with backoff instead of failing, so that chain-indexer keeps indexing
+    // while other components temporarily hold all connections of the database instance.
+    let mut storage = RetryingStorage::new(storage);
+
     let Config {
         network_id,
         blocks_buffer,
