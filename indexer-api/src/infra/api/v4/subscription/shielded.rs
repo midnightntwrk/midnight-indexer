@@ -37,7 +37,7 @@ use futures::{
 };
 use indexer_common::domain::{Subscriber, WalletIndexed};
 use log::{debug, warn};
-use std::{future::ready, marker::PhantomData, pin::pin};
+use std::{future::ready, marker::PhantomData, num::NonZeroU32, pin::pin};
 use stream_cancel::{StreamExt as _, Trigger, Tripwire};
 use tokio::time::sleep;
 use uuid::Uuid;
@@ -216,7 +216,7 @@ where
 fn make_relevant_transactions<'a, S, B>(
     cx: &'a Context<'a>,
     wallet_id: Uuid,
-    mut index: u64,
+    index: u64,
     trigger: Trigger,
 ) -> impl Stream<Item = ApiResult<RelevantTransaction<S>>> + use<'a, S, B>
 where
@@ -242,13 +242,16 @@ where
         // Stream exiting transactions.
         debug!(wallet_id:%, index; "streaming existing transactions");
 
-        let transactions = storage.get_relevant_transactions(wallet_id, index, batch_size);
+        let mut cursor = Cursor::new(index);
+
+        let transactions = cursor.transactions(storage, wallet_id, batch_size);
         let mut transactions = pin!(transactions);
         while let Some(transaction) = get_next_transaction(&mut transactions)
             .await
             .map_err_into_server_error(|| "get next transaction")?
         {
-            let end_index = transaction.zswap_end_index;
+            let index = cursor.index;
+            cursor = cursor.after(&transaction);
 
             yield make_relevant_transaction(
                 index,
@@ -258,13 +261,10 @@ where
                 ledger_query_limiter,
             )
             .await?;
-
-            // The end index is "exclusive", i.e. the next free index; hence no +1 here!
-            index = end_index;
         }
 
         // Stream live transactions.
-        debug!(wallet_id:%, index; "streaming live transactions");
+        debug!(wallet_id:%, cursor:?; "streaming live transactions");
         let mut wallet_indexed_events = pin!(wallet_indexed_events);
         while wallet_indexed_events
             .try_next()
@@ -272,16 +272,16 @@ where
             .map_err_into_server_error(|| "get next WalletIndexed event")?
             .is_some()
         {
-            debug!(index; "streaming next live transactions");
+            debug!(cursor:?; "streaming next live transactions");
 
-            let transactions =
-                storage.get_relevant_transactions(wallet_id, index, batch_size);
+            let transactions = cursor.transactions(storage, wallet_id, batch_size);
             let mut transactions = pin!(transactions);
             while let Some(transaction) =  get_next_transaction(&mut transactions)
                 .await
                 .map_err_into_server_error(|| "get next transaction")?
             {
-                let end_index = transaction.zswap_end_index;
+                let index = cursor.index;
+                cursor = cursor.after(&transaction);
 
                 yield make_relevant_transaction(
                     index,
@@ -291,14 +291,56 @@ where
                     ledger_query_limiter,
                 )
                 .await?;
-
-                // The end index is "exclusive", i.e. the next free index; hence no +1 here!
-                index = end_index;
             }
         }
 
         warn!("stream of WalletIndexed events completed unexpectedly");
         trigger.cancel();
+    }
+}
+
+/// Where the relevant transactions of a shielded transactions subscription continue.
+#[derive(Debug, Clone, Copy)]
+struct Cursor {
+    /// The zswap index up to which the client has the zswap state Merkle tree.
+    index: u64,
+    /// The lowest ID of the transactions still to stream, i.e. one past the last streamed
+    /// transaction: re-queries resume there rather than at the zswap index, which does not advance
+    /// for a transaction without commitments.
+    from_transaction_id: u64,
+}
+
+impl Cursor {
+    fn new(index: u64) -> Self {
+        Self {
+            index,
+            from_transaction_id: 0,
+        }
+    }
+
+    /// The cursor after streaming the given transaction.
+    fn after(self, transaction: &domain::RegularTransaction) -> Self {
+        Self {
+            // Exclusive already: the next free zswap index.
+            index: transaction.zswap_end_index,
+            from_transaction_id: transaction.id + 1,
+        }
+    }
+
+    /// The relevant transactions for the given wallet which follow this cursor.
+    fn transactions<S: Storage>(
+        self,
+        storage: &S,
+        wallet_id: Uuid,
+        batch_size: NonZeroU32,
+    ) -> impl Stream<Item = Result<domain::RegularTransaction, sqlx::Error>> + Send + use<'_, S>
+    {
+        storage.get_relevant_transactions(
+            wallet_id,
+            self.index,
+            self.from_transaction_id,
+            batch_size,
+        )
     }
 }
 
@@ -431,4 +473,181 @@ async fn get_next_transaction<E>(
             SpanContext::random(),
         ))
         .await
+}
+
+#[cfg(all(test, feature = "standalone"))]
+mod tests {
+    use crate::infra::{api::v4::subscription::shielded::Cursor, storage::Storage};
+    use chacha20poly1305::{ChaCha20Poly1305, Key, KeyInit};
+    use futures::{StreamExt, TryStreamExt};
+    use indexer_common::infra::{
+        migrations,
+        pool::sqlite::{Config, SqlitePool},
+    };
+    use indoc::indoc;
+    use sqlx::types::{Uuid, time::OffsetDateTime};
+    use std::{error::Error as StdError, num::NonZeroU32, time::Duration};
+    use tokio::time::timeout;
+
+    /// Relevant transactions which add no zswap commitment, i.e. have equal zswap start and end
+    /// indices, must each be streamed once, also when one is the last of a batch or a whole batch
+    /// shares one start index.
+    #[tokio::test]
+    async fn existing_transactions_without_commitments_are_streamed_once()
+    -> Result<(), Box<dyn StdError>> {
+        let (storage, pool) = new_storage().await?;
+        let wallet_id = Uuid::now_v7();
+        seed(&pool, wallet_id).await?;
+        for (id, start, end) in [(1, 2, 5), (2, 5, 5), (3, 5, 5), (4, 5, 7)] {
+            seed_relevant_transaction(&pool, wallet_id, id, start, end).await?;
+        }
+
+        for batch_size in [NonZeroU32::MIN, NonZeroU32::MIN.saturating_add(1)] {
+            let transactions = Cursor::new(5)
+                .transactions(&storage, wallet_id, batch_size)
+                // Take one more than expected so a repeating stream still terminates.
+                .take(4)
+                .try_collect::<Vec<_>>();
+            let transactions = timeout(Duration::from_secs(10), transactions).await??;
+
+            let ids = transactions
+                .iter()
+                .map(|transaction| transaction.id)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                ids,
+                vec![2, 3, 4],
+                "each transaction from index 5 once, batch size {batch_size}"
+            );
+        }
+
+        Ok(())
+    }
+
+    /// A live re-query after a relevant transaction which adds no zswap commitment must not return
+    /// that transaction again, but only the relevant transactions indexed since.
+    #[tokio::test]
+    async fn live_requery_resumes_after_last_streamed_transaction() -> Result<(), Box<dyn StdError>>
+    {
+        let (storage, pool) = new_storage().await?;
+        let wallet_id = Uuid::now_v7();
+        seed(&pool, wallet_id).await?;
+        seed_relevant_transaction(&pool, wallet_id, 1, 5, 5).await?;
+
+        let batch_size = NonZeroU32::MIN;
+        let cursor = Cursor::new(0);
+
+        // Existing transactions.
+        let transactions = cursor
+            .transactions(&storage, wallet_id, batch_size)
+            .take(1)
+            .try_collect::<Vec<_>>();
+        let transactions = timeout(Duration::from_secs(10), transactions).await??;
+        let cursor = transactions
+            .iter()
+            .fold(cursor, |cursor, transaction| cursor.after(transaction));
+
+        // A WalletIndexed event for a new relevant transaction triggers a live re-query.
+        seed_relevant_transaction(&pool, wallet_id, 2, 5, 7).await?;
+        let transactions = cursor
+            .transactions(&storage, wallet_id, batch_size)
+            // Take one more than expected so a repeating stream still terminates.
+            .take(2)
+            .try_collect::<Vec<_>>();
+        let transactions = timeout(Duration::from_secs(10), transactions).await??;
+
+        let ids = transactions
+            .iter()
+            .map(|transaction| transaction.id)
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec![2], "only the newly indexed transaction");
+
+        Ok(())
+    }
+
+    async fn new_storage() -> Result<(Storage, SqlitePool), Box<dyn StdError>> {
+        // A single connection, because every connection to `sqlite::memory:` gets its own empty
+        // database.
+        let config = Config {
+            cnn_url: "sqlite::memory:".to_string(),
+            max_connections: 1,
+            ..Default::default()
+        };
+        let pool = SqlitePool::new(config).await?;
+        migrations::sqlite::run(&pool).await?;
+        let cipher = ChaCha20Poly1305::new(Key::from_slice(&[0u8; 32]));
+        Ok((Storage::new(cipher, pool.clone()), pool))
+    }
+
+    /// Seed a block and a connected wallet.
+    async fn seed(pool: &SqlitePool, wallet_id: Uuid) -> Result<(), sqlx::Error> {
+        let query = indoc! {"
+            INSERT INTO blocks (
+                id, hash, height, protocol_version, parent_hash, author,
+                timestamp, zswap_merkle_tree_root, ledger_parameters, ledger_state_key
+            )
+            VALUES (1, zeroblob(32), 0, 1000000, zeroblob(32), NULL, 0, X'00', X'00', X'00')
+        "};
+        sqlx::query(query).execute(&**pool).await?;
+
+        let query = indoc! {"
+            INSERT INTO wallets (
+                id, viewing_key_hash, viewing_key,
+                wanted_start_index, first_indexed_transaction_id, last_indexed_transaction_id,
+                last_active, session_id
+            )
+            VALUES ($1, X'00', X'00', 0, 0, 0, $2, X'01')
+        "};
+        sqlx::query(query)
+            .bind(wallet_id)
+            .bind(OffsetDateTime::now_utc())
+            .execute(&**pool)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Seed a regular transaction in block 1 which is relevant for the given wallet.
+    async fn seed_relevant_transaction(
+        pool: &SqlitePool,
+        wallet_id: Uuid,
+        id: i64,
+        zswap_start_index: i64,
+        zswap_end_index: i64,
+    ) -> Result<(), sqlx::Error> {
+        let query = indoc! {"
+            INSERT INTO transactions (id, block_id, variant, hash, protocol_version, raw)
+            VALUES ($1, 1, 'Regular', zeroblob(32), 1000000, X'00')
+        "};
+        sqlx::query(query).bind(id).execute(&**pool).await?;
+
+        let query = indoc! {"
+            INSERT INTO regular_transactions (
+                id, transaction_result, zswap_merkle_tree_root,
+                zswap_start_index, zswap_end_index,
+                dust_commitment_start_index, dust_commitment_end_index,
+                dust_generation_start_index, dust_generation_end_index,
+                paid_fees, estimated_fees
+            )
+            VALUES ($1, '\"Success\"', X'00', $2, $3, 0, 0, 0, 0, NULL, NULL)
+        "};
+        sqlx::query(query)
+            .bind(id)
+            .bind(zswap_start_index)
+            .bind(zswap_end_index)
+            .execute(&**pool)
+            .await?;
+
+        let query = indoc! {"
+            INSERT INTO relevant_transactions (wallet_id, transaction_id)
+            VALUES ($1, $2)
+        "};
+        sqlx::query(query)
+            .bind(wallet_id)
+            .bind(id)
+            .execute(&**pool)
+            .await?;
+
+        Ok(())
+    }
 }

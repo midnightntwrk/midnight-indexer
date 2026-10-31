@@ -1,6 +1,20 @@
+FROM rust:1.98.1-trixie@sha256:a8a5f0a1e5fe7dfe1d352591e4a1c7dd2c08fd70475cae872cf3458ba0df0546 AS toolchain
 ARG RUST_VERSION
-FROM lukemathwalker/cargo-chef:0.1.77-rust-$RUST_VERSION-trixie AS chef
+# cargo chef cook runs before rust-toolchain.toml is copied in, so the image's Rust must match it.
+RUN test "$(rustc --version | cut -d ' ' -f 2)" = "${RUST_VERSION:?build arg required}" || \
+    { echo "image has $(rustc --version), rust-toolchain.toml wants ${RUST_VERSION}" >&2; exit 1; }
+
+FROM toolchain AS chef
+ARG CARGO_CHEF_VERSION
+RUN cargo install cargo-chef --locked --version "${CARGO_CHEF_VERSION:?build arg required}" && \
+    rm -rf "$CARGO_HOME/registry"
 WORKDIR /build
+
+# Built from toolchain, not chef, so bumping either tool leaves the other's layer cached.
+FROM toolchain AS auditable
+ARG CARGO_AUDITABLE_VERSION
+RUN cargo install cargo-auditable --locked --version "${CARGO_AUDITABLE_VERSION:?build arg required}" && \
+    rm -rf "$CARGO_HOME/registry"
 
 FROM chef AS planner
 COPY . .
@@ -10,18 +24,26 @@ FROM chef AS builder
 SHELL ["/bin/bash", "-c"]
 ARG PROFILE=release
 COPY --from=planner /build/recipe.json recipe.json
-RUN cargo chef cook --profile $PROFILE --recipe-path recipe.json
+# Same package and features as the build below, so cargo reuses every dependency compiled here.
+RUN cargo chef cook -p indexer-tests --locked --profile $PROFILE --recipe-path recipe.json
+COPY --from=auditable /usr/local/cargo/bin/cargo-auditable /usr/local/cargo/bin/
 COPY . .
-RUN cargo build -p indexer-tests --locked --profile $PROFILE && \
+RUN cargo auditable build -p indexer-tests --locked --profile $PROFILE && \
+    if ! readelf -S "./target/${PROFILE/dev/debug}/indexer-tests" | grep -q '\.dep-v0'; then \
+        echo "indexer-tests binary lacks the .dep-v0 section embedded by cargo auditable" >&2; exit 1; \
+    fi && \
     mkdir -p /runtime/usr/local/bin && \
     mv "./target/${PROFILE/dev/debug}/indexer-tests" /runtime/usr/local/bin
 
-FROM debian:trixie-slim@sha256:66b37a5078a77098bfc80175fb5eb881a3196809242fd295b25502854e12cbec AS runtime
+FROM debian:trixie-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad AS runtime
 RUN useradd -u 10001 -d /nonexistent -s /usr/sbin/nologin -M -c "" appuser && \
     passwd -l appuser && \
     mkdir /var/run/indexer-tests && \
     chown appuser:appuser /var/run/indexer-tests
-COPY --from=builder --chown=appuser:appuser /runtime /
-USER appuser
+# Root-owned, so the service can run and read these but not replace them; it only writes
+# to the directories created for it above.
+COPY --from=builder /runtime /
+# appuser, by UID: Kubernetes runAsNonRoot can only verify a numeric user.
+USER 10001
 WORKDIR /opt/indexer-tests
 ENTRYPOINT ["indexer-tests"]
