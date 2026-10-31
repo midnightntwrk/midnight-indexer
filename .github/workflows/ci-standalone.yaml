@@ -9,11 +9,21 @@ on:
       - main
       - feat/*
       - release/*
+  # Runs on main populate the Rust cache that pull requests restore from.
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - qa/**
   workflow_dispatch:
 
 concurrency:
   group: ${{github.workflow}}-${{github.head_ref || github.run_id}}
   cancel-in-progress: true
+
+env:
+  # Line tables keep backtraces readable while shrinking the cached target directory.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:
   # Detects whether the PR touches anything outside `qa/**`. Subsequent jobs
@@ -62,9 +72,6 @@ jobs:
         with:
           tool: just
 
-      - name: Setup Rust cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-
       - name: just fmt-check
         run: |
           just feature=standalone fmt-check
@@ -90,6 +97,11 @@ jobs:
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # The default key is the job id, which ci-cloud shares.
+          key: standalone
+          # PR caches are visible only to their own PR, so only main saves.
+          save-if: ${{github.ref == 'refs/heads/main'}}
 
       - name: Init Env Vars
         uses: ./.github/actions/init-env
@@ -100,7 +112,7 @@ jobs:
           just feature=standalone lint
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-8-core-x64
     needs: [changes]
     if: ${{!cancelled() && needs.changes.outputs.non_qa != 'false'}}
     timeout-minutes: 15
@@ -133,6 +145,11 @@ jobs:
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # The default key is the job id, which ci-cloud shares.
+          key: standalone
+          # PR caches are visible only to their own PR, so only main saves.
+          save-if: ${{github.ref == 'refs/heads/main'}}
 
       - name: Init Env Vars
         uses: ./.github/actions/init-env
@@ -163,6 +180,11 @@ jobs:
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # The default key is the job id, which ci-cloud shares.
+          key: standalone
+          # PR caches are visible only to their own PR, so only main saves.
+          save-if: ${{github.ref == 'refs/heads/main'}}
 
       - name: just doc
         run: |
