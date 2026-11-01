@@ -28,6 +28,8 @@ use midnight_storage_core_v1::{
 #[cfg(test)]
 use midnight_storage_core_v1::{Storage, storable::SMALL_OBJECT_LIMIT};
 use sqlx::QueryBuilder;
+#[cfg(feature = "cloud")]
+use std::collections::HashSet;
 use std::{collections::HashMap, future::ready};
 use tokio::{runtime::Handle, task::block_in_place};
 
@@ -478,9 +480,7 @@ async fn flush_inserts<Hasher: WellBehavedHasher>(
 }
 
 // Postgres takes the keys and the nodes as two `bytea[]` parameters, so every statement has the same
-// SQL whatever its number of nodes. `DISTINCT ON` keeps one row per key, as an upsert fails when two
-// of its rows share a key. Nodes are content-addressed and, with storage-core's `layout-v2`, carry no
-// reference count, so rows sharing a key are identical.
+// SQL whatever its number of nodes.
 #[cfg(feature = "cloud")]
 async fn flush_inserts<Hasher: WellBehavedHasher>(
     tx: &mut SqlxTransaction,
@@ -488,13 +488,18 @@ async fn flush_inserts<Hasher: WellBehavedHasher>(
 ) {
     let query = indoc! {"
         INSERT INTO ledger_db_nodes (key, object)
-        SELECT DISTINCT ON (key) * FROM UNNEST($1::bytea[], $2::bytea[]) AS nodes (key, object)
+        SELECT * FROM UNNEST($1::bytea[], $2::bytea[])
         ON CONFLICT (key) DO UPDATE SET object = EXCLUDED.object
     "};
 
     for chunk in insert_chunks(inserts, |(_, object)| object.serialized_size()) {
+        // Keeps one row per key, as an upsert fails when two of its rows share a key. Nodes are
+        // content-addressed and, with storage-core's `layout-v2`, carry no reference count, so rows
+        // sharing a key are identical.
+        let mut unique = HashSet::with_capacity(chunk.len());
         let (keys, objects) = chunk
             .iter()
+            .filter(|(key, _)| unique.insert(key.0.as_slice()))
             .map(|(key, object)| (key.0.as_slice(), serialize_object(object)))
             .unzip::<_, _, Vec<_>, Vec<_>>();
 
