@@ -478,7 +478,8 @@ async fn flush_inserts<Hasher: WellBehavedHasher>(
 }
 
 // Postgres takes the keys and the nodes as two `bytea[]` parameters, so every statement has the same
-// SQL whatever its number of nodes.
+// SQL whatever its number of nodes. `DISTINCT ON` keeps one row per key, as an upsert fails when two
+// of its rows share a key. Nodes are content-addressed, so rows sharing a key are identical.
 #[cfg(feature = "cloud")]
 async fn flush_inserts<Hasher: WellBehavedHasher>(
     tx: &mut SqlxTransaction,
@@ -486,7 +487,7 @@ async fn flush_inserts<Hasher: WellBehavedHasher>(
 ) {
     let query = indoc! {"
         INSERT INTO ledger_db_nodes (key, object)
-        SELECT * FROM UNNEST($1::BYTEA[], $2::BYTEA[])
+        SELECT DISTINCT ON (key) * FROM UNNEST($1::BYTEA[], $2::BYTEA[]) AS nodes (key, object)
         ON CONFLICT (key) DO UPDATE SET object = EXCLUDED.object
     "};
 
