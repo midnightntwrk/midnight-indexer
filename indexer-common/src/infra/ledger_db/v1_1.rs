@@ -911,7 +911,7 @@ fn assert_get_root_count_reads_stored_count(db: &mut LedgerDb) {
 #[cfg(all(test, feature = "standalone"))]
 pub(crate) mod sqlite_tests {
     use super::{
-        assert_batch_update_deletes_in_chunks_and_keeps_update_order,
+        SQLITE_MAX_BINDS, assert_batch_update_deletes_in_chunks_and_keeps_update_order,
         assert_batch_update_inserts_in_chunks, assert_batch_update_sets_root_counts,
         assert_get_root_count_reads_stored_count,
     };
@@ -923,6 +923,7 @@ pub(crate) mod sqlite_tests {
     use anyhow::Context;
     use indoc::indoc;
     use midnight_storage_core_v1::{DefaultHasher, Storage, arena::ArenaHash, db::DB};
+    use sqlx::{QueryBuilder, Sqlite};
     use std::error::Error as StdError;
 
     /// Number of times a root is persisted before it is unpersisted again; stands in for the
@@ -1098,6 +1099,40 @@ pub(crate) mod sqlite_tests {
             stored_root_count(&pool, &root.hash()).await?,
             None,
             "no longer a root"
+        );
+
+        Ok(())
+    }
+
+    // `SQLITE_MAX_BINDS` is the linked SQLite's limit: a statement with that many binds runs, and
+    // one with a bind more fails.
+    #[tokio::test]
+    async fn sqlite_max_binds_is_the_linked_limit() -> Result<(), Box<dyn StdError>> {
+        let pool = setup_pool().await?;
+        let query = |binds: usize| {
+            let mut query = QueryBuilder::<Sqlite>::new("SELECT 1 WHERE 1 IN (");
+            let mut values = query.separated(", ");
+            (0..binds as i64).for_each(|value| {
+                values.push_bind(value);
+            });
+            values.push_unseparated(")");
+            query
+        };
+
+        query(SQLITE_MAX_BINDS)
+            .build()
+            .execute(&*pool)
+            .await
+            .context("run statement with SQLITE_MAX_BINDS binds")?;
+
+        let error = query(SQLITE_MAX_BINDS + 1)
+            .build()
+            .execute(&*pool)
+            .await
+            .expect_err("statement with more than SQLITE_MAX_BINDS binds fails");
+        assert!(
+            error.to_string().contains("too many SQL variables"),
+            "unexpected error: {error}"
         );
 
         Ok(())
