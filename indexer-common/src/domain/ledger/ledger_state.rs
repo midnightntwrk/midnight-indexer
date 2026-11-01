@@ -166,7 +166,7 @@ pub enum LedgerState {
 ///
 /// It covers the leaves below the tree's `first_free` when it last caught up. Commitment tree
 /// leaves are never removed, so indices are only ever added.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct ContractZswapIndices {
     // The commitment tree's `first_free` when the indices last caught up; leaves below it are indexed.
     first_free: u64,

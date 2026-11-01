@@ -85,7 +85,7 @@ pub(crate) fn should_bump_first_regular_tblock(
 }
 
 /// New type for ledger state from indexer_common.
-#[derive(Debug, Clone, Deref)]
+#[derive(Debug, Deref)]
 pub struct LedgerState(#[deref] ledger::LedgerState, ContractZswapIndices);
 
 impl DerefMut for LedgerState {
