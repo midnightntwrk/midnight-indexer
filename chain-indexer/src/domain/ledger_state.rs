@@ -86,7 +86,7 @@ pub(crate) fn should_bump_first_regular_tblock(
 
 /// New type for ledger state from indexer_common.
 #[derive(Debug, Clone, Deref)]
-pub struct LedgerState(#[deref] pub ledger::LedgerState, ContractZswapIndices);
+pub struct LedgerState(#[deref] ledger::LedgerState, ContractZswapIndices);
 
 impl DerefMut for LedgerState {
     fn deref_mut(&mut self) -> &mut Self::Target {
@@ -120,7 +120,7 @@ impl LedgerState {
     }
 
     // Wraps a ledger state with empty contract zswap indices, which read the whole commitment tree on
-    // first use. Private, so code outside this module cannot drop the indices of an existing state.
+    // first use. Private, so code outside this module cannot rebuild the wrapper around the state.
     fn from(ledger_state: ledger::LedgerState) -> Self {
         Self(ledger_state, ContractZswapIndices::default())
     }
