@@ -104,17 +104,30 @@ jobs:
     needs: [changes]
     if: ${{!cancelled() && needs.changes.outputs.non_qa != 'false'}}
     timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    env:
+      # Embargoed node releases are only published to the private shadow-midnight-node package.
+      NODE_IMAGE: ghcr.io/shieldedtech/shadow-midnight-node
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Login to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Pre-pull Docker images
         run: |
           NODE_VERSION=$(tail -n 1 NODE_VERSIONS)
-          echo "Pre-pulling midnight-node:$NODE_VERSION..."
-          docker pull "midnightntwrk/midnight-node:$NODE_VERSION" || \
-          docker pull "midnightntwrk/midnight-node:$NODE_VERSION" || \
-          docker pull "midnightntwrk/midnight-node:$NODE_VERSION"
+          echo "Pre-pulling $NODE_IMAGE:$NODE_VERSION..."
+          docker pull "$NODE_IMAGE:$NODE_VERSION" || \
+          docker pull "$NODE_IMAGE:$NODE_VERSION" || \
+          docker pull "$NODE_IMAGE:$NODE_VERSION"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
