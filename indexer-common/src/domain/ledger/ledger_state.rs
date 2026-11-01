@@ -3577,84 +3577,124 @@ mod tests {
         Ok(())
     }
 
-    /// The zswap state captured from `ContractZswapIndices` is the one zswap's `State::filter`
-    /// produces, for contracts with entries, a contract without, and after the indices catch up
-    /// with leaves added since their previous use.
-    #[cfg(any(feature = "cloud", feature = "standalone"))]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn contract_zswap_state_key_matches_filter() -> Result<(), BoxError> {
-        use crate::domain::{
-            SerializedZswapStateKey,
-            ledger::{ContractZswapIndices, SerializableExt, TaggedSerializableExt},
-        };
-        use midnight_base_crypto_v1::hash::HashOutput;
-        use midnight_coin_structure_v3::contract::ContractAddress as ContractAddressV9;
-        use midnight_storage_core_v1::storage::default_storage;
-        use midnight_transient_crypto_v3::curve::Fr;
-        use midnight_zswap_v9::ledger::State as ZswapStateV9;
-        use std::ops::{Deref, Range};
+    // One test per ledger version: the zswap state captured from `ContractZswapIndices` is the one
+    // zswap's `State::filter` produces, for contracts with entries, a contract without, after the
+    // indices catch up with leaves added since their previous use, and after indices built against a
+    // longer tree are reused with a shorter one.
+    macro_rules! contract_zswap_state_key_matches_filter {
+        ($test:ident, $variant:ident, $zswap_state:path, $address:path, $fr:path) => {
+            #[cfg(any(feature = "cloud", feature = "standalone"))]
+            #[tokio::test(flavor = "multi_thread")]
+            async fn $test() -> Result<(), BoxError> {
+                use crate::domain::{
+                    SerializedZswapStateKey,
+                    ledger::{ContractZswapIndices, SerializableExt, TaggedSerializableExt},
+                };
+                use midnight_base_crypto_v1::hash::HashOutput;
+                use midnight_storage_core_v1::storage::default_storage;
+                use std::ops::{Deref, Range};
+                use $address as Address;
+                use $fr as Fr;
+                use $zswap_state as ZswapState;
 
-        let _ledger_db = init_ledger_db().await?;
+                const LEAVES: u64 = 20;
 
-        let addresses = [7, 8, 9].map(|byte| ContractAddressV9(HashOutput([byte; 32])));
+                let _ledger_db = init_ledger_db().await?;
 
-        // Owns every third leaf to the first address, every third from the second leaf to the
-        // second address up to leaf 9, and no other leaf.
-        let owner = |index: u64| match index % 3 {
-            0 => Some(Sp::new(addresses[0])),
-            1 if index < 9 => Some(Sp::new(addresses[1])),
-            _ => None,
-        };
-        let insert = |state: &mut LedgerState, leaves: Range<u64>| match state {
-            LedgerState::V9 { ledger_state, .. } => {
-                let mut zswap = ledger_state.zswap.deref().to_owned();
-                zswap.coin_coms = leaves.clone().fold(zswap.coin_coms.clone(), |tree, index| {
-                    tree.try_update(index, &Fr::from(index + 1), owner(index))
-                        .expect("insert coin commitment")
-                });
-                zswap.first_free = leaves.end;
-                ledger_state.zswap = Sp::new(zswap);
+                let addresses = [7, 8, 9].map(|byte| Address(HashOutput([byte; 32])));
+
+                // The first address owns every third leaf and the last, so its final two leaves are
+                // adjacent and end the tree. The second owns adjacent leaves 1 and 2 and leaf 7.
+                // The third owns none.
+                let owner = |index: u64| match index {
+                    1 | 2 | 7 => Some(Sp::new(addresses[1])),
+                    index if index % 3 == 0 || index == LEAVES - 1 => Some(Sp::new(addresses[0])),
+                    _ => None,
+                };
+                let insert = |state: &mut LedgerState, leaves: Range<u64>| match state {
+                    LedgerState::$variant { ledger_state, .. } => {
+                        let mut zswap = ledger_state.zswap.deref().to_owned();
+                        zswap.coin_coms =
+                            leaves.clone().fold(zswap.coin_coms.clone(), |tree, index| {
+                                tree.try_update(index, &Fr::from(index + 1), owner(index))
+                                    .expect("insert coin commitment")
+                            });
+                        zswap.first_free = leaves.end;
+                        ledger_state.zswap = Sp::new(zswap);
+                    }
+                    _ => unreachable!("constructed as {}", stringify!($variant)),
+                };
+                // Persists the filtered state before taking its key, as `contract_zswap_state_key`
+                // does, because persisting changes the serialized key.
+                let filtered_key = |state: &LedgerState, address: Address| match state {
+                    LedgerState::$variant { ledger_state, .. } => {
+                        let mut contract_zswap_state = ZswapState::new();
+                        contract_zswap_state.coin_coms = ledger_state.zswap.filter(&[address]);
+                        let mut contract_zswap_state =
+                            default_storage::<v1_1::LedgerDb>().alloc(contract_zswap_state);
+                        contract_zswap_state.persist();
+                        SerializedZswapStateKey::from(
+                            contract_zswap_state
+                                .as_typed_key()
+                                .tagged_serialize()
+                                .expect("zswap state key can be serialized"),
+                        )
+                    }
+                    _ => unreachable!("constructed as {}", stringify!($variant)),
+                };
+                let new_state = || {
+                    LedgerState::new("undeployed".try_into()?, LedgerVersion::$variant)
+                        .map_err(BoxError::from)
+                };
+
+                let mut contract_zswap_indices = ContractZswapIndices::default();
+
+                let mut state = new_state()?;
+                for leaves in [0..12, 12..LEAVES] {
+                    insert(&mut state, leaves);
+                    for address in addresses {
+                        assert_eq!(
+                            state.contract_zswap_state_key(
+                                &address.serialize()?,
+                                &mut contract_zswap_indices
+                            )?,
+                            filtered_key(&state, address),
+                        );
+                    }
+                }
+
+                // The indices now cover a longer tree than this state's.
+                let mut shorter = new_state()?;
+                insert(&mut shorter, 0..6);
+                for address in addresses {
+                    assert_eq!(
+                        shorter.contract_zswap_state_key(
+                            &address.serialize()?,
+                            &mut contract_zswap_indices
+                        )?,
+                        filtered_key(&shorter, address),
+                    );
+                }
+
+                Ok(())
             }
-            LedgerState::V8 { .. } => unreachable!("constructed as V9"),
         };
-        // Persists the filtered state before taking its key, as `contract_zswap_state_key` does,
-        // because persisting changes the serialized key.
-        let filtered_key = |state: &LedgerState, address: ContractAddressV9| match state {
-            LedgerState::V9 { ledger_state, .. } => {
-                let mut contract_zswap_state = ZswapStateV9::new();
-                contract_zswap_state.coin_coms = ledger_state.zswap.filter(&[address]);
-                let mut contract_zswap_state =
-                    default_storage::<v1_1::LedgerDb>().alloc(contract_zswap_state);
-                contract_zswap_state.persist();
-                SerializedZswapStateKey::from(
-                    contract_zswap_state
-                        .as_typed_key()
-                        .tagged_serialize()
-                        .expect("zswap state key can be serialized"),
-                )
-            }
-            LedgerState::V8 { .. } => unreachable!("constructed as V9"),
-        };
-
-        let mut state = LedgerState::new("undeployed".try_into()?, LedgerVersion::V9)
-            .expect("ledger state can be constructed");
-        let mut contract_zswap_indices = ContractZswapIndices::default();
-
-        for leaves in [0..12, 12..20] {
-            insert(&mut state, leaves);
-            for address in addresses {
-                assert_eq!(
-                    state.contract_zswap_state_key(
-                        &address.serialize()?,
-                        &mut contract_zswap_indices
-                    )?,
-                    filtered_key(&state, address),
-                );
-            }
-        }
-
-        Ok(())
     }
+
+    contract_zswap_state_key_matches_filter!(
+        contract_zswap_state_key_matches_filter_v8,
+        V8,
+        midnight_zswap_v8::ledger::State,
+        midnight_coin_structure_v2::contract::ContractAddress,
+        midnight_transient_crypto_v2::curve::Fr
+    );
+    contract_zswap_state_key_matches_filter!(
+        contract_zswap_state_key_matches_filter_v9,
+        V9,
+        midnight_zswap_v9::ledger::State,
+        midnight_coin_structure_v3::contract::ContractAddress,
+        midnight_transient_crypto_v3::curve::Fr
+    );
 
     #[cfg(feature = "cloud")]
     async fn init_ledger_db()
