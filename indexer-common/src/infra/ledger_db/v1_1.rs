@@ -800,15 +800,17 @@ fn assert_batch_update_deletes_in_chunks_and_keeps_update_order(
         kept.iter().map(|(_, (key, _))| key).collect::<Vec<_>>()
     );
 
-    // A delete then an insert of a present key leaves it; an insert then a delete of an absent key
-    // leaves it absent.
+    // A delete then an insert of a present key leaves it, and an insert then a delete of an absent
+    // key leaves it absent. Root counts set between the node updates are still written.
     let (_, (present, present_object)) = kept.into_iter().next().expect("kept node");
     let (_, (absent, absent_object)) = deleted.into_iter().next().expect("deleted node");
     db.batch_update(
         [
             (present.clone(), DeleteNode),
+            (present.clone(), SetRootCount(3)),
             (present.clone(), InsertNode(present_object)),
             (absent.clone(), InsertNode(absent_object)),
+            (absent.clone(), SetRootCount(0)),
             (absent.clone(), DeleteNode),
         ]
         .into_iter(),
@@ -818,6 +820,8 @@ fn assert_batch_update_deletes_in_chunks_and_keeps_update_order(
         "re-inserted node is present"
     );
     assert!(db.get_node(&absent).is_none(), "deleted node is absent");
+    assert_eq!(db.get_root_count(&present), 3);
+    assert_eq!(db.get_root_count(&absent), 0);
 }
 
 // `batch_update` writes root counts in chunks: a count above zero is stored, zero removes the root,
