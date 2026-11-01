@@ -728,8 +728,8 @@ fn persist_nodes(
     nodes
 }
 
-/// `batch_update` inserts in chunks, storing every node as given, and accepts a key inserted twice
-/// in one batch. Shared by both suites, like [assert_get_root_count_reads_stored_count].
+// `batch_update` inserts in chunks, storing every node as given, and accepts a key inserted twice
+// in one batch. Shared by both suites, like `assert_get_root_count_reads_stored_count`.
 #[cfg(test)]
 fn assert_batch_update_inserts_in_chunks(storage: &Storage<LedgerDb>, db: &mut LedgerDb) {
     // Inserting every node spans several insert chunks.
@@ -766,9 +766,9 @@ fn assert_batch_update_inserts_in_chunks(storage: &Storage<LedgerDb>, db: &mut L
     );
 }
 
-/// `batch_update` deletes in chunks, removing exactly the deleted keys, and applies inserts and
-/// deletes of the same key in their original order. Shared by both suites, like
-/// [assert_get_root_count_reads_stored_count].
+// `batch_update` deletes in chunks, removing exactly the deleted keys, and applies inserts, deletes
+// and root counts of the same key in their original order. Shared by both suites, like
+// `assert_get_root_count_reads_stored_count`.
 #[cfg(test)]
 fn assert_batch_update_deletes_in_chunks_and_keeps_update_order(
     storage: &Storage<LedgerDb>,
@@ -820,9 +820,9 @@ fn assert_batch_update_deletes_in_chunks_and_keeps_update_order(
     assert!(db.get_node(&absent).is_none(), "deleted node is absent");
 }
 
-/// `batch_update` writes root counts in batches: a count above zero is stored, zero removes the
-/// root, and a later count for the same key replaces an earlier one. Shared by both suites, like
-/// [assert_get_root_count_reads_stored_count].
+// `batch_update` writes root counts in chunks: a count above zero is stored, zero removes the root,
+// and a later count for the same key replaces an earlier one. Shared by both suites, like
+// `assert_get_root_count_reads_stored_count`.
 #[cfg(test)]
 fn assert_batch_update_sets_root_counts(db: &mut LedgerDb) {
     let [first, second, third, absent] =
@@ -937,7 +937,7 @@ pub(crate) mod sqlite_tests {
         Ok(count)
     }
 
-    /// See [super::assert_batch_update_sets_root_counts].
+    // See `assert_batch_update_sets_root_counts`.
     #[tokio::test(flavor = "multi_thread")]
     async fn batch_update_sets_root_counts() -> Result<(), Box<dyn StdError>> {
         let pool = setup_pool().await?;
@@ -946,7 +946,7 @@ pub(crate) mod sqlite_tests {
         Ok(())
     }
 
-    /// See [super::assert_batch_update_deletes_in_chunks_and_keeps_update_order].
+    // See `assert_batch_update_deletes_in_chunks_and_keeps_update_order`.
     #[tokio::test(flavor = "multi_thread")]
     async fn batch_update_deletes_in_chunks_and_keeps_update_order() -> Result<(), Box<dyn StdError>>
     {
@@ -957,7 +957,7 @@ pub(crate) mod sqlite_tests {
         Ok(())
     }
 
-    /// See [super::assert_batch_update_inserts_in_chunks].
+    // See `assert_batch_update_inserts_in_chunks`.
     #[tokio::test(flavor = "multi_thread")]
     async fn batch_update_inserts_in_chunks() -> Result<(), Box<dyn StdError>> {
         let pool = setup_pool().await?;
@@ -1172,8 +1172,8 @@ mod postgres_tests {
         Ok(())
     }
 
-    /// Postgres insert chunks respect both the row limit and the byte limit, and a node larger than
-    /// the byte limit gets a chunk of its own.
+    // Postgres insert chunks respect both the row limit and the byte limit, and a node larger than
+    // the byte limit gets a chunk of its own.
     #[test]
     fn insert_chunks_respect_row_and_byte_limits() {
         let lengths = |sizes: &[usize]| {
@@ -1195,7 +1195,7 @@ mod postgres_tests {
         assert!(lengths(&[]).is_empty());
     }
 
-    /// See [super::assert_batch_update_sets_root_counts].
+    // See `assert_batch_update_sets_root_counts`.
     #[tokio::test(flavor = "multi_thread")]
     async fn batch_update_sets_root_counts() -> Result<(), Box<dyn StdError>> {
         let (_container, pool) = setup_pool().await?;
@@ -1204,7 +1204,7 @@ mod postgres_tests {
         Ok(())
     }
 
-    /// See [super::assert_batch_update_deletes_in_chunks_and_keeps_update_order].
+    // See `assert_batch_update_deletes_in_chunks_and_keeps_update_order`.
     #[tokio::test(flavor = "multi_thread")]
     async fn batch_update_deletes_in_chunks_and_keeps_update_order() -> Result<(), Box<dyn StdError>>
     {
@@ -1215,7 +1215,7 @@ mod postgres_tests {
         Ok(())
     }
 
-    /// See [super::assert_batch_update_inserts_in_chunks].
+    // See `assert_batch_update_inserts_in_chunks`.
     #[tokio::test(flavor = "multi_thread")]
     async fn batch_update_inserts_in_chunks() -> Result<(), Box<dyn StdError>> {
         let (_container, pool) = setup_pool().await?;
