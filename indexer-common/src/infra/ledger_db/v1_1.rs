@@ -518,15 +518,15 @@ fn insert_chunks<Node>(nodes: &[Node], size: impl Fn(&Node) -> usize) -> Vec<&[N
     let mut bytes = 0;
 
     for (index, node) in nodes.iter().enumerate() {
-        let node = size(node);
+        let node_size = size(node);
         // Ends the chunk before this node once the chunk holds `BATCH_ROWS` nodes or the node would
         // take it past `BATCH_BYTES`, unless the chunk is empty.
-        if index > start && (index - start == BATCH_ROWS || bytes + node > BATCH_BYTES) {
+        if index > start && (index - start == BATCH_ROWS || bytes + node_size > BATCH_BYTES) {
             chunks.push(&nodes[start..index]);
             start = index;
             bytes = 0;
         }
-        bytes += node;
+        bytes += node_size;
     }
     // Pushes the last chunk, which no node after it ended.
     if start < nodes.len() {
