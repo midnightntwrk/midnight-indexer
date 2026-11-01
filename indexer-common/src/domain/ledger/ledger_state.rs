@@ -168,7 +168,7 @@ pub enum LedgerState {
 /// leaves are never removed, so indices are only ever added.
 #[derive(Debug, Clone, Default)]
 pub struct ContractZswapIndices {
-    // The commitment tree's `first_free` when the indices last caught up, so leaves below it are read.
+    // The commitment tree's `first_free` when the indices last caught up; leaves below it are indexed.
     first_free: u64,
     // Each contract's leaf indices, ascending.
     indices: HashMap<SerializedContractAddress, Vec<u64>>,
@@ -1015,7 +1015,9 @@ impl LedgerState {
     /// and is stored once however often it is captured.
     ///
     /// The filtered tree matches zswap's `State::filter`, but `contract_zswap_indices` supplies the
-    /// contract's entries in place of a scan of the whole commitment tree.
+    /// contract's entries in place of a scan of the whole commitment tree. The indices must have
+    /// been built against this ledger state or an earlier state of the same chain. Indices from
+    /// another chain produce a wrong tree without an error.
     #[trace(properties = { "address": "{address}" })]
     pub fn contract_zswap_state_key(
         &self,
