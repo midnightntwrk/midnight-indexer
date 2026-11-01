@@ -829,6 +829,12 @@ fn assert_batch_update_deletes_in_chunks_and_keeps_update_order(
 // `assert_get_root_count_reads_stored_count`.
 #[cfg(test)]
 fn assert_batch_update_sets_root_counts(db: &mut LedgerDb) {
+    // Setting every root count spans two upsert chunks.
+    #[cfg(feature = "standalone")]
+    const ROOTS: usize = BATCH_INSERT_SIZE + 1;
+    #[cfg(feature = "cloud")]
+    const ROOTS: usize = BATCH_ROWS + 1;
+
     let [first, second, third, absent] =
         [0xa1, 0xa2, 0xa3, 0xa4].map(|byte| arena_hash([byte; 32]));
 
@@ -860,6 +866,22 @@ fn assert_batch_update_sets_root_counts(db: &mut LedgerDb) {
     assert_eq!(db.get_root_count(&second), 0);
     assert_eq!(db.get_root_count(&third), 7);
     assert_eq!(db.get_root_count(&absent), 0);
+    assert_eq!(
+        db.get_roots(),
+        HashMap::from([(first.clone(), 5), (third.clone(), 7)])
+    );
+
+    // Sets then clears `ROOTS` root counts, each in one batch.
+    let roots = (0..ROOTS as u32)
+        .map(|index| {
+            let mut bytes = [0; 32];
+            bytes[..4].copy_from_slice(&index.to_be_bytes());
+            arena_hash(bytes)
+        })
+        .collect::<Vec<_>>();
+    db.batch_update(roots.iter().map(|root| (root.clone(), SetRootCount(1))));
+    assert_eq!(db.get_roots().len(), ROOTS + 2);
+    db.batch_update(roots.iter().map(|root| (root.clone(), SetRootCount(0))));
     assert_eq!(db.get_roots(), HashMap::from([(first, 5), (third, 7)]));
 }
 
