@@ -20,13 +20,33 @@ use midnight_storage_core_v1::{
     DefaultHasher, WellBehavedHasher,
     arena::ArenaHash,
     backend::OnDiskObject,
-    db::{DB, DummyArbitrary, Update},
+    db::{
+        DB, DummyArbitrary,
+        Update::{self, DeleteNode, InsertNode, SetRootCount},
+    },
 };
+#[cfg(test)]
+use midnight_storage_core_v1::{Storage, storable::SMALL_OBJECT_LIMIT};
 use sqlx::QueryBuilder;
 use std::{collections::HashMap, future::ready};
 use tokio::{runtime::Handle, task::block_in_place};
 
-const BATCH_INSERT_SIZE: usize = 1_000;
+// Serialized node bytes per Postgres insert. Far below Postgres' 1 GB limit on one parameter value,
+// it also bounds the memory a statement takes in the indexer and in Postgres.
+#[cfg(feature = "cloud")]
+const BATCH_BYTES: usize = 64 * 1024 * 1024;
+// Keys per SQLite `DELETE … IN (…)`, one bind each.
+#[cfg(feature = "standalone")]
+const BATCH_DELETE_SIZE: usize = SQLITE_MAX_BINDS;
+// Rows per SQLite `INSERT … VALUES`, two binds each.
+#[cfg(feature = "standalone")]
+const BATCH_INSERT_SIZE: usize = SQLITE_MAX_BINDS / 2;
+// Rows per Postgres statement taking its rows as array parameters.
+#[cfg(feature = "cloud")]
+const BATCH_ROWS: usize = 10_000;
+// SQLite's maximum number of binds per statement.
+#[cfg(feature = "standalone")]
+const SQLITE_MAX_BINDS: usize = 32_766;
 
 #[cfg(feature = "cloud")]
 type SqlxTransaction = sqlx::Transaction<'static, sqlx::Postgres>;
@@ -152,23 +172,31 @@ impl DB for LedgerDb {
                     .await
                     .unwrap_or_panic("begin transaction for batch update");
 
+                // Consecutive inserts and consecutive deletes are each sent in batches. Flushing one
+                // buffer before the other grows keeps the updates in their original order.
                 let mut inserts = Vec::new();
+                let mut deletes = Vec::new();
+                let mut root_counts = Vec::new();
 
                 for (key, update) in updates {
                     match update {
-                        Update::InsertNode(object) => inserts.push((key, object)),
-                        Update::DeleteNode => {
-                            flush_inserts(&mut tx, &mut inserts).await;
-                            delete_node(&mut tx, &key).await;
+                        InsertNode(object) => {
+                            flush_deletes(&mut tx, &mut deletes).await;
+                            inserts.push((key, object));
                         }
-                        Update::SetRootCount(count) => {
+                        DeleteNode => {
                             flush_inserts(&mut tx, &mut inserts).await;
-                            set_root_count(&mut tx, key, count).await;
+                            deletes.push(key);
                         }
+                        // Root counts live in `ledger_db_roots`, which no node insert or delete
+                        // touches, so they are written together after the nodes.
+                        SetRootCount(count) => root_counts.push((key, count)),
                     }
                 }
 
                 flush_inserts(&mut tx, &mut inserts).await;
+                flush_deletes(&mut tx, &mut deletes).await;
+                flush_root_counts(&mut tx, root_counts).await;
 
                 tx.commit()
                     .await
@@ -427,22 +455,16 @@ where
     }
 }
 
-async fn flush_inserts<H>(
+// SQLite has no array parameters, so nodes are bound in chunks.
+#[cfg(feature = "standalone")]
+async fn flush_inserts<Hasher: WellBehavedHasher>(
     tx: &mut SqlxTransaction,
-    inserts: &mut Vec<(ArenaHash<H>, OnDiskObject<H>)>,
-) where
-    H: WellBehavedHasher,
-{
-    if inserts.is_empty() {
-        return;
-    }
-
+    inserts: &mut Vec<(ArenaHash<Hasher>, OnDiskObject<Hasher>)>,
+) {
     for chunk in inserts.chunks(BATCH_INSERT_SIZE) {
         QueryBuilder::new("INSERT INTO ledger_db_nodes (key, object) ")
             .push_values(chunk, |mut q, (key, object)| {
-                let mut ser_object = Vec::with_capacity(object.serialized_size());
-                Serializable::serialize(object, &mut ser_object)
-                    .unwrap_or_panic("cannot serialize object");
+                let ser_object = serialize_object(object);
                 q.push_bind(key.0.as_slice()).push_bind(ser_object);
             })
             .push(" ON CONFLICT (key) DO UPDATE SET object = EXCLUDED.object")
@@ -453,6 +475,178 @@ async fn flush_inserts<H>(
     }
 
     inserts.clear();
+}
+
+// Postgres takes the keys and the nodes as two `bytea[]` parameters, so every statement has the same
+// SQL whatever its number of nodes.
+#[cfg(feature = "cloud")]
+async fn flush_inserts<Hasher: WellBehavedHasher>(
+    tx: &mut SqlxTransaction,
+    inserts: &mut Vec<(ArenaHash<Hasher>, OnDiskObject<Hasher>)>,
+) {
+    let query = indoc! {"
+        INSERT INTO ledger_db_nodes (key, object)
+        SELECT * FROM UNNEST($1::BYTEA[], $2::BYTEA[])
+        ON CONFLICT (key) DO UPDATE SET object = EXCLUDED.object
+    "};
+
+    for chunk in insert_chunks(inserts, |(_, object)| object.serialized_size()) {
+        let (keys, objects) = chunk
+            .iter()
+            .map(|(key, object)| (key.0.as_slice(), serialize_object(object)))
+            .unzip::<_, _, Vec<_>, Vec<_>>();
+
+        sqlx::query(query)
+            .bind(keys)
+            .bind(objects)
+            .execute(&mut **tx)
+            .await
+            .unwrap_or_panic("cannot batch insert nodes");
+    }
+
+    inserts.clear();
+}
+
+// Splits nodes into chunks of at most `BATCH_ROWS` rows and `BATCH_BYTES` serialized bytes, as
+// measured by `size`. A single node larger than the byte limit gets a chunk of its own.
+#[cfg(feature = "cloud")]
+fn insert_chunks<Node>(nodes: &[Node], size: impl Fn(&Node) -> usize) -> Vec<&[Node]> {
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    let mut bytes = 0;
+
+    for (index, node) in nodes.iter().enumerate() {
+        let node = size(node);
+        // Ends the chunk before this node once the chunk holds `BATCH_ROWS` nodes or the node would
+        // take it past `BATCH_BYTES`, unless the chunk is empty.
+        if index > start && (index - start == BATCH_ROWS || bytes + node > BATCH_BYTES) {
+            chunks.push(&nodes[start..index]);
+            start = index;
+            bytes = 0;
+        }
+        bytes += node;
+    }
+    // Pushes the last chunk, which no node after it ended.
+    if start < nodes.len() {
+        chunks.push(&nodes[start..]);
+    }
+
+    chunks
+}
+
+fn serialize_object<Hasher: WellBehavedHasher>(object: &OnDiskObject<Hasher>) -> Vec<u8> {
+    let mut serialized = Vec::with_capacity(object.serialized_size());
+    Serializable::serialize(object, &mut serialized).unwrap_or_panic("cannot serialize object");
+    serialized
+}
+
+async fn flush_deletes<Hasher: WellBehavedHasher>(
+    tx: &mut SqlxTransaction,
+    deletes: &mut Vec<ArenaHash<Hasher>>,
+) {
+    let keys = deletes
+        .iter()
+        .map(|key| key.0.as_slice())
+        .collect::<Vec<_>>();
+    delete_keys(tx, "ledger_db_nodes", &keys).await;
+    deletes.clear();
+}
+
+// SQLite has no array parameters, so keys are bound one each in chunks.
+#[cfg(feature = "standalone")]
+async fn delete_keys(tx: &mut SqlxTransaction, table: &str, keys: &[&[u8]]) {
+    for chunk in keys.chunks(BATCH_DELETE_SIZE) {
+        let mut query = QueryBuilder::new(format!("DELETE FROM {table} WHERE key IN ("));
+        let mut keys = query.separated(", ");
+        chunk.iter().for_each(|key| {
+            keys.push_bind(*key);
+        });
+        keys.push_unseparated(")");
+
+        query
+            .build()
+            .execute(&mut **tx)
+            .await
+            .unwrap_or_panic("cannot batch delete keys");
+    }
+}
+
+// Postgres takes the keys as one `bytea[]` parameter, so every statement has the same SQL whatever
+// its number of keys.
+#[cfg(feature = "cloud")]
+async fn delete_keys(tx: &mut SqlxTransaction, table: &str, keys: &[&[u8]]) {
+    let query = format!("DELETE FROM {table} WHERE key = ANY($1)");
+
+    for chunk in keys.chunks(BATCH_ROWS) {
+        sqlx::query(&query)
+            .bind(chunk)
+            .execute(&mut **tx)
+            .await
+            .unwrap_or_panic("cannot batch delete keys");
+    }
+}
+
+async fn flush_root_counts<Hasher: WellBehavedHasher>(
+    tx: &mut SqlxTransaction,
+    root_counts: Vec<(ArenaHash<Hasher>, u32)>,
+) {
+    // Collecting into a map keeps the last count per key, as applying the counts in order would. A
+    // count of zero means the key is no longer a root.
+    let (set, cleared) = root_counts
+        .into_iter()
+        .collect::<HashMap<_, _>>()
+        .into_iter()
+        .partition::<Vec<_>, _>(|(_, count)| *count > 0);
+
+    let cleared = cleared
+        .iter()
+        .map(|(key, _)| key.0.as_slice())
+        .collect::<Vec<_>>();
+    delete_keys(tx, "ledger_db_roots", &cleared).await;
+
+    let set = set
+        .iter()
+        .map(|(key, count)| (key.0.as_slice(), *count as i64))
+        .collect::<Vec<_>>();
+    upsert_root_counts(tx, &set).await;
+}
+
+// SQLite has no array parameters, so root counts are bound in chunks.
+#[cfg(feature = "standalone")]
+async fn upsert_root_counts(tx: &mut SqlxTransaction, root_counts: &[(&[u8], i64)]) {
+    for chunk in root_counts.chunks(BATCH_INSERT_SIZE) {
+        QueryBuilder::new("INSERT INTO ledger_db_roots (key, count) ")
+            .push_values(chunk, |mut q, (key, count)| {
+                q.push_bind(*key).push_bind(*count);
+            })
+            .push(" ON CONFLICT (key) DO UPDATE SET count = EXCLUDED.count")
+            .build()
+            .execute(&mut **tx)
+            .await
+            .unwrap_or_panic("cannot batch set root counts");
+    }
+}
+
+// Postgres takes the keys and the counts as two array parameters, so every statement has the same
+// SQL whatever its number of root counts.
+#[cfg(feature = "cloud")]
+async fn upsert_root_counts(tx: &mut SqlxTransaction, root_counts: &[(&[u8], i64)]) {
+    let query = indoc! {"
+        INSERT INTO ledger_db_roots (key, count)
+        SELECT * FROM UNNEST($1::BYTEA[], $2::BIGINT[])
+        ON CONFLICT (key) DO UPDATE SET count = EXCLUDED.count
+    "};
+
+    for chunk in root_counts.chunks(BATCH_ROWS) {
+        let (keys, counts) = chunk.iter().copied().unzip::<_, _, Vec<_>, Vec<_>>();
+
+        sqlx::query(query)
+            .bind(keys)
+            .bind(counts)
+            .execute(&mut **tx)
+            .await
+            .unwrap_or_panic("cannot batch set root counts");
+    }
 }
 
 async fn delete_node<H>(tx: &mut SqlxTransaction, key: &ArenaHash<H>)
@@ -533,7 +727,10 @@ fn assert_get_root_count_reads_stored_count(db: &mut LedgerDb) {
 
 #[cfg(all(test, feature = "standalone"))]
 pub(crate) mod sqlite_tests {
-    use super::assert_get_root_count_reads_stored_count;
+    use super::{
+        assert_batch_update_deletes_in_chunks_and_keeps_update_order,
+        assert_batch_update_sets_root_counts, assert_get_root_count_reads_stored_count,
+    };
     use crate::infra::{
         ledger_db::v1_1::LedgerDb,
         migrations::sqlite::run_for_ledger_db,
@@ -580,6 +777,26 @@ pub(crate) mod sqlite_tests {
             .map(|(count,)| count);
 
         Ok(count)
+    }
+
+    /// See [super::assert_batch_update_sets_root_counts].
+    #[tokio::test(flavor = "multi_thread")]
+    async fn batch_update_sets_root_counts() -> Result<(), Box<dyn StdError>> {
+        let pool = setup_pool().await?;
+        let mut db = LedgerDb::new(pool);
+        assert_batch_update_sets_root_counts(&mut db);
+        Ok(())
+    }
+
+    /// See [super::assert_batch_update_deletes_in_chunks_and_keeps_update_order].
+    #[tokio::test(flavor = "multi_thread")]
+    async fn batch_update_deletes_in_chunks_and_keeps_update_order() -> Result<(), Box<dyn StdError>>
+    {
+        let pool = setup_pool().await?;
+        let storage = Storage::new(16, LedgerDb::new(pool.clone()));
+        let mut db = LedgerDb::new(pool);
+        assert_batch_update_deletes_in_chunks_and_keeps_update_order(&storage, &mut db);
+        Ok(())
     }
 
     #[tokio::test]
@@ -695,14 +912,18 @@ pub(crate) mod sqlite_tests {
 
 #[cfg(all(test, feature = "cloud"))]
 mod postgres_tests {
-    use super::assert_get_root_count_reads_stored_count;
+    use super::{
+        BATCH_BYTES, BATCH_ROWS, assert_batch_update_deletes_in_chunks_and_keeps_update_order,
+        assert_batch_update_sets_root_counts, assert_get_root_count_reads_stored_count,
+        insert_chunks,
+    };
     use crate::infra::{
         ledger_db::v1_1::LedgerDb,
         migrations::postgres::run as run_migrations,
         pool::{self, postgres::PostgresPool},
     };
     use anyhow::Context;
-    use midnight_storage_core_v1::{DefaultHasher, arena::ArenaHash, db::DB};
+    use midnight_storage_core_v1::{DefaultHasher, Storage, arena::ArenaHash, db::DB};
     use sqlx::postgres::PgSslMode;
     use std::{error::Error as StdError, time::Duration};
     use testcontainers::{ImageExt, runners::AsyncRunner};
