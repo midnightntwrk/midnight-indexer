@@ -479,7 +479,8 @@ async fn flush_inserts<Hasher: WellBehavedHasher>(
 
 // Postgres takes the keys and the nodes as two `bytea[]` parameters, so every statement has the same
 // SQL whatever its number of nodes. `DISTINCT ON` keeps one row per key, as an upsert fails when two
-// of its rows share a key. Nodes are content-addressed, so rows sharing a key are identical.
+// of its rows share a key. Nodes are content-addressed and, with storage-core's `layout-v2`, carry no
+// reference count, so rows sharing a key are identical.
 #[cfg(feature = "cloud")]
 async fn flush_inserts<Hasher: WellBehavedHasher>(
     tx: &mut SqlxTransaction,
