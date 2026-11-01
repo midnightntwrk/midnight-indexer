@@ -703,6 +703,161 @@ pub(crate) fn arena_hash(bytes: [u8; 32]) -> ArenaHash<DefaultHasher> {
     ArenaHash::deserialize(&mut bytes.as_slice(), 0).expect("32 bytes are an ArenaHash")
 }
 
+// Persists `count` roots, flushes their nodes to the database and reads them back.
+#[cfg(test)]
+fn persist_nodes(
+    storage: &Storage<LedgerDb>,
+    db: &mut LedgerDb,
+    count: usize,
+) -> Vec<(ArenaHash<DefaultHasher>, OnDiskObject<DefaultHasher>)> {
+    // Each array of `SMALL_OBJECT_LIMIT / 4` `u32`s holds `SMALL_OBJECT_LIMIT` bytes, which with its
+    // header exceeds the inline limit, so it is stored as its own node. A distinct `u32` per array
+    // gives each node its own key.
+    let _roots = (0..count as u32)
+        .map(|value| {
+            let mut root = storage.alloc([value; SMALL_OBJECT_LIMIT / 4]);
+            root.persist();
+            root
+        })
+        .collect::<Vec<_>>();
+    storage.with_backend(|backend| backend.flush_all_changes_to_db());
+
+    let (nodes, _) = db.scan(None, 2 * count);
+    assert_eq!(nodes.len(), count);
+    nodes
+}
+
+/// `batch_update` inserts in chunks, storing every node as given, and accepts a key inserted twice
+/// in one batch. Shared by both suites, like [assert_get_root_count_reads_stored_count].
+#[cfg(test)]
+fn assert_batch_update_inserts_in_chunks(storage: &Storage<LedgerDb>, db: &mut LedgerDb) {
+    // Inserting every node spans several insert chunks.
+    #[cfg(feature = "standalone")]
+    const NODES: usize = 2 * BATCH_INSERT_SIZE + 1;
+    #[cfg(feature = "cloud")]
+    const NODES: usize = 2 * BATCH_ROWS + 1;
+
+    let nodes = persist_nodes(storage, db, NODES);
+
+    // Deletes every node, then inserts them all again in one batch, the first node twice in the
+    // same chunk.
+    db.batch_update(nodes.iter().map(|(key, _)| (key.clone(), DeleteNode)));
+    assert!(db.scan(None, 1).0.is_empty(), "every node is deleted");
+    db.batch_update(
+        nodes
+            .first()
+            .into_iter()
+            .chain(&nodes)
+            .map(|(key, object)| (key.clone(), InsertNode(object.clone()))),
+    );
+
+    // Compares serialized bytes, as `OnDiskObject` has no `PartialEq`.
+    let serialized = |nodes: &[(ArenaHash<_>, _)]| {
+        nodes
+            .iter()
+            .map(|(key, object)| (key.clone(), serialize_object(object)))
+            .collect::<Vec<_>>()
+    };
+    let (inserted, _) = db.scan(None, 2 * NODES);
+    assert!(
+        serialized(&inserted) == serialized(&nodes),
+        "inserted nodes match the originals"
+    );
+}
+
+/// `batch_update` deletes in chunks, removing exactly the deleted keys, and applies inserts and
+/// deletes of the same key in their original order. Shared by both suites, like
+/// [assert_get_root_count_reads_stored_count].
+#[cfg(test)]
+fn assert_batch_update_deletes_in_chunks_and_keeps_update_order(
+    storage: &Storage<LedgerDb>,
+    db: &mut LedgerDb,
+) {
+    // Inserting every node spans several insert chunks, and deleting every other node spans two
+    // delete chunks.
+    #[cfg(feature = "standalone")]
+    const NODES: usize = 2 * BATCH_DELETE_SIZE + 2;
+    #[cfg(feature = "cloud")]
+    const NODES: usize = 2 * BATCH_ROWS + 2;
+
+    let nodes = persist_nodes(storage, db, NODES);
+
+    // Deletes every other node in one batch.
+    let (deleted, kept) = nodes
+        .into_iter()
+        .enumerate()
+        .partition::<Vec<_>, _>(|(index, _)| index % 2 == 0);
+    db.batch_update(
+        deleted
+            .iter()
+            .map(|(_, (key, _))| (key.clone(), DeleteNode)),
+    );
+
+    let (remaining, _) = db.scan(None, 2 * NODES);
+    assert_eq!(
+        remaining.iter().map(|(key, _)| key).collect::<Vec<_>>(),
+        kept.iter().map(|(_, (key, _))| key).collect::<Vec<_>>()
+    );
+
+    // A delete then an insert of a present key leaves it; an insert then a delete of an absent key
+    // leaves it absent.
+    let (_, (present, present_object)) = kept.into_iter().next().expect("kept node");
+    let (_, (absent, absent_object)) = deleted.into_iter().next().expect("deleted node");
+    db.batch_update(
+        [
+            (present.clone(), DeleteNode),
+            (present.clone(), InsertNode(present_object)),
+            (absent.clone(), InsertNode(absent_object)),
+            (absent.clone(), DeleteNode),
+        ]
+        .into_iter(),
+    );
+    assert!(
+        db.get_node(&present).is_some(),
+        "re-inserted node is present"
+    );
+    assert!(db.get_node(&absent).is_none(), "deleted node is absent");
+}
+
+/// `batch_update` writes root counts in batches: a count above zero is stored, zero removes the
+/// root, and a later count for the same key replaces an earlier one. Shared by both suites, like
+/// [assert_get_root_count_reads_stored_count].
+#[cfg(test)]
+fn assert_batch_update_sets_root_counts(db: &mut LedgerDb) {
+    let [first, second, third, absent] =
+        [0xa1, 0xa2, 0xa3, 0xa4].map(|byte| arena_hash([byte; 32]));
+
+    db.batch_update(
+        [
+            (first.clone(), SetRootCount(1)),
+            (second.clone(), SetRootCount(2)),
+            (third.clone(), SetRootCount(3)),
+        ]
+        .into_iter(),
+    );
+    assert_eq!(
+        db.get_roots(),
+        HashMap::from([(first.clone(), 1), (second.clone(), 2), (third.clone(), 3)])
+    );
+
+    db.batch_update(
+        [
+            (first.clone(), SetRootCount(5)),
+            (second.clone(), SetRootCount(0)),
+            (third.clone(), SetRootCount(4)),
+            (third.clone(), SetRootCount(7)),
+            (absent.clone(), SetRootCount(0)),
+        ]
+        .into_iter(),
+    );
+
+    assert_eq!(db.get_root_count(&first), 5);
+    assert_eq!(db.get_root_count(&second), 0);
+    assert_eq!(db.get_root_count(&third), 7);
+    assert_eq!(db.get_root_count(&absent), 0);
+    assert_eq!(db.get_roots(), HashMap::from([(first, 5), (third, 7)]));
+}
+
 /// `get_root_count` must return the stored count, not the number of matching rows: `key` is the
 /// primary key, so a row-count aggregate can only ever be 0 or 1.
 ///
@@ -730,7 +885,8 @@ fn assert_get_root_count_reads_stored_count(db: &mut LedgerDb) {
 pub(crate) mod sqlite_tests {
     use super::{
         assert_batch_update_deletes_in_chunks_and_keeps_update_order,
-        assert_batch_update_sets_root_counts, assert_get_root_count_reads_stored_count,
+        assert_batch_update_inserts_in_chunks, assert_batch_update_sets_root_counts,
+        assert_get_root_count_reads_stored_count,
     };
     use crate::infra::{
         ledger_db::v1_1::LedgerDb,
@@ -797,6 +953,16 @@ pub(crate) mod sqlite_tests {
         let storage = Storage::new(16, LedgerDb::new(pool.clone()));
         let mut db = LedgerDb::new(pool);
         assert_batch_update_deletes_in_chunks_and_keeps_update_order(&storage, &mut db);
+        Ok(())
+    }
+
+    /// See [super::assert_batch_update_inserts_in_chunks].
+    #[tokio::test(flavor = "multi_thread")]
+    async fn batch_update_inserts_in_chunks() -> Result<(), Box<dyn StdError>> {
+        let pool = setup_pool().await?;
+        let storage = Storage::new(16, LedgerDb::new(pool.clone()));
+        let mut db = LedgerDb::new(pool);
+        assert_batch_update_inserts_in_chunks(&storage, &mut db);
         Ok(())
     }
 
@@ -915,8 +1081,8 @@ pub(crate) mod sqlite_tests {
 mod postgres_tests {
     use super::{
         BATCH_BYTES, BATCH_ROWS, assert_batch_update_deletes_in_chunks_and_keeps_update_order,
-        assert_batch_update_sets_root_counts, assert_get_root_count_reads_stored_count,
-        insert_chunks,
+        assert_batch_update_inserts_in_chunks, assert_batch_update_sets_root_counts,
+        assert_get_root_count_reads_stored_count, insert_chunks,
     };
     use crate::infra::{
         ledger_db::v1_1::LedgerDb,
@@ -1002,6 +1168,59 @@ mod postgres_tests {
 
         assert_get_root_count_reads_stored_count(&mut db);
 
+        Ok(())
+    }
+
+    /// Postgres insert chunks respect both the row limit and the byte limit, and a node larger than
+    /// the byte limit gets a chunk of its own.
+    #[test]
+    fn insert_chunks_respect_row_and_byte_limits() {
+        let lengths = |sizes: &[usize]| {
+            insert_chunks(sizes, |size| *size)
+                .iter()
+                .map(|chunk| chunk.len())
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(lengths(&[1; BATCH_ROWS + 1]), vec![BATCH_ROWS, 1]);
+        assert_eq!(lengths(&[BATCH_BYTES / 2; 3]), vec![2, 1]);
+        assert_eq!(lengths(&[BATCH_BYTES / 2 + 1; 3]), vec![1, 1, 1]);
+        assert_eq!(lengths(&[BATCH_BYTES; 2]), vec![1, 1]);
+        assert_eq!(
+            lengths(&[1, BATCH_BYTES + 1, BATCH_BYTES + 1, 1]),
+            vec![1, 1, 1, 1]
+        );
+
+        assert!(lengths(&[]).is_empty());
+    }
+
+    /// See [super::assert_batch_update_sets_root_counts].
+    #[tokio::test(flavor = "multi_thread")]
+    async fn batch_update_sets_root_counts() -> Result<(), Box<dyn StdError>> {
+        let (_container, pool) = setup_pool().await?;
+        let mut db = LedgerDb::new(pool);
+        assert_batch_update_sets_root_counts(&mut db);
+        Ok(())
+    }
+
+    /// See [super::assert_batch_update_deletes_in_chunks_and_keeps_update_order].
+    #[tokio::test(flavor = "multi_thread")]
+    async fn batch_update_deletes_in_chunks_and_keeps_update_order() -> Result<(), Box<dyn StdError>>
+    {
+        let (_container, pool) = setup_pool().await?;
+        let storage = Storage::new(16, LedgerDb::new(pool.clone()));
+        let mut db = LedgerDb::new(pool);
+        assert_batch_update_deletes_in_chunks_and_keeps_update_order(&storage, &mut db);
+        Ok(())
+    }
+
+    /// See [super::assert_batch_update_inserts_in_chunks].
+    #[tokio::test(flavor = "multi_thread")]
+    async fn batch_update_inserts_in_chunks() -> Result<(), Box<dyn StdError>> {
+        let (_container, pool) = setup_pool().await?;
+        let storage = Storage::new(16, LedgerDb::new(pool.clone()));
+        let mut db = LedgerDb::new(pool);
+        assert_batch_update_inserts_in_chunks(&storage, &mut db);
         Ok(())
     }
 }
