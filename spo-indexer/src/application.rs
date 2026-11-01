@@ -342,9 +342,15 @@ async fn save_spo_identity(
     cardano_id: String,
     tx: &mut SqlxTransaction,
 ) -> anyhow::Result<()> {
+    // A registration without an aura key cannot produce blocks, and storing it with a NULL
+    // aura key would block every later aura-less identity via the uniqueness check.
+    let Some(aura) = &raw_spo.keys.aura else {
+        return Ok(());
+    };
+
     // Normalize all hex-like identifiers to avoid mixed representations.
     let spo_sk = remove_hex_prefix(&raw_spo.sidechain_pub_key).to_owned();
-    let aura_pk = remove_hex_prefix(&raw_spo.keys.aura).to_owned();
+    let aura_pk = remove_hex_prefix(aura).to_owned();
     let main_pk = remove_hex_prefix(&raw_spo.mainchain_pub_key).to_owned();
 
     let spo = SPO {
