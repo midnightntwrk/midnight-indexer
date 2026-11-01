@@ -487,7 +487,7 @@ async fn flush_inserts<Hasher: WellBehavedHasher>(
 ) {
     let query = indoc! {"
         INSERT INTO ledger_db_nodes (key, object)
-        SELECT DISTINCT ON (key) * FROM UNNEST($1::BYTEA[], $2::BYTEA[]) AS nodes (key, object)
+        SELECT DISTINCT ON (key) * FROM UNNEST($1::bytea[], $2::bytea[]) AS nodes (key, object)
         ON CONFLICT (key) DO UPDATE SET object = EXCLUDED.object
     "};
 
@@ -555,7 +555,7 @@ async fn flush_deletes<Hasher: WellBehavedHasher>(
 
 // SQLite has no array parameters, so keys are bound one each in chunks.
 #[cfg(feature = "standalone")]
-async fn delete_keys(tx: &mut SqlxTransaction, table: &str, keys: &[&[u8]]) {
+async fn delete_keys(tx: &mut SqlxTransaction, table: &'static str, keys: &[&[u8]]) {
     for chunk in keys.chunks(BATCH_DELETE_SIZE) {
         let mut query = QueryBuilder::new(format!("DELETE FROM {table} WHERE key IN ("));
         let mut keys = query.separated(", ");
@@ -575,8 +575,8 @@ async fn delete_keys(tx: &mut SqlxTransaction, table: &str, keys: &[&[u8]]) {
 // Postgres takes the keys as one `bytea[]` parameter, so every statement has the same SQL whatever
 // its number of keys.
 #[cfg(feature = "cloud")]
-async fn delete_keys(tx: &mut SqlxTransaction, table: &str, keys: &[&[u8]]) {
-    let query = format!("DELETE FROM {table} WHERE key = ANY($1)");
+async fn delete_keys(tx: &mut SqlxTransaction, table: &'static str, keys: &[&[u8]]) {
+    let query = format!("DELETE FROM {table} WHERE key = ANY($1::bytea[])");
 
     for chunk in keys.chunks(BATCH_ROWS) {
         sqlx::query(&query)
@@ -634,7 +634,7 @@ async fn upsert_root_counts(tx: &mut SqlxTransaction, root_counts: &[(&[u8], i64
 async fn upsert_root_counts(tx: &mut SqlxTransaction, root_counts: &[(&[u8], i64)]) {
     let query = indoc! {"
         INSERT INTO ledger_db_roots (key, count)
-        SELECT * FROM UNNEST($1::BYTEA[], $2::BIGINT[])
+        SELECT * FROM UNNEST($1::bytea[], $2::bigint[])
         ON CONFLICT (key) DO UPDATE SET count = EXCLUDED.count
     "};
 
