@@ -123,8 +123,9 @@ mod tests {
 
                 const LEAVES: u64 = 20;
 
-                // Returns a state of `LEAVES` commitments and three contracts: the first owns every
-                // third leaf, the second every third from leaf 1 below leaf 9, the third none.
+                // Returns a state of `LEAVES` commitments and three contracts. The first owns every
+                // third leaf and the last, so its final two leaves are adjacent and end the tree.
+                // The second owns adjacent leaves 1 and 2 and leaf 7. The third owns none.
                 fn state() -> (State, [Address; 3]) {
                     let addresses =
                         [7, 8, 9].map(|byte| super::super::$address(HashOutput([byte; 32])));
@@ -138,9 +139,11 @@ mod tests {
                 }
 
                 fn owner(addresses: &[Address; 3], index: u64) -> Option<Sp<Address, InMemoryDB>> {
-                    match index % 3 {
-                        0 => Some(Sp::new(addresses[0])),
-                        1 if index < 9 => Some(Sp::new(addresses[1])),
+                    match index {
+                        1 | 2 | 7 => Some(Sp::new(addresses[1])),
+                        index if index % 3 == 0 || index == LEAVES - 1 => {
+                            Some(Sp::new(addresses[0]))
+                        }
                         _ => None,
                     }
                 }
