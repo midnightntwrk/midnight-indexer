@@ -17,7 +17,7 @@
 //!
 //! The translation table is the ledger team's
 //! [`v8_to_v9_state_translation::StateTranslationTable`], pinned by rev to the
-//! exact crate `node-2.1.100-rc.3` migrates with. This module used to carry a
+//! exact crate `node-2.1.100-rc.4` migrates with. This module used to carry a
 //! re-ported copy of that table; it now depends on the upstream crate directly,
 //! so there is one implementation rather than two to keep in sync.
 //!
