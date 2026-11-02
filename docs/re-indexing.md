@@ -11,9 +11,9 @@ rebuild them from the node.
 > Your existing contract states are not carried forward and cannot be recovered
 > afterwards, by any version. Do not read "migration" here as "upgrade in place".
 
-This is the only such change so far — see [When a re-index is
-required](#when-a-re-index-is-required) — but the procedure applies to any future
-one.
+The schema change below requires a genesis re-index. Other fixes can require
+historical replay depending on the data already indexed; see
+[SPO identity fixes and historical data](#spo-identity-fixes-and-historical-data).
 
 The indexer refuses to apply that migration to a database that still
 holds contract states as blobs, so an accidental in-place upgrade fails safe and
@@ -65,6 +65,37 @@ keep the other. Don't.
   found contract actions with no contract state key; they were indexed by a
   version that stored contract states as blobs, which cannot be converted.
   ```
+
+## SPO identity fixes and historical data
+
+The [SPO identity fix](https://github.com/shieldedtech/shielded-security-engineering/issues/714)
+prevents unverified registrations from being attributed to a pool. It also allows
+a node-verified registration to replace conflicting identities that never had
+VALID history or a performance row. This change adds no schema migration.
+
+Installing the fix does not repair every previously written SPO row:
+
+- An unsigned registration could previously overwrite a genuine pool's epoch
+  status with INVALID. A stored INVALID status cannot distinguish that case from
+  a legitimate UnknownStake epoch. Establish affected epochs from authoritative
+  node registration data and replay them with the fixed code; do not mass-update
+  INVALID rows to VALID.
+- Cleanup can remove a genuine pool's earlier identity and INVALID history if it
+  rotated keys while its stake was still unknown. This is the same replacement
+  rule used to remove squatted identities; it does not preserve those old rows.
+- The pre-existing `blocks_produced` calculation counts registrations rather than
+  authored blocks. It needs a separate fix and historical-data repair plan.
+  Replaying with this version alone will not correct that performance metric.
+
+The [registration-decoding fix](https://github.com/shieldedtech/shielded-security-engineering/issues/690)
+resumes at the last committed epoch. That recovery from an indexing halt must not
+be confused with repairing earlier SPO identity or history corruption.
+
+Preserve the original database for comparison before data repair or cutover. Until
+a targeted SPO replay has been implemented and validated, use a clean secondary
+re-index with the procedure below when historical correctness must be restored.
+Record which historical data was repaired as part of release validation; the
+preventive fix alone must not be presented as a complete historical repair.
 
 ## Procedure
 
