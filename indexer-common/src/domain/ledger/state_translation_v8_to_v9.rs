@@ -17,11 +17,9 @@
 //!
 //! The translation table is the ledger team's
 //! [`v8_to_v9_state_translation::StateTranslationTable`], pinned by rev to the
-//! exact crate `node-2.1.100-rc.2` migrates with (`midnight-node` PR #2054,
-//! backported as #2060, replaced the node's own copy with this crate). This
-//! module used to carry a re-ported copy of that table; it now depends on the
-//! upstream crate directly, so there is one implementation rather than two to
-//! keep in sync.
+//! exact crate `node-2.1.100-rc.3` migrates with. This module used to carry a
+//! re-ported copy of that table; it now depends on the upstream crate directly,
+//! so there is one implementation rather than two to keep in sync.
 //!
 //! Only the [`translate_ledger_state`] driver below is ours. Upstream ships the
 //! table; the node drives it in
@@ -35,9 +33,13 @@
 //! compares it against the node's value, so the indexer and the node MUST
 //! translate with the same table compiled against the same ledger crates. That
 //! holds today: both pin this crate at the same rev and patch every v9-side
-//! crate to the same per-crate ledger 9.1.0.0-rc.6 tags, with
+//! crate to the same per-crate ledger 9.1.0.1-rc.2 tags, with
 //! `midnight-storage-core`'s `layout-v2` / `gc-v1` features matching. Any drift
 //! there breaks the boundary permanently.
+//!
+//! The v8 side reads through `midnight-storage` 2.x and the v9 side through 3.x.
+//! Both share one `midnight-storage-core`, hence one arena, and the translation
+//! machinery runs on the v9 side.
 //!
 //! When the ledger rc moves, re-check in this order: bump the workspace
 //! `[patch.crates-io]` tags, bump this crate's rev to whatever the matching node
@@ -59,7 +61,7 @@
 
 use midnight_ledger_v8 as ledger_v8;
 use midnight_ledger_v9 as ledger_v9;
-use midnight_storage_v2 as storage;
+use midnight_storage_v3 as storage;
 
 use midnight_base_crypto_v1::cost_model::CostDuration;
 use std::io;
@@ -156,8 +158,8 @@ mod tests {
     /// Rebuild every expected ID from the node's actual crate types and compare.
     #[test]
     fn table_tags_match_types() {
-        use storage::merkle_patricia_trie::{MerklePatriciaTrie, Node};
-        use storage::storable::SizeAnn;
+        use midnight_storage_v2::merkle_patricia_trie as merkle_patricia_trie_v2;
+        use storage::{merkle_patricia_trie as merkle_patricia_trie_v3, storable::SizeAnn};
 
         type V8Ann = ledger_v8::annotation::NightAnn;
         type V9Ann = ledger_v9::annotation::NightAnn;
@@ -175,21 +177,21 @@ mod tests {
             ),
             (V8Contract::tag(), V9Contract::tag()),
             (
-                MerklePatriciaTrie::<V8Contract, InMemoryDB, V8Ann>::tag(),
-                MerklePatriciaTrie::<V9Contract, InMemoryDB, V9Ann>::tag(),
+                merkle_patricia_trie_v2::MerklePatriciaTrie::<V8Contract, InMemoryDB, V8Ann>::tag(),
+                merkle_patricia_trie_v3::MerklePatriciaTrie::<V9Contract, InMemoryDB, V9Ann>::tag(),
             ),
             (
-                Node::<V8Contract, InMemoryDB, V8Ann>::tag(),
-                Node::<V9Contract, InMemoryDB, V9Ann>::tag(),
+                merkle_patricia_trie_v2::Node::<V8Contract, InMemoryDB, V8Ann>::tag(),
+                merkle_patricia_trie_v3::Node::<V9Contract, InMemoryDB, V9Ann>::tag(),
             ),
             (u128::tag(), u128::tag()),
             (
-                MerklePatriciaTrie::<u128, InMemoryDB, SizeAnn>::tag(),
-                MerklePatriciaTrie::<u128, InMemoryDB, V9Ann>::tag(),
+                merkle_patricia_trie_v2::MerklePatriciaTrie::<u128, InMemoryDB, SizeAnn>::tag(),
+                merkle_patricia_trie_v3::MerklePatriciaTrie::<u128, InMemoryDB, V9Ann>::tag(),
             ),
             (
-                Node::<u128, InMemoryDB, SizeAnn>::tag(),
-                Node::<u128, InMemoryDB, V9Ann>::tag(),
+                merkle_patricia_trie_v2::Node::<u128, InMemoryDB, SizeAnn>::tag(),
+                merkle_patricia_trie_v3::Node::<u128, InMemoryDB, V9Ann>::tag(),
             ),
         ];
 

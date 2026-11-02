@@ -81,9 +81,11 @@ generate-spo-api-schema:
     cargo run -p spo-api --features cloud --bin spo-api-cli print-api-schema-v1 > \
         spo-api/graphql/schema-v1.graphql
 
+# Fetching the ledger crates needs GIT_TOKEN, e.g. `GIT_TOKEN=$(gh auth token)`.
 build-docker-image package profile="dev":
     tag=$(git rev-parse --short=8 HEAD) && \
     docker build \
+        ${GIT_TOKEN:+--secret id=git_token,env=GIT_TOKEN} \
         --build-arg "RUST_VERSION={{rust_version}}" \
         --build-arg "PROFILE={{profile}}" \
         --build-arg "CARGO_AUDITABLE_VERSION={{cargo_auditable_version}}" \

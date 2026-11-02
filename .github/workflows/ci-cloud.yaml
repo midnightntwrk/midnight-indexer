@@ -76,6 +76,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The fetch-cargo-dependencies action needs GITHUB_TOKEN out of .git/config.
+          persist-credentials: false
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
@@ -90,6 +93,11 @@ jobs:
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Fetch cargo dependencies
+        uses: ./.github/actions/fetch-cargo-dependencies
+        with:
+          token: ${{ secrets.NODE_GIT_TOKEN }}
 
       - name: Init Env Vars
         uses: ./.github/actions/init-env
@@ -112,6 +120,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The fetch-cargo-dependencies action needs GITHUB_TOKEN out of .git/config.
+          persist-credentials: false
 
       - name: Login to GHCR
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
@@ -146,6 +157,11 @@ jobs:
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
+      - name: Fetch cargo dependencies
+        uses: ./.github/actions/fetch-cargo-dependencies
+        with:
+          token: ${{ secrets.NODE_GIT_TOKEN }}
+
       - name: Init Env Vars
         uses: ./.github/actions/init-env
 
@@ -161,6 +177,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The fetch-cargo-dependencies action needs GITHUB_TOKEN out of .git/config.
+          persist-credentials: false
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
@@ -175,6 +194,11 @@ jobs:
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Fetch cargo dependencies
+        uses: ./.github/actions/fetch-cargo-dependencies
+        with:
+          token: ${{ secrets.NODE_GIT_TOKEN }}
 
       - name: just doc
         run: |
