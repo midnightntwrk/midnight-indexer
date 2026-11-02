@@ -83,6 +83,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The fetch-cargo-dependencies action needs GITHUB_TOKEN out of .git/config.
+          persist-credentials: false
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
@@ -103,6 +106,11 @@ jobs:
           # PR caches are visible only to their own PR, so only main saves.
           save-if: ${{github.ref == 'refs/heads/main'}}
 
+      - name: Fetch cargo dependencies
+        uses: ./.github/actions/fetch-cargo-dependencies
+        with:
+          token: ${{ secrets.NODE_GIT_TOKEN }}
+
       - name: Init Env Vars
         uses: ./.github/actions/init-env
 
@@ -119,6 +127,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The fetch-cargo-dependencies action needs GITHUB_TOKEN out of .git/config.
+          persist-credentials: false
 
       - name: Pre-pull Docker images
         run: |
@@ -151,6 +162,11 @@ jobs:
           # PR caches are visible only to their own PR, so only main saves.
           save-if: ${{github.ref == 'refs/heads/main'}}
 
+      - name: Fetch cargo dependencies
+        uses: ./.github/actions/fetch-cargo-dependencies
+        with:
+          token: ${{ secrets.NODE_GIT_TOKEN }}
+
       - name: Init Env Vars
         uses: ./.github/actions/init-env
 
@@ -166,6 +182,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The fetch-cargo-dependencies action needs GITHUB_TOKEN out of .git/config.
+          persist-credentials: false
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
@@ -185,6 +204,11 @@ jobs:
           key: cloud
           # PR caches are visible only to their own PR, so only main saves.
           save-if: ${{github.ref == 'refs/heads/main'}}
+
+      - name: Fetch cargo dependencies
+        uses: ./.github/actions/fetch-cargo-dependencies
+        with:
+          token: ${{ secrets.NODE_GIT_TOKEN }}
 
       - name: just doc
         run: |

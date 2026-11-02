@@ -2973,13 +2973,12 @@ mod tests {
         // empty state does not.
         //
         // The pinned v9 root below was reproduced byte-for-byte by the ledger
-        // team's `v8-to-v9-state-translation` crate (`midnightntwrk/midnight-ledger`
-        // rev `da96e33d`) over this same blob — the crate `node-2.1.100-rc.2`
-        // itself translates with, so this fixture is authoritative for the
-        // translation. It moved when the ledger 8 -> 9 dust wipe landed
-        // (midnight-node #2012, backported as #2057): the v8 dust state is
-        // dropped rather than recast, which changes the arena root over any blob
-        // whose dust is non-empty.
+        // team's `v8-to-v9-state-translation` crate, at the rev
+        // `node-2.1.100-rc.3` itself translates with, over this same blob, so
+        // this fixture is authoritative for the translation. It moved when the
+        // ledger 8 -> 9 dust wipe landed (midnight-node #2012, backported as
+        // #2057): the v8 dust state is dropped rather than recast, which changes
+        // the arena root over any blob whose dust is non-empty.
         //
         // To re-derive after an upstream change, add
         //   v8-to-v9-state-translation = { git = "https://github.com/midnightntwrk/midnight-ledger", rev = "<rev>" }
