@@ -344,13 +344,6 @@ jobs:
           docker compose --profile ${{ matrix.profile }} config --quiet
           echo "Docker Compose syntax validation completed successfully"
 
-      - name: Login to GHCR
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Setup Docker Metadata
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
@@ -392,6 +385,25 @@ jobs:
             echo "Using node tag: $node_tag"
             echo "NODE_TAG=$node_tag" >> "$GITHUB_ENV"
           fi
+
+      # GITHUB_TOKEN cannot read the private shadow-midnight-node package, and a second GHCR login
+      # replaces the first, so the node image is pulled before logging in for this repo's images.
+      - name: Login to GHCR for the node image
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: MidnightCI
+          password: ${{ secrets.MIDNIGHTCI_PACKAGES_READ }}
+
+      - name: Pre-pull node image
+        run: docker pull "ghcr.io/shieldedtech/shadow-midnight-node:$NODE_TAG"
+
+      - name: Login to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set image registry
         run: |
