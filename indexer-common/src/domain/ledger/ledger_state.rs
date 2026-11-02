@@ -2872,7 +2872,7 @@ mod tests {
         //
         // The pinned v9 root below was reproduced byte-for-byte by the ledger
         // team's `v8-to-v9-state-translation` crate (`midnightntwrk/midnight-ledger`
-        // rev `da96e33d`) over this same blob — the crate `node-2.1.0-rc.4`
+        // rev `da96e33d`) over this same blob — the crate `node-2.1.100-rc.2`
         // itself translates with, so this fixture is authoritative for the
         // translation. It moved when the ledger 8 -> 9 dust wipe landed
         // (midnight-node #2012, backported as #2057): the v8 dust state is
@@ -3288,7 +3288,7 @@ mod tests {
                 .starts_with(b"midnight:contract-state[v8]:"),
             "the translated state must serialize with the ledger-9 tag"
         );
-        let balances = translated.balances()?;
+        let balances = translated.balances();
         assert_eq!(balances.len(), 1);
         assert_eq!(
             balances[0].amount, AMOUNT,
@@ -3423,7 +3423,7 @@ mod tests {
         );
 
         // Field reads must survive the lazy reload too, not just the byte-level walk.
-        let balances = reloaded.balances()?;
+        let balances = reloaded.balances();
         assert_eq!(balances.len(), 1);
         assert_eq!(balances[0].amount, AMOUNT);
 

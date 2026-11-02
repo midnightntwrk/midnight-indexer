@@ -14,7 +14,7 @@
 mod v0_22_0;
 mod v1_0_300;
 mod v2_0_0;
-mod v2_1_0;
+mod v2_1_100;
 
 // To see how this is generated, look in build.rs
 include!(concat!(env!("OUT_DIR"), "/generated_runtime.rs"));
@@ -143,7 +143,7 @@ pub async fn decode_block_details(
             v2_0_0::make_block_details(authorities, client, block, extrinsics, events).await
         }
         NodeVersion::V2_1 => {
-            v2_1_0::make_block_details(authorities, client, block, extrinsics, events).await
+            v2_1_100::make_block_details(authorities, client, block, extrinsics, events).await
         }
     }
 }
@@ -193,7 +193,7 @@ pub async fn fetch_authorities(
         NodeVersion::V0_22 => v0_22_0::fetch_authorities(block).await,
         NodeVersion::V1_0 => v1_0_300::fetch_authorities(block).await,
         NodeVersion::V2_0 => v2_0_0::fetch_authorities(block).await,
-        NodeVersion::V2_1 => v2_1_0::fetch_authorities(block).await,
+        NodeVersion::V2_1 => v2_1_100::fetch_authorities(block).await,
     }
 }
 
@@ -203,7 +203,7 @@ pub fn decode_slot(slot: &[u8], node_version: NodeVersion) -> Result<u64, SubxtN
         NodeVersion::V0_22 => v0_22_0::decode_slot(slot),
         NodeVersion::V1_0 => v1_0_300::decode_slot(slot),
         NodeVersion::V2_0 => v2_0_0::decode_slot(slot),
-        NodeVersion::V2_1 => v2_1_0::decode_slot(slot),
+        NodeVersion::V2_1 => v2_1_100::decode_slot(slot),
     }
 }
 
@@ -215,7 +215,7 @@ pub async fn get_zswap_merkle_tree_root(
         NodeVersion::V0_22 => v0_22_0::get_zswap_merkle_tree_root(block).await,
         NodeVersion::V1_0 => v1_0_300::get_zswap_merkle_tree_root(block).await,
         NodeVersion::V2_0 => v2_0_0::get_zswap_merkle_tree_root(block).await,
-        NodeVersion::V2_1 => v2_1_0::get_zswap_merkle_tree_root(block).await,
+        NodeVersion::V2_1 => v2_1_100::get_zswap_merkle_tree_root(block).await,
     }
 }
 
@@ -228,7 +228,7 @@ pub async fn get_ledger_state_root(
         NodeVersion::V0_22 => v0_22_0::get_ledger_state_root(block).await,
         NodeVersion::V1_0 => v1_0_300::get_ledger_state_root(block).await,
         NodeVersion::V2_0 => v2_0_0::get_ledger_state_root(block).await,
-        NodeVersion::V2_1 => v2_1_0::get_ledger_state_root(block).await,
+        NodeVersion::V2_1 => v2_1_100::get_ledger_state_root(block).await,
     }
 }
 
@@ -241,7 +241,7 @@ pub async fn get_d_parameter(
         NodeVersion::V0_22 => v0_22_0::get_d_parameter(block).await,
         NodeVersion::V1_0 => v1_0_300::get_d_parameter(block).await,
         NodeVersion::V2_0 => v2_0_0::get_d_parameter(block).await,
-        NodeVersion::V2_1 => v2_1_0::get_d_parameter(block).await,
+        NodeVersion::V2_1 => v2_1_100::get_d_parameter(block).await,
     }
 }
 
@@ -256,7 +256,7 @@ pub async fn fetch_genesis_cnight_registrations(
         NodeVersion::V0_22 => v0_22_0::fetch_genesis_cnight_registrations(block).await,
         NodeVersion::V1_0 => v1_0_300::fetch_genesis_cnight_registrations(block).await,
         NodeVersion::V2_0 => v2_0_0::fetch_genesis_cnight_registrations(block).await,
-        NodeVersion::V2_1 => v2_1_0::fetch_genesis_cnight_registrations(block).await,
+        NodeVersion::V2_1 => v2_1_100::fetch_genesis_cnight_registrations(block).await,
     }
 }
 
@@ -269,7 +269,7 @@ pub async fn get_terms_and_conditions(
         NodeVersion::V0_22 => v0_22_0::get_terms_and_conditions(block).await,
         NodeVersion::V1_0 => v1_0_300::get_terms_and_conditions(block).await,
         NodeVersion::V2_0 => v2_0_0::get_terms_and_conditions(block).await,
-        NodeVersion::V2_1 => v2_1_0::get_terms_and_conditions(block).await,
+        NodeVersion::V2_1 => v2_1_100::get_terms_and_conditions(block).await,
     }
 }
 
@@ -559,7 +559,7 @@ mod tests {
     // indexer serves for its block 0.
     #[tokio::test]
     async fn genesis_block_of_devnet_runtime_1_0_300() {
-        let details = decode("devnet-0", "1.0.300").await.unwrap();
+        let details = decode("devnet-0", "1.0.400").await.unwrap();
         assert_eq!(
             summary(&details),
             [
@@ -598,7 +598,7 @@ mod tests {
 
     #[tokio::test]
     async fn registrations_block_of_devnet_runtime_1_0_300() {
-        let details = decode("devnet-2", "1.0.300").await.unwrap();
+        let details = decode("devnet-2", "1.0.400").await.unwrap();
         assert_eq!(
             summary(&details),
             [
@@ -614,7 +614,7 @@ mod tests {
 
     #[tokio::test]
     async fn midnight_transaction_block_of_devnet_runtime_1_0_300() {
-        let details = decode("devnet-8464", "1.0.300").await.unwrap();
+        let details = decode("devnet-8464", "1.0.400").await.unwrap();
         assert_eq!(
             summary(&details),
             [
@@ -647,7 +647,7 @@ mod tests {
 
         let mut checked = 0;
         for name in ["devnet-0", "devnet-2", "devnet-8464"] {
-            let details = decode(name, "1.0.300").await?;
+            let details = decode(name, "1.0.400").await?;
             for (_, transaction, outcome) in details.transactions {
                 use Transaction::*;
 
@@ -912,11 +912,12 @@ mod tests {
         }
     }
 
-    const RUNTIMES: [(&str, u32); 4] = [
+    const RUNTIMES: [(&str, u32); 5] = [
         ("0.22.0", 22_000),
-        ("1.0.300", 1_000_300),
+        ("1.0.400", 1_000_300),
         ("2.0.0-rc.4", 2_000_000),
         ("2.1.0-rc.4", 2_001_000),
+        ("2.1.100-rc.2", 2_001_100),
     ];
 
     #[tokio::test]
