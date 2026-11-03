@@ -2,16 +2,34 @@
 
 ## Overview
 
-End-to-end tests provide comprehensive validation of the Midnight Indexer by actively interacting with the blockchain through the Midnight Node Toolkit. These tests create real blockchain transactions and contract interactions, then verify that the indexer correctly captures and reports these events through its GraphQL API.
+End-to-end tests provide comprehensive validation of the Midnight Indexer by actively interacting with the blockchain through a transaction backend: the Midnight Node Toolkit or moth-wallet, selected by `TX_BACKEND`. These tests create real blockchain transactions and contract interactions, then verify that the indexer correctly captures and reports these events through its GraphQL API.
 
 ## Be aware of
-These tests are slower than the other tests as submitting transactions to a Midnight node can take time. Also these test use the Midnight Node Toolkit, which needs the full view of the blockchain to be able to operate with transactions. These test will be slow the first time because the Toolkit needs to pull all the blocks from the chain and this can take a lot of time and depends on the number of blocks. However, the good news is that after the first pull, everything should be cached and future execution should take much less time.
+These tests are slower than the other tests as submitting transactions to a Midnight node can take time. On the toolkit backend they use the Midnight Node Toolkit, which needs the full view of the blockchain to be able to operate with transactions. These test will be slow the first time because the Toolkit needs to pull all the blocks from the chain and this can take a lot of time and depends on the number of blocks. However, the good news is that after the first pull, everything should be cached and future execution should take much less time.
 
 ## Test Scope
 
-### Toolkit Basics
-- **Toolkit Functionality**: Validates that the Node Toolkit container is operational and can perform basic operations
-- **Key Material Management**: Tests generation and handling of cryptographic keys and addresses
+### Transaction backends
+
+`TX_BACKEND` selects the wallet tool every suite builds and submits transactions with:
+
+| `TX_BACKEND` | Backend | Notes |
+|---|---|---|
+| unset / `toolkit` | `midnight-node-toolkit` container | Replays the chain from genesis into its cache; slow on long-lived environments. |
+| `moth` | moth-wallet, in-process | Persists and restores each wallet's sync state. Needs a proof server matching the node's ledger (`PROOF_SERVER_URL`, or one is started from `PROOF_SERVER_TAG`). `FUNDING_SEED_<ENV>_LIGHT` selects a lighter funding wallet for transfers. |
+
+Suites reach the backend only through `createTxBackend()` (`utils/tx-backend`): transfers, contract deploy/call/update, wallet state, DUST balance, addresses and viewing keys. Both implementations return the same shapes, and moth's addresses and viewing keys are pinned to the toolkit's by `tests/unit/utils/moth/moth-addresses.test.ts`.
+
+A suite that needs something only one backend can do declares it with `requiresBackend()` and **skips** on the other, with the requirement in its title (e.g. `[TX_BACKEND=toolkit only, running moth]`):
+
+| Suite | Requires | Why |
+|---|---|---|
+| `contract-actions-partial-success` | toolkit | custom contract via the toolkit's `contract-custom` flow |
+| `contract-deploy-failed-segment` | toolkit | crafted raw toolkit transaction |
+| `unshielded-balance-e2e` (skipped) | toolkit | minter contract shipped in the toolkit image |
+| `segment-probe-contract-actions` | moth | custom contract via midnight-js |
+
+`tests/e2e/tx-backend/` holds self-checks of the selected backend (wallet state and DUST balance in the expected schema). They make no indexer calls.
 
 ### Transaction Tests
 - **Shielded Transactions**: Creates shielded token transfers between wallets and validates indexer reporting
@@ -46,10 +64,9 @@ Its candidates are point-in-time, so the suite probes the funding wallet at run 
 
 ## Cache Warmup
 
-E2E tests include a global setup phase that warms up the toolkit cache. This process:
-- Downloads and initializes the Node Toolkit container
-- Prepares the toolkit environment for test execution
-- Typically takes 30-60 seconds on first run (cached for subsequent runs)
+Global setup warms only the selected backend:
+- **toolkit**: starts a container, fetches the chain into the toolkit cache and pre-warms the funding wallet. Typically 30-60 seconds on a fresh local chain; hours on a long-lived one the first time.
+- **moth**: starts the proof server once for all workers and syncs the transfer funding wallet into moth's cache (`~/.moth`, or `MOTH_HOME`), which the workers then restore from.
 
 ## When to Run
 
@@ -62,9 +79,13 @@ E2E tests should be executed:
 ## Execution
 
 ```bash
-# Run only e2e tests (includes cache warmup)
+# Run only e2e tests (includes cache warmup). Files must run one at a time:
+# they share one funding wallet, so always pass --no-file-parallelism.
 bash qa/scripts/startup-localenv-from-genesis.sh
-TARGET_ENV=undeployed bun run test:e2e
+TARGET_ENV=undeployed bun run test:e2e --no-file-parallelism
+
+# The same suites on moth
+TARGET_ENV=undeployed TX_BACKEND=moth bun run test:e2e --no-file-parallelism
 
 # Run a single unshielded token type
 TARGET_ENV=undeployed bun run test:e2e tests/e2e/night-transactions.test.ts
@@ -78,6 +99,6 @@ Running against a long-lived environment — which the custom token suite has to
 
 These tests require:
 - A running Midnight node and indexer
-- Docker access for the Node Toolkit
+- Docker access for the Node Toolkit (toolkit backend) or a proof server (moth backend)
 - More time to execute due to real blockchain interactions
 
