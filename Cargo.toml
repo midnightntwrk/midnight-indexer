@@ -21,7 +21,7 @@ documentation = "https://github.com/midnightntwrk/midnight-indexer"
 publish       = false
 
 [workspace.dependencies]
-# Ledger v8. base-crypto and serialize are patched to the rc tags below and
+# Ledger v8. base-crypto and serialize are patched to the tags below and
 # shared with v9 (within-major).
 #
 # Every crate that resolves from crates.io carries an `=` pin. The caret reqs all
@@ -123,13 +123,13 @@ trait-variant               = { version = "0.1" }
 uuid                        = { version = "1.23", features = [ "serde" ] }
 walkdir                     = { version = "2.5" }
 
-# Ledger 9.1.0.1-rc.2; the v8/v9 coexistence shape traces to
-# midnight-ledger#580. The rc crates aren't on crates.io, hence git tags.
+# Ledger 9.1.0.1; the v8/v9 coexistence shape traces to
+# midnight-ledger#580. The ledger 9 crates aren't on crates.io, hence git tags.
 # Storage 2.0.3 and storage-core 1.2.3 sit at versions compatible with ledger
 # 8.1.3, as in the node.
 #
-# These pins match midnight-node `node-2.1.100-rc.4` crate for crate — same
-# per-crate rc tags on the v9 side, same `=8.1.3` / `=3.0.2` / `=3.1.2` v8 side,
+# These pins match midnight-node `node-2.1.100` crate for crate — same
+# per-crate tags on the v9 side, same `=8.1.3` / `=3.0.2` / `=3.1.2` v8 side,
 # same `layout-v2` + `gc-v1` on storage-core, same `v8-to-v9-state-translation`
 # rev. They have to: the indexer re-derives the translated arena root and
 # compares it against the node's at the fork boundary. Re-check that parity
@@ -145,8 +145,8 @@ walkdir                     = { version = "2.5" }
 # its own entry for that reason: under the workspace tag it arrived free via
 # `path = "../static"`, and crates.io stops at 9.0.0.
 #
-# `midnight-transient-crypto-old` stays on transient-crypto-2.2.0-rc.1: the 2.x
-# crypto stack is frozen and 9.1.0.1-rc.2 only ships 3.x.
+# `midnight-transient-crypto-old` pins transient-crypto 2.2.0: the 2.x crypto
+# stack is frozen and 9.1.0.1 only ships 3.x.
 #
 # Storage is split by ledger major. Ledger 9 needs `midnight-storage` 3.x (its
 # `Map` keys need `EncodingShape`), patched in here; ledger 8 stays on crates.io
@@ -160,19 +160,19 @@ walkdir                     = { version = "2.5" }
 # cross-major v9 crates carry package + version to patch only their major,
 # leaving v8's registry versions intact.
 [patch.crates-io]
-midnight-base-crypto          = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "base-crypto-1.1.1-rc.2" }
-midnight-base-crypto-derive   = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "base-crypto-derive-1.1.0-rc.2" }
-midnight-serialize            = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "serialize-1.2.1-rc.1" }
-midnight-zkir                 = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "zkir-2.2.0-rc.4" }
-midnight-storage              = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "storage-3.0.0-rc.1" }
-midnight-storage-core         = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "storage-core-1.2.3-rc.2" }
-midnight-storage-macros       = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "storage-macros-1.0.1-rc.1" }
-midnight-transient-crypto-old = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "transient-crypto-2.2.0-rc.1", package = "midnight-transient-crypto", version = "2.2.0" }
-midnight-ledger-static        = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "crate-ledger-9.1.0.1-rc.2" }
-midnight-ledger-v9            = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "crate-ledger-9.1.0.1-rc.2" }
-midnight-zswap_v9             = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "zswap-9.0.1-rc.2",                 package = "midnight-zswap",            version = "9.0.1" }
-midnight-coin-structure_v3    = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "coin-structure-3.0.1-rc.1",        package = "midnight-coin-structure",   version = "3.0.1" }
-midnight-transient-crypto_v3  = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "transient-crypto-3.0.1-rc.1",       package = "midnight-transient-crypto", version = "3.0.1" }
-midnight-onchain-runtime_v4   = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "crate-onchain-runtime-4.0.1-rc.2", package = "midnight-onchain-runtime",  version = "4.0.1" }
-midnight-onchain-state_v4     = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "onchain-state-4.0.1-rc.1",         package = "midnight-onchain-state",    version = "4.0.1" }
-midnight-onchain-vm_v4        = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "onchain-vm-4.0.1-rc.2",            package = "midnight-onchain-vm",       version = "4.0.1" }
+midnight-base-crypto          = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "base-crypto-1.1.1" }
+midnight-base-crypto-derive   = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "base-crypto-derive-1.1.0" }
+midnight-serialize            = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "serialize-1.2.1" }
+midnight-zkir                 = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "crate-zkir-2.2.0" }
+midnight-storage              = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "storage-3.0.0" }
+midnight-storage-core         = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "storage-core-1.2.3" }
+midnight-storage-macros       = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "storage-macros-1.0.1" }
+midnight-transient-crypto-old = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "transient-crypto-2.2.0", package = "midnight-transient-crypto", version = "2.2.0" }
+midnight-ledger-static        = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "crate-ledger-9.1.0.1" }
+midnight-ledger-v9            = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "crate-ledger-9.1.0.1" }
+midnight-zswap_v9             = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "zswap-9.0.1",                 package = "midnight-zswap",            version = "9.0.1" }
+midnight-coin-structure_v3    = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "coin-structure-3.0.1",        package = "midnight-coin-structure",   version = "3.0.1" }
+midnight-transient-crypto_v3  = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "transient-crypto-3.0.1",      package = "midnight-transient-crypto", version = "3.0.1" }
+midnight-onchain-runtime_v4   = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "crate-onchain-runtime-4.0.1", package = "midnight-onchain-runtime",  version = "4.0.1" }
+midnight-onchain-state_v4     = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "onchain-state-4.0.1",         package = "midnight-onchain-state",    version = "4.0.1" }
+midnight-onchain-vm_v4        = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "onchain-vm-4.0.1",            package = "midnight-onchain-vm",       version = "4.0.1" }
