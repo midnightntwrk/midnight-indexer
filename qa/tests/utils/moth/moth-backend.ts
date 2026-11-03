@@ -203,9 +203,9 @@ const awaitSettled = async (
           };
           const line =
             `moth syncing (${elapsed(now - started)})  ` +
-            `${one('shielded', s.shielded?.state?.progress)}  ` +
+            `${one('shielded', s.shielded?.progress)}  ` +
             `${one('unshielded', s.unshielded?.progress)}  ` +
-            `${one('dust', s.dust?.state?.progress)}`;
+            `${one('dust', s.dust?.progress)}`;
           log.info(line);
           // Global setup has no test log of its own and can sit here for well
           // over an hour on a first sync. Without a line on stdout a healthy slow
@@ -215,14 +215,14 @@ const awaitSettled = async (
         Rx.filter((s: any) => {
           try {
             const complete =
-              s.shielded?.state?.progress?.isStrictlyComplete?.() === true &&
+              s.shielded?.progress?.isStrictlyComplete?.() === true &&
               s.unshielded?.progress?.isStrictlyComplete?.() === true &&
-              s.dust?.state?.progress?.isStrictlyComplete?.() === true;
+              s.dust?.progress?.isStrictlyComplete?.() === true;
             if (!complete) return false;
             const idle = (p: any) =>
               Number(p?.appliedIndex ?? 0n) === 0 &&
               Number(p?.highestRelevantWalletIndex ?? p?.highestIndex ?? 0n) === 0;
-            if (idle(s.shielded?.state?.progress) && idle(s.dust?.state?.progress)) {
+            if (idle(s.shielded?.progress) && idle(s.dust?.progress)) {
               zeroTotalSince ??= Date.now();
               if (Date.now() - zeroTotalSince > ZERO_TOTAL_GRACE_MS) {
                 throw new Error(
@@ -634,7 +634,15 @@ export const getDustBalanceViaMoth = async (seed: string): Promise<DustBalance> 
   // agree, and the wallet's own `availableCoins` getter would value the coins
   // at its sync time instead.
   const now = new Date();
-  const coinsAndBalances = dust.capabilities.coinsAndBalances;
+  // wallet-sdk 2 dropped `capabilities` from the dust state, so the backing NIGHT
+  // value is not reachable here; fail loudly rather than report a made-up value.
+  const coinsAndBalances = (dust as any).capabilities?.coinsAndBalances;
+  if (!coinsAndBalances) {
+    throw new Error(
+      'getDustBalanceViaMoth is not supported on wallet-sdk 2 yet: the dust state no longer ' +
+        'exposes per-coin generation info (backing NIGHT value).',
+    );
+  }
 
   // `getAvailableCoins` already drops UTXOs without generation info (which have
   // no value the toolkit can report, and the schema's `generation_info` is not

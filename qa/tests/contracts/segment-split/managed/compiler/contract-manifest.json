@@ -1,0 +1,79 @@
+{
+  "manifest-version": "1",
+  "compiler-version": "0.35.0",
+  "compiler-commit": "debb05f9414b9d1e176741c2be289bb32233f0fc",
+  "language-version": "0.27.0",
+  "runtime-version": "0.20.0",
+  "compiler": {
+    "type": "directory",
+    "contract-info.json": {
+      "type": "file",
+      "size": 1260,
+      "hash": "8cc44ce42a45881b2cea971a5d144717e07667625f9defbbea69b4eb16ae88d2"
+    }
+  },
+  "contract": {
+    "type": "directory",
+    "index.d.ts": {
+      "type": "file",
+      "size": 1983,
+      "hash": "5999710edace928047aaa5e71f1b55ea7eae3ca2c1b3ed00e77b7753a57f6af1"
+    },
+    "index.js": {
+      "type": "file",
+      "size": 79759,
+      "hash": "744ba8fe2c31b7161c0176502446fc9ae05ef129ff35e900984289c8788cc1a9"
+    },
+    "index.js.map": {
+      "type": "file",
+      "size": 1962,
+      "hash": "bb81f282ed708677521313cb0e4a094cbb5f95bf3dc01e201198b96098022828"
+    }
+  },
+  "zkir": {
+    "type": "directory",
+    "burnWithGuaranteed.bzkir": {
+      "type": "file",
+      "size": 1000,
+      "hash": "83b5a69b8848b84d6c32022897ddc1929eaeed189bab88c2a9272655abb91543"
+    },
+    "burnWithGuaranteed.zkir": {
+      "type": "file",
+      "size": 17507,
+      "hash": "e8b4a70ac00c752f1f4d24d191b0b816e3dd780f0952828aa07ed089a3061639"
+    },
+    "burnWithoutGuaranteed.bzkir": {
+      "type": "file",
+      "size": 974,
+      "hash": "dc4df6c6bf72c0c8d3036b09bbd70ac1624375c1d7e8cdfbc28842ce423c3bab"
+    },
+    "burnWithoutGuaranteed.zkir": {
+      "type": "file",
+      "size": 17032,
+      "hash": "b8205ae6d46202af57d964d7464c7380d170f43e207885d32f774d587466e321"
+    }
+  },
+  "keys": {
+    "type": "directory",
+    "burnWithGuaranteed.prover": {
+      "type": "file",
+      "size": 139272,
+      "hash": "4887f6e28181a9cd3b9da75877e439fdcd7991a1687176ee7009e5411716b2ea"
+    },
+    "burnWithGuaranteed.verifier": {
+      "type": "file",
+      "size": 1351,
+      "hash": "618af433201f8905da15d8c97e4d45016ce55d3324b0da2f2378c76b07362fa8"
+    },
+    "burnWithoutGuaranteed.prover": {
+      "type": "file",
+      "size": 139257,
+      "hash": "67464724cc63d796539b52d8def6b69adc9fe68cf1df256b908718d618cf230c"
+    },
+    "burnWithoutGuaranteed.verifier": {
+      "type": "file",
+      "size": 1351,
+      "hash": "abffddfc8a02b85dbc9c99ffd2bb49c38efed2760913c232e1b825b5cdc899cd"
+    }
+  }
+}

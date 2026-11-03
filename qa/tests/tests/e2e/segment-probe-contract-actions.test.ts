@@ -26,7 +26,7 @@
 //
 // The contract itself is the fixture from the guaranteed/fallible segment
 // investigation (segment-probe, "pink tawny owl"), recompiled here with
-// compactc 0.31.1. This suite deliberately exercises only its FIRST call, which
+// compactc 0.35.0. This suite deliberately exercises only its FIRST call, which
 // applies normally — the stale-call behaviour it was built for belongs in that
 // probe, not in indexer query assertions.
 //

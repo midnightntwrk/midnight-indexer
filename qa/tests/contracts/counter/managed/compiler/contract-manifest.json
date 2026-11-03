@@ -1,0 +1,79 @@
+{
+  "manifest-version": "1",
+  "compiler-version": "0.35.0",
+  "compiler-commit": "debb05f9414b9d1e176741c2be289bb32233f0fc",
+  "language-version": "0.27.0",
+  "runtime-version": "0.20.0",
+  "compiler": {
+    "type": "directory",
+    "contract-info.json": {
+      "type": "file",
+      "size": 750,
+      "hash": "8a0acd24340fa95470bec6c9a75afcf51f2f6668c81d8a2cb35d5974183458da"
+    }
+  },
+  "contract": {
+    "type": "directory",
+    "index.d.ts": {
+      "type": "file",
+      "size": 1664,
+      "hash": "6b17270f94230628e482b3a2a62ef3602cbf94cb695436aff8570fa2843c2b98"
+    },
+    "index.js": {
+      "type": "file",
+      "size": 14460,
+      "hash": "7fce02a9d04a0ad9ff08510a06c10333c3b6874e70d51f5ca9f62cc179a275e8"
+    },
+    "index.js.map": {
+      "type": "file",
+      "size": 614,
+      "hash": "c65b817304d9da5683c9e407249cab20c9fdba10f085d4c832c93c5217ac938a"
+    }
+  },
+  "zkir": {
+    "type": "directory",
+    "increment.bzkir": {
+      "type": "file",
+      "size": 64,
+      "hash": "833adb07e48001c8298bf203770b4dc2bf141c84e8c3a84d365894fc07c8bb3a"
+    },
+    "increment.zkir": {
+      "type": "file",
+      "size": 784,
+      "hash": "53ea5208e5594c4bd7c3be6ce9447fa019968ce5f7654afec9c7c9e0c4ee8289"
+    },
+    "store.bzkir": {
+      "type": "file",
+      "size": 64,
+      "hash": "833adb07e48001c8298bf203770b4dc2bf141c84e8c3a84d365894fc07c8bb3a"
+    },
+    "store.zkir": {
+      "type": "file",
+      "size": 784,
+      "hash": "53ea5208e5594c4bd7c3be6ce9447fa019968ce5f7654afec9c7c9e0c4ee8289"
+    }
+  },
+  "keys": {
+    "type": "directory",
+    "increment.prover": {
+      "type": "file",
+      "size": 14071,
+      "hash": "5b5e8ff644f16d11a90240f1be25011c53df2dde78e6c2edab8d73cfcf06e5a7"
+    },
+    "increment.verifier": {
+      "type": "file",
+      "size": 1351,
+      "hash": "62d768951a97c18af8cb385f8c0fe6488a4dbfbebce83ea08b21914a0ebe7789"
+    },
+    "store.prover": {
+      "type": "file",
+      "size": 14071,
+      "hash": "5b5e8ff644f16d11a90240f1be25011c53df2dde78e6c2edab8d73cfcf06e5a7"
+    },
+    "store.verifier": {
+      "type": "file",
+      "size": 1351,
+      "hash": "62d768951a97c18af8cb385f8c0fe6488a4dbfbebce83ea08b21914a0ebe7789"
+    }
+  }
+}
