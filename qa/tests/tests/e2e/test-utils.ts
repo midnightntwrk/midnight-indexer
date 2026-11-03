@@ -18,8 +18,8 @@ import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { z } from 'zod';
 import log from '@utils/logging/logger';
 import { IndexerWsClient, UnshieldedTxSubscriptionResponse } from '@utils/indexer/websocket-client';
-import { ToolkitWrapper, type ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
-import { deriveAddresses } from '@utils/moth/moth-addresses';
+import type { ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
+import type { TxBackend } from '@utils/tx-backend';
 
 /**
  * Whether two hashes or addresses are the same, ignoring case, surrounding whitespace and a `0x`
@@ -220,13 +220,13 @@ export function validateSchema<T>(data: T, schema: z.ZodSchema<T>, dataType: str
  *  waits for initial event streams to stabilise and returns all relevant context needed before performing any transactions.
  */
 export async function setupWalletEventSubscriptions(
-  toolkit: ToolkitWrapper,
+  backend: TxBackend,
   indexerWsClient: IndexerWsClient,
   sourceSeed: string,
   destinationSeeds: string[],
 ) {
   // Getting the addresses from their seeds
-  const sourceAddress = (await deriveAddresses(sourceSeed, toolkit)).unshielded;
+  const sourceAddress = (await backend.addresses(sourceSeed)).unshielded;
   // Events from the indexer websocket for both the source addresses
   const sourceAddressEvents: UnshieldedTxSubscriptionResponse[] = [];
 
@@ -248,7 +248,7 @@ export async function setupWalletEventSubscriptions(
   // nothing and costs a connection slot on the shared socket.
   const destinationWallets = await Promise.all(
     destinationSeeds.map(async (seed) => {
-      const destinationAddress = (await deriveAddresses(seed, toolkit)).unshielded;
+      const destinationAddress = (await backend.addresses(seed)).unshielded;
 
       if (destinationAddress === sourceAddress) {
         return {

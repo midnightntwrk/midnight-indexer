@@ -26,7 +26,7 @@ import {
 } from '@utils/indexer/websocket-client';
 import { buildErrorPayload } from '@utils/indexer/subscription-error';
 import { generateSyntheticViewingKey } from '@utils/bech32-codec';
-import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
+import { createTxBackend, type TxBackend } from '@utils/tx-backend';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import {
   MerkleTreeCollapsedUpdateSchema,
@@ -38,9 +38,7 @@ import { isProgressProtocolVersionSupported } from '@utils/indexer/schema-featur
 import type { ShieldedTransactionsProgress } from '@utils/indexer/indexer-types';
 import dataProvider from '@utils/testdata-provider';
 
-// This is longer because it might take some time when
-// a new verion of the toolkit image is available and
-// it needs to be pulled the first time
+// Generous because the toolkit backend may first pull a new toolkit image.
 const TOOLKIT_STARTUP_TIMEOUT = 60_000;
 
 const httpClient = new IndexerHttpClient();
@@ -53,14 +51,14 @@ const PROGRESS_PROTOCOL_VERSION_ABSENT =
 
 describe('shielded transaction subscriptions', () => {
   let randomSeed: string;
-  let toolkit: ToolkitWrapper;
+  let backend: TxBackend;
   let indexerWsClient: IndexerWsClient;
   let progressProtocolVersionSupported = false;
 
   beforeAll(async () => {
-    // Initialise the toolkit wrapper
-    toolkit = new ToolkitWrapper({});
-    await toolkit.start();
+    // Initialise the tx backend TX_BACKEND selects
+    backend = createTxBackend();
+    await backend.start();
 
     progressProtocolVersionSupported = await isProgressProtocolVersionSupported();
     if (!progressProtocolVersionSupported) {
@@ -69,7 +67,7 @@ describe('shielded transaction subscriptions', () => {
   }, TOOLKIT_STARTUP_TIMEOUT);
 
   afterAll(async () => {
-    await toolkit.stop();
+    await backend.stop();
   });
 
   beforeEach(async () => {
@@ -102,7 +100,7 @@ describe('shielded transaction subscriptions', () => {
      */
     test('should return a session ID, given a valid viewing key', async () => {
       log.info(`randomSeed = ${randomSeed}`);
-      const viewingKey = await toolkit.showViewingKey(randomSeed);
+      const viewingKey = await backend.viewingKey(randomSeed);
       log.debug(`viewingKey = ${viewingKey}`);
 
       return indexerWsClient
@@ -162,7 +160,7 @@ describe('shielded transaction subscriptions', () => {
       const networkIds = env.getAllEnvironmentNames();
       for (const networkId of networkIds) {
         log.debug(`networkId = ${networkId}`);
-        const viewingKey = await toolkit.showViewingKey(randomSeed, networkId);
+        const viewingKey = await backend.viewingKey(randomSeed, networkId);
         log.debug(`viewingKey = ${viewingKey}`);
         if (networkId === env.getNetworkId().toLowerCase()) {
           continue;
@@ -183,8 +181,8 @@ describe('shielded transaction subscriptions', () => {
      * @then Indexer should terminate the session successfully
      */
     test('should terminate the session successfully, given a valid session ID', async () => {
-      // Gets the viewing key for the random seed using toolkit
-      const viewingKey = await toolkit.showViewingKey(randomSeed);
+      // Gets the viewing key for the random seed from the tx backend
+      const viewingKey = await backend.viewingKey(randomSeed);
       log.debug(`viewingKey = ${viewingKey}`);
 
       const sessionId = await indexerWsClient.openWalletSession(viewingKey);
@@ -230,7 +228,7 @@ describe('shielded transaction subscriptions', () => {
     test('should stream wallet events starting from the beginning, given there are relevant transactions', async () => {
       // Seed with transaction from which we get viewing key
       const seedWithTransactions = dataProvider.getFundingSeed();
-      const viewingKey = await toolkit.showViewingKey(seedWithTransactions);
+      const viewingKey = await backend.viewingKey(seedWithTransactions);
       log.debug(`viewingKey = ${viewingKey}`);
 
       const sessionId: string = await indexerWsClient.openWalletSession(viewingKey);
@@ -271,7 +269,7 @@ describe('shielded transaction subscriptions', () => {
     test('should stream shielded transaction events adhering to the expected schema', async () => {
       // Seed with transaction from which we get viewing key
       const seedWithTransactions = dataProvider.getFundingSeed();
-      const viewingKey = await toolkit.showViewingKey(seedWithTransactions);
+      const viewingKey = await backend.viewingKey(seedWithTransactions);
       log.debug(`viewingKey = ${viewingKey}`);
 
       const sessionId: string = await indexerWsClient.openWalletSession(viewingKey);
@@ -324,7 +322,7 @@ describe('shielded transaction subscriptions', () => {
      */
     test('should be able to use highestZswapEndIndex from progress event in collapsed update query', async () => {
       const seedWithTransactions = dataProvider.getFundingSeed();
-      const viewingKey = await toolkit.showViewingKey(seedWithTransactions);
+      const viewingKey = await backend.viewingKey(seedWithTransactions);
 
       const sessionId: string = await indexerWsClient.openWalletSession(viewingKey);
 
@@ -397,7 +395,7 @@ describe('shielded transaction subscriptions', () => {
         return ctx.skip(true, PROGRESS_PROTOCOL_VERSION_ABSENT);
       }
 
-      const viewingKey = await toolkit.showViewingKey(dataProvider.getFundingSeed());
+      const viewingKey = await backend.viewingKey(dataProvider.getFundingSeed());
       const sessionId: string = await indexerWsClient.openWalletSession(viewingKey);
 
       // The first progress event is emitted immediately on subscribe, so the 15s
@@ -448,7 +446,7 @@ describe('shielded transaction subscriptions', () => {
      */
     test('should reject shieldedTransactions subscription when using expired session ID', async () => {
       const seedWithTransactions = dataProvider.getFundingSeed();
-      const viewingKey = await toolkit.showViewingKey(seedWithTransactions);
+      const viewingKey = await backend.viewingKey(seedWithTransactions);
 
       const sessionId = await indexerWsClient.openWalletSession(viewingKey);
 

@@ -17,36 +17,24 @@ import log from '@utils/logging/logger';
 import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
 import dataProvider from '@utils/testdata-provider';
-import { ToolkitWrapper, type DustBalance } from '@utils/toolkit/toolkit-wrapper';
+import type { DustBalance } from '@utils/toolkit/toolkit-wrapper';
+import { createTxBackend } from '@utils/tx-backend';
 import { DustBalanceSchema } from '@utils/toolkit/schemas';
-import { env } from 'environment/model';
 import { seedFingerprint } from '@utils/moth/moth-backend';
 
-const TOOLKIT_STARTUP_TIMEOUT = 60_000;
+const BACKEND_STARTUP_TIMEOUT = 60_000;
+const DUST_BALANCE_TIMEOUT = 180_000;
 
-// Under TX_BACKEND=moth the balance comes from moth's synced wallet, not the
-// toolkit's `dust-balance`, so no container is needed and the test exercises
-// the moth mapping into the toolkit's schema rather than the toolkit's own
-// output. The suite is named after the backend so a pass is not read as toolkit
-// coverage. The first read in a worker restores the wallet from the cache
-// global setup warmed, which can outlast a toolkit call against a short local
-// chain.
-const isMoth = env.getTxBackend() === 'moth';
-const BACKEND = isMoth ? 'moth' : 'toolkit';
-const BACKEND_LABEL = isMoth ? 'Moth' : 'Toolkit';
-const DUST_BALANCE_TIMEOUT = isMoth ? 180_000 : TOOLKIT_STARTUP_TIMEOUT;
+// The suite is named after the backend TX_BACKEND selects, so a pass is read as
+// coverage of that backend. On moth the first read may restore the wallet from
+// the cache global setup warmed, which is why the timeout is generous.
+const backend = createTxBackend();
+const BACKEND_LABEL = backend.name === 'moth' ? 'Moth' : 'Toolkit';
 
-describe(`dust balance query using ${BACKEND}`, () => {
-  let toolkit: ToolkitWrapper;
+describe(`dust balance query using ${backend.name}`, () => {
+  beforeAll(() => backend.start(), BACKEND_STARTUP_TIMEOUT);
 
-  beforeAll(async () => {
-    toolkit = new ToolkitWrapper({});
-    if (!isMoth) await toolkit.start();
-  }, TOOLKIT_STARTUP_TIMEOUT);
-
-  afterAll(async () => {
-    await toolkit.stop();
-  });
+  afterAll(() => backend.stop());
 
   describe('a dust balance query with a valid wallet seed', () => {
     /**
@@ -72,7 +60,7 @@ describe(`dust balance query using ${BACKEND}`, () => {
 
         log.debug(`Querying dust balance for seed fingerprint: ${seedFingerprint(walletSeed)}`);
 
-        const dustBalance: DustBalance = await toolkit.getDustBalance(walletSeed);
+        const dustBalance: DustBalance = await backend.dustBalance(walletSeed);
 
         log.debug('Checking if we actually received a dust balance');
         expect(dustBalance).toBeDefined();

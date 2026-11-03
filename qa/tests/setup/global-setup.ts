@@ -19,6 +19,7 @@ import path from 'path';
 import { ToolkitWrapper } from '../utils/toolkit/toolkit-wrapper';
 import { startCacheProgressReporter, CacheProgressReporter } from '../utils/toolkit/toolkit-cache';
 import { env } from '../environment/model';
+import type { TxBackendName } from '../utils/tx-backend';
 import dataProvider from '../utils/testdata-provider';
 import { warmMothWallet } from '../utils/moth/moth-backend';
 import {
@@ -125,26 +126,20 @@ export async function setup(project: { config?: { fileParallelism?: boolean } })
   cleanupOrphanedToolkitDirs();
   reportFileParallelism(project);
 
-  // On the moth backend, skip the toolkit cache warm-up entirely.
-  //
-  // That warm-up fetches every block of the target chain into the shared
-  // toolkit Postgres. On preview (~905k blocks) it is hours of work, and the
-  // whole reason for the moth backend is that this cost grows with the chain
-  // and makes long-lived environments untestable. Paying it anyway would
-  // cancel the benefit out.
-  //
-  // A few suites still reach for the toolkit for things moth cannot do yet
-  // (notably `show-viewing-key`). They keep working — they just pay their own
-  // fetch cost on first call instead of having it pre-paid here.
-  if (env.getTxBackend() === 'moth') {
-    console.log(
-      '[SETUP] TX_BACKEND=moth — skipping the toolkit cache warm-up. ' +
-        'Any test that still calls the toolkit will pay its own fetch cost on first use.',
-    );
-    await warmMoth();
-    return;
-  }
+  // Only the selected backend is warmed. Suites that need the other one skip, so
+  // a moth run never pays the toolkit's whole-chain fetch, which on a deployed
+  // chain is hours of work.
+  const warmUp: Record<TxBackendName, () => Promise<void>> = {
+    toolkit: warmToolkit,
+    moth: warmMoth,
+  };
+  const backend = env.getTxBackend();
+  console.log(`[SETUP] TX_BACKEND=${backend}`);
+  await warmUp[backend]();
+}
 
+/** Fetch the target chain into the toolkit cache and pre-warm the funding wallet. */
+async function warmToolkit(): Promise<void> {
   console.log('[SETUP] Warming up toolkit cache (this may take several minutes)...');
 
   let reporter: CacheProgressReporter | undefined;

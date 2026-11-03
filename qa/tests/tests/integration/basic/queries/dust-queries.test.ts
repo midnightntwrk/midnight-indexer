@@ -21,7 +21,6 @@ import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
 import dataProvider from '@utils/testdata-provider';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
-import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
 import { DustGenerationStatusSchema } from '@utils/indexer/graphql/schema';
 import type { DustGenerationStatusResponse } from '@utils/indexer/indexer-types';
 
@@ -51,8 +50,6 @@ function generateRewardAddress(
   return bech32.encode(hrpPrefix, bech32.toWords(payload));
 }
 
-const TOOLKIT_STARTUP_TIMEOUT = 60_000;
-
 // Dust generation registrations require a Cardano-side mapping which has no
 // counterpart in the `undeployed` environment. Skip the whole surface there;
 // re-enable once #1152 lands local Cardano test-data provisioning.
@@ -60,17 +57,6 @@ const TOOLKIT_STARTUP_TIMEOUT = 60_000;
 // has known NIGHT/cNIGHT holders to probe.
 const skipNight = env.isUndeployedEnv() || env.isMainnetEnv();
 describe.skipIf(skipNight)('dust generation status queries', () => {
-  let toolkit: ToolkitWrapper;
-
-  beforeAll(async () => {
-    toolkit = new ToolkitWrapper({});
-    await toolkit.start();
-  }, TOOLKIT_STARTUP_TIMEOUT);
-
-  afterAll(async () => {
-    await toolkit.stop();
-  });
-
   describe('a dust generation status query with a valid Cardano reward address', () => {
     /**
      * A dust generation status query for a valid Cardano reward address should repond with the expected schema

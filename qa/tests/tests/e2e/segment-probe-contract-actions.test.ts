@@ -39,7 +39,7 @@ import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
 import log from '@utils/logging/logger';
 import dataProvider from '@utils/testdata-provider';
-import { env } from '../../environment/model';
+import { requiresBackend } from '@utils/tx-backend';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { closeMothWallets } from '@utils/moth/moth-backend';
 import {
@@ -75,195 +75,202 @@ function sameHash(a: string | undefined, b: string | undefined): boolean {
   return n(a) === n(b);
 }
 
-const isMoth = env.getTxBackend() === 'moth';
+const backendGate = requiresBackend('moth');
 
-describe.skipIf(!isMoth).sequential('segment-split contract actions', () => {
-  let indexerHttpClient: IndexerHttpClient;
-  let fundingSeed: string;
-  let contractAddress: string;
+describe
+  .skipIf(backendGate.skip)
+  .sequential(`segment-split contract actions ${backendGate.label}`, () => {
+    let indexerHttpClient: IndexerHttpClient;
+    let fundingSeed: string;
+    let contractAddress: string;
 
-  let deployTxHash: string;
-  let deployBlockHash: string;
-
-  beforeAll(async () => {
-    indexerHttpClient = new IndexerHttpClient();
-    fundingSeed = dataProvider.getFundingSeed();
-  });
-
-  // No toolkit here, so nothing else releases the wallet this suite opened.
-  afterAll(async () => {
-    closeMothContractContexts();
-    await closeMothWallets();
-  });
-
-  describe('a transaction to deploy a segment-split smart contract', () => {
-    beforeAll(async () => {
-      const deployed = await deployContractViaMoth(fundingSeed, ARTIFACT_DIR);
-      contractAddress = deployed.contractAddress;
-      // The deploy's own transaction and block hashes come from the indexer
-      // rather than from the submit call: midnight-js reports the transaction
-      // it sent, not the block it landed in.
-      const hashes = await getContractDeploymentHashes(contractAddress);
-      deployTxHash = hashes.txHash;
-      deployBlockHash = hashes.blockHash;
-      log.debug(`segment-split deployed at ${contractAddress}, tx ${deployTxHash}`);
-    }, CONTRACT_ACTION_TIMEOUT);
-
-    /**
-     * @given a confirmed deployment of the segment-split contract
-     * @when we query the indexer with a transaction query by hash
-     * @then the transaction should be found and reported correctly
-     */
-    test(
-      'should be reported by the indexer through a transaction query by hash',
-      async (context: TestContext) => {
-        context.task!.meta.custom = {
-          labels: ['Query', 'Transaction', 'ByHash', 'ContractDeploy'],
-        };
-
-        const transactionResponse = await getTransactionByHashWithRetry(deployTxHash);
-
-        expect(transactionResponse).toBeSuccess();
-        expect(transactionResponse?.data?.transactions).toBeDefined();
-
-        const foundTransaction = transactionResponse.data?.transactions?.find((tx: Transaction) =>
-          sameHash(tx.hash, deployTxHash),
-        );
-        expect(foundTransaction).toBeDefined();
-      },
-      TEST_TIMEOUT,
-    );
-
-    /**
-     * @given a confirmed deployment of the segment-split contract
-     * @when we query the indexer with a block query by hash
-     * @then the block should contain the deployment transaction
-     */
-    test(
-      'should be reported by the indexer through a block query by hash',
-      async (context: TestContext) => {
-        context.task!.meta.custom = {
-          labels: ['Query', 'Block', 'ByHash', 'ContractDeploy'],
-        };
-
-        const blockResponse = await getBlockByHashWithRetry(deployBlockHash);
-
-        expect(blockResponse).toBeSuccess();
-        const found = blockResponse.data?.block?.transactions?.find((tx: Transaction) =>
-          sameHash(tx.hash, deployTxHash),
-        );
-        expect(found).toBeDefined();
-      },
-      TEST_TIMEOUT,
-    );
-
-    /**
-     * @given a confirmed deployment of the segment-split contract
-     * @when we query the indexer with a contract action query by address
-     * @then the contract action should be found with __typename 'ContractDeploy'
-     */
-    test(
-      'should be reported by the indexer through a contract action query by address',
-      async (context: TestContext) => {
-        context.task!.meta.custom = {
-          labels: ['Query', 'ContractAction', 'ByAddress', 'ContractDeploy'],
-        };
-
-        const contractActionResponse = await indexerHttpClient.getContractAction(contractAddress);
-        expect(contractActionResponse?.data?.contractAction).toBeDefined();
-
-        const contractAction = contractActionResponse.data?.contractAction;
-        expect(contractAction?.__typename).toBe('ContractDeploy');
-
-        if (contractAction?.__typename === 'ContractDeploy') {
-          expect(sameHash(contractAction.address, contractAddress)).toBe(true);
-        }
-      },
-      TEST_TIMEOUT,
-    );
-  });
-
-  describe(`a transaction to call the ${CIRCUIT} circuit on the deployed segment-split smart contract`, () => {
-    let callTxHash: string;
-    let callBlockHash: string;
+    let deployTxHash: string;
+    let deployBlockHash: string;
 
     beforeAll(async () => {
-      callTxHash = await callCircuitViaMoth(fundingSeed, contractAddress, CIRCUIT, ARTIFACT_DIR);
-      const result = { txHash: callTxHash, blockHash: '', status: 'sent' as const, rawOutput: '' };
-      await resolveBlockHash(result);
-      callBlockHash = result.blockHash;
-      log.debug(`segment-split ${CIRCUIT} call tx ${callTxHash}, block ${callBlockHash}`);
-    }, CONTRACT_ACTION_TIMEOUT);
+      indexerHttpClient = new IndexerHttpClient();
+      fundingSeed = dataProvider.getFundingSeed();
+    });
 
-    /**
-     * @given a confirmed call to the segment-split contract
-     * @when we query the indexer with a transaction query by hash
-     * @then the transaction should be found and reported correctly
-     */
-    test(
-      'should be reported by the indexer through a transaction query by hash',
-      async (context: TestContext) => {
-        context.task!.meta.custom = {
-          labels: ['Query', 'Transaction', 'ByHash', 'ContractCall'],
+    // No toolkit here, so nothing else releases the wallet this suite opened.
+    afterAll(async () => {
+      closeMothContractContexts();
+      await closeMothWallets();
+    });
+
+    describe('a transaction to deploy a segment-split smart contract', () => {
+      beforeAll(async () => {
+        const deployed = await deployContractViaMoth(fundingSeed, ARTIFACT_DIR);
+        contractAddress = deployed.contractAddress;
+        // The deploy's own transaction and block hashes come from the indexer
+        // rather than from the submit call: midnight-js reports the transaction
+        // it sent, not the block it landed in.
+        const hashes = await getContractDeploymentHashes(contractAddress);
+        deployTxHash = hashes.txHash;
+        deployBlockHash = hashes.blockHash;
+        log.debug(`segment-split deployed at ${contractAddress}, tx ${deployTxHash}`);
+      }, CONTRACT_ACTION_TIMEOUT);
+
+      /**
+       * @given a confirmed deployment of the segment-split contract
+       * @when we query the indexer with a transaction query by hash
+       * @then the transaction should be found and reported correctly
+       */
+      test(
+        'should be reported by the indexer through a transaction query by hash',
+        async (context: TestContext) => {
+          context.task!.meta.custom = {
+            labels: ['Query', 'Transaction', 'ByHash', 'ContractDeploy'],
+          };
+
+          const transactionResponse = await getTransactionByHashWithRetry(deployTxHash);
+
+          expect(transactionResponse).toBeSuccess();
+          expect(transactionResponse?.data?.transactions).toBeDefined();
+
+          const foundTransaction = transactionResponse.data?.transactions?.find((tx: Transaction) =>
+            sameHash(tx.hash, deployTxHash),
+          );
+          expect(foundTransaction).toBeDefined();
+        },
+        TEST_TIMEOUT,
+      );
+
+      /**
+       * @given a confirmed deployment of the segment-split contract
+       * @when we query the indexer with a block query by hash
+       * @then the block should contain the deployment transaction
+       */
+      test(
+        'should be reported by the indexer through a block query by hash',
+        async (context: TestContext) => {
+          context.task!.meta.custom = {
+            labels: ['Query', 'Block', 'ByHash', 'ContractDeploy'],
+          };
+
+          const blockResponse = await getBlockByHashWithRetry(deployBlockHash);
+
+          expect(blockResponse).toBeSuccess();
+          const found = blockResponse.data?.block?.transactions?.find((tx: Transaction) =>
+            sameHash(tx.hash, deployTxHash),
+          );
+          expect(found).toBeDefined();
+        },
+        TEST_TIMEOUT,
+      );
+
+      /**
+       * @given a confirmed deployment of the segment-split contract
+       * @when we query the indexer with a contract action query by address
+       * @then the contract action should be found with __typename 'ContractDeploy'
+       */
+      test(
+        'should be reported by the indexer through a contract action query by address',
+        async (context: TestContext) => {
+          context.task!.meta.custom = {
+            labels: ['Query', 'ContractAction', 'ByAddress', 'ContractDeploy'],
+          };
+
+          const contractActionResponse = await indexerHttpClient.getContractAction(contractAddress);
+          expect(contractActionResponse?.data?.contractAction).toBeDefined();
+
+          const contractAction = contractActionResponse.data?.contractAction;
+          expect(contractAction?.__typename).toBe('ContractDeploy');
+
+          if (contractAction?.__typename === 'ContractDeploy') {
+            expect(sameHash(contractAction.address, contractAddress)).toBe(true);
+          }
+        },
+        TEST_TIMEOUT,
+      );
+    });
+
+    describe(`a transaction to call the ${CIRCUIT} circuit on the deployed segment-split smart contract`, () => {
+      let callTxHash: string;
+      let callBlockHash: string;
+
+      beforeAll(async () => {
+        callTxHash = await callCircuitViaMoth(fundingSeed, contractAddress, CIRCUIT, ARTIFACT_DIR);
+        const result = {
+          txHash: callTxHash,
+          blockHash: '',
+          status: 'sent' as const,
+          rawOutput: '',
         };
+        await resolveBlockHash(result);
+        callBlockHash = result.blockHash;
+        log.debug(`segment-split ${CIRCUIT} call tx ${callTxHash}, block ${callBlockHash}`);
+      }, CONTRACT_ACTION_TIMEOUT);
 
-        const transactionResponse = await getTransactionByHashWithRetry(callTxHash);
+      /**
+       * @given a confirmed call to the segment-split contract
+       * @when we query the indexer with a transaction query by hash
+       * @then the transaction should be found and reported correctly
+       */
+      test(
+        'should be reported by the indexer through a transaction query by hash',
+        async (context: TestContext) => {
+          context.task!.meta.custom = {
+            labels: ['Query', 'Transaction', 'ByHash', 'ContractCall'],
+          };
 
-        expect(transactionResponse).toBeSuccess();
-        const foundTransaction = transactionResponse.data?.transactions?.find((tx: Transaction) =>
-          sameHash(tx.hash, callTxHash),
-        );
-        expect(foundTransaction).toBeDefined();
-      },
-      TEST_TIMEOUT,
-    );
+          const transactionResponse = await getTransactionByHashWithRetry(callTxHash);
 
-    /**
-     * @given a confirmed call to the segment-split contract
-     * @when we query the indexer with a block query by hash
-     * @then the block should contain the call transaction
-     */
-    test(
-      'should be reported by the indexer through a block query by hash',
-      async (context: TestContext) => {
-        context.task!.meta.custom = {
-          labels: ['Query', 'Block', 'ByHash', 'ContractCall'],
-        };
+          expect(transactionResponse).toBeSuccess();
+          const foundTransaction = transactionResponse.data?.transactions?.find((tx: Transaction) =>
+            sameHash(tx.hash, callTxHash),
+          );
+          expect(foundTransaction).toBeDefined();
+        },
+        TEST_TIMEOUT,
+      );
 
-        const blockResponse = await getBlockByHashWithRetry(callBlockHash);
+      /**
+       * @given a confirmed call to the segment-split contract
+       * @when we query the indexer with a block query by hash
+       * @then the block should contain the call transaction
+       */
+      test(
+        'should be reported by the indexer through a block query by hash',
+        async (context: TestContext) => {
+          context.task!.meta.custom = {
+            labels: ['Query', 'Block', 'ByHash', 'ContractCall'],
+          };
 
-        expect(blockResponse).toBeSuccess();
-        const found = blockResponse.data?.block?.transactions?.find((tx: Transaction) =>
-          sameHash(tx.hash, callTxHash),
-        );
-        expect(found).toBeDefined();
-      },
-      TEST_TIMEOUT,
-    );
+          const blockResponse = await getBlockByHashWithRetry(callBlockHash);
 
-    /**
-     * @given a confirmed call to the segment-split contract
-     * @when we query the indexer with a contract action query by address
-     * @then the latest contract action should be a 'ContractCall'
-     */
-    test(
-      'should be reported by the indexer through a contract action query by address',
-      async (context: TestContext) => {
-        context.task!.meta.custom = {
-          labels: ['Query', 'ContractAction', 'ByAddress', 'ContractCall'],
-        };
+          expect(blockResponse).toBeSuccess();
+          const found = blockResponse.data?.block?.transactions?.find((tx: Transaction) =>
+            sameHash(tx.hash, callTxHash),
+          );
+          expect(found).toBeDefined();
+        },
+        TEST_TIMEOUT,
+      );
 
-        const contractActionResponse = await indexerHttpClient.getContractAction(contractAddress);
-        expect(contractActionResponse?.data?.contractAction).toBeDefined();
+      /**
+       * @given a confirmed call to the segment-split contract
+       * @when we query the indexer with a contract action query by address
+       * @then the latest contract action should be a 'ContractCall'
+       */
+      test(
+        'should be reported by the indexer through a contract action query by address',
+        async (context: TestContext) => {
+          context.task!.meta.custom = {
+            labels: ['Query', 'ContractAction', 'ByAddress', 'ContractCall'],
+          };
 
-        const contractAction = contractActionResponse.data?.contractAction;
-        expect(contractAction?.__typename).toBe('ContractCall');
+          const contractActionResponse = await indexerHttpClient.getContractAction(contractAddress);
+          expect(contractActionResponse?.data?.contractAction).toBeDefined();
 
-        if (contractAction?.__typename === 'ContractCall') {
-          expect(sameHash(contractAction.address, contractAddress)).toBe(true);
-        }
-      },
-      TEST_TIMEOUT,
-    );
+          const contractAction = contractActionResponse.data?.contractAction;
+          expect(contractAction?.__typename).toBe('ContractCall');
+
+          if (contractAction?.__typename === 'ContractCall') {
+            expect(sameHash(contractAction.address, contractAddress)).toBe(true);
+          }
+        },
+        TEST_TIMEOUT,
+      );
+    });
   });
-});

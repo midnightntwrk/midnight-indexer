@@ -111,11 +111,11 @@ The test suite is organized using **Vitest projects**, which allows running diff
 
 - **[Smoke Tests](tests/smoke/README.md)** - Quick health checks and API validation (~1 second runtime)
 - **[Integration Tests](tests/integration/README.md)** - Comprehensive GraphQL API testing with pre-seeded data
-- **[E2E Tests](tests/e2e/README.md)** - End-to-end validation using the Node Toolkit (includes cache warmup)
+- **[E2E Tests](tests/e2e/README.md)** - End-to-end validation through the toolkit or moth transaction backend (includes cache warmup)
 - **[Unit Tests](tests/unit/README.md)** - Pure checks of the harness's own helpers (retry, websocket liveness); no environment, no Docker
 - **[Sync Tests](tests/sync/README.md)** - Runs a chosen indexer version against a deployed chain and watches it index from genesis, to prove that version can sync that chain
 
-Each project can be run independently or together. E2E tests include a cache warmup phase for the Node Toolkit, while smoke and integration tests start immediately. Sync tests are deliberately excluded from the aggregate `test`, `test:coverage` and `test:ui` scripts, each of which names its projects explicitly: a sync run takes minutes at best, and days if its block budget is lifted.
+Each project can be run independently or together. E2E tests include a cache warmup phase for the selected transaction backend, while smoke and integration tests start immediately. Sync tests are deliberately excluded from the aggregate `test`, `test:coverage` and `test:ui` scripts, each of which names its projects explicitly: a sync run takes minutes at best, and days if its block budget is lifted.
 
 ## 🚀 Getting Started
 
@@ -450,6 +450,10 @@ TARGET_ENV=preprod INDEXER_API_VERSION=v3 bun run test:integration
 | `VITEST_MAX_WORKERS`  | No                                | all available CPUs     | Cap the Vitest worker pool. Accepts a positive integer (`1`, `2`, …) or a percentage (`"50%"`).       |
 | `MN_FETCH_CACHE`      | No (managed by harness)           | auto                   | Postgres-backed toolkit fetch cache. The `toolkit-postgres` container is started automatically.       |
 | `INDEXER_INSTANCE`    | No                                | (primary)              | Blue/green indexer instance to target: `blue` / `green`. Unset → primary (bare `indexer.<env>`). Only meaningful on `qanet`/`preview`/`preprod`; ignored for `undeployed`. A `/ready` preflight fails fast if the colour isn't routed. |
+| `TX_BACKEND`          | No                                | `toolkit`              | Transaction backend for e2e and integration tests: `toolkit` or `moth`. See [Transaction backends](tests/e2e/README.md#transaction-backends). |
+| `PROOF_SERVER_URL`    | No (moth)                         | auto-started           | Proof server moth proves with. Unset → a `midnightntwrk/proof-server:$PROOF_SERVER_TAG` container is started for the run. |
+| `PROOF_SERVER_TAG`    | No (moth)                         | `9.0.0-rc.10`          | Proof server image tag when one is auto-started. Must match the node's ledger.                        |
+| `FUNDING_SEED_<ENV>_LIGHT` | No (moth)                    | `FUNDING_SEED_<ENV>`   | A funded wallet with little history, used for moth transfers so its first sync is short.               |
 
 **Sync test project only** (`bun run test:sync`, see [tests/sync/README.md](tests/sync/README.md)):
 

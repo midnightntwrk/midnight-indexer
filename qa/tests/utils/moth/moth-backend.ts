@@ -13,26 +13,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// An alternative transaction backend that builds and submits transactions with
-// moth-wallet's sync engine in-process, instead of a `midnight-node-toolkit`
-// container.
+// Transfers and wallet reads through moth-wallet's sync engine, in-process;
+// `utils/tx-backend/moth-tx-backend.ts` exposes them as the moth `TxBackend`.
 //
 // WHY. The toolkit rebuilds full ledger state from raw blocks on every
 // chain-touching call — measured on preprod at ~607 s and ~34.5 GB per call,
 // and the cost grows with the chain. moth persists each sub-wallet's state and
 // restores it, so a warm wallet catches up in ~1 s. This backend reuses that
-// engine for transaction *submission* only.
+// engine for transfers and wallet reads.
 //
 // WHAT IT DELIBERATELY DOES NOT USE. moth's own contract path
 // (`contract/deploy.ts`, `call.ts`) hand-rolls signing in a way that surfaces
 // as node error 192 (moth issue #119). moth's *transfer* path
 // (`sendTokensWithKeys`) does not — it balances, proves and submits through the
 // wallet facade, the same path a real wallet uses. This module only wires that
-// transfer path, so `generateSingleTx` gets a fast backend without the #119 trap.
-//
-// SCOPE. Transfers only, for now. Contract deploys and calls, chain forensics
-// and chain setup all stay on the toolkit; this backend is selected only for
-// single-transfer submission when TX_BACKEND=moth.
+// transfer path; contract actions go through midnight-js (`moth-contracts.ts`).
 
 import { createHash } from 'crypto';
 import {

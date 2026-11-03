@@ -18,7 +18,6 @@ import '@utils/logging/test-logging-hooks';
 import log from '@utils/logging/logger';
 import dataProvider from '@utils/testdata-provider';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
-import { env } from '../../environment/model';
 import { getBlockByHashWithRetry, getTransactionByHashWithRetry, retry } from './test-utils';
 import {
   ContractActionSubscriptionResponse,
@@ -26,11 +25,11 @@ import {
 } from '@utils/indexer/websocket-client';
 import { extractSubscriptionErrorMessage } from '@utils/indexer/subscription-error';
 import { sleep } from '@utils/retry-helper';
-import {
-  ToolkitWrapper,
+import type {
   DeployContractResult,
   ToolkitTransactionResult,
 } from '@utils/toolkit/toolkit-wrapper';
+import { createTxBackend, type TxBackend } from '@utils/tx-backend';
 import { Transaction } from '@utils/indexer/indexer-types';
 
 const TOOLKIT_WRAPPER_TIMEOUT = 120_000; // 2 minutes
@@ -50,7 +49,7 @@ function sameHash(a: string | undefined, b: string | undefined): boolean {
 
 describe.sequential('contract actions', () => {
   let indexerHttpClient: IndexerHttpClient;
-  let toolkit: ToolkitWrapper;
+  let backend: TxBackend;
   let fundingSeed: string;
   let contractDeployResult: DeployContractResult;
   let contractCallResult: ToolkitTransactionResult;
@@ -65,29 +64,25 @@ describe.sequential('contract actions', () => {
   beforeAll(async () => {
     indexerHttpClient = new IndexerHttpClient();
     fundingSeed = dataProvider.getFundingSeed();
-    toolkit = new ToolkitWrapper({});
-    // Under TX_BACKEND=moth every contract action goes through midnight-js, so
-    // the toolkit container would run for the whole suite and do no work.
-    if (env.getTxBackend() === 'toolkit') {
-      await toolkit.start();
-    }
+    backend = createTxBackend();
+    await backend.start();
   }, TOOLKIT_WRAPPER_TIMEOUT);
 
   afterAll(async () => {
-    await toolkit.stop();
+    await backend.stop();
   });
 
   describe('a transaction to deploy a counter smart contract', () => {
     beforeAll(async () => {
-      contractDeployResult = await toolkit.deployContract(fundingSeed);
+      contractDeployResult = await backend.deployContract(fundingSeed);
     }, CONTRACT_ACTION_TIMEOUT);
 
     /**
      * Once a contract deployment transaction has been submitted to node and confirmed, the indexer should report
-     * that transaction through a transaction query by hash, using the transaction hash reported by the toolkit.
+     * that transaction through a transaction query by hash, using the transaction hash reported by the tx backend.
      *
      * @given a confirmed contract deployment transaction
-     * @when we query the indexer with a transaction query by hash, using the transaction hash reported by the toolkit
+     * @when we query the indexer with a transaction query by hash, using the transaction hash reported by the tx backend
      * @then the transaction should be found and reported correctly
      */
     test(
@@ -116,10 +111,10 @@ describe.sequential('contract actions', () => {
 
     /**
      * Once a contract deployment transaction has been submitted to node and confirmed, the indexer should report
-     * that transaction in the block through a block query by hash, using the block hash reported by the toolkit.
+     * that transaction in the block through a block query by hash, using the block hash reported by the tx backend.
      *
      * @given a confirmed contract deployment transaction
-     * @when we query the indexer with a block query by hash, using the block hash reported by the toolkit
+     * @when we query the indexer with a block query by hash, using the block hash reported by the tx backend
      * @then the block should contain the contract deployment transaction
      */
     test(
@@ -226,12 +221,7 @@ describe.sequential('contract actions', () => {
         subscriptionSetupError = error;
       }
 
-      contractCallResult = await toolkit.callContract(
-        'store',
-        contractDeployResult,
-        undefined,
-        fundingSeed,
-      );
+      contractCallResult = await backend.callContract(contractDeployResult, fundingSeed, 'store');
 
       expect(contractCallResult.status).toBe('confirmed');
       log.debug(
@@ -281,10 +271,10 @@ describe.sequential('contract actions', () => {
 
     /**
      * Once a contract call transaction has been submitted to node and confirmed, the indexer should report
-     * that transaction through a query by transaction hash, using the transaction hash reported by the toolkit.
+     * that transaction through a query by transaction hash, using the transaction hash reported by the tx backend.
      *
      * @given a confirmed contract call transaction
-     * @when we query the indexer with a transaction query by hash, using the transaction hash reported by the toolkit
+     * @when we query the indexer with a transaction query by hash, using the transaction hash reported by the tx backend
      * @then the transaction should be found and reported correctly
      */
     test(
@@ -313,10 +303,10 @@ describe.sequential('contract actions', () => {
 
     /**
      * Once a contract call transaction has been submitted to node and confirmed, the indexer should report
-     * that transaction in the block through a block query by hash, using the block hash reported by the toolkit.
+     * that transaction in the block through a block query by hash, using the block hash reported by the tx backend.
      *
      * @given a confirmed contract call transaction
-     * @when we query the indexer with a block query by hash, using the block hash reported by the toolkit
+     * @when we query the indexer with a block query by hash, using the block hash reported by the tx backend
      * @then the block should contain the contract call transaction
      */
     test(
@@ -380,7 +370,7 @@ describe.sequential('contract actions', () => {
       // Allow call to finalize before running maintenance (update)
       await getTransactionByHashWithRetry(contractCallTransactionHash);
       await new Promise((resolve) => setTimeout(resolve, 30000));
-      contractUpdateResult = await toolkit.updateContract(contractDeployResult, fundingSeed);
+      contractUpdateResult = await backend.updateContract(contractDeployResult, fundingSeed);
 
       expect(contractUpdateResult.status).toBe('confirmed');
 
@@ -393,7 +383,7 @@ describe.sequential('contract actions', () => {
      * should report that transaction via a transaction query by hash.
      *
      * @given a confirmed contract update transaction
-     * @when we query the indexer by transaction hash (from the toolkit)
+     * @when we query the indexer by transaction hash (from the tx backend)
      * @then the indexer returns the update transaction
      */
     test(
@@ -426,7 +416,7 @@ describe.sequential('contract actions', () => {
      * should report that transaction in the block via a block query by hash.
      *
      * @given a confirmed contract update transaction
-     * @when we query the indexer by block hash (from the toolkit)
+     * @when we query the indexer by block hash (from the tx backend)
      * @then the block contains the update transaction
      */
     test(

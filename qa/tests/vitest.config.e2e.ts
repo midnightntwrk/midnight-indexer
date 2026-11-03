@@ -16,7 +16,7 @@
 import path from 'path';
 import { defineConfig } from 'vitest/config';
 
-// E2E test configuration - includes toolkit cache warmup
+// E2E test configuration - includes the transaction backend's cache warmup
 export default defineConfig({
   test: {
     name: 'e2e',

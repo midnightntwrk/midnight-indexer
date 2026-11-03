@@ -30,6 +30,7 @@ import dataProvider from '@utils/testdata-provider';
 import { retry } from '@utils/retry-helper';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { ToolkitWrapper, type MinterContract } from '@utils/toolkit/toolkit-wrapper';
+import { requiresBackend } from '@utils/tx-backend';
 
 const TOOLKIT_WRAPPER_TIMEOUT = 120_000;
 const CONTRACT_ACTION_TIMEOUT = 180_000;
@@ -50,7 +51,10 @@ const DOMAIN_SEP = 'feeb00000000000000000000000000000000000000000000000000000000
 const MINT_AMOUNT = 1000;
 const SEND_AMOUNT = 400; // remainder the contract should still hold: 600
 
-describe.skip('unshielded balance indexing (deploy + mint + verify) [#1253 scaffold]', () => {
+// Toolkit only: the minter contract and its mint/send flow live in the toolkit image.
+const backendGate = requiresBackend('toolkit');
+
+describe.skip(`unshielded balance indexing (deploy + mint + verify) [#1253 scaffold] ${backendGate.label}`, () => {
   let indexerHttpClient: IndexerHttpClient;
   let toolkit: ToolkitWrapper;
   let fundingSeed: string;
