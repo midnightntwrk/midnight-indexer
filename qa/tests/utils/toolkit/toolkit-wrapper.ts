@@ -21,19 +21,6 @@ import { env } from '../../environment/model';
 import { GenericContainer, StartedTestContainer } from 'testcontainers';
 import { getContractDeploymentHashes, resolveBlockHash } from '../../tests/e2e/test-utils';
 import { ensureToolkitCachePostgres } from './toolkit-cache';
-import {
-  closeMothWallets,
-  generateSingleTxViaMoth,
-  getDustBalanceViaMoth,
-  showPrivateWalletStateViaMoth,
-  showPublicWalletStateViaMoth,
-} from '../moth/moth-backend';
-import {
-  callCircuitViaMoth,
-  closeMothContractContexts,
-  deployContractViaMoth,
-  updateContractViaMoth,
-} from '../moth/moth-contracts';
 import { z } from 'zod';
 import {
   Coin,
@@ -514,10 +501,6 @@ class ToolkitWrapper {
   }
 
   async stop() {
-    // Drop the midnight-js providers first: they wrap the wallet facades that
-    // closeMothWallets() is about to stop. Both are safe when unused.
-    closeMothContractContexts();
-    await closeMothWallets();
     if (this.startedContainer) {
       // Make /out world-writable before stopping so the host process can delete root-owned
       // files that the container wrote there (e.g. transaction files).
@@ -724,13 +707,6 @@ class ToolkitWrapper {
    * @throws Error if the container is not started or if the show-wallet command fails.
    */
   async showPrivateWalletState(walletSeed: string): Promise<PrivateWalletState> {
-    // When TX_BACKEND=moth, read the state from moth's synced wallet. The
-    // toolkit replays the whole chain before printing it, which never finishes
-    // on a deployed chain; moth restores from its warmed cache.
-    if (env.getTxBackend() === 'moth') {
-      return showPrivateWalletStateViaMoth(walletSeed);
-    }
-
     return (await this.executeShowWallet(
       '--seed',
       walletSeed,
@@ -744,27 +720,11 @@ class ToolkitWrapper {
    * This method queries the public wallet state for the specified address.
    *
    * @param walletAddress - The wallet address to query public wallet state for (required)
-   * @param walletSeed - The seed that owns `walletAddress`. Required when TX_BACKEND=moth,
-   *                     since moth opens wallets by seed; ignored by the toolkit backend.
    *
    * @returns A promise that resolves to the public wallet state object.
    * @throws Error if the container is not started or if the show-wallet command fails.
    */
-  async showPublicWalletState(
-    walletAddress: string,
-    walletSeed?: string,
-  ): Promise<PublicWalletState> {
-    // When TX_BACKEND=moth, read the state from moth's synced wallet, for the
-    // same reason as showPrivateWalletState.
-    if (env.getTxBackend() === 'moth') {
-      if (!walletSeed) {
-        throw new Error(
-          'showPublicWalletState needs the seed that owns the address when TX_BACKEND=moth.',
-        );
-      }
-      return showPublicWalletStateViaMoth(walletSeed, walletAddress);
-    }
-
+  async showPublicWalletState(walletAddress: string): Promise<PublicWalletState> {
     return (await this.executeShowWallet(
       '--address',
       walletAddress,
@@ -787,13 +747,6 @@ class ToolkitWrapper {
    * @throws Error if the container is not started or if the dust-balance command fails.
    */
   async getDustBalance(walletSeed: string): Promise<DustBalance> {
-    // When TX_BACKEND=moth, read the balance from moth's synced wallet. The
-    // toolkit replays the whole chain from genesis per call, which never
-    // finishes on a deployed chain; moth restores from its warmed cache.
-    if (env.getTxBackend() === 'moth') {
-      return getDustBalanceViaMoth(walletSeed);
-    }
-
     if (!this.startedContainer) {
       throw new Error('Container is not started. Call start() first.');
     }
@@ -914,19 +867,6 @@ class ToolkitWrapper {
     amount: number,
     tokenType?: string,
   ): Promise<ToolkitTransactionResult> {
-    // When TX_BACKEND=moth, build and submit through moth's sync engine instead
-    // of the toolkit container. Transfers only; every other operation stays on
-    // the toolkit. The container need not be started for this path.
-    if (env.getTxBackend() === 'moth') {
-      return generateSingleTxViaMoth(
-        sourceSeed,
-        addressType,
-        destinationAddress,
-        amount,
-        tokenType,
-      );
-    }
-
     if (!this.startedContainer) {
       throw new Error('Container is not started. Call start() first.');
     }
@@ -1019,26 +959,6 @@ class ToolkitWrapper {
       );
     }
 
-    // When TX_BACKEND=moth, call the circuit through midnight-js. `callKey` is
-    // the circuit name either way — the committed counter contract exposes
-    // `increment`, which is this method's default.
-    if (env.getTxBackend() === 'moth') {
-      const seed = fundingSeed ?? DEFAULT_FUNDING_SEED;
-      const txHash = await callCircuitViaMoth(
-        seed,
-        deploymentResult['contract-address-untagged'],
-        callKey,
-      );
-      const result: ToolkitTransactionResult = {
-        txHash,
-        blockHash: '',
-        status: 'sent',
-        rawOutput: `moth/midnight-js submitted ${txHash}`,
-      };
-      await resolveBlockHash(result);
-      return result;
-    }
-
     if (!this.startedContainer) {
       throw new Error('Container is not started. Call start() first.');
     }
@@ -1074,10 +994,6 @@ class ToolkitWrapper {
    * Run contract maintenance (update): change contract authority and submit in one toolkit command.
    * Uses execToolkit and parseTransactionOutput; maintenance does not use a separate generate-then-send step.
    *
-   * Under TX_BACKEND=moth the update must use the same funding seed as the
-   * deploy: the contract's signing key lives in that seed's in-process private
-   * state provider, and a different seed has no key to sign the update with.
-   *
    * @param deploymentResult - From deployContract; provides contract-address-untagged.
    * @param fundingSeed - Optional funding seed. When provided, uses --funding-seed (required on preprod/qanet).
    * @param newAuthoritySeed - Seed for the new authority. Defaults to DEFAULT_NEW_AUTHORITY_SEED.
@@ -1093,26 +1009,6 @@ class ToolkitWrapper {
       throw new Error(
         'Deployment result with contract-address-untagged is required. Ensure deployContract() succeeded before calling updateContract().',
       );
-    }
-
-    // When TX_BACKEND=moth, replace the authority through midnight-js.
-    // `newAuthoritySeed` is not used on this path: midnight-js takes a signing
-    // key rather than a seed, and no assertion reads who holds the authority
-    // afterwards — only that the update is indexed.
-    if (env.getTxBackend() === 'moth') {
-      const seed = fundingSeed ?? DEFAULT_FUNDING_SEED;
-      const txHash = await updateContractViaMoth(
-        seed,
-        deploymentResult['contract-address-untagged'],
-      );
-      const result: ToolkitTransactionResult = {
-        txHash,
-        blockHash: '',
-        status: 'sent',
-        rawOutput: `moth/midnight-js submitted ${txHash}`,
-      };
-      await resolveBlockHash(result);
-      return result;
     }
 
     if (!this.startedContainer) {
@@ -1161,27 +1057,6 @@ class ToolkitWrapper {
    * @throws Error if the container is not started or if any step in the deployment process fails.
    */
   async deployContract(fundingSeed?: string): Promise<DeployContractResult> {
-    // When TX_BACKEND=moth, deploy through midnight-js in-process with moth
-    // supplying the wallet, instead of the toolkit container. The contract is
-    // the counter committed under qa/tests/contracts, not the toolkit's
-    // built-in contract-simple, so the address is the only thing the
-    // assertions carry over — which is all they use.
-    if (env.getTxBackend() === 'moth') {
-      const seed = fundingSeed ?? DEFAULT_FUNDING_SEED;
-      const { contractAddress } = await deployContractViaMoth(seed);
-      const { txHash, blockHash } = await getContractDeploymentHashes(contractAddress);
-      return {
-        'contract-address-untagged': contractAddress,
-        // The toolkit reports a bech32m-tagged address and the deploying
-        // wallet's coin public key alongside the deploy. midnight-js returns
-        // neither, and no assertion reads them; left empty rather than faked.
-        'contract-address-tagged': '',
-        'coin-public': '',
-        'deploy-tx-hash': txHash,
-        'deploy-block-hash': blockHash,
-      };
-    }
-
     if (!this.startedContainer) {
       throw new Error('Container is not started. Call start() first.');
     }

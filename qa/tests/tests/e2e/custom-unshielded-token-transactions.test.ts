@@ -42,7 +42,7 @@
 import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
 import dataProvider from '@utils/testdata-provider';
-import { listUnshieldedHoldings, pickSpendableCustomToken } from '@utils/moth/moth-holdings';
+import { pickSpendableCustomToken } from '@utils/tx-backend';
 import {
   defineUnshieldedTransferTests,
   setupUnshieldedTransferScenario,
@@ -64,10 +64,9 @@ describe('unshielded custom token transactions', { timeout: UNSHIELDED_TRANSFER_
     // would burn one unit per run until the suite silently starts skipping.
     selfTransfer: true,
     prepare: async (scenario) => {
-      const holdings = await listUnshieldedHoldings(
+      const holdings = await scenario.backend.unshieldedHoldings(
         dataProvider.getTransferFundingSeed(),
         scenario.wallet.source.address,
-        scenario.toolkit,
       );
       log.debug(
         `Funding wallet holds ${holdings.size} unshielded token type(s): ` +

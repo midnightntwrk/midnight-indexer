@@ -13,7 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Reading a wallet's spendable unshielded holdings, on either backend.
+// Choosing a custom token the wallet under test can spend.
 //
 // WHY THIS EXISTS RATHER THAN A STATIC FIXTURE. `data/static/<env>/
 // unshielded-token-types.jsonc` is produced by the block scanner: it records
@@ -27,60 +27,13 @@
 // it did record can have been spent since. Asking the wallet is the only
 // answer that is true at the moment the test runs.
 //
-// So e2e suites discover their token here, from the live balance, and leave the
-// fixture to the integration suites.
-
-import { env } from '../../environment/model';
-import { listUnshieldedHoldingsViaMoth } from './moth-backend';
-import type { ToolkitWrapper } from '../toolkit/toolkit-wrapper';
+// So e2e suites discover their token from the live balance
+// (`TxBackend.unshieldedHoldings`) and leave the fixture to the integration suites.
 
 /** The all-zero token type: NIGHT, which every chain has from genesis. */
 export const NIGHT_TOKEN_TYPE = '0'.repeat(64);
 
 /**
- * Total spendable value per unshielded token type for a wallet, keyed by the
- * hex token type the indexer reports as `tokenType`.
- *
- * On the moth backend this reads the synced wallet's own state. On the toolkit
- * backend it is the existing `show-public-wallet-state` exec, so a started
- * toolkit must be supplied.
- *
- * @param seed - Seed of the wallet to read. Never logged.
- * @param address - That seed's unshielded address, used by the toolkit backend.
- * @param toolkit - A started ToolkitWrapper. Required on the toolkit backend;
- *                  ignored on the moth backend.
- */
-export async function listUnshieldedHoldings(
-  seed: string,
-  address: string,
-  toolkit?: ToolkitWrapper,
-): Promise<Map<string, bigint>> {
-  if (env.getTxBackend() === 'moth') {
-    return listUnshieldedHoldingsViaMoth(seed);
-  }
-
-  if (!toolkit) {
-    throw new Error(
-      'listUnshieldedHoldings needs a started ToolkitWrapper on the toolkit backend. ' +
-        'Pass one, or run with TX_BACKEND=moth.',
-    );
-  }
-
-  // The toolkit reports UTXO token types under `token_type`, in the same hex
-  // encoding the indexer reports as `tokenType`; if a provisioned environment
-  // ever looks empty here, compare the two encodings first.
-  const walletState = await toolkit.showPublicWalletState(address);
-  const totals = new Map<string, bigint>();
-  for (const utxo of walletState.utxos) {
-    totals.set(utxo.token_type, (totals.get(utxo.token_type) ?? 0n) + BigInt(utxo.value));
-  }
-  return totals;
-}
-
-/**
- * Pick a custom (non-NIGHT) unshielded token the wallet can spend, leaving
- * change behind.
- *
  * Strictly greater than `amount`: the transfer must create a destination output
  * *and* a source change output, exactly as the NIGHT transfer does, so the
  * suite's assertions about both sides hold.

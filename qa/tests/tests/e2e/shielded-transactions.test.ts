@@ -16,7 +16,8 @@
 import '@utils/logging/test-logging-hooks';
 import log from '@utils/logging/logger';
 import dataProvider from '@utils/testdata-provider';
-import { ToolkitWrapper, type ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
+import type { ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
+import { createTxBackend, type TxBackend } from '@utils/tx-backend';
 
 import type { Transaction, RegularTransaction } from '@utils/indexer/indexer-types';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
@@ -35,7 +36,6 @@ import {
 import { IndexerWsClient } from '@utils/indexer/websocket-client';
 import { EventCoordinator } from '@utils/event-coordinator';
 import { collectValidDustLedgerEvents } from 'tests/shared/dust-ledger-utils';
-import { deriveAddresses } from '@utils/moth/moth-addresses';
 
 /**
  * Subscribe to shielded transaction events for an open wallet session and resolve `true` as soon
@@ -85,7 +85,7 @@ describe('shielded transactions', () => {
   let previousMaxLedgerId: number;
   let zswapEndIndexBeforeTx: number;
   let dustCommitmentEndIndexBeforeTx: number;
-  let toolkit: ToolkitWrapper;
+  let backend: TxBackend;
   let transactionResult: ToolkitTransactionResult;
 
   // Deterministic seeds (hex) that work with the toolkit
@@ -111,13 +111,13 @@ describe('shielded transactions', () => {
     indexerEventCoordinator = new EventCoordinator();
     indexerHttpClient = new IndexerHttpClient();
     await indexerWsClient.connectionInit();
-    // Start a one-off toolkit container
-    toolkit = new ToolkitWrapper({});
+    // Start the tx backend TX_BACKEND selects
+    backend = createTxBackend();
 
-    await toolkit.start();
+    await backend.start();
 
     // Derive shielded addresses from seeds
-    destinationAddress = (await deriveAddresses(destinationSeed, toolkit)).shielded;
+    destinationAddress = (await backend.addresses(destinationSeed)).shielded;
 
     const beforeDustEvents = await collectValidDustLedgerEvents(
       indexerWsClient,
@@ -150,20 +150,15 @@ describe('shielded transactions', () => {
     log.debug(`Highest dustCommitmentEndIndex from genesis = ${dustCommitmentEndIndexBeforeTx}`);
 
     // Submit one shielded->shielded transfer (1 STAR)
-    transactionResult = await toolkit.generateSingleTx(
-      sourceSeed,
-      'shielded',
-      destinationAddress,
-      1,
-    );
+    transactionResult = await backend.transfer(sourceSeed, 'shielded', destinationAddress, 1);
 
-    // Print the TX hashes from toolkit
+    // Print the TX hashes from the tx backend
     const summary = {
       txHash: transactionResult.txHash,
       blockHash: transactionResult.blockHash,
       status: transactionResult.status,
     };
-    log.info(`\nTX hashes from toolkit: ${JSON.stringify(summary, null, 2)} \n`);
+    log.info(`\nTX hashes from the tx backend: ${JSON.stringify(summary, null, 2)} \n`);
 
     await resolveBlockHash(transactionResult);
 
@@ -180,16 +175,16 @@ describe('shielded transactions', () => {
   }, 200_000);
 
   afterAll(async () => {
-    await Promise.all([toolkit.stop(), indexerWsClient.connectionClose()]);
+    await Promise.all([backend.stop(), indexerWsClient.connectionClose()]);
   });
 
   describe('a successful shielded transaction transferring 1 Shielded Token between two wallets', async () => {
     /**
      * Once a shielded transaction has been submitted to node and confirmed, the indexer should report
-     * that transaction in the block through a block query by hash, using the block hash reported by the toolkit.
+     * that transaction in the block through a block query by hash, using the block hash reported by the tx backend.
      *
      * @given a confirmed shielded transaction between two wallets
-     * @when we query the indexer with a block query by hash, using the block hash reported by the toolkit
+     * @when we query the indexer with a block query by hash, using the block hash reported by the tx backend
      * @then the block should contain the expected transaction
      */
     test('should be reported by the indexer through a block query by hash', async (ctx: TestContext) => {
@@ -211,7 +206,7 @@ describe('shielded transactions', () => {
 
     /**
      * Once a shielded transaction has been submitted to node and confirmed, the indexer should report
-     * that transaction through a query by transaction hash, using the transaction hash reported by the toolkit.
+     * that transaction through a query by transaction hash, using the transaction hash reported by the tx backend.
      *
      * @given a confirmed shielded transaction between two wallets
      * @when we query transactions by the transaction hash
@@ -440,7 +435,7 @@ describe('shielded transactions', () => {
         await indexerWsClient.connectionClose();
         await indexerWsClient.connectionInit();
 
-        const viewingKey = await toolkit.showViewingKey(sourceSeed);
+        const viewingKey = await backend.viewingKey(sourceSeed);
         const sessionId = await indexerWsClient.openWalletSession(viewingKey);
 
         const delivered = await awaitRelevantTransaction(
@@ -475,7 +470,7 @@ describe('shielded transactions', () => {
         await indexerWsClient.connectionClose();
         await indexerWsClient.connectionInit();
 
-        const viewingKey = await toolkit.showViewingKey(destinationSeed);
+        const viewingKey = await backend.viewingKey(destinationSeed);
         const sessionId = await indexerWsClient.openWalletSession(viewingKey);
 
         const delivered = await awaitRelevantTransaction(
@@ -514,7 +509,7 @@ describe('shielded transactions', () => {
         await indexerWsClient.connectionClose();
         await indexerWsClient.connectionInit();
 
-        const viewingKey = await toolkit.showViewingKey(unrelatedSeed);
+        const viewingKey = await backend.viewingKey(unrelatedSeed);
         const sessionId = await indexerWsClient.openWalletSession(viewingKey);
 
         const delivered = await awaitRelevantTransaction(

@@ -17,44 +17,30 @@ import log from '@utils/logging/logger';
 import type { TestContext } from 'vitest';
 import '@utils/logging/test-logging-hooks';
 import dataProvider from '@utils/testdata-provider';
-import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
+import { createTxBackend } from '@utils/tx-backend';
 import {
   type PrivateWalletState,
   type PublicWalletState,
   PrivateWalletStateSchema,
   PublicWalletStateSchema,
 } from '@utils/toolkit/schemas';
-import { env } from 'environment/model';
 import { seedFingerprint } from '@utils/moth/moth-backend';
 
-const TOOLKIT_STARTUP_TIMEOUT = 60_000;
+const BACKEND_STARTUP_TIMEOUT = 60_000;
+const WALLET_STATE_TIMEOUT = 180_000;
 
-// Under TX_BACKEND=moth the wallet state comes from moth's synced wallet, not
-// from the toolkit's `show-wallet`, so these tests then exercise the moth
-// mapping into the toolkit's schema rather than the toolkit's own output. The
-// suite is named after the backend so a pass is not read as toolkit coverage.
-// The first read in a worker restores the wallet from the cache global setup
-// warmed, which can outlast a toolkit call against a short local chain.
-const isMoth = env.getTxBackend() === 'moth';
-const BACKEND = isMoth ? 'moth' : 'toolkit';
-const BACKEND_LABEL = isMoth ? 'Moth' : 'Toolkit';
-const WALLET_STATE_TIMEOUT = isMoth ? 180_000 : TOOLKIT_STARTUP_TIMEOUT;
+// The suite is named after the backend TX_BACKEND selects, so a pass is read as
+// coverage of that backend. On moth the first read may restore the wallet from
+// the cache global setup warmed, which is why the timeout is generous.
+const backend = createTxBackend();
+const BACKEND_LABEL = backend.name === 'moth' ? 'Moth' : 'Toolkit';
 
-describe(`show wallet queries using ${BACKEND}`, () => {
-  let toolkit: ToolkitWrapper;
+describe(`show wallet queries using ${backend.name}`, () => {
+  beforeAll(() => backend.start(), BACKEND_STARTUP_TIMEOUT);
 
-  // The container is still needed under moth: `showAddress` derives the
-  // unshielded address through the toolkit.
-  beforeAll(async () => {
-    toolkit = new ToolkitWrapper({});
-    await toolkit.start();
-  }, TOOLKIT_STARTUP_TIMEOUT);
+  afterAll(() => backend.stop());
 
-  afterAll(async () => {
-    await toolkit.stop();
-  });
-
-  describe(`private wallet state query using ${BACKEND}`, () => {
+  describe(`private wallet state query using ${backend.name}`, () => {
     /**
      * A private wallet state query should return a valid private wallet state object according
      * to the requested schema, whichever backend serves it: the toolkit's `show-wallet --seed`
@@ -79,7 +65,7 @@ describe(`show wallet queries using ${BACKEND}`, () => {
         log.debug(
           `Querying private wallet state for seed fingerprint: ${seedFingerprint(walletSeed)}`,
         );
-        const walletState: PrivateWalletState = await toolkit.showPrivateWalletState(walletSeed);
+        const walletState: PrivateWalletState = await backend.privateWalletState(walletSeed);
 
         expect(walletState).toBeDefined();
 
@@ -93,7 +79,7 @@ describe(`show wallet queries using ${BACKEND}`, () => {
     );
   });
 
-  describe(`public wallet state query using ${BACKEND}`, () => {
+  describe(`public wallet state query using ${backend.name}`, () => {
     /**
      * A public wallet state query should return a valid public wallet state object according
      * to the requested schema, whichever backend serves it: the toolkit's `show-wallet --address`
@@ -113,14 +99,12 @@ describe(`show wallet queries using ${BACKEND}`, () => {
         // Same seed as the private state query, for the same reason.
         const walletSeed = dataProvider.getTransferFundingSeed();
 
-        // Get the unshielded address from the seed
-        const addressInfo = await toolkit.showAddress(walletSeed);
-        const walletAddress = addressInfo.unshielded;
+        const walletAddress = (await backend.addresses(walletSeed)).unshielded;
 
         log.debug(`Querying public wallet state for address: ${walletAddress}`);
-        const publicWalletState: PublicWalletState = await toolkit.showPublicWalletState(
-          walletAddress,
+        const publicWalletState: PublicWalletState = await backend.publicWalletState(
           walletSeed,
+          walletAddress,
         );
 
         expect(publicWalletState).toBeDefined();

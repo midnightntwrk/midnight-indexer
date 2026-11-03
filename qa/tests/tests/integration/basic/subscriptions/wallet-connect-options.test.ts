@@ -18,10 +18,10 @@ import '@utils/logging/test-logging-hooks';
 import { env } from 'environment/model';
 import { IndexerWsClient } from '@utils/indexer/websocket-client';
 import { extractSubscriptionErrorMessage } from '@utils/indexer/subscription-error';
-import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
+import { createTxBackend, type TxBackend } from '@utils/tx-backend';
 import dataProvider from '@utils/testdata-provider';
 
-// Toolkit cold-start can be slow on the first run when the image is pulled.
+// The toolkit backend's cold start can be slow on the first run, while the image is pulled.
 const TOOLKIT_STARTUP_TIMEOUT = 60_000;
 
 /**
@@ -43,16 +43,16 @@ const TOOLKIT_STARTUP_TIMEOUT = 60_000;
 // startIndex-based offset behaviour meaningfully. Re-enable once #1152 makes
 // local chain data rich enough (or the test derives startIndex from the tip).
 describe.skipIf(env.isUndeployedEnv())('wallet connect options (startIndex)', () => {
-  let toolkit: ToolkitWrapper;
+  let backend: TxBackend;
   let indexerWsClient: IndexerWsClient;
 
   beforeAll(async () => {
-    toolkit = new ToolkitWrapper({});
-    await toolkit.start();
+    backend = createTxBackend();
+    await backend.start();
   }, TOOLKIT_STARTUP_TIMEOUT);
 
   afterAll(async () => {
-    await toolkit.stop();
+    await backend.stop();
   });
 
   beforeEach(async () => {
@@ -117,7 +117,7 @@ describe.skipIf(env.isUndeployedEnv())('wallet connect options (startIndex)', ()
      */
     test('should accept startIndex = 0 (no-op equivalent of unset options)', async () => {
       const seed = dataProvider.getFundingSeed();
-      const viewingKey = await toolkit.showViewingKey(seed);
+      const viewingKey = await backend.viewingKey(seed);
 
       const sessionId = await indexerWsClient.openWalletSession(viewingKey, {
         startIndex: 0,
@@ -139,7 +139,7 @@ describe.skipIf(env.isUndeployedEnv())('wallet connect options (startIndex)', ()
      */
     test('should skip historical scan when startIndex equals the current tip', async (ctx) => {
       const seed = dataProvider.getFundingSeed();
-      const viewingKey = await toolkit.showViewingKey(seed);
+      const viewingKey = await backend.viewingKey(seed);
 
       const tipIndex = await readCurrentZswapTipIndex(viewingKey);
       log.debug(`tip zswap end index = ${tipIndex}`);
@@ -209,7 +209,7 @@ describe.skipIf(env.isUndeployedEnv())('wallet connect options (startIndex)', ()
      */
     test('should accept startIndex past the current tip (fast-forward)', async () => {
       const seed = dataProvider.getFundingSeed();
-      const viewingKey = await toolkit.showViewingKey(seed);
+      const viewingKey = await backend.viewingKey(seed);
 
       const tipIndex = await readCurrentZswapTipIndex(viewingKey);
       // 1M past tip is well beyond any realistic chain depth: exercises the

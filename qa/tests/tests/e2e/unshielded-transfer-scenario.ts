@@ -23,7 +23,6 @@
 // Not a *.test.ts file, so it is never collected on its own — it only defines
 // tests when a suite calls defineUnshieldedTransferTests.
 
-import { env } from 'environment/model';
 import type { TestContext } from 'vitest';
 import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
@@ -31,7 +30,8 @@ import { retry } from '@utils/retry-helper';
 import dataProvider from '@utils/testdata-provider';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { IndexerWsClient, UnshieldedTxSubscriptionResponse } from '@utils/indexer/websocket-client';
-import { ToolkitWrapper, ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
+import type { ToolkitTransactionResult } from '@utils/toolkit/toolkit-wrapper';
+import { createTxBackend, NIGHT_TOKEN_TYPE, type TxBackend } from '@utils/tx-backend';
 import {
   Transaction,
   UnshieldedTransaction,
@@ -49,8 +49,7 @@ import {
 /** Timeout for the suite and for the transfer that sets it up. */
 export const UNSHIELDED_TRANSFER_TIMEOUT = 200_000;
 
-/** NIGHT is the chain's native unshielded token: its token type is all zeros. */
-export const NIGHT_TOKEN_TYPE = '0'.repeat(64);
+export { NIGHT_TOKEN_TYPE } from '@utils/tx-backend';
 
 /**
  * The progress subscription backs off while idle (since indexer 4.4.0: 30s doubling
@@ -135,7 +134,7 @@ export interface UnshieldedTransferScenario {
   token: UnshieldedTokenUnderTest;
   httpClient: IndexerHttpClient;
   wsClient: IndexerWsClient;
-  toolkit: ToolkitWrapper;
+  backend: TxBackend;
   wallet: Awaited<ReturnType<typeof setupWalletEventSubscriptions>>;
   transactionResult: ToolkitTransactionResult;
   /** Non-null when the environment cannot run the scenario; every test skips with it. */
@@ -143,7 +142,7 @@ export interface UnshieldedTransferScenario {
 }
 
 /**
- * Registers the scenario's `beforeAll`/`afterAll` hooks: connect, start the toolkit,
+ * Registers the scenario's `beforeAll`/`afterAll` hooks: connect, start the tx backend,
  * subscribe both wallets, then transfer `amount` of the token under test from the
  * environment's funding wallet to the destination wallet.
  *
@@ -161,16 +160,8 @@ export function setupUnshieldedTransferScenario(
     scenario.wsClient = new IndexerWsClient();
     await scenario.wsClient.connectionInit();
 
-    // The wrapper is always constructed — `generateSingleTx` dispatches on
-    // TX_BACKEND inside it — but its CONTAINER is only started when the toolkit
-    // backend is actually going to be used. On the moth backend nothing in this
-    // scenario touches the container: transfers go through moth, and addresses
-    // come from local key derivation. Starting it anyway cost a container for
-    // the life of the suite and did no work.
-    scenario.toolkit = new ToolkitWrapper({});
-    if (env.getTxBackend() === 'toolkit') {
-      await scenario.toolkit.start();
-    }
+    scenario.backend = createTxBackend();
+    await scenario.backend.start();
 
     const sourceSeed = dataProvider.getTransferFundingSeed();
     // On a self-transfer the funding wallet is also the recipient, so it is
@@ -185,7 +176,7 @@ export function setupUnshieldedTransferScenario(
       );
     }
     scenario.wallet = await setupWalletEventSubscriptions(
-      scenario.toolkit,
+      scenario.backend,
       scenario.wsClient,
       sourceSeed,
       [destinationSeed, ...(token.extraDestinationSeeds ?? [])],
@@ -197,7 +188,7 @@ export function setupUnshieldedTransferScenario(
       return;
     }
 
-    scenario.transactionResult = await scenario.toolkit.generateSingleTx(
+    scenario.transactionResult = await scenario.backend.transfer(
       sourceSeed,
       'unshielded',
       scenario.wallet.destinations[0].destinationAddress,
@@ -210,7 +201,7 @@ export function setupUnshieldedTransferScenario(
   afterAll(async () => {
     scenario.wallet?.source.unsubscribe();
     scenario.wallet?.destinations.forEach((destination) => destination.unsubscribe());
-    await Promise.all([scenario.toolkit?.stop(), scenario.wsClient?.connectionClose()]);
+    await Promise.all([scenario.backend?.stop(), scenario.wsClient?.connectionClose()]);
   });
 
   return scenario;

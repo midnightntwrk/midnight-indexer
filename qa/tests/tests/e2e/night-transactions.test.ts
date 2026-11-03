@@ -32,7 +32,6 @@ import {
   setupUnshieldedTransferScenario,
   UNSHIELDED_TRANSFER_TIMEOUT,
 } from './unshielded-transfer-scenario';
-import { deriveAddresses } from '@utils/moth/moth-addresses';
 
 // Destination wallets are numbered per e2e suite (…e2e002 is the custom-token suite's) so
 // that no two suites share one — see `destinationSeed` in unshielded-transfer-scenario.ts.
@@ -303,7 +302,7 @@ describe.skipIf(skipNight)('unshielded NIGHT transactions', NIGHT_SUITE_OPTS, ()
 
       const destinationAddress = b1.destinationAddress;
 
-      const b1TxResult = await scenario.toolkit.generateSingleTx(
+      const b1TxResult = await scenario.backend.transfer(
         scenario.wallet.source.seed,
         'unshielded',
         destinationAddress,
@@ -360,7 +359,7 @@ describe.skipIf(skipNight)('unshielded NIGHT transactions', NIGHT_SUITE_OPTS, ()
 
       const secondDestinationAddress = b2.destinationAddress;
 
-      const b2TxResult = await scenario.toolkit.generateSingleTx(
+      const b2TxResult = await scenario.backend.transfer(
         scenario.wallet.source.seed,
         'unshielded',
         secondDestinationAddress,
@@ -410,7 +409,7 @@ describe.skipIf(skipNight)('unshielded NIGHT transactions', NIGHT_SUITE_OPTS, ()
       ctx.task!.meta.custom = { labels: ['Wallet', 'Subscription', 'EmptyWallet'] };
 
       const emptySeed = '000000000000000000000000000000000000000000000000000000000000000E';
-      const emptyAddress = (await deriveAddresses(emptySeed, scenario.toolkit)).unshielded;
+      const emptyAddress = (await scenario.backend.addresses(emptySeed)).unshielded;
       log.debug(`Empty wallet address: ${emptyAddress}`);
 
       const ws = new IndexerWsClient();

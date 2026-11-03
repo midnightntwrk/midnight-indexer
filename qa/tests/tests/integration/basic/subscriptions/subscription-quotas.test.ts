@@ -19,7 +19,7 @@ import '@utils/logging/test-logging-hooks';
 import { IndexerWsClient } from '@utils/indexer/websocket-client';
 import { extractSubscriptionErrorMessage } from '@utils/indexer/subscription-error';
 import { BLOCKS_SUBSCRIPTION_FROM_LATEST_BLOCK } from '@utils/indexer/graphql/subscriptions';
-import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
+import { createTxBackend, type TxBackend } from '@utils/tx-backend';
 
 // Shipped defaults from the indexer-api `infra.api.quota` configuration.
 const PER_CONNECTION_CAP = 20;
@@ -169,21 +169,21 @@ describe('subscription quotas', () => {
   });
 
   describe('per-session subscription creation rate limit', () => {
-    let toolkit: ToolkitWrapper;
+    let backend: TxBackend;
 
     beforeAll(async () => {
-      toolkit = new ToolkitWrapper({});
-      await toolkit.start();
+      backend = createTxBackend();
+      await backend.start();
     }, TOOLKIT_STARTUP_TIMEOUT);
 
     afterAll(async () => {
-      await toolkit.stop();
+      await backend.stop();
     });
 
     // The rate limit is enforced before wallet resolution, so a session for a
     // random (empty) wallet is sufficient — no on-chain data is needed.
     const openRandomWalletSession = async (): Promise<string> => {
-      const viewingKey = await toolkit.showViewingKey(randomBytes(32).toString('hex'));
+      const viewingKey = await backend.viewingKey(randomBytes(32).toString('hex'));
       return client.openWalletSession(viewingKey);
     };
 

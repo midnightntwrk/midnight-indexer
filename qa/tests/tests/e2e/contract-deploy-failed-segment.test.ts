@@ -18,6 +18,7 @@ import '@utils/logging/test-logging-hooks';
 import log from '@utils/logging/logger';
 import dataProvider from '@utils/testdata-provider';
 import { env } from 'environment/model';
+import { requiresBackend } from '@utils/tx-backend';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import { NodeRpcClient, type ContractStateResult } from '@utils/node/rpc-client';
 import { GET_TRANSACTION_CONTRACT_ACTIONS_BY_OFFSET } from '@utils/indexer/graphql/transaction-queries';
@@ -94,9 +95,12 @@ const indexesNodeTwo = line.major > 4 || (line.major === 4 && line.minor >= 4);
  * must go red with the indexer's own `ContractNotPresent` fatal. That control run is part of
  * the procedure, not an optional extra.
  */
+// Toolkit only: the duplicate deploy is crafted and submitted as a raw toolkit transaction.
+const backendGate = requiresBackend('toolkit');
+
 describe
-  .skipIf(!env.isUndeployedEnv())
-  .sequential('a contract deploy in a rolled-back fallible segment', () => {
+  .skipIf(!env.isUndeployedEnv() || backendGate.skip)
+  .sequential(`a contract deploy in a rolled-back fallible segment ${backendGate.label}`, () => {
     let indexer: IndexerHttpClient;
     let node: NodeRpcClient;
     let toolkit: ToolkitWrapper;

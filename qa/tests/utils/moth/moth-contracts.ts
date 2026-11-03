@@ -390,7 +390,7 @@ export const updateContractViaMoth = async (
 /**
  * Drop the cached provider sets so no caller can reuse one that wraps a
  * stopped facade. Call it right before `closeMothWallets()`, as
- * `ToolkitWrapper.stop()` and the moth-only suites do; the wallets themselves
+ * `MothTxBackend.stop()` and the moth-only suites do; the wallets themselves
  * stay owned by `moth-backend`, which is why this does not stop them.
  */
 export const closeMothContractContexts = (): void => {
