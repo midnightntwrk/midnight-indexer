@@ -47,7 +47,12 @@ import {
   type WalletKeys,
 } from '@shieldedtech/moth-wallet';
 import type { FacadeState, UtxoWithMeta } from '@midnightntwrk/wallet-sdk/facade';
-import type { Dust, DustFullInfo } from '@midnightntwrk/wallet-sdk/dust/v1';
+import {
+  CoinsAndBalances,
+  coreStateOf,
+  type Dust,
+  type DustFullInfo,
+} from '@midnightntwrk/wallet-sdk/dust/v2';
 import * as Rx from 'rxjs';
 import log from '@utils/logging/logger';
 import { env } from '../../environment/model';
@@ -634,25 +639,29 @@ export const getDustBalanceViaMoth = async (seed: string): Promise<DustBalance> 
   // agree, and the wallet's own `availableCoins` getter would value the coins
   // at its sync time instead.
   const now = new Date();
-  // wallet-sdk 2 dropped `capabilities` from the dust state, so the backing NIGHT
-  // value is not reachable here; fail loudly rather than report a made-up value.
-  const coinsAndBalances = (dust as any).capabilities?.coinsAndBalances;
-  if (!coinsAndBalances) {
-    throw new Error(
-      'getDustBalanceViaMoth is not supported on wallet-sdk 2 yet: the dust state no longer ' +
-        'exposes per-coin generation info (backing NIGHT value).',
-    );
+  // wallet-sdk 2 seals the dust state; the per-coin generation info is read from
+  // the ledger-9 (v2) core state through the SDK's own coins-and-balances helpers.
+  const core = coreStateOf(dust);
+  if (core._tag !== 'Some') {
+    throw new Error('The DUST balance needs the ledger-9 dust wallet, but it is not running yet.');
   }
+  const coinsAndBalances = CoinsAndBalances.makeDefaultCoinsAndBalancesCapability(
+    undefined,
+    // Only dust-generation estimates read the keys; balances and coins never do.
+    () => {
+      throw new Error('keys are not needed to read DUST coins');
+    },
+  );
 
   // `getAvailableCoins` already drops UTXOs without generation info (which have
   // no value the toolkit can report, and the schema's `generation_info` is not
   // nullable) and carries their `dtime`. The generation info is read again only
   // for the fields the full info lacks (value, owner, nonce); it exists for
   // every coin returned here.
-  const coins: readonly DustFullInfo[] = coinsAndBalances.getAvailableCoins(dust.state, now);
+  const coins: readonly DustFullInfo[] = coinsAndBalances.getAvailableCoins(core.value, now);
 
   const generation_infos = coins.map(({ token, dtime }) => {
-    const generation = coinsAndBalances.getGenerationInfo(dust.state, token);
+    const generation = coinsAndBalances.getGenerationInfo(core.value, token);
     if (!generation) {
       throw new Error(
         `moth returned an available DUST UTXO (nonce ${toHex(token.nonce)}) without generation info`,
