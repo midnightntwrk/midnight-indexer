@@ -24,3 +24,10 @@ pub mod telemetry;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 pub mod version;
+
+// jemalloc backs every Linux executable in the workspace: it is what the allocator metrics in
+// `telemetry` read from and what heap profiling (docs/heap-profiling.md) needs. Declared here
+// rather than per binary so there is a single allocator and a single profiling feature.
+#[cfg(target_os = "linux")]
+#[global_allocator]
+static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
