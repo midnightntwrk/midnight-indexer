@@ -66,6 +66,11 @@ echo "Compose project: ${COMPOSE_PROJECT_NAME}   RPC/API ports: ${NODE_RPC_PORT}
 
 mkdir -p "$TMPDIR"
 
+# The toolkit image chowns its /out mount recursively on start. Mounting $TMPDIR itself
+# would take the postgres data directory away from postgres, so it gets a subdirectory.
+TX_DIR="${TMPDIR}/tx"
+mkdir -p "$TX_DIR"
+
 # The cloud services need non-empty credentials. Keep rehearsal defaults local to this isolated
 # Compose project; callers can still supply their normal environment values.
 : "${APP__INFRA__STORAGE__PASSWORD:=hardfork-test-password}"
@@ -89,6 +94,18 @@ indexer_height() {
     | python3 -c "import json,sys; print(json.load(sys.stdin)['data']['block']['height'])" 2>/dev/null || echo ""
 }
 
+# Finalized block height from the node RPC. Empty on failure.
+finalized_height() {
+  local fh
+  fh=$(curl -sf -H "Content-Type: application/json" \
+    -d '{"id":1,"jsonrpc":"2.0","method":"chain_getFinalizedHead"}' "$NODE_RPC_HTTP" 2>/dev/null \
+    | python3 -c "import json,sys; print(json.load(sys.stdin)['result'])" 2>/dev/null || echo "")
+  [ -n "$fh" ] || { echo ""; return 0; }
+  curl -sf -H "Content-Type: application/json" \
+    -d "{\"id\":1,\"jsonrpc\":\"2.0\",\"method\":\"chain_getHeader\",\"params\":[\"$fh\"]}" "$NODE_RPC_HTTP" 2>/dev/null \
+    | python3 -c "import json,sys; print(int(json.load(sys.stdin)['result']['number'],16))" 2>/dev/null || echo ""
+}
+
 # Block until the node has finalized at least $1 blocks. The toolkit's generate-txs
 # refuses to build a transaction against a chain that has only finalized genesis
 # (`GetTransactions(NodeClientError(OnlyGenesisFinalized))`), so on a freshly booted
@@ -97,16 +114,8 @@ wait_for_finalized() {
   local want="$1" n=""
   echo ">>> Waiting for finalized height >= ${want}..."
   for i in {1..40}; do
-    local fh
-    fh=$(curl -sf -H "Content-Type: application/json" \
-      -d '{"id":1,"jsonrpc":"2.0","method":"chain_getFinalizedHead"}' "$NODE_RPC_HTTP" 2>/dev/null \
-      | python3 -c "import json,sys; print(json.load(sys.stdin)['result'])" 2>/dev/null)
-    if [ -n "$fh" ]; then
-      n=$(curl -sf -H "Content-Type: application/json" \
-        -d "{\"id\":1,\"jsonrpc\":\"2.0\",\"method\":\"chain_getHeader\",\"params\":[\"$fh\"]}" "$NODE_RPC_HTTP" 2>/dev/null \
-        | python3 -c "import json,sys; print(int(json.load(sys.stdin)['result']['number'],16))" 2>/dev/null)
-      if [ -n "$n" ] && [ "$n" -ge "$want" ]; then echo "Finalized height: $n"; return 0; fi
-    fi
+    n=$(finalized_height)
+    if [ -n "$n" ] && [ "$n" -ge "$want" ]; then echo "Finalized height: $n"; return 0; fi
     echo "Finalized not yet >= ${want} (got '${n:-}')... ($i)"; sleep 3
   done
   echo "ERROR: node did not finalize >= ${want} blocks in time" >&2
@@ -131,7 +140,7 @@ submit_tx() {
   local toolkit_tag="$1" label="$2"
   local dest="/out/${label}.mn"
   echo ">>> Generating ${label} tx with toolkit ${toolkit_tag}..."
-  docker run --rm --network "${NETWORK_NAME}" -v "${TMPDIR}:/out" \
+  docker run --rm --network "${NETWORK_NAME}" -v "${TX_DIR}:/out" \
     "${IMAGE_REGISTRY}/midnight-node-toolkit:${toolkit_tag}" \
     generate-txs \
     --src-url "$NODE_RPC_WS_COMPOSE" \
@@ -143,7 +152,7 @@ submit_tx() {
     --destination-address mn_shield-addr_undeployed1tth9g6jf8he6cmhgtme6arty0jde7wnypsg53qc3x5navl9za355jqqvfftm8asg986dx9puzwkmedeune9nfkuqvtmccmxtjwvlrvccwypcs \
     --destination-address mn_addr_undeployed1gkasr3z3vwyscy2jpp53nzr37v7n4r3lsfgj6v5g584dakjzt0xqun4d4r
   echo ">>> Submitting ${label} tx..."
-  docker run --rm --network "${NETWORK_NAME}" -v "${TMPDIR}:/out" \
+  docker run --rm --network "${NETWORK_NAME}" -v "${TX_DIR}:/out" \
     "${IMAGE_REGISTRY}/midnight-node-toolkit:${toolkit_tag}" \
     generate-txs \
     --src-file "$dest" \
@@ -168,7 +177,7 @@ submit_tx() {
 register_dust_address() {
   local toolkit_tag="$1"
   echo ">>> Re-registering the source wallet's DUST address (post-wipe)..."
-  docker run --rm --network "${NETWORK_NAME}" -v "${TMPDIR}:/out" \
+  docker run --rm --network "${NETWORK_NAME}" -v "${TX_DIR}:/out" \
     "${IMAGE_REGISTRY}/midnight-node-toolkit:${toolkit_tag}" \
     generate-txs \
     --fetch-cache inmemory \
@@ -355,10 +364,29 @@ if compose --profile cloud logs chain-indexer 2>&1 \
   exit 1
 fi
 
-FINAL_HEIGHT=$(indexer_height)
+# An indexer that died for any other reason (a storage error, say) leaves none of those
+# lines behind, so also require chain-indexer to be up and caught up with the post-fork tip.
+if [ -z "$(compose --profile cloud ps --status running --quiet chain-indexer)" ]; then
+  echo "ERROR: chain-indexer is not running. Last log lines:" >&2
+  compose --profile cloud logs --tail 20 chain-indexer >&2
+  exit 1
+fi
+
+TARGET_HEIGHT=$(finalized_height)
+FINAL_HEIGHT=""
+for i in {1..20}; do
+  FINAL_HEIGHT=$(indexer_height)
+  if [ -n "$FINAL_HEIGHT" ] && [ -n "$TARGET_HEIGHT" ] && [ "$FINAL_HEIGHT" -ge "$TARGET_HEIGHT" ]; then break; fi
+  echo "Indexer at '${FINAL_HEIGHT}', waiting for finalized height ${TARGET_HEIGHT}... ($i)"; sleep 3
+done
+if [ -z "$FINAL_HEIGHT" ] || [ -z "$TARGET_HEIGHT" ] || [ "$FINAL_HEIGHT" -lt "$TARGET_HEIGHT" ]; then
+  echo "ERROR: the indexer did not reach the post-fork finalized height ${TARGET_HEIGHT:-?} (indexed: '${FINAL_HEIGHT}')." >&2
+  exit 1
+fi
+
 echo "Final indexed height: ${FINAL_HEIGHT} (post-fork specVersion ${POST_SPEC})"
 echo ""
-echo "SUCCESS: no boundary root/translate mismatch; the indexer crossed 8 -> 9 and kept indexing."
+echo "SUCCESS: no boundary root/translate mismatch; the indexer crossed 8 -> 9 and is caught up."
 echo "Inspect further:"
 echo "  compose --profile cloud logs -f chain-indexer"
 echo "  curl -s ${INDEXER_API}/api/v4/graphql -H 'Content-Type: application/json' -d '{\"query\":\"{ block { height } }\"}'"
