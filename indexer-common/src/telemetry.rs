@@ -27,6 +27,10 @@
 //!
 //! ## Metrics
 //! - Metrics are exposed via Prometheus at the configured endpoint.
+//! - On Linux the allocator's own statistics are published as well, see [allocator_metrics].
+
+#[cfg(target_os = "linux")]
+pub mod allocator_metrics;
 
 use fastrace::{
     collector::{ConsoleReporter, Reporter},
@@ -201,11 +205,12 @@ pub fn init_tracing(config: TracingConfig) {
 
 /// Initialize metrics.
 ///
-/// Installs a Prometheus exporter.
+/// Installs a Prometheus exporter and, on Linux, starts publishing the allocator's statistics.
+/// Must be called within a Tokio runtime.
 ///
 /// # Panics
 ///
-/// Panics if the Prometheus exporter can be installed.
+/// Panics if the Prometheus exporter cannot be installed.
 pub fn init_metrics(config: MetricsConfig) {
     let MetricsConfig {
         enabled,
@@ -218,6 +223,16 @@ pub fn init_metrics(config: MetricsConfig) {
             .with_http_listener((address, port))
             .install()
             .expect("Prometheus exporter can be installed");
+
+        #[cfg(target_os = "linux")]
+        match allocator_metrics::AllocatorMetrics::new() {
+            Ok(metrics) => {
+                tokio::spawn(metrics.run(allocator_metrics::DEFAULT_INTERVAL));
+            }
+            Err(error) => {
+                log::error!(error:%; "cannot read allocator statistics, not publishing them")
+            }
+        }
     }
 }
 

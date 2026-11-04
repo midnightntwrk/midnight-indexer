@@ -111,6 +111,8 @@ tempfile                    = { version = "3.27" }
 testcontainers              = { version = "0.27" }
 testcontainers-modules      = { version = "0.15" }
 thiserror                   = { version = "2.0" }
+tikv-jemalloc-ctl           = { version = "0.6", features = [ "stats" ] }
+tikv-jemallocator           = { version = "0.6", features = [ "unprefixed_malloc_on_supported_platforms" ] }
 tokio                       = { version = "1" }
 tokio-stream                = { version = "0.1" }
 tokio-tungstenite           = { version = "0.29" }
