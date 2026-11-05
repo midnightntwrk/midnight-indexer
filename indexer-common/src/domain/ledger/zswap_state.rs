@@ -82,7 +82,8 @@ impl<D: DB> ZswapStateExt for ZswapStateV9<D> {
 }
 
 // Collapses every leaf of `tree` below `first_free` except those at `retained`, with the same
-// `collapse` calls `State::filter` makes after scanning for them, so the result is identical.
+// `collapse` calls `State::filter` makes after scanning for them, so the result is identical. See
+// https://github.com/midnightntwrk/midnight-ledger/blob/f861b4ecdde7a67638366d2a19eea9cd9ff77035/zswap/src/ledger.rs#L211-L239
 fn collapse_except<Tree: Clone>(
     tree: &Tree,
     retained: &[u64],
@@ -128,7 +129,7 @@ mod tests {
                 // The second owns adjacent leaves 1 and 2 and leaf 7. The third owns none.
                 fn state() -> (State, [Address; 3]) {
                     let addresses =
-                        [7, 8, 9].map(|byte| super::super::$address(HashOutput([byte; 32])));
+                        [1, 2, 3].map(|byte| super::super::$address(HashOutput([byte; 32])));
                     let mut state = State::new();
                     state.coin_coms = (0..LEAVES).fold(state.coin_coms.clone(), |tree, index| {
                         tree.try_update(index, &Fr::from(index + 1), owner(&addresses, index))
@@ -152,6 +153,7 @@ mod tests {
                 fn owned_leaves_yields_the_owned_leaves_in_range() {
                     let (state, addresses) = state();
 
+                    // The whole tree, a range starting and ending mid-tree, and an empty range.
                     for range in [0..LEAVES, 5..12, 12..12] {
                         let expected = range
                             .clone()
