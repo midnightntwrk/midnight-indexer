@@ -134,15 +134,23 @@ const UINT_128_SIZE: usize = 16;
 const EITHER_SIZE: usize = 1 + 2 * BYTES_32_SIZE; // is_left + left(32) + right(32).
 const MAYBE_512_SIZE: usize = 1 + 512;
 
+// Only node-verified finalized blocks are applied and each block's state root is checked against the
+// node's, so proofs and signatures need no re-check. Zswap proofs stay: strictness can't skip them.
 static STRICTNESS_V8: LazyLock<WellFormedStrictnessV8> = LazyLock::new(|| {
     let mut strictness = WellFormedStrictnessV8::default();
     strictness.enforce_balancing = false;
+    strictness.verify_native_proofs = false;
+    strictness.verify_contract_proofs = false;
+    strictness.verify_signatures = false;
     strictness
 });
 
 static STRICTNESS_V9: LazyLock<WellFormedStrictnessV9> = LazyLock::new(|| {
     let mut strictness = WellFormedStrictnessV9::default();
     strictness.enforce_balancing = false;
+    strictness.verify_native_proofs = false;
+    strictness.verify_contract_proofs = false;
+    strictness.verify_signatures = false;
     strictness
 });
 
