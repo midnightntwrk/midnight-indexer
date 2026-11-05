@@ -227,7 +227,7 @@ export CHAINSPEC_PATH="${TMPDIR}/chainspec.json" # consumed by docker-compose.ru
 
 cd "$REPO_ROOT"
 
-# The project name and per-run data paths isolate this rehearsal from other local stacks.
+# The project name, which also scopes the data volumes, isolates this rehearsal from other local stacks.
 NETWORK_NAME="${COMPOSE_PROJECT_NAME}_default" # compose network; toolkit + runtime-upgrade attach here
 
 # The 2.1.0 binary may reject the dev chain-spec unless these config fields are set
@@ -244,10 +244,15 @@ services:
     ports: !override ["${INDEXER_API_PORT}:8088"]
   postgres:
     ports: !override ["${POSTGRES_PORT}:5432"]
-    volumes: !override ["${TMPDIR}/postgres:/var/lib/postgresql/data"]
+    volumes: !override ["postgres_data:/var/lib/postgresql/data"]
   nats:
     ports: !override ["${NATS_PORT}:4222"]
-    volumes: !override ["${TMPDIR}/nats:/tmp/nats"]
+    volumes: !override ["nats_data:/tmp/nats"]
+# Named volumes, unlike bind mounts, are scoped to the project and removed by
+# `down --volumes`, so every run starts the indexer from an empty database.
+volumes:
+  postgres_data:
+  nats_data:
 EOF
 COMPOSE_FILES+=(-f "$COMPOSE_OVERRIDE")
 
@@ -255,7 +260,9 @@ compose() {
   docker compose -p "$COMPOSE_PROJECT_NAME" "${COMPOSE_FILES[@]}" "$@"
 }
 
-compose down --volumes --remove-orphans 2>/dev/null || true
+# Every service sits behind a profile, so a `down` without one matches nothing and
+# a re-run would boot on the previous run's chain.
+compose --profile cloud down --volumes --remove-orphans || true
 if [ -n "${STORAGE_SEPARATION:-}${TBLOCK_CORRECTION_OFFSET:-}${TBLOCK_CORRECTION_DISABLE_AFTER:-}" ]; then
   NODE_ENV_OVERRIDE="${TMPDIR}/docker-compose.node-env.yaml"
   {
