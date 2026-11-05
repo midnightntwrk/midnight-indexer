@@ -17,12 +17,14 @@ mod ledger_state;
 mod secret_key;
 mod state_translation_v8_to_v9;
 mod transaction;
+mod zswap_state;
 
 pub use contract_state::*;
 pub use contract_zswap_state::*;
 pub use ledger_state::*;
 pub use secret_key::*;
 pub use transaction::*;
+pub use zswap_state::*;
 
 use crate::{
     domain::{
