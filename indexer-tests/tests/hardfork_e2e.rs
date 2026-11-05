@@ -22,8 +22,8 @@
 //! # What makes this a real test
 //!
 //! `chain-indexer` re-derives the whole ledger state itself and compares its
-//! arena root against the node's `ledger_state_root` on *every* block
-//! (`chain-indexer/src/application.rs`, "ledger state root mismatch"). That root
+//! arena key against the node's `StateKey` on *every* block
+//! (`chain-indexer/src/application.rs`, "ledger state root mismatch"). That key
 //! covers `dust`, so it is a total consistency oracle: a wrong dust wipe, a
 //! dropped replayed system transaction, or one applied out of order all bail the
 //! indexer on the very next block. This test's job is therefore not to invent a
@@ -554,11 +554,7 @@ impl Harness {
     /// exit.
     fn assert_indexer_healthy(&self, stage: &str) -> anyhow::Result<()> {
         let log = self.indexer_log().unwrap_or_default();
-        for marker in [
-            "ledger state root mismatch",
-            "zswap state root mismatch",
-            "translate ledger state",
-        ] {
+        for marker in ["ledger state root mismatch", "translate ledger state"] {
             if log.contains(marker) {
                 let context = log
                     .lines()

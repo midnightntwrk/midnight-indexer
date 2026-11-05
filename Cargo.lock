@@ -1360,7 +1360,6 @@ dependencies = [
  "const-hex",
  "criterion",
  "derive_more 2.1.1",
- "fake",
  "fastrace",
  "fs_extra",
  "futures",

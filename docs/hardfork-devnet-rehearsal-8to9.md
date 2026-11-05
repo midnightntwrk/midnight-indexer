@@ -60,8 +60,8 @@ pre-fork traffic, runtime upgrade, and post-fork traffic.
   only cNIGHT's slice, so the genesis dev wallets cross the boundary holding
   NIGHT but generating no DUST and cannot pay a fee until they re-register.
 - Ledger-9 transactions are accepted and indexed after the upgrade.
-- `chain-indexer` logs contain none of: `translate ledger state`, `ledger state
-  root mismatch`, or `zswap state root mismatch`.
+- `chain-indexer` logs contain neither `translate ledger state` nor `ledger state
+  root mismatch`.
 - The script completes with its success message and records a post-fork indexed
   height.
 

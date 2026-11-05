@@ -31,8 +31,8 @@
 //!
 //! # Why the pinning matters
 //!
-//! At the fork boundary the indexer re-derives `ledger_state.root()` and
-//! compares it against the node's value, so the indexer and the node MUST
+//! At the fork boundary the indexer re-derives the ledger state and compares
+//! its key against the node's `StateKey`, so the indexer and the node MUST
 //! translate with the same table compiled against the same ledger crates. That
 //! holds today: both pin this crate at the same rev and patch every v9-side
 //! crate to the same per-crate ledger 9.1.0.0-rc.5 tags, with
