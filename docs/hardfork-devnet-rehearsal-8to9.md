@@ -62,6 +62,8 @@ pre-fork traffic, runtime upgrade, and post-fork traffic.
 - Ledger-9 transactions are accepted and indexed after the upgrade.
 - `chain-indexer` logs contain none of: `translate ledger state`, `ledger state
   root mismatch`, or `zswap state root mismatch`.
+- `chain-indexer` is still running and the indexer has caught up with the
+  node's finalized height after the post-fork traffic.
 - The script completes with its success message and records a post-fork indexed
   height.
 
