@@ -131,7 +131,13 @@ impl LedgerState {
     /// # Errors
     /// Returns [Error::Load] if the state cannot be reloaded, e.g. mid-block or for an unknown `key`.
     pub fn reload(self, key: &SerializedLedgerStateKey) -> Result<Self, Error> {
-        self.0.reload(key).map_err(Error::Load).map(Into::into)
+        let Self(ledger_state, contract_zswap_indices) = self;
+
+        // Reloading leaves the commitment tree as it is, so its contract zswap indices still hold.
+        ledger_state
+            .reload(key)
+            .map_err(Error::Load)
+            .map(|ledger_state| Self(ledger_state, contract_zswap_indices))
     }
 
     pub fn translate(self, ledger_version: LedgerVersion) -> Result<Self, Error> {
