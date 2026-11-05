@@ -3577,31 +3577,26 @@ mod tests {
         Ok(())
     }
 
-    // One test per ledger version: the zswap state captured from `ContractZswapIndices` is the one
+    // One test per ledger version: the commitment tree filtered with `ContractZswapIndices` is the one
     // zswap's `State::filter` produces, for contracts with entries, a contract without, after the
     // indices catch up with leaves added since their previous use, and after indices built against a
     // longer tree are reused with a shorter one.
-    macro_rules! contract_zswap_state_key_matches_filter {
-        ($test:ident, $variant:ident, $zswap_state:path, $address:path, $fr:path) => {
+    macro_rules! contract_zswap_indices_match_filter {
+        ($test:ident, $variant:ident, $address:path, $fr:path) => {
             #[cfg(any(feature = "cloud", feature = "standalone"))]
             #[tokio::test(flavor = "multi_thread")]
             async fn $test() -> Result<(), BoxError> {
-                use crate::domain::{
-                    SerializedZswapStateKey,
-                    ledger::{ContractZswapIndices, SerializableExt, TaggedSerializableExt},
-                };
+                use crate::domain::ledger::{ContractZswapIndices, SerializableExt, ZswapStateExt};
                 use midnight_base_crypto_v1::hash::HashOutput;
-                use midnight_storage_core_v1::storage::default_storage;
                 use std::ops::{Deref, Range};
                 use $address as Address;
                 use $fr as Fr;
-                use $zswap_state as ZswapState;
 
                 const LEAVES: u64 = 20;
 
                 let _ledger_db = init_ledger_db().await?;
 
-                let addresses = [7, 8, 9].map(|byte| Address(HashOutput([byte; 32])));
+                let addresses = [1, 2, 3].map(|byte| Address(HashOutput([byte; 32])));
 
                 // The first address owns every third leaf and the last, so its final two leaves are
                 // adjacent and end the tree. The second owns adjacent leaves 1 and 2 and leaf 7.
@@ -3624,23 +3619,22 @@ mod tests {
                     }
                     _ => unreachable!("constructed as {}", stringify!($variant)),
                 };
-                // Persists the filtered state before taking its key, as `contract_zswap_state_key`
-                // does, because persisting changes the serialized key.
-                let filtered_key = |state: &LedgerState, address: Address| match state {
-                    LedgerState::$variant { ledger_state, .. } => {
-                        let mut contract_zswap_state = ZswapState::new();
-                        contract_zswap_state.coin_coms = ledger_state.zswap.filter(&[address]);
-                        let mut contract_zswap_state =
-                            default_storage::<v1_1::LedgerDb>().alloc(contract_zswap_state);
-                        contract_zswap_state.persist();
-                        SerializedZswapStateKey::from(
-                            contract_zswap_state
-                                .as_typed_key()
-                                .tagged_serialize()
-                                .expect("zswap state key can be serialized"),
-                        )
-                    }
-                    _ => unreachable!("constructed as {}", stringify!($variant)),
+                // Updates the indices to `state` and checks the tree they filter is `State::filter`'s.
+                let assert_matches_filter = |state: &LedgerState,
+                                             contract_zswap_indices: &mut ContractZswapIndices,
+                                             address: Address|
+                 -> Result<(), BoxError> {
+                    state.update_contract_zswap_indices(contract_zswap_indices)?;
+                    let LedgerState::$variant { ledger_state, .. } = state else {
+                        unreachable!("constructed as {}", stringify!($variant))
+                    };
+                    assert!(
+                        ledger_state
+                            .zswap
+                            .filter_indices(contract_zswap_indices.get(&address.serialize()?))
+                            == ledger_state.zswap.filter(&[address])
+                    );
+                    Ok(())
                 };
                 let new_state = || {
                     LedgerState::new("undeployed".try_into()?, LedgerVersion::$variant)
@@ -3649,49 +3643,42 @@ mod tests {
 
                 let mut contract_zswap_indices = ContractZswapIndices::default();
 
+                // The first range builds the indices from an empty tree. The second adds leaves, so
+                // the indices catch up with only those.
                 let mut state = new_state()?;
-                for leaves in [0..12, 12..LEAVES] {
-                    insert(&mut state, leaves);
+                for Range { start, end } in [0..12, 12..LEAVES] {
+                    insert(&mut state, start..end);
+                    assert_eq!(contract_zswap_indices.first_free, start);
                     for address in addresses {
-                        assert_eq!(
-                            state.contract_zswap_state_key(
-                                &address.serialize()?,
-                                &mut contract_zswap_indices
-                            )?,
-                            filtered_key(&state, address),
-                        );
+                        assert_matches_filter(&state, &mut contract_zswap_indices, address)?;
                     }
+                    assert_eq!(contract_zswap_indices.first_free, end);
                 }
 
-                // The indices now cover a longer tree than this state's.
-                let mut shorter = new_state()?;
-                insert(&mut shorter, 0..6);
+                // Existing contract zswap indices covering a longer tree than the state's belong to
+                // another state, and would keep leaves the state does not have, so the update
+                // discards them and rebuilds from the state's tree.
+                let mut state = new_state()?;
+                insert(&mut state, 0..6);
                 for address in addresses {
-                    assert_eq!(
-                        shorter.contract_zswap_state_key(
-                            &address.serialize()?,
-                            &mut contract_zswap_indices
-                        )?,
-                        filtered_key(&shorter, address),
-                    );
+                    assert_matches_filter(&state, &mut contract_zswap_indices, address)?;
                 }
+                assert_eq!(contract_zswap_indices.first_free, 6);
 
                 Ok(())
             }
         };
     }
 
-    contract_zswap_state_key_matches_filter!(
-        contract_zswap_state_key_matches_filter_v8,
+    contract_zswap_indices_match_filter!(
+        contract_zswap_indices_match_filter_v8,
         V8,
-        midnight_zswap_v8::ledger::State,
         midnight_coin_structure_v2::contract::ContractAddress,
         midnight_transient_crypto_v2::curve::Fr
     );
-    contract_zswap_state_key_matches_filter!(
-        contract_zswap_state_key_matches_filter_v9,
+    contract_zswap_indices_match_filter!(
+        contract_zswap_indices_match_filter_v9,
         V9,
-        midnight_zswap_v9::ledger::State,
         midnight_coin_structure_v3::contract::ContractAddress,
         midnight_transient_crypto_v3::curve::Fr
     );
