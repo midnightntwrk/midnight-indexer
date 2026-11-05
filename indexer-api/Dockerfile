@@ -51,7 +51,7 @@ RUN cargo auditable build -p indexer-api --locked --features cloud --profile $PR
     mkdir -p /runtime/opt/indexer-api && \
     mv /build/indexer-api/config.yaml /runtime/opt/indexer-api
 
-FROM debian:trixie-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad AS runtime
+FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2 AS runtime
 RUN useradd -u 10001 -d /nonexistent -s /usr/sbin/nologin -M -c "" appuser && \
     passwd -l appuser && \
     mkdir /var/run/indexer-api && \
