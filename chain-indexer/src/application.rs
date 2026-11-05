@@ -754,8 +754,8 @@ where
 
     // Persist ledger state.
     let (new_ledger_state, ledger_state_key) =
-        ledger_state.0.persist().context("persist ledger state")?;
-    ledger_state = new_ledger_state.into();
+        ledger_state.persist().context("persist ledger state")?;
+    ledger_state = new_ledger_state;
 
     // Determine system parameters change if any.
     let system_parameters_change = determine_system_parameters_change(&block, storage, node)
