@@ -48,8 +48,8 @@ readonly node_dir="$(pwd)/.node/$node_version"
 # to override it. Ledger tokens token-issuer mints go to whichever wallet its
 # mintUnshielded call names as recipient.
 case "$node_version" in
-    2.1.100*) default_compactc_version="0.35.0" ;;
-    2.1.*) default_compactc_version="0.33.0-rc.2" ;;
+    2.1.0*) default_compactc_version="0.33.0-rc.2" ;;
+    2.1.*) default_compactc_version="0.35.0" ;;
     *) default_compactc_version="0.30.0" ;;
 esac
 readonly compactc_version="${COMPACTC_VERSION:-$default_compactc_version}"

@@ -2974,7 +2974,7 @@ mod tests {
         //
         // The pinned v9 root below was reproduced byte-for-byte by the ledger
         // team's `v8-to-v9-state-translation` crate, at the rev
-        // `node-2.1.100` itself translates with, over this same blob, so
+        // `node-2.1.101` itself translates with, over this same blob, so
         // this fixture is authoritative for the translation. It moved when the
         // ledger 8 -> 9 dust wipe landed (midnight-node #2012, backported as
         // #2057): the v8 dust state is dropped rather than recast, which changes
