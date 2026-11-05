@@ -128,7 +128,7 @@ walkdir                     = { version = "2.5" }
 # Storage 2.0.3 and storage-core 1.2.3 sit at versions compatible with ledger
 # 8.1.3, as in the node.
 #
-# These pins match midnight-node `node-2.1.100` crate for crate — same
+# These pins match midnight-node `node-2.1.101` crate for crate — same
 # per-crate tags on the v9 side, same `=8.1.3` / `=3.0.2` / `=3.1.2` v8 side,
 # same `layout-v2` + `gc-v1` on storage-core, same `v8-to-v9-state-translation`
 # rev. They have to: the indexer re-derives the translated arena root and
@@ -145,8 +145,8 @@ walkdir                     = { version = "2.5" }
 # its own entry for that reason: under the workspace tag it arrived free via
 # `path = "../static"`, and crates.io stops at 9.0.0.
 #
-# `midnight-transient-crypto-old` pins transient-crypto 2.2.0: the 2.x crypto
-# stack is frozen and 9.1.0.1 only ships 3.x.
+# transient-crypto 2.x resolves from crates.io, which publishes 2.2.0 with the
+# ledger 8.1.2 verifier-key fix that the `transient-crypto-2.2.0` git tag lacks.
 #
 # Storage is split by ledger major. Ledger 9 needs `midnight-storage` 3.x (its
 # `Map` keys need `EncodingShape`), patched in here; ledger 8 stays on crates.io
@@ -167,7 +167,6 @@ midnight-zkir                 = { git = "https://github.com/shieldedtech/embargo
 midnight-storage              = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "storage-3.0.0" }
 midnight-storage-core         = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "storage-core-1.2.3" }
 midnight-storage-macros       = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "storage-macros-1.0.1" }
-midnight-transient-crypto-old = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "transient-crypto-2.2.0", package = "midnight-transient-crypto", version = "2.2.0" }
 midnight-ledger-static        = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "crate-ledger-9.1.0.1" }
 midnight-ledger-v9            = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "crate-ledger-9.1.0.1" }
 midnight-zswap_v9             = { git = "https://github.com/shieldedtech/embargo-2026-10-midnight-ledger", tag = "zswap-9.0.1",                 package = "midnight-zswap",            version = "9.0.1" }

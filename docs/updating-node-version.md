@@ -64,8 +64,8 @@ script picks the default from the node version:
 
 | Node version  | Ledger | compactc      |
 | ------------- | ------ | ------------- |
-| `2.1.100*`    | v9     | `0.35.0`      |
-| other `2.1.*` | v9     | `0.33.0-rc.2` |
+| `2.1.0*`      | v9     | `0.33.0-rc.2` |
+| other `2.1.*` | v9     | `0.35.0`      |
 | anything else | v8     | `0.30.0`      |
 
 Set `COMPACTC_VERSION` to override it, e.g. when adding a node line the table
