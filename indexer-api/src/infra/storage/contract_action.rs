@@ -756,7 +756,7 @@ mod tests {
         .bind(height as i64)
         .bind(protocol_version as i64)
         .bind(block_hash(height.wrapping_sub(1)))
-        .fetch_one(&**pool)
+        .fetch_one(pool.writer())
         .await
         .expect("insert block")
     }
@@ -771,7 +771,7 @@ mod tests {
         .bind(block_hash(
             TRANSACTION_SEED.fetch_add(1, Ordering::Relaxed) as u32
         ))
-        .fetch_one(&**pool)
+        .fetch_one(pool.writer())
         .await
         .expect("insert transaction")
     }
@@ -797,7 +797,7 @@ mod tests {
         .bind(transaction_id)
         .bind(address)
         .bind(state_key)
-        .fetch_one(&**pool)
+        .fetch_one(pool.writer())
         .await
         .expect("insert contract action")
     }
@@ -847,7 +847,7 @@ mod tests {
         .bind(action_id)
         .bind(block_id)
         .bind(key)
-        .execute(&**pool)
+        .execute(pool.writer())
         .await
         .expect("insert translation");
     }
