@@ -11,11 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::infra::api::v4::HexDecodeError;
+use crate::{domain::SESSION_TOKEN_LEN, infra::api::v4::HexDecodeError};
 use async_graphql::scalar;
 use derive_more::{Debug, Display, derive::From};
-use indexer_common::domain::{self, ByteArrayLenError};
-use secrecy::{ExposeSecret, SecretString, zeroize::Zeroizing};
+use indexer_common::domain;
+use secrecy::{ExposeSecret, SecretSlice, SecretString};
 use serde::{Deserialize, Serialize, Serializer};
 use thiserror::Error;
 
@@ -51,31 +51,54 @@ impl From<domain::SessionId> for SessionId {
     }
 }
 
-impl TryFrom<SessionId> for domain::SessionId {
-    type Error = SessionIdFormatError;
+impl From<SecretSlice<u8>> for SessionId {
+    fn from(session: SecretSlice<u8>) -> Self {
+        Self(const_hex::encode(session.expose_secret()).into())
+    }
+}
 
-    /// Hex-decodes the given API session ID into a domain session ID.
-    fn try_from(session_id: SessionId) -> Result<Self, Self::Error> {
-        let bytes = Zeroizing::new(
-            const_hex::decode(session_id.0.expose_secret()).map_err(HexDecodeError::from)?,
+impl SessionId {
+    /// Decode a sealed token or legacy session ID while keeping the bytes secret.
+    pub fn into_bytes(self) -> Result<SecretSlice<u8>, SessionIdFormatError> {
+        let bytes = SecretSlice::from(
+            const_hex::decode(self.0.expose_secret()).map_err(HexDecodeError::from)?,
         );
-        let session_id = Self::try_from(bytes.as_slice())?;
-        Ok(session_id)
+        if !matches!(bytes.expose_secret().len(), 32 | SESSION_TOKEN_LEN) {
+            return Err(SessionIdFormatError::InvalidLength);
+        }
+        Ok(bytes)
     }
 }
 
 #[derive(Debug, Error)]
 pub enum SessionIdFormatError {
+    #[error("invalid session ID length")]
+    InvalidLength,
+
     #[error("cannot hex-decode session ID")]
     HexDecode(#[from] HexDecodeError),
-
-    #[error("cannot convert into session ID")]
-    ByteArrayLen(#[from] ByteArrayLenError),
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::infra::api::v4::session_id::SessionId;
+    use super::*;
+
+    #[test]
+    fn token_and_legacy_session_roundtrip_without_debug_exposure() {
+        for len in [32, SESSION_TOKEN_LEN] {
+            let bytes = SecretSlice::from(vec![7; len]);
+            let session = SessionId::from(bytes);
+            let hex = "07".repeat(len);
+            assert!(!format!("{session:?}").contains(&hex));
+            assert!(!session.to_string().contains(&hex));
+            assert_eq!(
+                serde_json::to_string(&session).unwrap(),
+                format!("\"{hex}\"")
+            );
+            assert_eq!(session.into_bytes().unwrap().expose_secret(), vec![7; len]);
+        }
+        assert!(SessionId::from("07").into_bytes().is_err());
+    }
 
     #[test]
     fn test_debug_and_display_redacted() {
