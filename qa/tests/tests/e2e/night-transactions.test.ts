@@ -118,13 +118,20 @@ function validateCrossWalletTransaction(
       `No spent UTXO in the source stream for ${srcAddr} on hash ${destTx.transaction.hash}`,
     ).not.toHaveLength(0);
 
-    const spent = srcTx.spentUtxos[0];
-    expect(spent.spentAtTransaction.hash).toBe(destTx.transaction.hash);
-    const spentTx = spent.spentAtTransaction as { hash: string; identifiers?: string[] };
-    expect(spentTx.identifiers?.[0]).toBe(destTx.transaction.identifiers?.[0]);
+    // A wallet may fund one transfer from several inputs (wallet-sdk 2's coin selection does), so
+    // every spent UTXO must belong to this transaction, and value is conserved across all of them.
+    for (const spent of srcTx.spentUtxos) {
+      expect(spent.spentAtTransaction.hash).toBe(destTx.transaction.hash);
+      const spentTx = spent.spentAtTransaction as { hash: string; identifiers?: string[] };
+      expect(spentTx.identifiers?.[0]).toBe(destTx.transaction.identifiers?.[0]);
+    }
 
-    // Value conservation: the destination receives the spent input minus the change kept by source.
-    expect(BigInt(destUtxo.value)).toBe(BigInt(spent.value) - BigInt(srcUtxo.value));
+    // Value conservation: the destination receives the spent inputs minus the change kept by source.
+    const spentTotal = srcTx.spentUtxos.reduce(
+      (total: bigint, spent: { value: string | number }) => total + BigInt(spent.value),
+      0n,
+    );
+    expect(BigInt(destUtxo.value)).toBe(spentTotal - BigInt(srcUtxo.value));
 
     log.debug(`Validation complete for hash=${destTx.transaction.hash}`);
   });

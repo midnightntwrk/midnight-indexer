@@ -62,13 +62,13 @@ const READY_POLL_INTERVAL_MS = 1_000;
  *
  * It is NOT guessed from NODE_TAG: nothing in this repo maps a node tag to a
  * ledger version, and a guess that is wrong fails deep inside proving. It is
- * read from the one thing we do control — the `@midnight-ntwrk/ledger-v8`
+ * set to match the one thing we do control — the `@midnightntwrk/ledger-v9`
  * override pinned in `package.json`, which is also what keeps a single physical
  * ledger copy in `node_modules`. If the target node runs a different ledger
  * train, that override has to move too, and `PROOF_SERVER_TAG` is the escape
  * hatch in the meantime.
  */
-const DEFAULT_PROOF_SERVER_TAG = '8.1.0';
+const DEFAULT_PROOF_SERVER_TAG = '9.0.0-rc.10';
 
 const proofServerTag = (): string =>
   process.env.PROOF_SERVER_TAG?.trim() || DEFAULT_PROOF_SERVER_TAG;
@@ -254,7 +254,7 @@ export function proofServerMismatchHint(): string {
   return (
     `The proof server must match the node's ledger train (currently ${proofServerTag()}). ` +
     'If the target environment runs a different ledger version, set PROOF_SERVER_TAG ' +
-    '(and the @midnight-ntwrk/ledger-v8 override in package.json) to that train.'
+    '(and the @midnightntwrk/ledger-v9 override in package.json) to that train.'
   );
 }
 

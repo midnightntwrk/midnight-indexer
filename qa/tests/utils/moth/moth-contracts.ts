@@ -34,10 +34,10 @@
 // Node we implement it directly against moth's facade. There is no connector
 // and no IPC involved.
 //
-// ONE WASM COPY. `@midnight-ntwrk/ledger-v8` and `onchain-runtime-v3` must each
-// resolve to a single physical copy in node_modules, or objects built by one
-// copy fail `instanceof` in the other (separate WASM linear memories). The
-// `overrides` block in package.json pins both; do not remove it.
+// ONE WASM COPY. `@midnightntwrk/ledger-v9` must resolve to a single physical
+// copy in node_modules, or objects built by one copy fail `instanceof` in the
+// other (separate WASM linear memories). The `overrides` block in package.json
+// pins it; do not remove it.
 
 import { dirname, resolve } from 'path';
 import {
@@ -53,21 +53,28 @@ import { indexerPublicDataProvider } from '@midnight-ntwrk/midnight-js-indexer-p
 import { httpClientProofProvider } from '@midnight-ntwrk/midnight-js-http-client-proof-provider';
 import { NodeZkConfigProvider } from '@midnight-ntwrk/midnight-js-node-zk-config-provider';
 import { setNetworkId } from '@midnight-ntwrk/midnight-js-network-id';
-import { SucceedEntirely, type FinalizedTxData } from '@midnight-ntwrk/midnight-js-types';
+import {
+  createMidnightProviderFromHandlers,
+  createWalletProviderFromHandlers,
+  SucceedEntirely,
+  type FinalizedTxData,
+} from '@midnight-ntwrk/midnight-js-types';
+import { Transaction as LedgerTransaction } from '@midnight-ntwrk/midnight-js-protocol/ledger';
 import * as Rx from 'rxjs';
 import log from '@utils/logging/logger';
 import { env } from '../../environment/model';
 import { ensureProofServer, proofServerMismatchHint } from './proof-server';
 import { balanceTransaction } from '@shieldedtech/moth-wallet/sync/operations';
+import { unwrapTransaction } from '@shieldedtech/moth-wallet/sync/ledger-routing';
 import { openMothWallet, seedFingerprint } from './moth-backend';
 
 /**
  * The compiled contract this suite deploys: `counter.compact`, whose single
  * circuit `increment()` is the call key `callContract()` already defaults to.
  *
- * Built with compactc 0.31.1, which emits `checkRuntimeVersion('0.16.0')` to
- * match the `@midnight-ntwrk/compact-runtime` 0.16.0 that midnight-js 4.1.1
- * pins. A 0.30.0 build emits 0.15.0 and will not load here.
+ * Built with compactc 0.35.0, which emits `checkRuntimeVersion('0.20.0')` to
+ * match the `@midnight-ntwrk/compact-runtime` 0.20.0 that midnight-js 5 pins
+ * for ledger 9. A 0.31.x (ledger 8) build emits 0.16.0 and will not load here.
  */
 export const DEFAULT_ARTIFACT_DIR = resolve(__dirname, '../../contracts/counter/managed');
 
@@ -139,15 +146,29 @@ const openContractContext = (seed: string, artifactDir: string): Promise<Contrac
     const coinPublicKey = state.shielded.coinPublicKey.toHexString() as string;
     const encryptionPublicKey = state.shielded.encryptionPublicKey.toHexString() as string;
 
-    const walletProvider = {
+    // Only the current era (ledger 9) is served. Transactions cross between
+    // midnight-js and moth as bytes, so the two never share a ledger WASM copy.
+    const walletProvider = createWalletProviderFromHandlers({
       getCoinPublicKey: () => coinPublicKey,
       getEncryptionPublicKey: () => encryptionPublicKey,
       // moth takes the serialized bytes and picks the TTL itself, so the one
       // midnight-js offers is not forwarded.
-      balanceTx: (tx: any) =>
-        balanceTransaction(facade, wallet.keys, networkId, tx.serialize(), false),
-      submitTx: (tx: any) => facade.submitTransaction(tx),
-    };
+      currentEra: async (tx) => {
+        const balanced = await balanceTransaction(
+          facade,
+          wallet.keys,
+          networkId,
+          tx.serialize(),
+          false,
+        );
+        const bytes = unwrapTransaction<{ serialize(): Uint8Array }>(balanced).serialize();
+        return LedgerTransaction.deserialize('signature', 'proof', 'binding', bytes);
+      },
+    });
+    const midnightProvider = createMidnightProviderFromHandlers({
+      currentEra: (tx) =>
+        facade.submitTransaction(facade.adoptTransaction(tx.serialize(), 'Finalized')),
+    });
 
     const zkConfigProvider = new NodeZkConfigProvider<string>(artifactDir);
     const providers = {
@@ -156,9 +177,15 @@ const openContractContext = (seed: string, artifactDir: string): Promise<Contrac
         env.getIndexerGraphqlWsURL(),
       ),
       zkConfigProvider,
-      proofProvider: httpClientProofProvider(await ensureProofServer(), zkConfigProvider as any),
+      proofProvider: httpClientProofProvider({
+        url: await ensureProofServer(),
+        zkConfigProvider: zkConfigProvider as any,
+      }),
       walletProvider,
-      midnightProvider: walletProvider,
+      midnightProvider,
+      // Required from midnight-js 5. The TTL matches the 30 minutes moth gives
+      // the intents it balances, so neither side expires before the other.
+      config: { networkId, ttlSeconds: 30 * 60 },
       // Required even for a contract with no private state: `submitDeployTx`
       // calls `setContractAddress()` on it unconditionally. In-memory, because
       // nothing here needs to outlive the process and a LevelDB provider would
@@ -186,7 +213,7 @@ const inMemoryPrivateStateProvider = () => {
   // id, so the two live in separate maps rather than one shared key space.
   const signingKeys = new Map<string, string>();
   return {
-    // The 4.1.1 interface scopes private state to one contract at a time; with
+    // midnight-js scopes private state to one contract at a time; with
     // no private state to scope, the address only needs to be accepted.
     setContractAddress: (_address: string): void => {},
     set: async (key: string, state: unknown) => void states.set(key, state),
@@ -225,7 +252,10 @@ const asBackendFailure = (what: string, err: unknown): Error => {
  * not it applied, so a rejected transaction still comes back with a hash. The
  * suite must not go on to assert the indexer against one of those.
  */
-const ensureApplied = (what: string, finalized: FinalizedTxData): string => {
+const ensureApplied = (
+  what: string,
+  finalized: Pick<FinalizedTxData, 'status' | 'txHash'>,
+): string => {
   if (finalized.status !== SucceedEntirely) {
     throw new Error(`${what} landed with status ${finalized.status}`);
   }
@@ -283,6 +313,13 @@ export const callCircuitViaMoth = async (
   const ctx = await openContractContext(seed, artifactDir);
   try {
     const snapshot = await getPublicStates(ctx.providers.publicDataProvider, contractAddress);
+    // midnight-js 5 tags public state by ledger era. This suite only builds
+    // ledger-9 calls, so a ledger-8 state means the chain is pre-fork.
+    if (snapshot.version !== 'v9') {
+      throw new Error(
+        `contract ${contractAddress} state is ledger-${snapshot.version}, expected v9`,
+      );
+    }
     const call = await createUnprovenCallTxFromInitialStates(
       ctx.providers.zkConfigProvider,
       {
@@ -294,11 +331,13 @@ export const callCircuitViaMoth = async (
         initialContractState: snapshot.contractState,
         initialZswapChainState: snapshot.zswapChainState,
         ledgerParameters: snapshot.ledgerParameters,
+        // midnight-js 5 needs the same config here as on the provider set.
+        config: ctx.providers.config,
       } as any,
       ctx.encryptionPublicKey,
     );
     const submitted = await submitTx(ctx.providers, {
-      unprovenTx: call.private.unprovenTx,
+      unprovenTx: { version: 'v9', tx: call.private.unprovenTx },
       circuitId,
     });
     const txHash = ensureApplied(`the ${circuitId} call`, submitted);
@@ -340,7 +379,7 @@ export const updateContractViaMoth = async (
       contractAddress as any,
     );
     const finalized = await maintenance.replaceAuthority(newAuthority);
-    const txHash = ensureApplied('the authority update', finalized);
+    const txHash = ensureApplied('the authority update', finalized.public);
     log.info(`moth/midnight-js replaced the authority on ${contractAddress}`);
     return txHash;
   } catch (err) {

@@ -1,5 +1,5 @@
 import * as __compactRuntime from '@midnight-ntwrk/compact-runtime';
-__compactRuntime.checkRuntimeVersion('0.16.0');
+__compactRuntime.checkRuntimeVersion('0.20.0');
 
 const _descriptor_0 = new __compactRuntime.CompactTypeUnsignedInteger(65535n, 2);
 
@@ -52,7 +52,64 @@ class _ContractAddress_0 {
 
 const _descriptor_6 = new _ContractAddress_0();
 
-const _descriptor_7 = new __compactRuntime.CompactTypeUnsignedInteger(255n, 1);
+class _UserAddress_0 {
+  alignment() {
+    return _descriptor_3.alignment();
+  }
+  fromValue(value_0) {
+    return {
+      bytes: _descriptor_3.fromValue(value_0),
+    };
+  }
+  toValue(value_0) {
+    return _descriptor_3.toValue(value_0.bytes);
+  }
+}
+
+const _descriptor_7 = new _UserAddress_0();
+
+class _Either_1 {
+  alignment() {
+    return _descriptor_2
+      .alignment()
+      .concat(_descriptor_6.alignment().concat(_descriptor_7.alignment()));
+  }
+  fromValue(value_0) {
+    return {
+      is_left: _descriptor_2.fromValue(value_0),
+      left: _descriptor_6.fromValue(value_0),
+      right: _descriptor_7.fromValue(value_0),
+    };
+  }
+  toValue(value_0) {
+    return _descriptor_2
+      .toValue(value_0.is_left)
+      .concat(_descriptor_6.toValue(value_0.left).concat(_descriptor_7.toValue(value_0.right)));
+  }
+}
+
+const _descriptor_8 = new _Either_1();
+
+class _Maybe_0 {
+  alignment() {
+    return _descriptor_2.alignment().concat(_descriptor_8.alignment());
+  }
+  fromValue(value_0) {
+    return {
+      is_some: _descriptor_2.fromValue(value_0),
+      value: _descriptor_8.fromValue(value_0),
+    };
+  }
+  toValue(value_0) {
+    return _descriptor_2.toValue(value_0.is_some).concat(_descriptor_8.toValue(value_0.value));
+  }
+}
+
+const _descriptor_9 = new _Maybe_0();
+
+const _descriptor_10 = new __compactRuntime.CompactTypeUnsignedInteger(255n, 1);
+
+const _descriptor_11 = new __compactRuntime.CompactTypeUnsignedInteger(4294967295n, 4);
 
 export class Contract {
   witnesses;
@@ -70,7 +127,7 @@ export class Contract {
     }
     this.witnesses = witnesses_0;
     this.circuits = {
-      increment: (...args_1) => {
+      increment: async (...args_1) => {
         if (args_1.length !== 1) {
           throw new __compactRuntime.CompactError(
             `increment: expected 1 argument (as invoked from Typescript), received ${args_1.length}`,
@@ -78,7 +135,8 @@ export class Contract {
         }
         const contextOrig_0 = args_1[0];
         if (!(
-          typeof contextOrig_0 === 'object' && contextOrig_0.currentQueryContext != undefined
+          typeof contextOrig_0 === 'object' &&
+          contextOrig_0.callContext.currentQueryContext != undefined
         )) {
           __compactRuntime.typeError(
             'increment',
@@ -88,23 +146,19 @@ export class Contract {
             contextOrig_0,
           );
         }
-        const context = { ...contextOrig_0, gasCost: __compactRuntime.emptyRunningCost() };
+        const context = __compactRuntime.copyCircuitContext(contextOrig_0);
         const partialProofData = {
           input: { value: [], alignment: [] },
           output: undefined,
           publicTranscript: [],
           privateTranscriptOutputs: [],
         };
-        const result_0 = this._increment_0(context, partialProofData);
+        const result_0 = await this._increment_0(context, partialProofData);
         partialProofData.output = { value: [], alignment: [] };
-        return {
-          result: result_0,
-          context: context,
-          proofData: partialProofData,
-          gasCost: context.gasCost,
-        };
+        __compactRuntime.finalizeCallProofData(context, partialProofData);
+        return { result: result_0, context: context, gasCost: context.callContext.currentGasCost };
       },
-      store: (...args_1) => {
+      store: async (...args_1) => {
         if (args_1.length !== 1) {
           throw new __compactRuntime.CompactError(
             `store: expected 1 argument (as invoked from Typescript), received ${args_1.length}`,
@@ -112,7 +166,8 @@ export class Contract {
         }
         const contextOrig_0 = args_1[0];
         if (!(
-          typeof contextOrig_0 === 'object' && contextOrig_0.currentQueryContext != undefined
+          typeof contextOrig_0 === 'object' &&
+          contextOrig_0.callContext.currentQueryContext != undefined
         )) {
           __compactRuntime.typeError(
             'store',
@@ -122,21 +177,17 @@ export class Contract {
             contextOrig_0,
           );
         }
-        const context = { ...contextOrig_0, gasCost: __compactRuntime.emptyRunningCost() };
+        const context = __compactRuntime.copyCircuitContext(contextOrig_0);
         const partialProofData = {
           input: { value: [], alignment: [] },
           output: undefined,
           publicTranscript: [],
           privateTranscriptOutputs: [],
         };
-        const result_0 = this._store_0(context, partialProofData);
+        const result_0 = await this._store_0(context, partialProofData);
         partialProofData.output = { value: [], alignment: [] };
-        return {
-          result: result_0,
-          context: context,
-          proofData: partialProofData,
-          gasCost: context.gasCost,
-        };
+        __compactRuntime.finalizeCallProofData(context, partialProofData);
+        return { result: result_0, context: context, gasCost: context.callContext.currentGasCost };
       },
     };
     this.impureCircuits = {
@@ -148,7 +199,7 @@ export class Contract {
       store: this.circuits.store,
     };
   }
-  initialState(...args_0) {
+  async initialState(...args_0) {
     if (args_0.length !== 1) {
       throw new __compactRuntime.CompactError(
         `Contract state constructor: expected 1 argument (as invoked from Typescript), received ${args_0.length}`,
@@ -176,12 +227,13 @@ export class Contract {
     state_0.data = new __compactRuntime.ChargedState(stateValue_0);
     state_0.setOperation('increment', new __compactRuntime.ContractOperation());
     state_0.setOperation('store', new __compactRuntime.ContractOperation());
-    const context = __compactRuntime.createCircuitContext(
-      __compactRuntime.dummyContractAddress(),
-      constructorContext_0.initialZswapLocalState.coinPublicKey,
-      state_0.data,
-      constructorContext_0.initialPrivateState,
-    );
+    const context = __compactRuntime.createCircuitContext({
+      circuitId: 'constructor',
+      contractAddress: __compactRuntime.dummyContractAddress(),
+      coinPublicKeyOrZswapState: constructorContext_0.initialZswapLocalState.coinPublicKey,
+      contractState: state_0.data,
+      privateState: constructorContext_0.initialPrivateState,
+    });
     const partialProofData = {
       input: { value: [], alignment: [] },
       output: undefined,
@@ -193,8 +245,8 @@ export class Contract {
         push: {
           storage: false,
           value: __compactRuntime.StateValue.newCell({
-            value: _descriptor_7.toValue(0n),
-            alignment: _descriptor_7.alignment(),
+            value: _descriptor_10.toValue(0n),
+            alignment: _descriptor_10.alignment(),
           }).encode(),
         },
       },
@@ -209,14 +261,16 @@ export class Contract {
       },
       { ins: { cached: false, n: 1 } },
     ]);
-    state_0.data = new __compactRuntime.ChargedState(context.currentQueryContext.state.state);
+    state_0.data = new __compactRuntime.ChargedState(
+      context.callContext.currentQueryContext.state.state,
+    );
     return {
       currentContractState: state_0,
-      currentPrivateState: context.currentPrivateState,
-      currentZswapLocalState: context.currentZswapLocalState,
+      currentPrivateState: context.callContext.currentPrivateState,
+      currentZswapLocalState: context.callContext.currentZswapLocalState,
     };
   }
-  _increment_0(context, partialProofData) {
+  async _increment_0(context, partialProofData) {
     const tmp_0 = 1n;
     __compactRuntime.queryLedgerState(context, partialProofData, [
       {
@@ -226,7 +280,7 @@ export class Contract {
           path: [
             {
               tag: 'value',
-              value: { value: _descriptor_7.toValue(0n), alignment: _descriptor_7.alignment() },
+              value: { value: _descriptor_10.toValue(0n), alignment: _descriptor_10.alignment() },
             },
           ],
         },
@@ -244,7 +298,7 @@ export class Contract {
     ]);
     return [];
   }
-  _store_0(context, partialProofData) {
+  async _store_0(context, partialProofData) {
     const tmp_0 = 1n;
     __compactRuntime.queryLedgerState(context, partialProofData, [
       {
@@ -254,7 +308,7 @@ export class Contract {
           path: [
             {
               tag: 'value',
-              value: { value: _descriptor_7.toValue(0n), alignment: _descriptor_7.alignment() },
+              value: { value: _descriptor_10.toValue(0n), alignment: _descriptor_10.alignment() },
             },
           ],
         },
@@ -283,10 +337,13 @@ export function ledger(stateOrChargedState) {
       ? new __compactRuntime.ChargedState(stateOrChargedState)
       : stateOrChargedState;
   const context = {
-    currentQueryContext: new __compactRuntime.QueryContext(
-      chargedState,
-      __compactRuntime.dummyContractAddress(),
-    ),
+    callContext: {
+      currentQueryContext: new __compactRuntime.QueryContext(
+        chargedState,
+        __compactRuntime.dummyContractAddress(),
+      ),
+      currentGasCost: __compactRuntime.emptyRunningCost(),
+    },
     costModel: __compactRuntime.CostModel.initialCostModel(),
   };
   const partialProofData = {
@@ -307,7 +364,10 @@ export function ledger(stateOrChargedState) {
               path: [
                 {
                   tag: 'value',
-                  value: { value: _descriptor_7.toValue(0n), alignment: _descriptor_7.alignment() },
+                  value: {
+                    value: _descriptor_10.toValue(0n),
+                    alignment: _descriptor_10.alignment(),
+                  },
                 },
               ],
             },
@@ -319,12 +379,36 @@ export function ledger(stateOrChargedState) {
   };
 }
 const _emptyContext = {
-  currentQueryContext: new __compactRuntime.QueryContext(
-    new __compactRuntime.ContractState().data,
-    __compactRuntime.dummyContractAddress(),
-  ),
+  callContext: {
+    currentQueryContext: new __compactRuntime.QueryContext(
+      new __compactRuntime.ContractState().data,
+      __compactRuntime.dummyContractAddress(),
+    ),
+    currentGasCost: __compactRuntime.emptyRunningCost(),
+  },
 };
 const _dummyContract = new Contract({});
 export const pureCircuits = {};
-export const contractReferenceLocations = { tag: 'publicLedgerArray', indices: {} };
+export const expectedVk = {
+  increment: '62d768951a97c18af8cb385f8c0fe6488a4dbfbebce83ea08b21914a0ebe7789',
+  store: '62d768951a97c18af8cb385f8c0fe6488a4dbfbebce83ea08b21914a0ebe7789',
+};
+
+export const circuitSignatures = {
+  increment: {
+    pure: false,
+    provable: true,
+    argumentTypes: [],
+    resultType: { tag: 'Tuple', types: [] },
+  },
+  store: {
+    pure: false,
+    provable: true,
+    argumentTypes: [],
+    resultType: { tag: 'Tuple', types: [] },
+  },
+};
+
+export const declaredInterfaces = {};
+
 //# sourceMappingURL=index.js.map
