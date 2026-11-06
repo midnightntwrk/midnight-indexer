@@ -24,6 +24,7 @@ use crate::{
 };
 use fastrace::trace;
 use indoc::indoc;
+use sqlx::AssertSqlSafe;
 
 impl SpoStorage for Storage {
     #[trace]
@@ -1187,6 +1188,7 @@ impl SpoStorage for Storage {
             "}
         };
 
+        // Built only from static SQL, so `AssertSqlSafe` below is sound.
         let sql = if order_desc {
             base_select.to_string()
         } else {
@@ -1210,7 +1212,7 @@ impl SpoStorage for Storage {
                     Option<String>, // declared_pledge
                     Option<String>, // live_pledge
                 ),
-            >(&sql)
+            >(AssertSqlSafe(sql))
             .bind(limit)
             .bind(offset)
             .bind(s_like.clone())
@@ -1233,7 +1235,7 @@ impl SpoStorage for Storage {
                     Option<String>,
                     Option<String>,
                 ),
-            >(&sql)
+            >(AssertSqlSafe(sql))
             .bind(limit)
             .bind(offset)
             .fetch_all(&*self.pool)

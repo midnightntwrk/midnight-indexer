@@ -83,9 +83,9 @@ fn map_event_row(row: &<Db as sqlx::Database>::Row) -> Result<BridgeEvent, sqlx:
     })
 }
 
-fn push_filter<'a>(builder: &mut QueryBuilder<'a, Db>, filter: &'a BridgeEventFilter) -> bool {
+fn push_filter(builder: &mut QueryBuilder<Db>, filter: &BridgeEventFilter) -> bool {
     let mut started = false;
-    let push_clause = |b: &mut QueryBuilder<'a, Db>, started: &mut bool| {
+    let push_clause = |b: &mut QueryBuilder<Db>, started: &mut bool| {
         if !*started {
             b.push(" WHERE ");
             *started = true;
@@ -133,7 +133,7 @@ impl BridgeStorage for Storage {
         offset: u64,
         limit: u64,
     ) -> Result<Vec<BridgeEvent>, sqlx::Error> {
-        let mut builder: QueryBuilder<'_, Db> = QueryBuilder::new(SELECT_EVENT_FRAGMENT);
+        let mut builder: QueryBuilder<Db> = QueryBuilder::new(SELECT_EVENT_FRAGMENT);
         push_filter(&mut builder, filter);
         builder
             .push(" ORDER BY bpe.id LIMIT ")
@@ -217,7 +217,7 @@ impl BridgeStorage for Storage {
         offset: u64,
         limit: u64,
     ) -> Result<Vec<BridgeEvent>, sqlx::Error> {
-        let mut builder: QueryBuilder<'_, Db> = QueryBuilder::new(SELECT_EVENT_FRAGMENT);
+        let mut builder: QueryBuilder<Db> = QueryBuilder::new(SELECT_EVENT_FRAGMENT);
         builder.push(" WHERE ");
         match reason {
             Some(r) => {

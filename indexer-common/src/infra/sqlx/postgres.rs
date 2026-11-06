@@ -30,7 +30,7 @@ impl<'r> Decode<'r, Postgres> for U128BeBytes {
 impl<'q> Encode<'q, Postgres> for U128BeBytes {
     fn encode_by_ref(
         &self,
-        buf: &mut <Postgres as Database>::ArgumentBuffer<'q>,
+        buf: &mut <Postgres as Database>::ArgumentBuffer,
     ) -> Result<IsNull, BoxDynError> {
         self.0.encode_by_ref(buf)
     }

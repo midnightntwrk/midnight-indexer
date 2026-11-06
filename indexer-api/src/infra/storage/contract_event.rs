@@ -180,7 +180,7 @@ impl Storage {
 
 /// Shared SELECT + WHERE construction for both the query and subscription paths; the caller
 /// appends ORDER/LIMIT/OFFSET as appropriate.
-fn base_query_builder<'a>(filter: &'a ContractEventFilter) -> sqlx::QueryBuilder<'a, Db> {
+fn base_query_builder(filter: &ContractEventFilter) -> sqlx::QueryBuilder<Db> {
     let mut query_builder = sqlx::QueryBuilder::<Db>::new(indoc! {"
         SELECT
             ledger_events.id,
