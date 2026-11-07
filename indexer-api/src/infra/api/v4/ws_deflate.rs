@@ -23,15 +23,18 @@
 //!   zlib-compressed JSON and are inflated subject to `MAX_INFLATED_LEN` (1 MiB).
 //! - Control frames (ping/pong/close) are never compressed.
 //!
-//! Clients must offer the standard `graphql-transport-ws` subprotocol alongside
-//! `graphql-transport-ws+deflate`: the former satisfies the GraphQL protocol negotiation, the
-//! latter enables compression. Clients that do not offer the deflate variant are byte-for-byte
-//! unaffected.
+//! Clients may offer `graphql-transport-ws+deflate` alone or alongside the standard protocols.
+//! The deflate variant uses the `graphql-transport-ws` message format. Clients that do not offer
+//! the deflate variant are byte-for-byte unaffected.
 //!
 //! Compression uses a fresh context per message, so there is no per-connection compressor state
 //! and no shared-window memory cost per connection.
 
-use axum::extract::ws::Message;
+use async_graphql_axum::GraphQLProtocol;
+use axum::{
+    extract::{FromRequestParts, ws::Message},
+    http::{HeaderValue, StatusCode, header::SEC_WEBSOCKET_PROTOCOL, request::Parts},
+};
 use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 use futures::{Sink, Stream};
 use std::{
@@ -40,8 +43,39 @@ use std::{
     task::{Context, Poll},
 };
 
-/// The subprotocol identifier offered in addition to the standard `graphql-transport-ws`.
+/// The subprotocol identifier for compressed `graphql-transport-ws` messages.
 pub const GRAPHQL_TRANSPORT_WS_DEFLATE: &str = "graphql-transport-ws+deflate";
+
+/// GraphQL protocol extraction for the optional deflate subprotocol.
+pub(super) struct DeflateGraphQLProtocol(pub GraphQLProtocol);
+
+impl<S: Send + Sync> FromRequestParts<S> for DeflateGraphQLProtocol {
+    type Rejection = StatusCode;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let mut graphql_parts = parts.clone();
+        let deflate = parts
+            .headers
+            .get_all(SEC_WEBSOCKET_PROTOCOL)
+            .iter()
+            .filter_map(|value| value.to_str().ok())
+            .flat_map(|value| value.split(','))
+            .any(|protocol| protocol.trim() == GRAPHQL_TRANSPORT_WS_DEFLATE);
+
+        if deflate {
+            // async-graphql only knows the standard protocols. Keep the original request
+            // intact so WebSocketUpgrade still negotiates the deflate wire format.
+            graphql_parts.headers.insert(
+                SEC_WEBSOCKET_PROTOCOL,
+                HeaderValue::from_static("graphql-transport-ws"),
+            );
+        }
+
+        GraphQLProtocol::from_request_parts(&mut graphql_parts, state)
+            .await
+            .map(Self)
+    }
+}
 
 /// Outbound messages shorter than this are left uncompressed: at this size the deflate overhead
 /// outweighs the gain and the wire format permits mixing text and binary frames.
@@ -151,7 +185,106 @@ fn inflate_capped(payload: &[u8]) -> Result<String, InflateError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::http::Request;
     use futures::{SinkExt, StreamExt, stream};
+
+    #[tokio::test]
+    async fn accepts_deflate_without_a_plain_protocol_offer() {
+        let (mut parts, _) = Request::builder()
+            .header(SEC_WEBSOCKET_PROTOCOL, GRAPHQL_TRANSPORT_WS_DEFLATE)
+            .body(())
+            .unwrap()
+            .into_parts();
+        let original = parts.headers.clone();
+
+        let actual = DeflateGraphQLProtocol::from_request_parts(&mut parts, &())
+            .await
+            .expect("a proxy may forward only the negotiated deflate protocol");
+        assert_eq!(parts.headers, original);
+
+        parts.headers.insert(
+            SEC_WEBSOCKET_PROTOCOL,
+            "graphql-transport-ws".parse().unwrap(),
+        );
+        let expected = GraphQLProtocol::from_request_parts(&mut parts, &())
+            .await
+            .unwrap();
+        assert_eq!(actual.0, expected);
+    }
+
+    #[tokio::test]
+    async fn deflate_uses_the_modern_graphql_protocol_for_combined_offers() {
+        for offer in [
+            "graphql-transport-ws+deflate, graphql-transport-ws",
+            "graphql-transport-ws, graphql-transport-ws+deflate",
+            "graphql-ws, graphql-transport-ws+deflate",
+        ] {
+            let (mut parts, _) = Request::builder()
+                .header(SEC_WEBSOCKET_PROTOCOL, offer)
+                .body(())
+                .unwrap()
+                .into_parts();
+            let original = parts.headers.clone();
+            let actual = DeflateGraphQLProtocol::from_request_parts(&mut parts, &())
+                .await
+                .unwrap();
+            assert_eq!(parts.headers, original);
+
+            parts.headers.insert(
+                SEC_WEBSOCKET_PROTOCOL,
+                "graphql-transport-ws".parse().unwrap(),
+            );
+            let expected = GraphQLProtocol::from_request_parts(&mut parts, &())
+                .await
+                .unwrap();
+            assert_eq!(actual.0, expected, "offer: {offer}");
+        }
+    }
+
+    #[tokio::test]
+    async fn accepts_deflate_in_a_repeated_protocol_header() {
+        let (mut parts, _) = Request::builder()
+            .header(SEC_WEBSOCKET_PROTOCOL, "graphql-ws")
+            .header(SEC_WEBSOCKET_PROTOCOL, GRAPHQL_TRANSPORT_WS_DEFLATE)
+            .body(())
+            .unwrap()
+            .into_parts();
+        let original = parts.headers.clone();
+        let actual = DeflateGraphQLProtocol::from_request_parts(&mut parts, &())
+            .await
+            .unwrap();
+        assert_eq!(parts.headers, original);
+
+        parts.headers.insert(
+            SEC_WEBSOCKET_PROTOCOL,
+            "graphql-transport-ws".parse().unwrap(),
+        );
+        let expected = GraphQLProtocol::from_request_parts(&mut parts, &())
+            .await
+            .unwrap();
+        assert_eq!(actual.0, expected);
+    }
+
+    #[tokio::test]
+    async fn standard_and_invalid_protocol_offers_keep_their_behavior() {
+        for offer in [
+            None,
+            Some("graphql-transport-ws"),
+            Some("graphql-ws"),
+            Some("unknown"),
+        ] {
+            let mut request = Request::builder();
+            if let Some(offer) = offer {
+                request = request.header(SEC_WEBSOCKET_PROTOCOL, offer);
+            }
+            let (mut parts, _) = request.body(()).unwrap().into_parts();
+            let original = parts.headers.clone();
+            let expected = GraphQLProtocol::from_request_parts(&mut parts, &()).await;
+            let actual = DeflateGraphQLProtocol::from_request_parts(&mut parts, &()).await;
+            assert_eq!(actual.map(|protocol| protocol.0), expected);
+            assert_eq!(parts.headers, original);
+        }
+    }
 
     #[test]
     fn compress_inflate_roundtrip() {

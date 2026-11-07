@@ -451,7 +451,7 @@ where
 #[allow(clippy::type_complexity)]
 async fn graphql_ws<S, B>(
     Extension(schema): Extension<Schema<Query<S>, Mutation<S>, Subscription<S, B>>>,
-    protocol: GraphQLProtocol,
+    ws_deflate::DeflateGraphQLProtocol(protocol): ws_deflate::DeflateGraphQLProtocol,
     upgrade: WebSocketUpgrade,
 ) -> Response
 where
