@@ -4,51 +4,89 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [4.4.0-rc.6] - 2026-09-24
-
-Release candidate on top of `4.4.0-rc.5`. It fixes a transaction that could halt ingestion
-(GHSA-67mp-mh58-qx5h) and a halt after a node 1.0.300 runtime upgrade, clears a rustls advisory,
-restores Docker Hub publishing, and tracks the latest node and ledger releases.
-
-**In-place over `4.4.0-rc.5`**: no new migrations and no re-index. Ledger 8.1.1 → 8.1.2 changes no
-serialization output and no storage encoding. The re-index rc.4 requires still applies to anything
-upgrading from an earlier line.
+## [4.4.101] - 2026-11-05
 
 ### 🚀 Features
 
-- Support node 2.1.0-rc.1 with ledger 9.1.0.0-rc.5 (#1505)
+- *(deps)* Bump node to 2.1.101
+
+## [4.4.100] - 2026-11-03
+
+### 🚀 Features
+
+- *(deps)* Bump node 2.1.100 to final
+
+## [4.4.100-rc.1] - 2026-11-02
+
+### 🚀 Features
+
+- Support node 2.1.100-rc.2 with ledger 8.1.3
+  - Replaces node 1.0.300 with 1.0.400 and drops node 2.1.0-rc.4
+- Support node 2.1.100-rc.3 with ledger 9.1.0.1-rc.2
+- Support node 2.1.100-rc.4
+
+### 🐛 Bug Fixes
+
+- Extract only unshielded contract balances
+- Decode SPO registrations robustly
+- Attribute only verified SPO identities
+
+## [4.4.0-rc.6] - 2026-11-02
+
+### 🚀 Features
+
+- Support node 2.1.0-rc.1 with ledger 8.1.2 and 9.1.0.0-rc.5 (#1505)
+- Support node 1.0.300 (#1521)
+- Support node 2.0.0-rc.4 (#1517)
+- Support node 2.1.0-rc.4 (#1535, #1618)
+- [**breaking**] Serve post-fork state for untouched contracts (#1654)
+  - Adds migration `contract_action_translations` (postgres `010`, sqlite `012`)
+  - A database already past the 8→9 fork needs a reindex to fix #1605
+  - A `contractActions` subscription with no action at or after its offset now replays nothing
 
 ### 🐛 Bug Fixes
 
 - *(deps)* Bump rustls to 0.23.45 to clear RUSTSEC-2026-0285 (#1493)
 - *(ci)* Restore Docker Hub publishing for tag builds (#1477)
 - Prevent a single transaction from halting indexing (#1520)
-
-  A contract call's entry point was decoded as UTF-8 with a hard error. An entry point is an
-  arbitrary byte string, so one permissionless transaction could make a block fail to build on
-  every attempt and stop ingestion for a whole deployment (GHSA-67mp-mh58-qx5h). The entry point is
-  now decoded lossily and logged.
-
-  Contract actions from segments the ledger rolled back no longer reach storage or the API. They
-  were previously served with no indication that they did not apply; `transactionResult` is the
-  supported way to tell what applied. Rows written before this release keep what they hold today.
-
+  - Fixes GHSA-67mp-mh58-qx5h
+  - Contract actions from rolled-back segments are no longer stored or served
+  - Rows written earlier keep them; use `transactionResult` to tell what applied
 - *(chain-indexer)* Gate first-tx tblock bump on the block's runtime (#1537)
+  - Fixes a halt after a runtime upgrade to node 1.0.300
+- *(chain-indexer)* Accept the first regular transaction at either tblock (#1610)
+- *(indexer-api)* Redact viewing keys and session IDs (#1667)
+- *(chain-indexer)* Follow on chain outcome of each extrinsic (#1653)
+  - Failed transactions report zero fees
+- *(indexer-common)* Route bridge events through in-mem pub-sub (#1496)
+- *(deps)* Bump rustls to 0.23.46 (#1675)
+- *(indexer-common)* Register NATS subscriptions eagerly (#1674)
+- *(indexer-api)* Prune idle session quota buckets (#1668)
+- *(indexer-api)* Reload ledger cache on new state (#1672)
+- *(deps)* Bump rustls-webpki and webpki roots for emSign advisories (#1691)
+- *(deps)* Resolve current RustSec advisories (#1700)
+- *(deps)* Bump zstd crates for RUSTSEC-2026-0391, -0398, -0403, -0410 (#1704)
+- *(.github/workflows)* Suffix the latest tag in per-arch image builds (#1690)
+- *(indexer-api)* Page relevant transactions by id (#1681)
+- *(indexer-api)* Accept lowercase 0x prefix in SPO hex arguments (#1720)
+- *(indexer-api)* Correct DUST and shielded nullifier prefix bounds (#1729)
 
-  Runtime 1.0.300 validates a block's first regular transaction against the block's own time
-  instead of the parent time plus 12s, and 2.1 never used the offset. The indexer applied the offset
-  to every non-genesis block, so after a runtime upgrade to 1.0.300 it could reject a transaction
-  the node accepted and halt indexing. The offset now applies only to blocks from runtimes 0.22,
-  1.0 before 1.0.300, and 2.0, keyed on each block's protocol version.
+### ⚡ Performance
 
-### ⚙️ Dependencies
+- *(chain-indexer)* Run gc every 500 blocks while catching up (#1623)
 
-- Node: 1.0.0 → 1.0.300 (#1521), 2.0.0-rc.3 → 2.0.0-rc.4 (#1517), 2.1.0-beta.1 → 2.1.0-rc.2 (#1505,
-  #1535). Each new release shares its predecessor's metadata, so no decode module changes. 2.1.0-rc.2
-  is the default node for e2e tests and CI.
-- Ledger: 8.1.1 → 8.1.2, a security patch hardening low-level deserialization, and 9.1.0.0-rc.4 →
-  9.1.0.0-rc.5 (#1505). Crates resolved from crates.io carry `=` pins to keep arena-root parity with
-  the node at the fork boundary.
+### ⚙️ Miscellaneous Tasks
+
+- *(qa)* Clear the high audit advisories in qa/tests (#1614)
+- *(qa)* Clear the new high grpc-js audit advisory (#1617)
+- *(qa)* Clear the high braces audit advisory (#1638)
+- *(qa)* Override source-map-js to 1.2.2 to clear a high advisory (#1647)
+- *(qa)* Clear the zod, vite and undici audit advisories (#1697)
+- Bump rust toolchain to 1.98.1 (#1709)
+- *(deps)* Bump opentelemetry, fastrace-opentelemetry and minor deps (#1714)
+  - With tracing enabled, an OTLP endpoint without a scheme now stops the indexer at startup
+- *(.github/workflows)* Bump actions, holding back the scan action (#1669)
+- Harden indexer image builds with cargo auditable (#1711)
 
 ## [4.4.0-rc.5] - 2026-09-04
 
