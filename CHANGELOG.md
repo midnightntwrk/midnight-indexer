@@ -8,28 +8,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### 🚀 Features
 
-- *(deps)* Bump node to 2.1.101 (#50)
+- *(deps)* Bump node to 2.1.101
 
 ## [4.4.100] - 2026-11-03
 
 ### 🚀 Features
 
-- *(deps)* Bump node 2.1.100 to final (#46)
+- *(deps)* Bump node 2.1.100 to final
 
 ## [4.4.100-rc.1] - 2026-11-02
 
 ### 🚀 Features
 
-- Support node 2.1.100-rc.2 with ledger 8.1.3 (#26)
+- Support node 2.1.100-rc.2 with ledger 8.1.3
   - Replaces node 1.0.300 with 1.0.400 and drops node 2.1.0-rc.4
-- Support node 2.1.100-rc.3 with ledger 9.1.0.1-rc.2 (#36)
-- Support node 2.1.100-rc.4 (#40)
+- Support node 2.1.100-rc.3 with ledger 9.1.0.1-rc.2
+- Support node 2.1.100-rc.4
 
 ### 🐛 Bug Fixes
 
-- Extract only unshielded contract balances (#29)
-- Decode SPO registrations robustly (#30)
-- Attribute only verified SPO identities (#31)
+- Extract only unshielded contract balances
+- Decode SPO registrations robustly
+- Attribute only verified SPO identities
 
 ## [4.4.0-rc.6] - 2026-11-02
 
