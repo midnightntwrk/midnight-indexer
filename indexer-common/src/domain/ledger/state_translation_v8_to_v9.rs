@@ -16,7 +16,7 @@
 //! # Provenance
 //!
 //! The translation table is the ledger team's
-//! [`v8_to_v9_state_translation::StateTranslationTable`], pinned by rev to the
+//! [`v8_to_v9_state_translation::StateTranslationTable`], pinned by tag to the
 //! exact crate `node-2.1.101` migrates with. This module used to carry a
 //! re-ported copy of that table; it now depends on the upstream crate directly,
 //! so there is one implementation rather than two to keep in sync.
@@ -32,22 +32,21 @@
 //! At the fork boundary the indexer re-derives `ledger_state.root()` and
 //! compares it against the node's value, so the indexer and the node MUST
 //! translate with the same table compiled against the same ledger crates. That
-//! holds today: both pin this crate at the same rev and patch every v9-side
-//! crate to the same per-crate ledger 9.1.0.1 tags, with
-//! `midnight-storage-core`'s `layout-v2` / `gc-v1` features matching. Any drift
-//! there breaks the boundary permanently.
+//! holds today: both pin this crate at the same tag and every ledger crate to
+//! the same crates.io version, with `midnight-storage-core`'s `layout-v2` /
+//! `gc-v1` features matching. Any drift there breaks the boundary permanently.
 //!
 //! The v8 side reads through `midnight-storage` 2.x and the v9 side through 3.x.
 //! Both share one `midnight-storage-core`, hence one arena, and the translation
 //! machinery runs on the v9 side.
 //!
-//! When the ledger rc moves, re-check in this order: bump the workspace
-//! `[patch.crates-io]` tags, bump this crate's rev to whatever the matching node
-//! release pins, confirm [`tests::table_tags_match_types`] still passes (it
-//! rebuilds every `TranslationId` from the live crate types, so it catches a tag
-//! that drifted out from under the table's hardcoded literals), then regenerate
-//! the golden-root fixtures `indexer-common/tests/golden_v8_to_v9_*_root.raw`
-//! pinned by `LedgerState::translate`'s test and re-run the devnet rehearsal in
+//! When the ledger moves, re-check in this order: bump the workspace ledger pins
+//! and this crate's tag to whatever the matching node release pins, confirm
+//! [`tests::table_tags_match_types`] still passes (it rebuilds every
+//! `TranslationId` from the live crate types, so it catches a tag that drifted
+//! out from under the table's hardcoded literals), then regenerate the
+//! golden-root fixtures `indexer-common/tests/golden_v8_to_v9_*_root.raw` pinned
+//! by `LedgerState::translate`'s test and re-run the devnet rehearsal in
 //! `docs/hardfork-devnet-rehearsal-8to9.md`.
 //!
 //! # Note on dust
