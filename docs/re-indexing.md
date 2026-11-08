@@ -68,10 +68,10 @@ keep the other. Don't.
 
 ## SPO identity fixes and historical data
 
-The [SPO identity fix](https://github.com/shieldedtech/shielded-security-engineering/issues/714)
-prevents unverified registrations from being attributed to a pool. It also allows
-a node-verified registration to replace conflicting identities that never had
-VALID history or a performance row. This change adds no schema migration.
+The SPO identity fix prevents unverified registrations from being attributed to a
+pool. It also allows a node-verified registration to replace conflicting
+identities that never had VALID history or a performance row. This change adds no
+schema migration.
 
 Installing the fix does not repair every previously written SPO row:
 
@@ -87,9 +87,9 @@ Installing the fix does not repair every previously written SPO row:
   authored blocks. It needs a separate fix and historical-data repair plan.
   Replaying with this version alone will not correct that performance metric.
 
-The [registration-decoding fix](https://github.com/shieldedtech/shielded-security-engineering/issues/690)
-resumes at the last committed epoch. That recovery from an indexing halt must not
-be confused with repairing earlier SPO identity or history corruption.
+The registration-decoding fix resumes at the last committed epoch. That recovery
+from an indexing halt must not be confused with repairing earlier SPO identity or
+history corruption.
 
 Preserve the original database for comparison before data repair or cutover. Until
 a targeted SPO replay has been implemented and validated, use a clean secondary

@@ -2871,7 +2871,7 @@ mod tests {
         // empty state does not.
         //
         // The pinned v9 root below was reproduced byte-for-byte by the ledger
-        // team's `v8-to-v9-state-translation` crate, at the rev
+        // team's `v8-to-v9-state-translation` crate, at the tag
         // `node-2.1.101` itself translates with, over this same blob, so
         // this fixture is authoritative for the translation. It moved when the
         // ledger 8 -> 9 dust wipe landed (midnight-node #2012, backported as
@@ -2879,7 +2879,7 @@ mod tests {
         // the arena root over any blob whose dust is non-empty.
         //
         // To re-derive after an upstream change, add
-        //   v8-to-v9-state-translation = { git = "https://github.com/midnightntwrk/midnight-ledger", rev = "<rev>" }
+        //   v8-to-v9-state-translation = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "<tag>" }
         // to indexer-common's dev-dependencies and run both tables over this blob
         // (see `state_translation_v8_to_v9`'s `matches_upstream_crate_on_devnet_genesis`).
         // (The full live-fork `apply + 1` RPC-format check is still Phase 3.)

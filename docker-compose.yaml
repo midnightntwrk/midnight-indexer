@@ -61,7 +61,7 @@ services:
         condition: "service_healthy"
       nats:
         condition: "service_started"
-    image: "${IMAGE_REGISTRY:-ghcr.io/shieldedtech/embargo-2026-10-midnight-indexer}/chain-indexer:${INDEXER_TAG:-latest}"
+    image: "${IMAGE_REGISTRY:-midnightntwrk}/chain-indexer:${INDEXER_TAG:-latest}"
     restart: "no"
     secrets:
       - *app__infra__storage__password
@@ -89,7 +89,7 @@ services:
         condition: "service_healthy"
       nats:
         condition: "service_started"
-    image: "${IMAGE_REGISTRY:-ghcr.io/shieldedtech/embargo-2026-10-midnight-indexer}/wallet-indexer:${INDEXER_TAG:-latest}"
+    image: "${IMAGE_REGISTRY:-midnightntwrk}/wallet-indexer:${INDEXER_TAG:-latest}"
     restart: "no"
     secrets:
       - *app__infra__secret
@@ -116,7 +116,7 @@ services:
     depends_on:
       postgres:
         condition: "service_healthy"
-    image: "${IMAGE_REGISTRY:-ghcr.io/shieldedtech/embargo-2026-10-midnight-indexer}/spo-indexer:${INDEXER_TAG:-latest}"
+    image: "${IMAGE_REGISTRY:-midnightntwrk}/spo-indexer:${INDEXER_TAG:-latest}"
     restart: "no"
     secrets:
       - *app__infra__storage__password
@@ -145,7 +145,7 @@ services:
         condition: "service_healthy"
       nats:
         condition: "service_started"
-    image: "${IMAGE_REGISTRY:-ghcr.io/shieldedtech/embargo-2026-10-midnight-indexer}/indexer-api:${INDEXER_TAG:-latest}"
+    image: "${IMAGE_REGISTRY:-midnightntwrk}/indexer-api:${INDEXER_TAG:-latest}"
     restart: "no"
     ports:
       - "8088:8088"
@@ -173,7 +173,7 @@ services:
       - standalone
     depends_on:
       - node
-    image: "${IMAGE_REGISTRY:-ghcr.io/shieldedtech/embargo-2026-10-midnight-indexer}/indexer-standalone:${INDEXER_TAG:-latest}"
+    image: "${IMAGE_REGISTRY:-midnightntwrk}/indexer-standalone:${INDEXER_TAG:-latest}"
     restart: "no"
     ports:
       - "8088:8088"
@@ -235,7 +235,7 @@ services:
 
   node:
     profiles: [cloud, standalone]
-    image: "${NODE_IMAGE:-ghcr.io/shieldedtech/shadow-midnight-node}:${NODE_TAG:-latest}"
+    image: "${NODE_IMAGE:-midnightntwrk/midnight-node}:${NODE_TAG:-latest}"
     restart: "always"
     ports:
       - "9944:9944"

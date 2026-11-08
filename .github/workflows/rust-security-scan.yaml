@@ -58,14 +58,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # The fetch-cargo-dependencies action needs GITHUB_TOKEN out of .git/config.
-          persist-credentials: false
-
-      - name: Fetch cargo dependencies
-        uses: ./.github/actions/fetch-cargo-dependencies
-        with:
-          token: ${{ secrets.NODE_GIT_TOKEN }}
 
       - name: Install cargo-deny
         uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
@@ -82,9 +74,9 @@ jobs:
         # Remove this flag once those upstream crates ship with explicit license fields.
 
       - name: Upload SARIF to GitHub Security
-        # Code scanning needs Code Security, which this embargo repo doesn't have; the gate below
-        # still runs. Set the CODE_SCANNING_ENABLED repo variable to `true` once it is enabled.
-        if: ${{ vars.CODE_SCANNING_ENABLED == 'true' }}
+        # Private repositories without Code Security reject the upload, so their runs tolerate the
+        # failure. The advisory check in the next step runs either way.
+        continue-on-error: ${{ github.event.repository.private == true }}
         uses: github/codeql-action/upload-sarif@7273f08caa1dcf2c2837f362f1982de0ab4dc344
         with:
           sarif_file: scan.sarif

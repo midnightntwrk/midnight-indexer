@@ -19,24 +19,11 @@ RUN cargo install cargo-auditable --locked --version "${CARGO_AUDITABLE_VERSION:
 FROM chef AS planner
 COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
-# Only this fetch sees the token, and it runs no build script. Git asks the helper for the token
-# when the ledger repository demands credentials; libgit2, cargo's default git client, ignores
-# git config credentials.
-RUN --mount=type=secret,id=git_token \
-    CARGO_NET_GIT_FETCH_WITH_CLI=true \
-    GIT_CONFIG_COUNT=1 \
-    GIT_CONFIG_KEY_0=credential.https://github.com.helper \
-    GIT_CONFIG_VALUE_0='!f() { echo username=x-access-token; echo "password=$(cat /run/secrets/git_token)"; }; f' \
-    cargo fetch --locked
 
 FROM chef AS builder
 SHELL ["/bin/bash", "-c"]
 ARG PROFILE=release
 COPY --from=planner /build/recipe.json recipe.json
-COPY --from=planner /usr/local/cargo/git /usr/local/cargo/git
-COPY --from=planner /usr/local/cargo/registry /usr/local/cargo/registry
-# Builds from the sources the planner fetched, so a missing one fails instead of fetching.
-ENV CARGO_NET_OFFLINE=true
 # Same package and features as the build below, so cargo reuses every dependency compiled here.
 RUN cargo chef cook -p spo-indexer --locked --features cloud --profile $PROFILE --recipe-path recipe.json
 COPY --from=auditable /usr/local/cargo/bin/cargo-auditable /usr/local/cargo/bin/
@@ -52,8 +39,9 @@ RUN cargo auditable build -p spo-indexer --locked --features cloud --profile $PR
     mv /build/spo-indexer/config.yaml /runtime/opt/spo-indexer
 
 FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2 AS runtime
+# The base image predates the trixie-security zlib1g fix for CVE-2026-85091 and CVE-2026-76844.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates=20250419+deb13u1 && \
+    apt-get install -y --no-install-recommends ca-certificates=20250419+deb13u1 zlib1g=1:1.3.dfsg+really1.3.1-1+deb13u1 && \
     rm -rf /var/lib/apt/lists/*
 RUN useradd -u 10001 -d /nonexistent -s /usr/sbin/nologin -M -c "" appuser && \
     passwd -l appuser && \
