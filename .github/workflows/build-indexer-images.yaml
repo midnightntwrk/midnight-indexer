@@ -184,10 +184,6 @@ jobs:
           # leaving it in the BuildKit container, so syft can read it as docker:<tag>. Not pushed:
           # `local/` below is only a tag name. Works because each job builds a single platform.
           load: true
-          # Cargo fetches the ledger crates with this token; see the planner stage of each
-          # Dockerfile. BuildKit keeps secrets out of layers and the build cache.
-          secrets: &secrets |
-            git_token=${{ secrets.NODE_GIT_TOKEN }}
           # Anchored here and reused by the push step below, so both builds match and share a cache.
           build-args: &build-args |
             PROFILE=${{ env.PROFILE }}
@@ -239,7 +235,6 @@ jobs:
           context: .
           file: ./${{ matrix.image.name }}/Dockerfile
           push: true
-          secrets: *secrets
           build-args: *build-args
           platforms: linux/${{ matrix.platform.arch }}
           tags: ${{ steps.meta.outputs.tags }}
