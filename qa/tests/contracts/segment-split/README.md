@@ -71,8 +71,8 @@ places:
   `segment-split.compact` on the fly, with whatever compactc the toolkit under
   test needs. It never reads `managed/`.
 - `segment-probe-contract-actions.test.ts` (`TX_BACKEND=moth`) loads the
-  committed `managed/` directory, compiled with compactc **0.31.1** for the
-  midnight-js runtime moth bundles.
+  committed `managed/` directory, compiled with compactc **0.35.0** for the
+  ledger-9 runtime midnight-js 5 loads.
 
 **`managed/` must be regenerated whenever `segment-split.compact` changes**, or
 the two suites exercise different contracts. With the compile helper below:
@@ -86,7 +86,7 @@ console.log(await compileCompactContract({
   sourceFile: 'segment-split.compact',
 }));
 TS
-dir=$(COMPACT_COMPILER_VERSION=0.31.1 bun run .regen.ts | tail -1) && rm .regen.ts
+dir=$(COMPACT_COMPILER_VERSION=0.35.0 bun run .regen.ts | tail -1) && rm .regen.ts
 cp -r "$dir/managed/." contracts/segment-split/managed/
 bun run format   # the committed copy is Prettier-formatted, like the rest of qa/tests
 ```

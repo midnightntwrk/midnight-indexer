@@ -47,7 +47,12 @@ import {
   type WalletKeys,
 } from '@shieldedtech/moth-wallet';
 import type { FacadeState, UtxoWithMeta } from '@midnightntwrk/wallet-sdk/facade';
-import type { Dust, DustFullInfo } from '@midnightntwrk/wallet-sdk/dust/v1';
+import {
+  CoinsAndBalances,
+  coreStateOf,
+  type Dust,
+  type DustFullInfo,
+} from '@midnightntwrk/wallet-sdk/dust/v2';
 import * as Rx from 'rxjs';
 import log from '@utils/logging/logger';
 import { env } from '../../environment/model';
@@ -203,9 +208,9 @@ const awaitSettled = async (
           };
           const line =
             `moth syncing (${elapsed(now - started)})  ` +
-            `${one('shielded', s.shielded?.state?.progress)}  ` +
+            `${one('shielded', s.shielded?.progress)}  ` +
             `${one('unshielded', s.unshielded?.progress)}  ` +
-            `${one('dust', s.dust?.state?.progress)}`;
+            `${one('dust', s.dust?.progress)}`;
           log.info(line);
           // Global setup has no test log of its own and can sit here for well
           // over an hour on a first sync. Without a line on stdout a healthy slow
@@ -215,14 +220,14 @@ const awaitSettled = async (
         Rx.filter((s: any) => {
           try {
             const complete =
-              s.shielded?.state?.progress?.isStrictlyComplete?.() === true &&
+              s.shielded?.progress?.isStrictlyComplete?.() === true &&
               s.unshielded?.progress?.isStrictlyComplete?.() === true &&
-              s.dust?.state?.progress?.isStrictlyComplete?.() === true;
+              s.dust?.progress?.isStrictlyComplete?.() === true;
             if (!complete) return false;
             const idle = (p: any) =>
               Number(p?.appliedIndex ?? 0n) === 0 &&
               Number(p?.highestRelevantWalletIndex ?? p?.highestIndex ?? 0n) === 0;
-            if (idle(s.shielded?.state?.progress) && idle(s.dust?.state?.progress)) {
+            if (idle(s.shielded?.progress) && idle(s.dust?.progress)) {
               zeroTotalSince ??= Date.now();
               if (Date.now() - zeroTotalSince > ZERO_TOTAL_GRACE_MS) {
                 throw new Error(
@@ -634,17 +639,29 @@ export const getDustBalanceViaMoth = async (seed: string): Promise<DustBalance> 
   // agree, and the wallet's own `availableCoins` getter would value the coins
   // at its sync time instead.
   const now = new Date();
-  const coinsAndBalances = dust.capabilities.coinsAndBalances;
+  // wallet-sdk 2 seals the dust state; the per-coin generation info is read from
+  // the ledger-9 (v2) core state through the SDK's own coins-and-balances helpers.
+  const core = coreStateOf(dust);
+  if (core._tag !== 'Some') {
+    throw new Error('The DUST balance needs the ledger-9 dust wallet, but it is not running yet.');
+  }
+  const coinsAndBalances = CoinsAndBalances.makeDefaultCoinsAndBalancesCapability(
+    undefined,
+    // Only dust-generation estimates read the keys; balances and coins never do.
+    () => {
+      throw new Error('keys are not needed to read DUST coins');
+    },
+  );
 
   // `getAvailableCoins` already drops UTXOs without generation info (which have
   // no value the toolkit can report, and the schema's `generation_info` is not
   // nullable) and carries their `dtime`. The generation info is read again only
   // for the fields the full info lacks (value, owner, nonce); it exists for
   // every coin returned here.
-  const coins: readonly DustFullInfo[] = coinsAndBalances.getAvailableCoins(dust.state, now);
+  const coins: readonly DustFullInfo[] = coinsAndBalances.getAvailableCoins(core.value, now);
 
   const generation_infos = coins.map(({ token, dtime }) => {
-    const generation = coinsAndBalances.getGenerationInfo(dust.state, token);
+    const generation = coinsAndBalances.getGenerationInfo(core.value, token);
     if (!generation) {
       throw new Error(
         `moth returned an available DUST UTXO (nonce ${toHex(token.nonce)}) without generation info`,
