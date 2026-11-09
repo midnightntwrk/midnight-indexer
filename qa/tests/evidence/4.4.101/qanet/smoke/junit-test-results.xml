@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="30" failures="0" errors="0" time="4.941292542">
+    <testsuite name="tests/smoke/bridge-schema.test.ts" timestamp="2026-11-05T18:37:18.068Z" hostname="ip-192-168-0-113.eu-west-1.compute.internal" tests="8" failures="0" errors="0" skipped="0" time="1.1178385">
+        <testcase classname="tests/smoke/bridge-schema.test.ts" name="bridge GraphQL schema &gt; types &gt; should expose BridgeEvent interface with flat blockHeight" time="0.069480459">
+        </testcase>
+        <testcase classname="tests/smoke/bridge-schema.test.ts" name="bridge GraphQL schema &gt; types &gt; should expose the five concrete BridgeEvent variants" time="0.341094084">
+        </testcase>
+        <testcase classname="tests/smoke/bridge-schema.test.ts" name="bridge GraphQL schema &gt; types &gt; should expose BridgeSubminimalFlushTransfer without a cardanoTxHash" time="0.0679165">
+        </testcase>
+        <testcase classname="tests/smoke/bridge-schema.test.ts" name="bridge GraphQL schema &gt; types &gt; should expose BridgeClaimTransaction implementing Transaction" time="0.081802291">
+        </testcase>
+        <testcase classname="tests/smoke/bridge-schema.test.ts" name="bridge GraphQL schema &gt; types &gt; should expose BridgeBalance with deposited, claimed, balance" time="0.070400958">
+        </testcase>
+        <testcase classname="tests/smoke/bridge-schema.test.ts" name="bridge GraphQL schema &gt; types &gt; should expose BridgeEventVariant enum with five values" time="0.063615334">
+        </testcase>
+        <testcase classname="tests/smoke/bridge-schema.test.ts" name="bridge GraphQL schema &gt; queries &gt; should expose the bridge query fields on Query" time="0.062561667">
+        </testcase>
+        <testcase classname="tests/smoke/bridge-schema.test.ts" name="bridge GraphQL schema &gt; subscriptions &gt; should expose the bridge subscription fields on Subscription" time="0.063919959">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/smoke/graphql-healthchecks.test.ts" timestamp="2026-11-05T18:37:18.070Z" hostname="ip-192-168-0-113.eu-west-1.compute.internal" tests="4" failures="0" errors="0" skipped="0" time="1.804936875">
+        <testcase classname="tests/smoke/graphql-healthchecks.test.ts" name="graphql health checks &gt; an introspection message sent to the websocket channel &gt; should return the supported graphql schema" time="0.721936959">
+        </testcase>
+        <testcase classname="tests/smoke/graphql-healthchecks.test.ts" name="graphql health checks &gt; an introspection message sent to the websocket channel &gt; should return an error, given the depth of the query is &gt; 15" time="0.707813875">
+        </testcase>
+        <testcase classname="tests/smoke/graphql-healthchecks.test.ts" name="graphql health checks &gt; an introspection request sent to the http channel &gt; should return the supported graphql schema" time="0.298136083">
+        </testcase>
+        <testcase classname="tests/smoke/graphql-healthchecks.test.ts" name="graphql health checks &gt; an introspection request sent to the http channel &gt; should return an error, given the depth of the query is &gt; 15" time="0.075084292">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/smoke/graphql-schema-change.test.ts" timestamp="2026-11-05T18:37:18.071Z" hostname="ip-192-168-0-113.eu-west-1.compute.internal" tests="1" failures="0" errors="0" skipped="1" time="0">
+        <testcase classname="tests/smoke/graphql-schema-change.test.ts" name="GraphQL Schema Stability Check &gt; should not change the schema unexpectedly" time="0">
+            <skipped/>
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/smoke/graphql-schema-deprecations.test.ts" timestamp="2026-11-05T18:37:18.071Z" hostname="ip-192-168-0-113.eu-west-1.compute.internal" tests="9" failures="0" errors="0" skipped="0" time="0.832455">
+        <testcase classname="tests/smoke/graphql-schema-deprecations.test.ts" name="graphql schema deprecations &gt; RegularTransaction.merkleTreeRoot &gt; should be marked deprecated with reason &quot;Use zswapMerkleTreeRoot instead&quot;" time="0.300302083">
+        </testcase>
+        <testcase classname="tests/smoke/graphql-schema-deprecations.test.ts" name="graphql schema deprecations &gt; RegularTransaction.startIndex &gt; should be marked deprecated with reason &quot;Use zswapStartIndex instead&quot;" time="0.068706208">
+        </testcase>
+        <testcase classname="tests/smoke/graphql-schema-deprecations.test.ts" name="graphql schema deprecations &gt; RegularTransaction.endIndex &gt; should be marked deprecated with reason &quot;Use zswapEndIndex instead&quot;" time="0.066851125">
+        </testcase>
+        <testcase classname="tests/smoke/graphql-schema-deprecations.test.ts" name="graphql schema deprecations &gt; RelevantTransaction.collapsedMerkleTree &gt; should be marked deprecated with reason &quot;Use zswapCollapsedUpdate instead&quot;" time="0.066732125">
+        </testcase>
+        <testcase classname="tests/smoke/graphql-schema-deprecations.test.ts" name="graphql schema deprecations &gt; ShieldedTransactionsProgress.highestEndIndex &gt; should be marked deprecated with reason &quot;Use highestZswapEndIndex instead&quot;" time="0.065680125">
+        </testcase>
+        <testcase classname="tests/smoke/graphql-schema-deprecations.test.ts" name="graphql schema deprecations &gt; ShieldedTransactionsProgress.highestCheckedEndIndex &gt; should be marked deprecated with reason &quot;Use highestCheckedZswapEndIndex instead&quot;" time="0.06558775">
+        </testcase>
+        <testcase classname="tests/smoke/graphql-schema-deprecations.test.ts" name="graphql schema deprecations &gt; ShieldedTransactionsProgress.highestRelevantEndIndex &gt; should be marked deprecated with reason &quot;Use highestRelevantZswapEndIndex instead&quot;" time="0.065398125">
+        </testcase>
+        <testcase classname="tests/smoke/graphql-schema-deprecations.test.ts" name="graphql schema deprecations &gt; RegularTransaction.fees &gt; should be marked deprecated with reason &quot;Use fee instead&quot;" time="0.06545125">
+        </testcase>
+        <testcase classname="tests/smoke/graphql-schema-deprecations.test.ts" name="graphql schema deprecations &gt; TransactionFees.estimatedFees &gt; should be marked deprecated with reason &quot;Use paidFees instead&quot;" time="0.066007292">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/smoke/progress-protocol-version-schema.test.ts" timestamp="2026-11-05T18:37:18.071Z" hostname="ip-192-168-0-113.eu-west-1.compute.internal" tests="3" failures="0" errors="0" skipped="0" time="0.49739225">
+        <testcase classname="tests/smoke/progress-protocol-version-schema.test.ts" name="progress protocol version schema &gt; UnshieldedTransactionsProgress.protocolVersion &gt; should be served as a non-null Int" time="0.068818">
+        </testcase>
+        <testcase classname="tests/smoke/progress-protocol-version-schema.test.ts" name="progress protocol version schema &gt; ShieldedTransactionsProgress.protocolVersion &gt; should be served as a non-null Int" time="0.067828042">
+        </testcase>
+        <testcase classname="tests/smoke/progress-protocol-version-schema.test.ts" name="progress protocol version schema &gt; DustGenerationsProgress.protocolVersion &gt; should be served as a non-null Int" time="0.065612083">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/smoke/service-healthchecks.test.ts" timestamp="2026-11-05T18:37:18.072Z" hostname="ip-192-168-0-113.eu-west-1.compute.internal" tests="5" failures="0" errors="0" skipped="0" time="0.688669917">
+        <testcase classname="tests/smoke/service-healthchecks.test.ts" name="service health checks &gt; a request to the /ready endpoint &gt; should return a 200 status code OK" time="0.300656375">
+        </testcase>
+        <testcase classname="tests/smoke/service-healthchecks.test.ts" name="service health checks &gt; a request to an unrecognised path /api/v3/__regression_unknown_path &gt; should not 308 to a version-double-prefixed Location" time="0.189202875">
+        </testcase>
+        <testcase classname="tests/smoke/service-healthchecks.test.ts" name="service health checks &gt; a request to an unrecognised path /api/v3/__regression_unknown_path &gt; should terminate when redirects are followed" time="0.065831083">
+        </testcase>
+        <testcase classname="tests/smoke/service-healthchecks.test.ts" name="service health checks &gt; a request to an unrecognised path /api/v4/__regression_unknown_path &gt; should not 308 to a version-double-prefixed Location" time="0.06547875">
+        </testcase>
+        <testcase classname="tests/smoke/service-healthchecks.test.ts" name="service health checks &gt; a request to an unrecognised path /api/v4/__regression_unknown_path &gt; should terminate when redirects are followed" time="0.066262125">
+        </testcase>
+    </testsuite>
+</testsuites>
