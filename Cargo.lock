@@ -3658,6 +3658,7 @@ dependencies = [
  "itertools 0.15.0",
  "log",
  "metrics",
+ "midnight-storage-core",
  "moka",
  "parking_lot",
  "secrecy",
