@@ -1,0 +1,210 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="78" failures="0" errors="0" time="859.357303126">
+    <testsuite name="tests/e2e/contract-actions-partial-success.test.ts" timestamp="2026-11-05T18:58:56.960Z" hostname="ip-192-168-0-113.eu-west-1.compute.internal" tests="6" failures="0" errors="0" skipped="6" time="0">
+        <testcase classname="tests/e2e/contract-actions-partial-success.test.ts" name="contract actions in a guaranteed/fallible segment split &gt; a Call whose guaranteed transcript applied but whose fallible segment failed &gt; the fixture produces a call with a guaranteed transcript" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="tests/e2e/contract-actions-partial-success.test.ts" name="contract actions in a guaranteed/fallible segment split &gt; a Call whose guaranteed transcript applied but whose fallible segment failed &gt; the fixture produces a partially successful transaction" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="tests/e2e/contract-actions-partial-success.test.ts" name="contract actions in a guaranteed/fallible segment split &gt; a Call whose guaranteed transcript applied but whose fallible segment failed &gt; is still reported by the indexer" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="tests/e2e/contract-actions-partial-success.test.ts" name="contract actions in a guaranteed/fallible segment split &gt; a Call where neither execution phase applied &gt; the fixture produces a call without a guaranteed transcript" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="tests/e2e/contract-actions-partial-success.test.ts" name="contract actions in a guaranteed/fallible segment split &gt; a Call where neither execution phase applied &gt; the fixture still produces a partially successful transaction" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="tests/e2e/contract-actions-partial-success.test.ts" name="contract actions in a guaranteed/fallible segment split &gt; a Call where neither execution phase applied &gt; is not reported by the indexer" time="0">
+            <skipped/>
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/e2e/contract-actions-sequential.test.ts" timestamp="2026-11-05T18:58:56.961Z" hostname="ip-192-168-0-113.eu-west-1.compute.internal" tests="10" failures="0" errors="0" skipped="0" time="121.020862334">
+        <testcase classname="tests/e2e/contract-actions-sequential.test.ts" name="contract actions &gt; a transaction to deploy a counter smart contract &gt; should be reported by the indexer through a transaction query by hash" time="0.085923792">
+        </testcase>
+        <testcase classname="tests/e2e/contract-actions-sequential.test.ts" name="contract actions &gt; a transaction to deploy a counter smart contract &gt; should be reported by the indexer through a block query by hash" time="0.081243125">
+        </testcase>
+        <testcase classname="tests/e2e/contract-actions-sequential.test.ts" name="contract actions &gt; a transaction to deploy a counter smart contract &gt; should be reported by the indexer through a contract action query by address" time="0.086740792">
+        </testcase>
+        <testcase classname="tests/e2e/contract-actions-sequential.test.ts" name="contract actions &gt; a transaction to call the store circuit on the deployed counter smart contract &gt; should stream only the call to a subscription opened without an offset before it" time="5.003206416">
+        </testcase>
+        <testcase classname="tests/e2e/contract-actions-sequential.test.ts" name="contract actions &gt; a transaction to call the store circuit on the deployed counter smart contract &gt; should be reported by the indexer through a transaction query by hash" time="0.274617208">
+        </testcase>
+        <testcase classname="tests/e2e/contract-actions-sequential.test.ts" name="contract actions &gt; a transaction to call the store circuit on the deployed counter smart contract &gt; should be reported by the indexer through a block query by hash" time="0.090321958">
+        </testcase>
+        <testcase classname="tests/e2e/contract-actions-sequential.test.ts" name="contract actions &gt; a transaction to call the store circuit on the deployed counter smart contract &gt; should be reported by the indexer through a contract action query by address" time="0.081800458">
+        </testcase>
+        <testcase classname="tests/e2e/contract-actions-sequential.test.ts" name="contract actions &gt; a transaction to update the counter smart contract &gt; should be reported by the indexer through a transaction query by hash" time="0.081051333">
+        </testcase>
+        <testcase classname="tests/e2e/contract-actions-sequential.test.ts" name="contract actions &gt; a transaction to update the counter smart contract &gt; should be reported by the indexer through a block query by hash" time="0.169238125">
+        </testcase>
+        <testcase classname="tests/e2e/contract-actions-sequential.test.ts" name="contract actions &gt; a transaction to update the counter smart contract &gt; should be reported by the indexer through a contract action query by address" time="0.150567125">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/e2e/contract-deploy-failed-segment.test.ts" timestamp="2026-11-05T18:58:56.962Z" hostname="ip-192-168-0-113.eu-west-1.compute.internal" tests="7" failures="0" errors="0" skipped="7" time="0">
+        <testcase classname="tests/e2e/contract-deploy-failed-segment.test.ts" name="a contract deploy in a rolled-back fallible segment &gt; the crafted transaction &gt; should carry two deploys of the same contract" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="tests/e2e/contract-deploy-failed-segment.test.ts" name="a contract deploy in a rolled-back fallible segment &gt; the crafted transaction &gt; should be included in a block the node serves" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="tests/e2e/contract-deploy-failed-segment.test.ts" name="a contract deploy in a rolled-back fallible segment &gt; what the node holds afterwards &gt; should report an ordinary deploy as present" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="tests/e2e/contract-deploy-failed-segment.test.ts" name="a contract deploy in a rolled-back fallible segment &gt; what the node holds afterwards &gt; should hold no contract at the rolled-back address" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="tests/e2e/contract-deploy-failed-segment.test.ts" name="a contract deploy in a rolled-back fallible segment &gt; what the indexer reports &gt; should keep advancing past that block" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="tests/e2e/contract-deploy-failed-segment.test.ts" name="a contract deploy in a rolled-back fallible segment &gt; what the indexer reports &gt; should report no deploy for the rolled-back address" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="tests/e2e/contract-deploy-failed-segment.test.ts" name="a contract deploy in a rolled-back fallible segment &gt; what the indexer reports &gt; should not increment indexer_uncaptured_contract_state_count" time="0">
+            <skipped/>
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/e2e/contract-shielded-balance.test.ts" timestamp="2026-11-05T18:58:56.963Z" hostname="ip-192-168-0-113.eu-west-1.compute.internal" tests="5" failures="0" errors="0" skipped="0" time="133.50591775">
+        <testcase classname="tests/e2e/contract-shielded-balance.test.ts" name="a contract whose balance map holds a shielded token &gt; the holdShielded call should declare a shielded token in its unshielded inputs" time="0.001310625">
+        </testcase>
+        <testcase classname="tests/e2e/contract-shielded-balance.test.ts" name="a contract whose balance map holds a shielded token &gt; the indexer should index the block that holds the holdShielded call" time="40.667583625">
+        </testcase>
+        <testcase classname="tests/e2e/contract-shielded-balance.test.ts" name="a contract whose balance map holds a shielded token &gt; the indexer should keep indexing past that block" time="43.628211167">
+        </testcase>
+        <testcase classname="tests/e2e/contract-shielded-balance.test.ts" name="a contract whose balance map holds a shielded token &gt; the holdShielded contract action should report no unshielded balance" time="0.199567625">
+        </testcase>
+        <testcase classname="tests/e2e/contract-shielded-balance.test.ts" name="a contract whose balance map holds a shielded token &gt; the later ping contract action should also report no unshielded balance" time="0.071789209">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/e2e/custom-unshielded-token-transactions.test.ts" timestamp="2026-11-05T18:58:56.963Z" hostname="ip-192-168-0-113.eu-west-1.compute.internal" tests="8" failures="0" errors="0" skipped="0" time="197.367608917">
+        <testcase classname="tests/e2e/custom-unshielded-token-transactions.test.ts" name="unshielded custom token transactions &gt; a successful unshielded transaction transferring 1 token between two addresses &gt; should be reported by the indexer through a block query by hash" time="0.09295425">
+        </testcase>
+        <testcase classname="tests/e2e/custom-unshielded-token-transactions.test.ts" name="unshielded custom token transactions &gt; a successful unshielded transaction transferring 1 token between two addresses &gt; should be reported by the indexer through a transaction query by hash" time="0.080620666">
+        </testcase>
+        <testcase classname="tests/e2e/custom-unshielded-token-transactions.test.ts" name="unshielded custom token transactions &gt; a successful unshielded transaction transferring 1 token between two addresses &gt; should be reported by the indexer through an unshielded transaction event for the source address" time="0.00117725">
+        </testcase>
+        <testcase classname="tests/e2e/custom-unshielded-token-transactions.test.ts" name="unshielded custom token transactions &gt; a successful unshielded transaction transferring 1 token between two addresses &gt; should be reported by the indexer through an unshielded transaction event for the destination address" time="0.001877">
+        </testcase>
+        <testcase classname="tests/e2e/custom-unshielded-token-transactions.test.ts" name="unshielded custom token transactions &gt; a successful unshielded transaction transferring 1 token between two addresses &gt; should have transferred 1 token from the source to the destination address" time="0.086310334">
+        </testcase>
+        <testcase classname="tests/e2e/custom-unshielded-token-transactions.test.ts" name="unshielded custom token transactions &gt; a successful unshielded transaction transferring 1 token between two addresses &gt; should report the token type under test on every created and spent output" time="0.084316084">
+        </testcase>
+        <testcase classname="tests/e2e/custom-unshielded-token-transactions.test.ts" name="unshielded custom token transactions &gt; a successful unshielded transaction transferring 1 token between two addresses &gt; should be reported by the indexer through a progress update event for the source address" time="85.172880416">
+        </testcase>
+        <testcase classname="tests/e2e/custom-unshielded-token-transactions.test.ts" name="unshielded custom token transactions &gt; a successful unshielded transaction transferring 1 token between two addresses &gt; should be reported by the indexer through a progress update event for the destination address" time="0.0009255">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/e2e/night-transactions.test.ts" timestamp="2026-11-05T18:58:56.963Z" hostname="ip-192-168-0-113.eu-west-1.compute.internal" tests="13" failures="0" errors="0" skipped="0" time="228.249409042">
+        <testcase classname="tests/e2e/night-transactions.test.ts" name="unshielded NIGHT transactions &gt; a successful unshielded transaction transferring 1 STAR between two addresses &gt; should be reported by the indexer through a block query by hash" time="0.078307209">
+        </testcase>
+        <testcase classname="tests/e2e/night-transactions.test.ts" name="unshielded NIGHT transactions &gt; a successful unshielded transaction transferring 1 STAR between two addresses &gt; should be reported by the indexer through a transaction query by hash" time="0.077018375">
+        </testcase>
+        <testcase classname="tests/e2e/night-transactions.test.ts" name="unshielded NIGHT transactions &gt; a successful unshielded transaction transferring 1 STAR between two addresses &gt; should be reported by the indexer through an unshielded transaction event for the source address" time="0.000413583">
+        </testcase>
+        <testcase classname="tests/e2e/night-transactions.test.ts" name="unshielded NIGHT transactions &gt; a successful unshielded transaction transferring 1 STAR between two addresses &gt; should be reported by the indexer through an unshielded transaction event for the destination address" time="0.000486458">
+        </testcase>
+        <testcase classname="tests/e2e/night-transactions.test.ts" name="unshielded NIGHT transactions &gt; a successful unshielded transaction transferring 1 STAR between two addresses &gt; should have transferred 1 STAR from the source to the destination address" time="0.08561375">
+        </testcase>
+        <testcase classname="tests/e2e/night-transactions.test.ts" name="unshielded NIGHT transactions &gt; a successful unshielded transaction transferring 1 STAR between two addresses &gt; should report the token type under test on every created and spent output" time="0.087227959">
+        </testcase>
+        <testcase classname="tests/e2e/night-transactions.test.ts" name="unshielded NIGHT transactions &gt; a successful unshielded transaction transferring 1 STAR between two addresses &gt; should be reported by the indexer through a progress update event for the source address" time="25.020172875">
+        </testcase>
+        <testcase classname="tests/e2e/night-transactions.test.ts" name="unshielded NIGHT transactions &gt; a successful unshielded transaction transferring 1 STAR between two addresses &gt; should be reported by the indexer through a progress update event for the destination address" time="0.0055785">
+        </testcase>
+        <testcase classname="tests/e2e/night-transactions.test.ts" name="unshielded NIGHT transactions &gt; the genesis block of a chain minted with NIGHT alone &gt; should report the all-zeros NIGHT token type on its outputs" time="0.00146825">
+        </testcase>
+        <testcase classname="tests/e2e/night-transactions.test.ts" name="unshielded NIGHT transactions &gt; the dust activity of a confirmed NIGHT transaction &gt; should increase the dust commitment Merkle tree end index" time="0.246478542">
+        </testcase>
+        <testcase classname="tests/e2e/night-transactions.test.ts" name="unshielded NIGHT transactions &gt; a confirmed unshielded transfer streamed to address subscriptions &gt; should emit UnshieldedTransaction only for the target wallet (A &gt; B1)" time="60.571922709">
+        </testcase>
+        <testcase classname="tests/e2e/night-transactions.test.ts" name="unshielded NIGHT transactions &gt; a confirmed unshielded transfer streamed to address subscriptions &gt; should emit UnshieldedTransaction only for the target wallet (A &gt; B2)" time="76.237057333">
+        </testcase>
+        <testcase classname="tests/e2e/night-transactions.test.ts" name="unshielded NIGHT transactions &gt; an address with no transaction history &gt; should emit only ProgressUpdate for empty wallet" time="2.676408291">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/e2e/segment-probe-contract-actions.test.ts" timestamp="2026-11-05T18:58:56.964Z" hostname="ip-192-168-0-113.eu-west-1.compute.internal" tests="6" failures="0" errors="0" skipped="0" time="73.512939333">
+        <testcase classname="tests/e2e/segment-probe-contract-actions.test.ts" name="segment-split contract actions &gt; a transaction to deploy a segment-split smart contract &gt; should be reported by the indexer through a transaction query by hash" time="0.095492334">
+        </testcase>
+        <testcase classname="tests/e2e/segment-probe-contract-actions.test.ts" name="segment-split contract actions &gt; a transaction to deploy a segment-split smart contract &gt; should be reported by the indexer through a block query by hash" time="0.096029584">
+        </testcase>
+        <testcase classname="tests/e2e/segment-probe-contract-actions.test.ts" name="segment-split contract actions &gt; a transaction to deploy a segment-split smart contract &gt; should be reported by the indexer through a contract action query by address" time="0.079979625">
+        </testcase>
+        <testcase classname="tests/e2e/segment-probe-contract-actions.test.ts" name="segment-split contract actions &gt; a transaction to call the burnWithGuaranteed circuit on the deployed segment-split smart contract &gt; should be reported by the indexer through a transaction query by hash" time="0.100501">
+        </testcase>
+        <testcase classname="tests/e2e/segment-probe-contract-actions.test.ts" name="segment-split contract actions &gt; a transaction to call the burnWithGuaranteed circuit on the deployed segment-split smart contract &gt; should be reported by the indexer through a block query by hash" time="0.091036125">
+        </testcase>
+        <testcase classname="tests/e2e/segment-probe-contract-actions.test.ts" name="segment-split contract actions &gt; a transaction to call the burnWithGuaranteed circuit on the deployed segment-split smart contract &gt; should be reported by the indexer through a contract action query by address" time="0.086623875">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/e2e/shielded-transactions.test.ts" timestamp="2026-11-05T18:58:56.965Z" hostname="ip-192-168-0-113.eu-west-1.compute.internal" tests="8" failures="0" errors="0" skipped="0" time="77.317986708">
+        <testcase classname="tests/e2e/shielded-transactions.test.ts" name="shielded transactions &gt; a successful shielded transaction transferring 1 Shielded Token between two wallets &gt; should be reported by the indexer through a block query by hash" time="0.153216792">
+        </testcase>
+        <testcase classname="tests/e2e/shielded-transactions.test.ts" name="shielded transactions &gt; a successful shielded transaction transferring 1 Shielded Token between two wallets &gt; should be reported by the indexer through a transaction query by hash" time="0.110771542">
+        </testcase>
+        <testcase classname="tests/e2e/shielded-transactions.test.ts" name="shielded transactions &gt; a successful shielded transaction transferring 1 Shielded Token between two wallets &gt; should stream Zswap events followed by DustSpendProcessed after a shielded transaction" time="0.843087833">
+        </testcase>
+        <testcase classname="tests/e2e/shielded-transactions.test.ts" name="shielded transactions &gt; a successful shielded transaction transferring 1 Shielded Token between two wallets &gt; should increase the zswap Merkle tree end index" time="0.362470917">
+        </testcase>
+        <testcase classname="tests/e2e/shielded-transactions.test.ts" name="shielded transactions &gt; a successful shielded transaction transferring 1 Shielded Token between two wallets &gt; should increase the dust commitment Merkle tree end index" time="0.074606167">
+        </testcase>
+        <testcase classname="tests/e2e/shielded-transactions.test.ts" name="shielded transactions &gt; a confirmed shielded transfer streamed to wallet sessions by viewing key &gt; should stream the transaction to the source viewing key with a matching hash" time="1.239520166">
+        </testcase>
+        <testcase classname="tests/e2e/shielded-transactions.test.ts" name="shielded transactions &gt; a confirmed shielded transfer streamed to wallet sessions by viewing key &gt; should stream the transaction to the destination viewing key with a matching hash" time="1.008813167">
+        </testcase>
+        <testcase classname="tests/e2e/shielded-transactions.test.ts" name="shielded transactions &gt; a confirmed shielded transfer streamed to wallet sessions by viewing key &gt; should not stream the transaction to an unrelated viewing key" time="20.727538542">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/e2e/subscription-polling.test.ts" timestamp="2026-11-05T18:58:56.965Z" hostname="ip-192-168-0-113.eu-west-1.compute.internal" tests="5" failures="0" errors="0" skipped="5" time="0">
+        <testcase classname="tests/e2e/subscription-polling.test.ts" name="subscription polling &gt; an unshielded transactions subscription for a never-used address &gt; should emit progress immediately and back off while the address is idle" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="tests/e2e/subscription-polling.test.ts" name="subscription polling &gt; an unshielded transactions subscription for a never-used address &gt; should reset the polling interval when the address receives a transaction" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="tests/e2e/subscription-polling.test.ts" name="subscription polling &gt; the keep-alive heartbeat of a shielded transactions subscription &gt; should refresh wallet activity once at subscription start and then throttle" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="tests/e2e/subscription-polling.test.ts" name="subscription polling &gt; the keep-alive heartbeat of a shielded transactions subscription &gt; should keep a subscribed wallet active beyond the wallet-indexer inactivity TTL" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="tests/e2e/subscription-polling.test.ts" name="subscription polling &gt; a shielded transactions subscription on an idle wallet &gt; should emit progress immediately and keep emitting while idle" time="0">
+            <skipped/>
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/e2e/unshielded-balance-e2e.test.ts" timestamp="2026-11-05T18:58:56.965Z" hostname="ip-192-168-0-113.eu-west-1.compute.internal" tests="1" failures="0" errors="0" skipped="1" time="0">
+        <testcase classname="tests/e2e/unshielded-balance-e2e.test.ts" name="unshielded balance indexing (deploy + mint + verify) [#1253 scaffold] &gt; reports the contract remainder after mint-to-self then partial send" time="0">
+            <skipped/>
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/e2e/toolkit/dust-balance.test.ts" timestamp="2026-11-05T18:58:56.966Z" hostname="ip-192-168-0-113.eu-west-1.compute.internal" tests="1" failures="0" errors="0" skipped="0" time="13.986353042">
+        <testcase classname="tests/e2e/toolkit/dust-balance.test.ts" name="dust balance query using moth &gt; a dust balance query with a valid wallet seed &gt; should respond with a dust balance according to the requested schema" time="13.939400292">
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/e2e/toolkit/key-material.test.ts" timestamp="2026-11-05T18:58:56.966Z" hostname="ip-192-168-0-113.eu-west-1.compute.internal" tests="6" failures="0" errors="0" skipped="6" time="0">
+        <testcase classname="tests/e2e/toolkit/key-material.test.ts" name="key material derivation validation &gt; a midnight shielded address &gt; should show with the expected prefix for the current network ID" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="tests/e2e/toolkit/key-material.test.ts" name="key material derivation validation &gt; a midnight shielded address &gt; should show with the expected prefix for all network IDs" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="tests/e2e/toolkit/key-material.test.ts" name="key material derivation validation &gt; a midnight unshielded address &gt; should show with the expected prefix for the current network ID" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="tests/e2e/toolkit/key-material.test.ts" name="key material derivation validation &gt; a midnight unshielded address &gt; should show with the expected prefix for all network IDs" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="tests/e2e/toolkit/key-material.test.ts" name="key material derivation validation &gt; a midnight viewing key &gt; should show with the expected prefix for the current network ID" time="0">
+            <skipped/>
+        </testcase>
+        <testcase classname="tests/e2e/toolkit/key-material.test.ts" name="key material derivation validation &gt; a midnight viewing key &gt; should show with the expected prefix for all network IDs" time="0">
+            <skipped/>
+        </testcase>
+    </testsuite>
+    <testsuite name="tests/e2e/toolkit/show-wallet-queries.test.ts" timestamp="2026-11-05T18:58:56.966Z" hostname="ip-192-168-0-113.eu-west-1.compute.internal" tests="2" failures="0" errors="0" skipped="0" time="14.396226">
+        <testcase classname="tests/e2e/toolkit/show-wallet-queries.test.ts" name="show wallet queries using moth &gt; private wallet state query using moth &gt; should respond with a private wallet state according to the requested schema" time="14.320403834">
+        </testcase>
+        <testcase classname="tests/e2e/toolkit/show-wallet-queries.test.ts" name="show wallet queries using moth &gt; public wallet state query using moth &gt; should respond with a public wallet state according to the requested schema" time="0.030748375">
+        </testcase>
+    </testsuite>
+</testsuites>
