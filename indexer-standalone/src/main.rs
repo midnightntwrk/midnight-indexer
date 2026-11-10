@@ -48,7 +48,16 @@ fn run() -> anyhow::Result<()> {
     };
     use indexer_api::{
         application as api_app,
-        infra::{api::AxumApi, storage as api_storage},
+        infra::{
+            api::{
+                AxumApi,
+                ledger_query_limit::{
+                    DEFAULT_MAX_BLOCKING_THREADS, LedgerQueryLimiter, default_permits,
+                    validate_permits,
+                },
+            },
+            storage as api_storage,
+        },
     };
     use indexer_common::{
         cipher::make_cipher,
@@ -61,7 +70,7 @@ fn run() -> anyhow::Result<()> {
         application as spo_app,
         infra::{spo_client::SPOClient, storage as spo_storage},
     };
-    use std::panic;
+    use std::{num::NonZeroUsize, panic};
     use tokio::{
         runtime::Builder,
         select,
@@ -73,6 +82,8 @@ fn run() -> anyhow::Result<()> {
     // Load configuration.
     let Config {
         thread_stack_size,
+        max_blocking_threads,
+        ledger_query_concurrency,
         application_config,
         spo_config,
         infra_config,
@@ -118,7 +129,44 @@ fn run() -> anyhow::Result<()> {
         secret,
     } = infra_config;
 
+    // Cap the blocking pool explicitly (issue #595): a ledger walk occupies a blocking thread for
+    // its whole duration via the `block_in_place` core handoff. In standalone the chain-indexer,
+    // wallet-indexer, spo-indexer and API share this one runtime and this one pool, so bounding
+    // API-driven ledger queries also keeps the indexing tasks scheduled under a query storm.
+    let max_blocking_threads = max_blocking_threads.unwrap_or(DEFAULT_MAX_BLOCKING_THREADS);
+
+    // The standalone ledger DB is SQLite pinned to a single connection — storage-core assumes a
+    // single writer, see `ledger_db::init` — so the default lands on one permit: walks already
+    // serialize on that connection and admitting more would only pin blocking threads waiting for
+    // it. Note this is the ledger DB's own pool, not the main storage pool, which is wider.
+    let ledger_db_max_connections = NonZeroUsize::new(ledger_db::MAX_CONNECTIONS as usize)
+        .expect("ledger DB pool holds at least one connection");
+
+    // The contract state cache bounds its own arena loads against this same single-connection
+    // ledger DB, so the ledger bound budgets against it rather than alongside it.
+    let contract_state_loads = api_config
+        .contract_state_cache_config
+        .max_concurrent_loads();
+
+    let ledger_query_permits = ledger_query_concurrency.unwrap_or_else(|| {
+        default_permits(
+            ledger_db_max_connections,
+            contract_state_loads,
+            max_blocking_threads,
+        )
+    });
+    validate_permits(ledger_query_permits, max_blocking_threads)
+        .context("validate ledger_query_concurrency")?;
+    info!(
+        max_blocking_threads = max_blocking_threads.get(),
+        ledger_db_max_connections = ledger_db_max_connections.get(),
+        ledger_query_permits = ledger_query_permits.get();
+        "runtime concurrency"
+    );
+    let ledger_query_limiter = LedgerQueryLimiter::new(ledger_query_permits);
+
     let runtime = Builder::new_multi_thread()
+        .max_blocking_threads(max_blocking_threads.get())
         .enable_all()
         .thread_stack_size(thread_stack_size as usize)
         .build()
@@ -180,7 +228,12 @@ fn run() -> anyhow::Result<()> {
         let indexer_api = task::spawn({
             let subscriber = pub_sub.subscriber();
             let storage = api_storage::Storage::new(cipher.clone(), pool.clone());
-            let api = AxumApi::new(api_config, storage, subscriber.clone());
+            let api = AxumApi::new(
+                api_config,
+                storage,
+                subscriber.clone(),
+                ledger_query_limiter,
+            );
 
             api_app::run(application_config.clone().into(), api, subscriber)
         });

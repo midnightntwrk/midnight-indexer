@@ -137,3 +137,107 @@ pub struct StakeShare {
     pub live_pledge: Option<String>,
     pub stake_share: Option<f64>,
 }
+
+/// Strip an optional `0x` or `0X` prefix from a hex string.
+pub fn strip_hex_prefix(input: &str) -> &str {
+    match input.as_bytes() {
+        // The pattern matched two ASCII bytes, so index 2 is a char boundary and cannot panic.
+        [b'0', b'x' | b'X', ..] => &input[2..],
+        _ => input,
+    }
+}
+
+/// Normalize a hex string by stripping an optional `0x` or `0X` prefix and lowercasing, or `None`
+/// if it is not a non-empty, even-length hex string.
+pub fn normalize_hex(input: &str) -> Option<String> {
+    let s = strip_hex_prefix(input);
+    // `check` strips the prefix itself, so it must see the original input to strip it only once.
+    (!s.is_empty() && const_hex::check(input).is_ok()).then(|| s.to_ascii_lowercase())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_hex, strip_hex_prefix};
+
+    #[test]
+    fn strips_hex_prefix() {
+        for (input, expected) in [
+            ("abc", "abc"),
+            ("0xabc", "abc"),
+            ("0XABC", "ABC"),
+            ("0x", ""),
+            ("0X", ""),
+            ("", ""),
+            // Only a single leading prefix is stripped.
+            ("0x0xab", "0xab"),
+            ("ab0x", "ab0x"),
+            ("x0ab", "x0ab"),
+            ("0\u{0445}ab", "0\u{0445}ab"), // Cyrillic "х"
+            // Non-hex input is passed through.
+            ("0xpool", "pool"),
+        ] {
+            assert_eq!(strip_hex_prefix(input), expected, "input: {input:?}");
+        }
+    }
+
+    #[test]
+    fn accepts_hex() {
+        for (input, expected) in [
+            ("abcd", "abcd"),
+            ("ABCD", "abcd"),
+            ("AbCd", "abcd"),
+            ("0xabcd", "abcd"),
+            ("0xABCD", "abcd"),
+            ("0Xabcd", "abcd"),
+            ("0XAbCd", "abcd"),
+            ("0123456789abcdefABCDEF", "0123456789abcdefabcdef"),
+            // Realistic pool ID (28 bytes) and sidechain key (32 bytes).
+            (
+                "0x8F63E953A61DA4860DE78F58C44BA7AF7121726B5C21CC2D157E9F89",
+                "8f63e953a61da4860de78f58c44ba7af7121726b5c21cc2d157e9f89",
+            ),
+            (
+                "0X03B827F4DA9711BAB7292E5695576A841A4D20AF9A07B1BA7A230168D2A78E9D",
+                "03b827f4da9711bab7292e5695576a841a4d20af9a07b1ba7a230168d2a78e9d",
+            ),
+        ] {
+            assert_eq!(
+                normalize_hex(input).as_deref(),
+                Some(expected),
+                "input: {input:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_non_hex() {
+        for input in [
+            "",
+            "0x",
+            "0X",
+            "abc",
+            "0xabc",
+            "zz",
+            "0xzz",
+            "0x0xab",
+            "0X0Xab",
+            "ab0x",
+            "x0ab",
+            " abcd",
+            "abcd ",
+            "pool name",
+            // Non-ASCII digits, letters and lookalikes are not hex.
+            "\u{ff10}\u{ff11}", // fullwidth "01"
+            "\u{0660}\u{0661}", // Arabic-Indic "01"
+            "0\u{0445}ab",      // Cyrillic "х" in place of the prefix "x"
+            "\u{0430}b",        // Cyrillic "а"
+            "\u{00e9}",         // two-byte "é", even byte length
+            "ab\u{00e9}",
+            "\u{fffd}",
+            "ab\0",
+            "\0\0",
+        ] {
+            assert_eq!(normalize_hex(input), None, "input: {input:?}");
+        }
+    }
+}

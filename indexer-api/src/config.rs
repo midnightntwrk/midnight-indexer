@@ -12,11 +12,27 @@
 // limitations under the License.
 
 use crate::{application, infra};
+use std::num::NonZeroUsize;
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct Config {
     #[serde(with = "byte_unit_serde")]
     pub thread_stack_size: u64,
+
+    /// Cap for the Tokio blocking pool. `None` uses
+    /// [`DEFAULT_MAX_BLOCKING_THREADS`](crate::infra::api::ledger_query_limit::DEFAULT_MAX_BLOCKING_THREADS)
+    /// rather than tokio's default of 512, which at `thread_stack_size` would be gigabytes of
+    /// thread stacks. A ledger walk occupies one of these threads for its whole duration.
+    #[serde(default)]
+    pub max_blocking_threads: Option<NonZeroUsize>,
+
+    /// Maximum concurrent ledger-DB-backed GraphQL queries (issue #595). `None` defaults to half
+    /// of the storage pool's `max_connections` — the pool the ledger DB shares with every other
+    /// resolver — less `contract_state_cache.max_concurrent_loads`, which bounds arena loads
+    /// against that same pool. Must stay below `max_blocking_threads`, or ledger queries can still
+    /// exhaust the blocking pool and wedge the runtime.
+    #[serde(default)]
+    pub ledger_query_concurrency: Option<NonZeroUsize>,
 
     #[serde(rename = "application")]
     pub application_config: application::Config,

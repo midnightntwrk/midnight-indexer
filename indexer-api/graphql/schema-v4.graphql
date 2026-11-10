@@ -124,6 +124,24 @@ input BlockOffset @oneOf {
 }
 
 """
+A block's height, hash and protocol version. Query `block` with the hash for the full block.
+"""
+type BlockReference {
+	"""
+	The block height.
+	"""
+	height: Int!
+	"""
+	The block hash.
+	"""
+	hash: HexEncoded!
+	"""
+	The protocol version.
+	"""
+	protocolVersion: Int!
+}
+
+"""
 Per-address bridge balance.
 """
 type BridgeBalance @beta {
@@ -390,9 +408,15 @@ type Contract @beta {
 	address: HexEncoded!
 	"""
 	The hex-encoded serialized contract state as of the queried block (the latest contract
-	action at or before it).
+	action at or before it), in that block's encoding; as of the latest block if no offset is
+	given.
 	"""
 	state: HexEncoded!
+	"""
+	The block at which `state` last changed: the latest action's block, or a later block at which
+	the state was translated to a new ledger version.
+	"""
+	stateAt: BlockReference!
 	"""
 	The contract's maintenance authority as of the queried block.
 	"""
@@ -411,6 +435,7 @@ A contract action.
 interface ContractAction {
 	address: HexEncoded!
 	state: HexEncoded!
+	stateAt: BlockReference!
 	zswapState: HexEncoded!
 	transaction: Transaction!
 	unshieldedBalances: [ContractBalance!]!
@@ -464,17 +489,25 @@ type ContractCall implements ContractAction {
 	"""
 	address: HexEncoded!
 	"""
-	The hex-encoded serialized state.
+	The entry point.
+	"""
+	entryPoint: String!
+	"""
+	The hex-encoded serialized contract state at the end of this action's block, in the encoding
+	of the block the query is anchored to: the latest block for `contractAction` without an
+	offset, the fork block for a `contractActions` re-emission, otherwise the action's own
+	block.
 	"""
 	state: HexEncoded!
+	"""
+	The block at which `state` last changed: this action's block, or a later block at which the
+	state was translated to a new ledger version.
+	"""
+	stateAt: BlockReference!
 	"""
 	The hex-encoded serialized contract-specific zswap state.
 	"""
 	zswapState: HexEncoded!
-	"""
-	The entry point.
-	"""
-	entryPoint: String!
 	"""
 	Transaction for this contract call.
 	"""
@@ -510,9 +543,17 @@ type ContractDeploy implements ContractAction {
 	"""
 	address: HexEncoded!
 	"""
-	The hex-encoded serialized state.
+	The hex-encoded serialized contract state at the end of this action's block, in the encoding
+	of the block the query is anchored to: the latest block for `contractAction` without an
+	offset, the fork block for a `contractActions` re-emission, otherwise the action's own
+	block.
 	"""
 	state: HexEncoded!
+	"""
+	The block at which `state` last changed: this action's block, or a later block at which the
+	state was translated to a new ledger version.
+	"""
+	stateAt: BlockReference!
 	"""
 	The hex-encoded serialized contract-specific zswap state.
 	"""
@@ -675,9 +716,17 @@ type ContractUpdate implements ContractAction {
 	"""
 	address: HexEncoded!
 	"""
-	The hex-encoded serialized state.
+	The hex-encoded serialized contract state at the end of this action's block, in the encoding
+	of the block the query is anchored to: the latest block for `contractAction` without an
+	offset, the fork block for a `contractActions` re-emission, otherwise the action's own
+	block.
 	"""
 	state: HexEncoded!
+	"""
+	The block at which `state` last changed: this action's block, or a later block at which the
+	state was translated to a new ledger version.
+	"""
+	stateAt: BlockReference!
 	"""
 	The hex-encoded serialized contract-specific zswap state.
 	"""
@@ -909,6 +958,12 @@ type DustGenerationsProgress @beta {
 	Final collapsed Merkle tree update covering remaining range.
 	"""
 	collapsedMerkleTree: MerkleTreeCollapsedUpdate
+	"""
+	The protocol version at the snapshot's block, i.e. the one this snapshot is encoded at.
+	Allows a wallet without any generations to observe a protocol upgrade, which it would
+	otherwise only learn about from the items it receives.
+	"""
+	protocolVersion: Int!
 }
 
 type DustInitialUtxo implements DustLedgerEvent {
@@ -1308,6 +1363,9 @@ type Query {
 	spoIdentities(limit: Int, offset: Int): [SpoIdentity!]!
 	"""
 	Get SPO identity by pool ID.
+	
+	`poolIdHex` is case-insensitive hex with an optional `0x`/`0X` prefix; invalid hex
+	matches nothing.
 	"""
 	spoIdentityByPoolId(poolIdHex: String!): SpoIdentity
 	"""
@@ -1316,6 +1374,9 @@ type Query {
 	spoCount: Int
 	"""
 	Get pool metadata by pool ID.
+	
+	`poolIdHex` is case-insensitive hex with an optional `0x`/`0X` prefix; invalid hex
+	matches nothing.
 	"""
 	poolMetadata(poolIdHex: String!): PoolMetadata
 	"""
@@ -1324,6 +1385,9 @@ type Query {
 	poolMetadataList(limit: Int, offset: Int, withNameOnly: Boolean): [PoolMetadata!]!
 	"""
 	Get SPO with metadata by pool ID.
+	
+	`poolIdHex` is case-insensitive hex with an optional `0x`/`0X` prefix; invalid hex
+	matches nothing.
 	"""
 	spoByPoolId(poolIdHex: String!): Spo
 	"""
@@ -1332,6 +1396,9 @@ type Query {
 	spoList(limit: Int, offset: Int, search: String): [Spo!]!
 	"""
 	Get composite SPO data (identity + metadata + performance).
+	
+	`poolIdHex` is case-insensitive hex with an optional `0x`/`0X` prefix; invalid hex
+	matches nothing.
 	"""
 	spoCompositeByPoolId(poolIdHex: String!): SpoComposite
 	"""
@@ -1344,6 +1411,9 @@ type Query {
 	spoPerformanceLatest(limit: Int, offset: Int): [EpochPerf!]!
 	"""
 	Get SPO performance by SPO key.
+	
+	`spoSkHex` is case-insensitive hex with an optional `0x`/`0X` prefix; invalid hex
+	returns an empty list.
 	"""
 	spoPerformanceBySpoSk(spoSkHex: String!, limit: Int, offset: Int): [EpochPerf!]!
 	"""
@@ -1826,6 +1896,14 @@ type ShieldedTransactionsProgress {
 	no relevant transactions have been indexed for the subscribing wallet.
 	"""
 	highestRelevantEndIndex: Int! @deprecated(reason: "Use highestRelevantZswapEndIndex instead")
+	"""
+	The protocol version at the tip of the chain, i.e. the one currently in effect, not the
+	one the transactions of this subscription were indexed at. Allows a wallet without any
+	relevant transactions to observe a protocol upgrade, which it would otherwise only learn
+	about from the transactions it receives. A value of zero means that no block has been
+	indexed yet.
+	"""
+	protocolVersion: Int!
 }
 
 """
@@ -1947,6 +2025,9 @@ type Subscription {
 	"""
 	Subscribe to contract actions with the given address starting at the given offset or at the
 	latest block if the offset is omitted.
+	
+	At a ledger hard fork, a contract without an action in the fork block has its latest action
+	re-emitted with the translated `state` and `stateAt` set to the fork block.
 	"""
 	contractActions(address: HexEncoded!, offset: BlockOffset): ContractAction!
 	"""
@@ -2426,6 +2507,14 @@ type UnshieldedTransactionsProgress {
 	The highest transaction ID of all currently known transactions for a subscribed address.
 	"""
 	highestTransactionId: Int!
+	"""
+	The protocol version at the tip of the chain, i.e. the one currently in effect, not the
+	one the transactions of this subscription were indexed at. Allows a wallet without any
+	transactions to observe a protocol upgrade, which it would otherwise only learn about
+	from the transactions it receives. A value of zero means that no block has been indexed
+	yet.
+	"""
+	protocolVersion: Int!
 }
 
 """
@@ -2462,6 +2551,11 @@ type UnshieldedUtxo {
 	initialNonce: HexEncoded!
 	"""
 	Whether this UTXO is registered for DUST generation.
+	
+	Reported against the chain's current DUST epoch, so a fork that wipes DUST
+	state (ledger 8 -> 9) turns this to `false` for every UTXO it strands,
+	matching the ledger rather than the value recorded when the UTXO was
+	created.
 	"""
 	registeredForDustGeneration: Boolean!
 	"""

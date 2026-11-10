@@ -17,7 +17,7 @@ use crate::{
         ApiResult, ContextExt, OptionExt, ResultExt,
         v4::{
             HexEncodable, HexEncoded,
-            block::BlockOffset,
+            block::{BlockOffset, BlockReference},
             contract_event::ContractEvent,
             directives::beta,
             transaction::{Transaction, TransactionOffset},
@@ -27,16 +27,23 @@ use crate::{
 };
 use async_graphql::{ComplexObject, Context, Interface, OneofObject, SimpleObject};
 use derive_more::Debug;
-use indexer_common::domain::{ContractAttributes, SerializedContractAddress};
+use indexer_common::domain::{
+    ByteVec, ContractAttributes, SerializedContractAddress, SerializedContractStateKey,
+    SerializedZswapStateKey,
+};
 use std::marker::PhantomData;
 
 /// A contract action.
+// `state` and `zswapState` are resolved lazily out of the ledger arena rather than being read from
+// a column, so they are fallible and owned rather than borrowed. `ApiResult<HexEncoded>` still
+// renders as `HexEncoded!`, so their nullability in the schema is unchanged.
 #[derive(Debug, Clone, Interface)]
 #[allow(clippy::duplicated_attributes)]
 #[graphql(
     field(name = "address", ty = "&HexEncoded"),
-    field(name = "state", ty = "&HexEncoded"),
-    field(name = "zswap_state", ty = "&HexEncoded"),
+    field(name = "state", ty = "ApiResult<HexEncoded>"),
+    field(name = "state_at", ty = "ApiResult<BlockReference>"),
+    field(name = "zswap_state", ty = "ApiResult<HexEncoded>"),
     field(name = "transaction", ty = "ApiResult<Transaction<S>>"),
     field(name = "unshielded_balances", ty = "ApiResult<Vec<ContractBalance>>")
 )]
@@ -56,46 +63,144 @@ where
     S: Storage,
 {
     fn from(action: domain::ContractAction) -> Self {
-        let domain::ContractAction {
-            id,
-            address,
-            state,
-            attributes,
-            zswap_state,
+        contract_action(action, None)
+    }
+}
+
+impl<S> From<domain::ContractActionAtBlock> for ContractAction<S>
+where
+    S: Storage,
+{
+    fn from(action: domain::ContractActionAtBlock) -> Self {
+        contract_action(action.action, Some(action.block))
+    }
+}
+
+/// A contract action whose `stateAt` resolves to `state_at` if given.
+fn contract_action<S>(
+    action: domain::ContractAction,
+    state_at: Option<domain::BlockReference>,
+) -> ContractAction<S>
+where
+    S: Storage,
+{
+    let domain::ContractAction {
+        id,
+        address,
+        state_key,
+        attributes,
+        zswap_state_key,
+        transaction_id,
+        translated_at,
+    } = action;
+
+    match attributes {
+        ContractAttributes::Deploy => ContractAction::Deploy(ContractDeploy {
+            address: address.hex_encode(),
+            state_key,
+            zswap_state_key,
             transaction_id,
-            ..
-        } = action;
+            contract_action_id: id,
+            translated_at,
+            state_at,
+            _s: PhantomData,
+        }),
 
-        match attributes {
-            ContractAttributes::Deploy => ContractAction::Deploy(ContractDeploy {
-                address: address.hex_encode(),
-                state: state.hex_encode(),
-                zswap_state: zswap_state.hex_encode(),
-                transaction_id,
-                contract_action_id: id,
-                _s: PhantomData,
-            }),
+        ContractAttributes::Call { entry_point } => ContractAction::Call(ContractCall {
+            address: address.hex_encode(),
+            state_key,
+            entry_point,
+            zswap_state_key,
+            transaction_id,
+            contract_action_id: id,
+            translated_at,
+            state_at,
+            raw_address: address,
+            _s: PhantomData,
+        }),
 
-            ContractAttributes::Call { entry_point } => ContractAction::Call(ContractCall {
-                address: address.hex_encode(),
-                state: state.hex_encode(),
-                entry_point,
-                zswap_state: zswap_state.hex_encode(),
-                transaction_id,
-                contract_action_id: id,
-                raw_address: address,
-                _s: PhantomData,
-            }),
+        ContractAttributes::Update => ContractAction::Update(ContractUpdate {
+            address: address.hex_encode(),
+            state_key,
+            zswap_state_key,
+            transaction_id,
+            contract_action_id: id,
+            translated_at,
+            state_at,
+            _s: PhantomData,
+        }),
+    }
+}
 
-            ContractAttributes::Update => ContractAction::Update(ContractUpdate {
-                address: address.hex_encode(),
-                state: state.hex_encode(),
-                zswap_state: zswap_state.hex_encode(),
-                transaction_id,
-                contract_action_id: id,
-                _s: PhantomData,
-            }),
+/// Resolve a contract state out of the ledger arena, hex-encoding it for the wire. A missing key
+/// resolves to the empty string, which is what an action with no contract state — a failed action —
+/// resolved to when the state was stored as an (empty) blob.
+pub(super) async fn resolve_state(
+    state_key: Option<&SerializedContractStateKey>,
+    cx: &Context<'_>,
+) -> ApiResult<HexEncoded> {
+    match state_key {
+        Some(state_key) => {
+            let state = cx
+                .get_contract_state_cache()
+                .contract_state(state_key)
+                .await?;
+
+            Ok(state.hex_encode())
         }
+
+        None => Ok(ByteVec::default().hex_encode()),
+    }
+}
+
+/// Resolve `stateAt`: the given block reference if any, else the block at the translation height if
+/// any, else the action's own block.
+pub(super) async fn resolve_state_at<S>(
+    state_at: Option<domain::BlockReference>,
+    translated_at: Option<u32>,
+    transaction_id: u64,
+    cx: &Context<'_>,
+) -> ApiResult<BlockReference>
+where
+    S: Storage,
+{
+    let block = match (state_at, translated_at) {
+        (Some(block), _) => block,
+        (None, Some(height)) => cx
+            .get_storage::<S>()
+            .get_block_reference_by_height(height)
+            .await
+            .map_err_into_server_error(|| format!("get block reference by height {height}"))?
+            .some_or_server_error(|| format!("block with height {height} not found"))?,
+        (None, None) => cx
+            .get_block_reference_by_transaction_id_loader::<S>()
+            .load_one(transaction_id)
+            .await
+            .map_err_into_server_error(|| {
+                format!("get block reference by transaction id {transaction_id}")
+            })?
+            .some_or_server_error(|| format!("transaction with id {transaction_id} not found"))?,
+    };
+
+    Ok(block.into())
+}
+
+/// Resolve a contract's zswap state out of the ledger arena. See [resolve_state].
+async fn resolve_zswap_state(
+    zswap_state_key: Option<&SerializedZswapStateKey>,
+    cx: &Context<'_>,
+) -> ApiResult<HexEncoded> {
+    match zswap_state_key {
+        Some(zswap_state_key) => {
+            let zswap_state = cx
+                .get_contract_state_cache()
+                .zswap_state(zswap_state_key)
+                .await?;
+
+            Ok(zswap_state.hex_encode())
+        }
+
+        None => Ok(ByteVec::default().hex_encode()),
     }
 }
 
@@ -109,17 +214,23 @@ where
     /// The hex-encoded serialized address.
     address: HexEncoded,
 
-    /// The hex-encoded serialized state.
-    state: HexEncoded,
+    #[graphql(skip)]
+    state_key: Option<SerializedContractStateKey>,
 
-    /// The hex-encoded serialized contract-specific zswap state.
-    zswap_state: HexEncoded,
+    #[graphql(skip)]
+    zswap_state_key: Option<SerializedZswapStateKey>,
 
     #[graphql(skip)]
     transaction_id: u64,
 
     #[graphql(skip)]
     contract_action_id: u64,
+
+    #[graphql(skip)]
+    translated_at: Option<u32>,
+
+    #[graphql(skip)]
+    state_at: Option<domain::BlockReference>,
 
     #[graphql(skip)]
     _s: PhantomData<S>,
@@ -130,6 +241,25 @@ impl<S> ContractDeploy<S>
 where
     S: Storage,
 {
+    /// The hex-encoded serialized contract state at the end of this action's block, in the encoding
+    /// of the block the query is anchored to: the latest block for `contractAction` without an
+    /// offset, the fork block for a `contractActions` re-emission, otherwise the action's own
+    /// block.
+    async fn state(&self, cx: &Context<'_>) -> ApiResult<HexEncoded> {
+        resolve_state(self.state_key.as_ref(), cx).await
+    }
+
+    /// The block at which `state` last changed: this action's block, or a later block at which the
+    /// state was translated to a new ledger version.
+    async fn state_at(&self, cx: &Context<'_>) -> ApiResult<BlockReference> {
+        resolve_state_at::<S>(self.state_at, self.translated_at, self.transaction_id, cx).await
+    }
+
+    /// The hex-encoded serialized contract-specific zswap state.
+    async fn zswap_state(&self, cx: &Context<'_>) -> ApiResult<HexEncoded> {
+        resolve_zswap_state(self.zswap_state_key.as_ref(), cx).await
+    }
+
     /// Transaction for this contract deploy.
     async fn transaction(&self, cx: &Context<'_>) -> ApiResult<Transaction<S>> {
         get_transaction_by_id(self.transaction_id, cx).await
@@ -162,20 +292,26 @@ where
     /// The hex-encoded serialized address.
     address: HexEncoded,
 
-    /// The hex-encoded serialized state.
-    state: HexEncoded,
-
-    /// The hex-encoded serialized contract-specific zswap state.
-    zswap_state: HexEncoded,
-
     /// The entry point.
     entry_point: String,
+
+    #[graphql(skip)]
+    state_key: Option<SerializedContractStateKey>,
+
+    #[graphql(skip)]
+    zswap_state_key: Option<SerializedZswapStateKey>,
 
     #[graphql(skip)]
     transaction_id: u64,
 
     #[graphql(skip)]
     contract_action_id: u64,
+
+    #[graphql(skip)]
+    translated_at: Option<u32>,
+
+    #[graphql(skip)]
+    state_at: Option<domain::BlockReference>,
 
     #[graphql(skip)]
     raw_address: SerializedContractAddress,
@@ -189,6 +325,25 @@ impl<S> ContractCall<S>
 where
     S: Storage,
 {
+    /// The hex-encoded serialized contract state at the end of this action's block, in the encoding
+    /// of the block the query is anchored to: the latest block for `contractAction` without an
+    /// offset, the fork block for a `contractActions` re-emission, otherwise the action's own
+    /// block.
+    async fn state(&self, cx: &Context<'_>) -> ApiResult<HexEncoded> {
+        resolve_state(self.state_key.as_ref(), cx).await
+    }
+
+    /// The block at which `state` last changed: this action's block, or a later block at which the
+    /// state was translated to a new ledger version.
+    async fn state_at(&self, cx: &Context<'_>) -> ApiResult<BlockReference> {
+        resolve_state_at::<S>(self.state_at, self.translated_at, self.transaction_id, cx).await
+    }
+
+    /// The hex-encoded serialized contract-specific zswap state.
+    async fn zswap_state(&self, cx: &Context<'_>) -> ApiResult<HexEncoded> {
+        resolve_zswap_state(self.zswap_state_key.as_ref(), cx).await
+    }
+
     /// Transaction for this contract call.
     async fn transaction(&self, cx: &Context<'_>) -> ApiResult<Transaction<S>> {
         get_transaction_by_id(self.transaction_id, cx).await
@@ -285,17 +440,23 @@ where
     /// The hex-encoded serialized address.
     address: HexEncoded,
 
-    /// The hex-encoded serialized state.
-    state: HexEncoded,
+    #[graphql(skip)]
+    state_key: Option<SerializedContractStateKey>,
 
-    /// The hex-encoded serialized contract-specific zswap state.
-    zswap_state: HexEncoded,
+    #[graphql(skip)]
+    zswap_state_key: Option<SerializedZswapStateKey>,
 
     #[graphql(skip)]
     transaction_id: u64,
 
     #[graphql(skip)]
     contract_action_id: u64,
+
+    #[graphql(skip)]
+    translated_at: Option<u32>,
+
+    #[graphql(skip)]
+    state_at: Option<domain::BlockReference>,
 
     #[graphql(skip)]
     _s: PhantomData<S>,
@@ -306,6 +467,25 @@ impl<S> ContractUpdate<S>
 where
     S: Storage,
 {
+    /// The hex-encoded serialized contract state at the end of this action's block, in the encoding
+    /// of the block the query is anchored to: the latest block for `contractAction` without an
+    /// offset, the fork block for a `contractActions` re-emission, otherwise the action's own
+    /// block.
+    async fn state(&self, cx: &Context<'_>) -> ApiResult<HexEncoded> {
+        resolve_state(self.state_key.as_ref(), cx).await
+    }
+
+    /// The block at which `state` last changed: this action's block, or a later block at which the
+    /// state was translated to a new ledger version.
+    async fn state_at(&self, cx: &Context<'_>) -> ApiResult<BlockReference> {
+        resolve_state_at::<S>(self.state_at, self.translated_at, self.transaction_id, cx).await
+    }
+
+    /// The hex-encoded serialized contract-specific zswap state.
+    async fn zswap_state(&self, cx: &Context<'_>) -> ApiResult<HexEncoded> {
+        resolve_zswap_state(self.zswap_state_key.as_ref(), cx).await
+    }
+
     /// Transaction for this contract update.
     async fn transaction(&self, cx: &Context<'_>) -> ApiResult<Transaction<S>> {
         get_transaction_by_id(self.transaction_id, cx).await

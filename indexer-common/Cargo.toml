@@ -23,18 +23,28 @@ midnight-onchain-runtime_v3  = { workspace = true }
 midnight-onchain-state_v3    = { workspace = true }
 midnight-serialize_v1        = { workspace = true }
 midnight-storage-core_v1     = { workspace = true, features = [ "layout-v2", "gc-v1" ] }
-midnight-storage_v2          = { workspace = true, features = [ "state-translation" ] }
+midnight-storage_v2          = { workspace = true, features = [ "public-internal-structure" ] }
 midnight-transient-crypto_v2 = { workspace = true }
 midnight-zswap_v8            = { workspace = true }
-# ledger v9 rc (base-crypto, serialize and storage-core stay unified across v8
-# and v9; coin-structure and transient-crypto are cross-major at this rc, hence
-# their own v9 aliases)
+# ledger v9 (base-crypto, serialize and storage-core stay unified across v8 and
+# v9; coin-structure, storage and transient-crypto are cross-major, hence their
+# own v9 aliases)
 midnight-coin-structure_v3   = { workspace = true }
 midnight-ledger_v9           = { workspace = true }
 midnight-onchain-runtime_v4  = { workspace = true }
 midnight-onchain-state_v4    = { workspace = true }
+midnight-storage_v3          = { workspace = true, features = [ "state-translation" ] }
 midnight-transient-crypto_v3 = { workspace = true }
 midnight-zswap_v9            = { workspace = true }
+# The ledger team's v8->v9 translation table, which is not on crates.io. Keep
+# this tag equal to the node's (`midnight-node`'s workspace Cargo.toml): the
+# indexer re-derives the translated arena root and compares it against the
+# node's at the fork boundary, so the two must translate with the same table. Its
+# own requirements resolve to the workspace pins, sharing one
+# `midnight-onchain-state` instance per ledger major and one
+# `midnight-storage-core` arena with the rest of the graph.
+v8-to-v9-state-translation = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "state-translation-v8-v9-node-2.1.101" }
+anyhow                       = { workspace = true, optional = true }
 async-nats                   = { workspace = true, optional = true }
 chacha20poly1305             = { workspace = true, features = [ "std" ] }
 const-hex                    = { workspace = true, features = [ "serde" ] }
@@ -54,12 +64,17 @@ opentelemetry                = { workspace = true }
 opentelemetry_sdk            = { workspace = true }
 opentelemetry-otlp           = { workspace = true, features = [ "grpc-tonic" ] }
 parity-scale-codec           = { workspace = true }
+# midnight-ledger's `Rng`/`CryptoRng` bounds require rand 0.8.
+rand                         = { version = "0.8", optional = true }
 secrecy                      = { workspace = true, features = [ "serde" ] }
 serde                        = { workspace = true, features = [ "derive" ] }
 serde_json                   = { workspace = true }
 serde_with                   = { workspace = true, optional = true }
 sha2                         = { workspace = true }
 sqlx                         = { workspace = true, features = [ "runtime-tokio", "uuid" ] }
+tempfile                     = { workspace = true, optional = true }
+testcontainers               = { workspace = true, optional = true }
+testcontainers-modules       = { workspace = true, optional = true, features = [ "postgres" ] }
 thiserror                    = { workspace = true }
 tokio                        = { workspace = true, features = [ "time" ] }
 tracing                      = { workspace = true }
@@ -73,6 +88,7 @@ anyhow                 = { workspace = true }
 assert_matches         = { workspace = true }
 bip32                  = { workspace = true }
 criterion              = { workspace = true }
+rand                   = { version = "0.8" }
 reqwest                = { workspace = true }
 tempfile               = { workspace = true }
 testcontainers         = { workspace = true }
@@ -83,6 +99,7 @@ tokio                  = { workspace = true, features = [ "macros", "rt-multi-th
 [features]
 cloud      = [ "async-nats", "serde_with", "sqlx/postgres", "sqlx/tls-rustls" ]
 standalone = [ "sqlx/sqlite" ]
+testing    = [ "anyhow", "rand", "tempfile", "testcontainers", "testcontainers-modules" ]
 
 [[bench]]
 name              = "ledger_transaction"

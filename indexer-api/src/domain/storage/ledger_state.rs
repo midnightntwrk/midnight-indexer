@@ -20,10 +20,10 @@ pub trait LedgerStateStorage
 where
     Self: Clone + Send + Sync + 'static,
 {
-    /// Get the protocol version and ledger state key of the highest (tip) block.
+    /// Get the height, protocol version and ledger state key of the highest (tip) block.
     async fn get_highest_ledger_state(
         &self,
-    ) -> Result<Option<(ProtocolVersion, SerializedLedgerStateKey)>, sqlx::Error>;
+    ) -> Result<Option<(u32, ProtocolVersion, SerializedLedgerStateKey)>, sqlx::Error>;
 
     /// Get the block id, height, protocol version, and ledger state key at a specific block,
     /// by hash.
@@ -37,7 +37,7 @@ where
 impl LedgerStateStorage for NoopStorage {
     async fn get_highest_ledger_state(
         &self,
-    ) -> Result<Option<(ProtocolVersion, SerializedLedgerStateKey)>, sqlx::Error> {
+    ) -> Result<Option<(u32, ProtocolVersion, SerializedLedgerStateKey)>, sqlx::Error> {
         unimplemented!()
     }
 

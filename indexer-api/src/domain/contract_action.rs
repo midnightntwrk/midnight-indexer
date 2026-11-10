@@ -11,12 +11,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use indexer_common::domain::{
-    ContractAttributes, SerializedContractAddress, SerializedContractState, SerializedZswapState,
+use crate::domain::BlockReference;
+use indexer_common::{
+    domain::{
+        ContractAttributes, SerializedContractAddress, SerializedContractStateKey,
+        SerializedZswapStateKey,
+    },
+    infra::sqlx::SqlxOption,
 };
 use sqlx::FromRow;
 
 /// A contract action.
+///
+/// The states are ledger-arena keys, resolved to bytes on demand: a row is tens of bytes rather
+/// than the ~860 KB the state blob used to cost, which matters most for the queries that return up
+/// to 500 rows or drive `Transaction.contractActions` through the loader.
+///
+/// Both keys are nullable. A failed action has no contract state, which is represented today as an
+/// empty `state` blob, so the API resolves a missing key to the empty string.
 #[derive(Debug, Clone, PartialEq, Eq, FromRow)]
 pub struct ContractAction {
     #[sqlx(try_from = "i64")]
@@ -24,13 +36,28 @@ pub struct ContractAction {
 
     pub address: SerializedContractAddress,
 
-    pub state: SerializedContractState,
+    pub state_key: Option<SerializedContractStateKey>,
 
     #[sqlx(json)]
     pub attributes: ContractAttributes,
 
-    pub zswap_state: SerializedZswapState,
+    pub zswap_state_key: Option<SerializedZswapStateKey>,
 
     #[sqlx(try_from = "i64")]
     pub transaction_id: u64,
+
+    /// The height of the block at which the state was translated to a new ledger version, if a
+    /// current or as-of view applied a translation. `None` on every other query.
+    #[sqlx(try_from = "SqlxOption<i64>", default)]
+    pub(crate) translated_at: Option<u32>,
+}
+
+/// A contract action with a reference to its block.
+#[derive(Debug, Clone, PartialEq, Eq, FromRow)]
+pub struct ContractActionAtBlock {
+    #[sqlx(flatten)]
+    pub(crate) action: ContractAction,
+
+    #[sqlx(flatten)]
+    pub(crate) block: BlockReference,
 }

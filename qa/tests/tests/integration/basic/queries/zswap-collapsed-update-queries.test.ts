@@ -19,6 +19,7 @@ import { MerkleTreeCollapsedUpdateSchema } from '@utils/indexer/graphql/schema';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import type { RegularTransaction } from '@utils/indexer/indexer-types';
 import { TestContext } from 'vitest';
+import { env } from 'environment/model';
 
 const indexerHttpClient = new IndexerHttpClient();
 
@@ -84,41 +85,45 @@ describe('zswap merkle tree collapsed update queries', () => {
      * @when we query for a collapsed update covering the full range from genesis
      * @then Indexer should return a valid collapsed update spanning the entire range
      */
-    test('should return a collapsed update for the full genesis zswap range', async (ctx: TestContext) => {
-      ctx.task!.meta.custom = {
-        labels: ['Query', 'Zswap', 'CollapsedUpdate', 'FullRange'],
-      };
+    // Genesis block has no regular transactions on mainnet: skip there.
+    test.skipIf(env.isMainnetEnv())(
+      'should return a collapsed update for the full genesis zswap range',
+      async (ctx: TestContext) => {
+        ctx.task!.meta.custom = {
+          labels: ['Query', 'Zswap', 'CollapsedUpdate', 'FullRange'],
+        };
 
-      // Get the highest zswapEndIndex from genesis block transactions
-      const genesisResponse = await indexerHttpClient.getBlockByOffset({ height: 0 });
-      expect(genesisResponse).toBeSuccess();
+        // Get the highest zswapEndIndex from genesis block transactions
+        const genesisResponse = await indexerHttpClient.getBlockByOffset({ height: 0 });
+        expect(genesisResponse).toBeSuccess();
 
-      const transactions = genesisResponse.data!.block.transactions;
-      const maxEndIndex = transactions.reduce((max, tx) => {
-        const regularTx = tx as RegularTransaction;
-        return regularTx.zswapEndIndex != null && regularTx.zswapEndIndex > max
-          ? regularTx.zswapEndIndex
-          : max;
-      }, 0);
+        const transactions = genesisResponse.data!.block.transactions;
+        const maxEndIndex = transactions.reduce((max, tx) => {
+          const regularTx = tx as RegularTransaction;
+          return regularTx.zswapEndIndex != null && regularTx.zswapEndIndex > max
+            ? regularTx.zswapEndIndex
+            : max;
+        }, 0);
 
-      log.debug(`Highest zswapEndIndex from genesis: ${maxEndIndex}`);
-      expect(maxEndIndex).toBeGreaterThan(0);
+        log.debug(`Highest zswapEndIndex from genesis: ${maxEndIndex}`);
+        expect(maxEndIndex).toBeGreaterThan(0);
 
-      // zswapEndIndex is exclusive (next free index), collapsed update endIndex is inclusive
-      const endIndex = maxEndIndex - 1;
+        // zswapEndIndex is exclusive (next free index), collapsed update endIndex is inclusive
+        const endIndex = maxEndIndex - 1;
 
-      log.debug(`Requesting collapsed update with startIndex=0, endIndex=${endIndex}`);
-      const response = await indexerHttpClient.getZswapMerkleTreeCollapsedUpdate(0, endIndex);
+        log.debug(`Requesting collapsed update with startIndex=0, endIndex=${endIndex}`);
+        const response = await indexerHttpClient.getZswapMerkleTreeCollapsedUpdate(0, endIndex);
 
-      expect(response).toBeSuccess();
-      expect(response.data?.zswapMerkleTreeCollapsedUpdate).toBeDefined();
+        expect(response).toBeSuccess();
+        expect(response.data?.zswapMerkleTreeCollapsedUpdate).toBeDefined();
 
-      const collapsedUpdate = response.data!.zswapMerkleTreeCollapsedUpdate;
-      expect(collapsedUpdate.startIndex).toBe(0);
-      expect(collapsedUpdate.endIndex).toBe(endIndex);
-      expect(collapsedUpdate.update).toBeDefined();
-      expect(collapsedUpdate.protocolVersion).toBeDefined();
-    });
+        const collapsedUpdate = response.data!.zswapMerkleTreeCollapsedUpdate;
+        expect(collapsedUpdate.startIndex).toBe(0);
+        expect(collapsedUpdate.endIndex).toBe(endIndex);
+        expect(collapsedUpdate.update).toBeDefined();
+        expect(collapsedUpdate.protocolVersion).toBeDefined();
+      },
+    );
   });
 
   describe('a collapsed update query with equal start and end indices', () => {

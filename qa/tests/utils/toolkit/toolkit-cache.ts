@@ -18,6 +18,7 @@ import { createServer } from 'net';
 import fs from 'fs';
 import path from 'path';
 import { promisify } from 'util';
+import { NodeRpcClient } from '@utils/node/rpc-client';
 
 const execFileAsync = promisify(execFile);
 
@@ -331,24 +332,13 @@ export function startCacheProgressReporter(
   let currentChainIdHex: string | undefined;
   let registeredCurrent = false;
 
-  const rpc = async <T>(method: string, params: unknown[]): Promise<T | undefined> => {
-    if (!nodeRpcUrl) return undefined;
-    try {
-      const res = await fetch(nodeRpcUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: 1, jsonrpc: '2.0', method, params }),
-      });
-      const json = (await res.json()) as { result?: T };
-      return json?.result;
-    } catch {
-      return undefined; // Non-fatal — the reporter is best-effort.
-    }
-  };
+  // Errors are swallowed at each call site rather than inside the shared client:
+  // this reporter is best-effort and must never fail a warmup, while other callers
+  // need RPC failures to surface.
+  const node = nodeRpcUrl ? new NodeRpcClient(nodeRpcUrl) : undefined;
 
   const fetchChainTip = async (): Promise<void> => {
-    const header = await rpc<{ number?: string }>('chain_getHeader', []);
-    if (header?.number) chainTip = parseInt(header.number, 16);
+    chainTip = (await node?.getChainTip().catch(() => undefined)) ?? chainTip;
   };
 
   const fetchCurrentChainId = async (): Promise<void> => {
@@ -356,7 +346,7 @@ export function startCacheProgressReporter(
     // Block height 1 (not 0): see the currentChainIdHex comment. Returns null until the
     // node has authored block 1 — harmless, we just retry on the next tick. The 30s
     // genesis settle in the undeployed provisioner ensures block 1 exists well before.
-    const hash = await rpc<string>('chain_getBlockHash', [1]);
+    const hash = await node?.getBlockHash(1).catch(() => undefined);
     const hex = hash?.replace(/^0x/, '').toLowerCase();
     if (hex && /^[0-9a-f]+$/.test(hex)) currentChainIdHex = hex;
   };

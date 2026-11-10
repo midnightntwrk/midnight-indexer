@@ -183,6 +183,11 @@ where
             .map_err_into_server_error(|| format!("get ledger state at block {}", self.hash))?
             .some_or_server_error(|| format!("no ledger state for block {}", self.hash))?;
 
+        // Bound concurrent ledger-DB work (issue #595): hold a permit across the availability
+        // check, load, and zswap-state extraction below so this unauthenticated field cannot
+        // exhaust the blocking pool that block_in_place hands the worker's core to.
+        let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
+
         // Verify the root node is still in the ledger DB before loading: loading culled state
         // panics inside storage-core rather than returning an error, so this check is what
         // turns a block beyond the chain-indexer's ledger_state_retention into a clean client
@@ -203,6 +208,33 @@ where
             .map_err_into_server_error(|| format!("extract zswap state for contract {address}"))?;
 
         Ok(Some(zswap_state.hex_encode()))
+    }
+}
+
+/// A block's height, hash and protocol version. Query `block` with the hash for the full block.
+#[derive(Debug, SimpleObject)]
+pub struct BlockReference {
+    /// The block height.
+    height: u32,
+    /// The block hash.
+    hash: HexEncoded,
+    /// The protocol version.
+    protocol_version: u32,
+}
+
+impl From<domain::BlockReference> for BlockReference {
+    fn from(block: domain::BlockReference) -> Self {
+        let domain::BlockReference {
+            height,
+            hash,
+            protocol_version,
+        } = block;
+
+        Self {
+            height,
+            hash: hash.hex_encode(),
+            protocol_version: protocol_version.into(),
+        }
     }
 }
 

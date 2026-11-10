@@ -12,25 +12,56 @@ name: rust-security-scan
 # This is acceptable because fork PRs still get security scanning via cargo-deny.
 
 permissions:
+  actions: read # required for SARIF upload in a private repo
   contents: read
   security-events: write # required for SARIF upload
 
 on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
   push:
-    branches: [main]
+    branches:
+      - main
+      - release/*
   pull_request:
-    branches: [main]
+    branches:
+      - main
+      - release/*
+  merge_group:
 
 jobs:
+  # Detects whether the PR touches anything outside `qa/**`. A qa-only PR cannot change the Rust
+  # dependency graph, so it skips the scan; a job skipped by `if` still satisfies the required
+  # check. Pushes, scheduled and manual runs always scan, and so does a PR whose detection
+  # fails, so a failed detection never passes as qa-only.
+  changes:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      non_qa: ${{steps.filter.outputs.non_qa}}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Detect non-qa changes
+        id: filter
+        uses: ./.github/actions/detect-non-qa-changes
+
   rust-security-scan:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    needs: [changes]
+    if: ${{!cancelled() && needs.changes.outputs.non_qa != 'false'}}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install cargo-deny
-        uses: taiki-e/install-action@065d6a08a14e61e89fb0a4c10eecdbdef39c7d8e # v2.85.4
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           # Pinned: cargo-deny 0.20.0 removed CLI flags without a major bump, so a floating
           # version silently breaks this workflow. Bump deliberately.
@@ -44,6 +75,9 @@ jobs:
         # Remove this flag once those upstream crates ship with explicit license fields.
 
       - name: Upload SARIF to GitHub Security
+        # Private repositories without Code Security reject the upload, so their runs tolerate the
+        # failure. The advisory check in the next step runs either way.
+        continue-on-error: ${{ github.event.repository.private == true }}
         uses: github/codeql-action/upload-sarif@7273f08caa1dcf2c2837f362f1982de0ab4dc344
         with:
           sarif_file: scan.sarif

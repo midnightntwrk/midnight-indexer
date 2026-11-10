@@ -17,7 +17,14 @@ import fs from "fs";
 import path from "path";
 import * as commentJson from "comment-json";
 import { TARGET_ENV, INDEXER_HTTP_URL, INDEXER_API_VERSION } from "./env.js";
-import { Transaction } from "./indexer-types.js";
+import {
+  ContractBalance,
+  Transaction,
+  UnshieldedUtxo,
+} from "./indexer-types.js";
+
+// Switch for blocks.jsonc/transactions.jsonc generation, currently disabled.
+const GENERATE_BLOCK_AND_TRANSACTION_DATA: boolean = false;
 
 // ============================================================================
 // Type Definitions
@@ -98,11 +105,13 @@ interface BaseTransaction {
 }
 
 /**
- * Regular transaction with contract actions
+ * Regular transaction with contract actions and unshielded UTXOs
  */
 interface RegularTransaction extends BaseTransaction {
   __typename: "RegularTransaction";
   contractActions?: ContractAction[];
+  unshieldedCreatedOutputs?: UnshieldedUtxo[];
+  unshieldedSpentOutputs?: UnshieldedUtxo[];
 }
 
 /**
@@ -184,6 +193,59 @@ interface ContractWithEvents {
 type ContractEventsDataFile = ContractWithEvents[];
 
 /**
+ * Structure for a contract holding a non-zero unshielded token balance
+ */
+interface TokenHoldingContract {
+  "contract-address": string;
+  "token-type": string;
+}
+
+/**
+ * Structure for token-holding-contracts.jsonc file (array of contracts)
+ */
+type TokenHoldingContractsDataFile = TokenHoldingContract[];
+
+/**
+ * One owner's unspent holding of a single unshielded token type, as of scan time
+ */
+interface UnspentHolder {
+  owner: string;
+  "unspent-value": string;
+  "unspent-utxos": number;
+}
+
+/**
+ * A custom (non-NIGHT) unshielded token type with the owners holding it unspent
+ */
+interface CustomTokenType {
+  "token-type": string;
+  "unspent-holders": UnspentHolder[];
+}
+
+/**
+ * Structure for unshielded-token-types.jsonc file
+ */
+interface UnshieldedTokenTypesDataFile {
+  scan: {
+    "from-block": number;
+    "to-block": number;
+    "scanned-at": string;
+  };
+  night: {
+    "unspent-utxos": number;
+    "distinct-owners": number;
+  };
+  "custom-tokens": CustomTokenType[];
+}
+
+/**
+ * NIGHT, the chain's native unshielded token, is the all-zero token type. It is on
+ * every chain and dominates every scan, so it is summarised rather than listed as a
+ * candidate.
+ */
+const NIGHT_TOKEN_TYPE = "0".repeat(64);
+
+/**
  * Maps the concrete ContractEvent GraphQL typenames to the
  * ContractEventType enum values used by the test fixtures and the
  * contractEvents(filter: { eventTypes: ... }) argument.
@@ -247,14 +309,38 @@ function validateNonEmptyArray<T>(array: T[], arrayName: string): void {
   }
 }
 
+/** Options controlling how a test data refresh runs. */
+export interface UpdateTestDataOptions {
+  /**
+   * Skip the contract-events and token-holding contracts harvests (the only
+   * remote steps) and leave those files untouched.
+   */
+  readonly localOnly?: boolean;
+  /** Aborted when another refresh has taken over; nothing is written once it fires. */
+  readonly signal?: AbortSignal;
+}
+
+/**
+ * Length of the leading part of a blocks.jsonl payload made of complete lines.
+ * Every line the scanner writes ends in a newline, so anything after the last
+ * one is a line cut short by an abrupt exit and is not safe to parse.
+ */
+export function completeLinesLength(data: string | Buffer): number {
+  const lastNewline =
+    typeof data === "string" ? data.lastIndexOf("\n") : data.lastIndexOf(0x0a);
+  return lastNewline + 1;
+}
+
 /**
  * Updates test data files in the specified folder
  * @param folderPath - Path to the test data folder
- * @param dataFile - Path to the data file containing blocks
+ * @param sourceBlockDataFile - Path to the data file containing blocks
+ * @param options - See {@link UpdateTestDataOptions}
  */
 export async function updateTestDataFiles(
   folderPath: string,
   sourceBlockDataFile: string,
+  { localOnly = false, signal }: UpdateTestDataOptions = {},
 ): Promise<void> {
   try {
     // Validate input parameters
@@ -271,20 +357,68 @@ export async function updateTestDataFiles(
       );
     }
 
-    // Read source block data file
-    const sourceBlockData = readFileContent(sourceBlockDataFile);
+    // A process killed mid-write can leave a truncated trailing line; it is
+    // dropped here rather than allowed to fail the parse.
+    const rawBlockData = readFileContent(sourceBlockDataFile);
+    const sourceBlockData = rawBlockData.slice(
+      0,
+      completeLinesLength(rawBlockData),
+    );
 
-    // Harvest the contract-events data (the only step with remote I/O)
-    // BEFORE any file is written: a probe or query failure then aborts the
-    // refresh with the previous snapshot fully intact, instead of leaving a
-    // mix of refreshed and stale files behind.
-    const contractsWithEvents = await harvestContractEvents(sourceBlockData);
+    // Harvest the contract-events and token-holding contracts data (the only
+    // steps with remote I/O) BEFORE any file is written: a probe or query
+    // failure then aborts the refresh with the previous snapshot fully intact,
+    // instead of leaving a mix of refreshed and stale files behind.
+    let contractsWithEvents: ContractWithEvents[] | null = null;
+    let listedHolders: TokenHoldingContractsDataFile | null = null;
+    let tokenHoldingContracts: TokenHoldingContract[] | null = null;
+    if (localOnly) {
+      console.info(
+        "[INFO ] - Skipping the contract events and token-holding contracts " +
+          "harvests (remote); leaving any existing data files untouched",
+      );
+    } else {
+      const blocks: Block[] = parseBlockData(sourceBlockData);
+      validateNonEmptyArray(blocks, "Blocks array");
+      contractsWithEvents = await harvestContractEvents(blocks);
+      listedHolders = loadTokenHoldingContractsDataFile(folderPath);
+      tokenHoldingContracts = await harvestTokenHoldingContracts(
+        blocks,
+        new Set(
+          listedHolders.map((holder) =>
+            holder["contract-address"].toLowerCase(),
+          ),
+        ),
+      );
+    }
 
-    updateBlockDataFile(folderPath, sourceBlockData);
-    updateTransactionDataFile(folderPath, sourceBlockData);
+    // The forced-exit refresh wrote the files while this one was waiting on
+    // the indexer; writing again now would race its exit.
+    if (signal?.aborted) {
+      console.info(
+        "[INFO ] - Skipping the test data write: superseded by a forced exit",
+      );
+      return;
+    }
+
+    // Block and transaction data files are currently not consumed by the test
+    // suites; generation is kept behind this switch instead of being removed
+    // so it can be re-enabled if they become needed again.
+    if (GENERATE_BLOCK_AND_TRANSACTION_DATA) {
+      updateBlockDataFile(folderPath, sourceBlockData);
+      updateTransactionDataFile(folderPath, sourceBlockData);
+    }
     updateContractDataFile(folderPath, sourceBlockData);
+    updateUnshieldedTokenTypesDataFile(folderPath, sourceBlockData);
     if (contractsWithEvents !== null) {
       writeContractEventsDataFile(folderPath, contractsWithEvents);
+    }
+    if (listedHolders !== null && tokenHoldingContracts !== null) {
+      writeTokenHoldingContractsDataFile(
+        folderPath,
+        listedHolders,
+        tokenHoldingContracts,
+      );
     }
 
     console.info("[INFO ] - All test data files updated successfully");
@@ -643,10 +777,13 @@ function updateTransactionDataFile(
 /**
  * Updates the contract data file
  *
- * This file has a strong requirement, it will contain only contracts that have
- * all 3 action types: ContractDeploy, ContractCall, ContractUpdate
+ * This file contains exactly one contract, with only the first instance of
+ * each action type it has: the first in scan order with all 3 action types -
+ * ContractDeploy, ContractCall, ContractUpdate - or, when no contract on the
+ * chain has been updated, the first with a deploy and a call. The suites that
+ * need a ContractUpdate skip themselves when the file has none.
  *
- * If not such contracts exist, the file will contain an empty array
+ * If no contract has a deploy and a call, the file will contain an empty array
  *
  * @param destinationPath - Path to the test data folder
  * @param sourceBlockData - Path to the data file containing blocks
@@ -688,33 +825,65 @@ function updateContractDataFile(
       }
     }
 
-    // Filter to only keep addresses that have all 3 action types
+    // Prefer the first contract (in scan order) with all 3 action types; a
+    // chain with no updated contract yet (devnet, stagenet) falls back to the
+    // first with a deploy and a call, so those environments still get data.
     const requiredActionTypes: string[] = ["ContractDeploy", "ContractCall"];
-    const filteredContracts: ContractWithActions[] = Object.entries(
-      contractActionsMap,
-    )
-      .filter(([address, actions]: [string, ContractActionEntry[]]) => {
-        const actionTypes: Set<string> = new Set(
-          actions.map((action: ContractActionEntry) => action["action-type"]),
-        );
-        return requiredActionTypes.every((type: string) =>
-          actionTypes.has(type),
-        );
-      })
-      .map(
-        ([address, actions]: [
-          string,
-          ContractActionEntry[],
-        ]): ContractWithActions => ({
-          "contract-address": address,
-          "contract-actions": actions,
-        }),
+    const optionalActionTypes: string[] = ["ContractUpdate"];
+    const hasActionTypes = (
+      actions: ContractActionEntry[],
+      types: string[],
+    ): boolean => {
+      const actionTypes: Set<string> = new Set(
+        actions.map((action: ContractActionEntry) => action["action-type"]),
+      );
+      return types.every((type: string) => actionTypes.has(type));
+    };
+
+    const contracts = Object.entries(contractActionsMap);
+    const qualifyingContract =
+      contracts.find(([, actions]: [string, ContractActionEntry[]]) =>
+        hasActionTypes(actions, [
+          ...requiredActionTypes,
+          ...optionalActionTypes,
+        ]),
+      ) ??
+      contracts.find(([, actions]: [string, ContractActionEntry[]]) =>
+        hasActionTypes(actions, requiredActionTypes),
       );
 
-    // Log if no contracts match the criteria
+    // Only the first instance of each action type the contract has, in a
+    // fixed order, so the file shape does not depend on the scan.
+    const filteredContracts: ContractWithActions[] = qualifyingContract
+      ? [
+          {
+            "contract-address": qualifyingContract[0],
+            "contract-actions": [...requiredActionTypes, ...optionalActionTypes]
+              .map((type: string) =>
+                qualifyingContract[1].find(
+                  (action: ContractActionEntry) =>
+                    action["action-type"] === type,
+                ),
+              )
+              .filter(
+                (action): action is ContractActionEntry => action !== undefined,
+              ),
+          },
+        ]
+      : [];
+
     if (filteredContracts.length === 0) {
       console.info(
-        "[INFO ] - No contracts found with all required action types (ContractDeploy, ContractCall)",
+        "[INFO ] - No contracts found with the required action types (ContractDeploy, ContractCall)",
+      );
+    } else if (
+      !hasActionTypes(
+        filteredContracts[0]["contract-actions"],
+        optionalActionTypes,
+      )
+    ) {
+      console.info(
+        "[INFO ] - No contract with a ContractUpdate found; recording the first with a deploy and a call",
       );
     }
 
@@ -755,6 +924,187 @@ function updateContractDataFile(
   }
 }
 
+/**
+ * Compares two decimal token amounts, highest first. The values are u128 on chain,
+ * so they are compared as BigInt rather than as Number.
+ */
+function compareAmountsDescending(a: string, b: string): number {
+  const left = BigInt(a);
+  const right = BigInt(b);
+  return left === right ? 0 : left > right ? -1 : 1;
+}
+
+/**
+ * Aggregates the unshielded UTXOs of the scanned blocks into the token-type
+ * candidates: every created output is grouped by token type and owner, keeping the
+ * ones still unspent, with the custom token types ordered by their largest single
+ * owner holding so the strongest candidate comes first.
+ *
+ * A UTXO counts as spent either because the indexer resolved its
+ * `spentAtTransaction` when the block was streamed, or because the scan itself saw
+ * it among a later transaction's spent outputs — the latter also covers the window
+ * in which the indexer has not yet linked the spend.
+ *
+ * @param sourceBlockData - The data containing the scanned blocks
+ * @returns The aggregated token types, ready to be written to the fixture
+ */
+function collectUnshieldedTokenTypes(
+  sourceBlockData: string,
+): UnshieldedTokenTypesDataFile {
+  const blocks: Block[] = parseBlockData(sourceBlockData);
+  validateNonEmptyArray(blocks, "Blocks array");
+
+  // (intentHash, outputIndex) identifies an unshielded UTXO
+  const utxoKey = (utxo: UnshieldedUtxo): string =>
+    `${utxo.intentHash}:${utxo.outputIndex}`;
+
+  const createdUtxos: Map<string, UnshieldedUtxo> = new Map();
+  const spentKeys: Set<string> = new Set();
+
+  for (const block of blocks) {
+    for (const transaction of block.transactions) {
+      if (transaction.__typename !== "RegularTransaction") {
+        continue;
+      }
+      for (const utxo of transaction.unshieldedCreatedOutputs ?? []) {
+        createdUtxos.set(utxoKey(utxo), utxo);
+        if (utxo.spentAtTransaction) {
+          spentKeys.add(utxoKey(utxo));
+        }
+      }
+      for (const utxo of transaction.unshieldedSpentOutputs ?? []) {
+        spentKeys.add(utxoKey(utxo));
+      }
+    }
+  }
+
+  const holdingsByToken: Map<
+    string,
+    Map<string, { value: bigint; utxos: number }>
+  > = new Map();
+  let nightUtxos = 0;
+  const nightOwners: Set<string> = new Set();
+
+  for (const [key, utxo] of createdUtxos) {
+    if (spentKeys.has(key)) {
+      continue;
+    }
+    if (utxo.tokenType === NIGHT_TOKEN_TYPE) {
+      nightUtxos++;
+      nightOwners.add(utxo.owner);
+      continue;
+    }
+
+    let holdings = holdingsByToken.get(utxo.tokenType);
+    if (!holdings) {
+      holdings = new Map();
+      holdingsByToken.set(utxo.tokenType, holdings);
+    }
+    const held = holdings.get(utxo.owner) ?? { value: 0n, utxos: 0 };
+    holdings.set(utxo.owner, {
+      value: held.value + BigInt(utxo.value),
+      utxos: held.utxos + 1,
+    });
+  }
+
+  const customTokens: CustomTokenType[] = [...holdingsByToken.entries()]
+    .map(([tokenType, holdings]) => ({
+      "token-type": tokenType,
+      "unspent-holders": [...holdings.entries()]
+        .map(([owner, held]) => ({
+          owner,
+          "unspent-value": held.value.toString(),
+          "unspent-utxos": held.utxos,
+        }))
+        .sort((a, b) =>
+          compareAmountsDescending(a["unspent-value"], b["unspent-value"]),
+        ),
+    }))
+    .sort((a, b) =>
+      compareAmountsDescending(
+        a["unspent-holders"][0]["unspent-value"],
+        b["unspent-holders"][0]["unspent-value"],
+      ),
+    );
+
+  // Reduced rather than spread into Math.min/max: a long scan holds more blocks
+  // than a call can take arguments.
+  const heights: number[] = blocks.map((block) => block.height);
+
+  return {
+    scan: {
+      "from-block": heights.reduce((min, height) => Math.min(min, height)),
+      "to-block": heights.reduce((max, height) => Math.max(max, height)),
+      "scanned-at": new Date().toISOString(),
+    },
+    night: {
+      "unspent-utxos": nightUtxos,
+      "distinct-owners": nightOwners.size,
+    },
+    "custom-tokens": customTokens,
+  };
+}
+
+/**
+ * Updates the unshielded token types data file, the fixture the custom unshielded
+ * token e2e suite picks a spendable token from.
+ *
+ * The data is aggregated from the scanned blocks alone, so an environment whose
+ * chain carries no custom unshielded token produces an empty candidate list and the
+ * suite that needs one skips cleanly.
+ *
+ * @param destinationPath - Path to the test data folder
+ * @param sourceBlockData - The data containing the scanned blocks
+ */
+function updateUnshieldedTokenTypesDataFile(
+  destinationPath: string,
+  sourceBlockData: string,
+): void {
+  try {
+    const tokenTypes = collectUnshieldedTokenTypes(sourceBlockData);
+
+    if (tokenTypes["custom-tokens"].length === 0) {
+      console.info(
+        "[INFO ] - No custom (non-NIGHT) unshielded token types found in the " +
+          "scanned blocks; writing an empty candidate list",
+      );
+    }
+
+    // Ensure the target directory exists
+    const targetDir: string = ensureTargetDirectory(destinationPath);
+
+    // Build file paths
+    const targetFileName = `unshielded-token-types.jsonc`;
+    const { targetFilePath, templateFilePath } = buildFilePaths(
+      targetDir,
+      targetFileName,
+    );
+
+    // Load template and populate with data to preserve comments
+    const dataObject: UnshieldedTokenTypesDataFile =
+      loadTemplateFile<UnshieldedTokenTypesDataFile>(templateFilePath);
+
+    dataObject.scan = tokenTypes.scan;
+    dataObject.night = tokenTypes.night;
+    dataObject["custom-tokens"] = tokenTypes["custom-tokens"];
+
+    // Write the data to the target folder
+    writeJsonFile<UnshieldedTokenTypesDataFile>(
+      targetFilePath,
+      dataObject,
+      `Unshielded token types data file updated: ${destinationPath}/${TARGET_ENV}/unshielded-token-types.jsonc`,
+    );
+  } catch (error) {
+    if (error instanceof TestDataHandlerError) {
+      throw error;
+    }
+    throw new TestDataHandlerError(
+      "Failed to update unshielded token types data file",
+      { destinationPath, originalError: error },
+    );
+  }
+}
+
 // Retry policy for the GraphQL requests issued during data generation
 const GRAPHQL_MAX_ATTEMPTS = 3;
 const GRAPHQL_RETRY_DELAY_MS = 1_000;
@@ -762,6 +1112,50 @@ const GRAPHQL_RETRY_DELAY_MS = 1_000;
 // Page size for the contract-events harvest; events are fetched page by page
 // until a short page signals the end of the contract's history.
 const CONTRACT_EVENTS_PAGE_SIZE = 100;
+
+// The token-holding contracts harvest stops once this many contracts with a
+// positive balance, not yet listed in the data file, are found: a few are
+// enough per run, and stopping early keeps the number of queries low.
+const MAX_TOKEN_HOLDING_CONTRACTS = 5;
+
+/**
+ * Collects the distinct contract addresses seen in the scanned blocks, in scan
+ * order (first seen first), or with `mostRecentFirst` by their latest contract
+ * action (last seen first, highest block first).
+ *
+ * @param blocks - The scanned blocks
+ * @param options - `mostRecentFirst` selects the last-seen ordering
+ * @returns The distinct contract addresses
+ */
+function collectContractAddresses(
+  blocks: Block[],
+  { mostRecentFirst = false } = {},
+): string[] {
+  const actions: { height: number; address: string }[] = [];
+  for (const block of blocks) {
+    for (const transaction of block.transactions) {
+      if (
+        transaction.__typename === "RegularTransaction" &&
+        transaction.contractActions
+      ) {
+        for (const contractAction of transaction.contractActions) {
+          actions.push({
+            height: block.height,
+            address: contractAction.address,
+          });
+        }
+      }
+    }
+  }
+
+  if (mostRecentFirst) {
+    // Reversing first keeps later actions of the same block ahead after the
+    // stable sort by height.
+    actions.reverse().sort((a, b) => b.height - a.height);
+  }
+
+  return [...new Set(actions.map((action) => action.address))];
+}
 
 /**
  * Sends a GraphQL POST request and returns the parsed body.
@@ -940,35 +1334,20 @@ async function fetchContractEventTypes(
  * caller leaves an existing curated fixture untouched. Transient query
  * failures are retried and then fail the generation run instead of being
  * mistaken for missing support — a stale fixture must not silently survive a
- * refresh. Because this is the only remote-I/O step of the refresh, the
- * caller runs it before writing any file, keeping the previous snapshot
- * fully intact when the harvest fails.
+ * refresh. Like the other remote-I/O step of the refresh (the token-holding
+ * contracts harvest), the caller runs it before writing any file, keeping the
+ * previous snapshot fully intact when the harvest fails.
  *
- * @param sourceBlockData - The data containing the scanned blocks
+ * @param blocks - The scanned blocks
  * @returns The contracts with their emitted event types, or null when the
  *          contract-events surface is not present
  */
 async function harvestContractEvents(
-  sourceBlockData: string,
+  blocks: Block[],
 ): Promise<ContractWithEvents[] | null> {
   try {
-    // Parse blocks and collect the distinct contract addresses seen on chain
-    const blocks: Block[] = parseBlockData(sourceBlockData);
-    validateNonEmptyArray(blocks, "Blocks array");
-
-    const addresses: Set<string> = new Set();
-    for (const block of blocks) {
-      for (const transaction of block.transactions) {
-        if (
-          transaction.__typename === "RegularTransaction" &&
-          transaction.contractActions
-        ) {
-          for (const contractAction of transaction.contractActions) {
-            addresses.add(contractAction.address);
-          }
-        }
-      }
-    }
+    // Collect the distinct contract addresses seen on chain
+    const addresses = collectContractAddresses(blocks);
 
     const graphqlUrl = `${INDEXER_HTTP_URL}/api/${INDEXER_API_VERSION}/graphql`;
 
@@ -986,7 +1365,7 @@ async function harvestContractEvents(
     // state (e.g. before a reset) survive.
     const contractsWithEvents: ContractWithEvents[] = [];
 
-    if (addresses.size === 0) {
+    if (addresses.length === 0) {
       console.info(
         "[INFO ] - No contract addresses found in the scanned blocks; " +
           "writing an empty contract events data file",
@@ -995,7 +1374,7 @@ async function harvestContractEvents(
     }
 
     console.info(
-      `[INFO ] - Querying contract events for ${addresses.size} contract(s)`,
+      `[INFO ] - Querying contract events for ${addresses.length} contract(s)`,
     );
 
     for (const address of addresses) {
@@ -1068,6 +1447,237 @@ function writeContractEventsDataFile(
     }
     throw new TestDataHandlerError(
       "Failed to update contract events data file",
+      { destinationPath, originalError: error },
+    );
+  }
+}
+
+/**
+ * Queries the indexer for the current unshielded balances of a single contract
+ * address. GraphQL errors and transport failures are retried and then thrown,
+ * never treated as "no balance".
+ *
+ * @param graphqlUrl - The indexer GraphQL HTTP endpoint
+ * @param address - The contract address to query the balances for
+ * @returns The contract's unshielded balances (empty when it holds none)
+ * @throws TestDataHandlerError when the query keeps failing
+ */
+async function fetchContractUnshieldedBalances(
+  graphqlUrl: string,
+  address: string,
+): Promise<ContractBalance[]> {
+  const query = `query ContractBalancesForAddress($ADDRESS: HexEncoded!) {
+    contractAction(address: $ADDRESS) {
+      unshieldedBalances {
+        tokenType
+        amount
+      }
+    }
+  }`;
+
+  return withRetries(async () => {
+    const body = await postGraphQL<{
+      contractAction?: { unshieldedBalances: ContractBalance[] } | null;
+    }>(graphqlUrl, query, { ADDRESS: address });
+
+    if (body.errors || body.data === undefined) {
+      throw new Error(body.errors?.[0]?.message ?? "no data in response");
+    }
+
+    if (!body.data.contractAction) {
+      console.warn(
+        `[WARN ] - contractAction returned null for ${address}, a contract ` +
+          "seen in the scanned blocks; treating it as holding no balance",
+      );
+      return [];
+    }
+    return body.data.contractAction.unshieldedBalances;
+  }, `contractAction balances query for ${address}`);
+}
+
+/**
+ * Picks the token type to record for a token-holding contract: its largest
+ * custom (non-NIGHT) balance, or its NIGHT balance when it holds no custom
+ * token. Custom tokens are preferred because they are minted by contracts,
+ * while NIGHT is on every chain.
+ *
+ * @param balances - The contract's balances, all with a positive amount
+ * @returns The token type to record
+ */
+function pickTokenType(balances: ContractBalance[]): string {
+  const custom = balances.filter(
+    (balance) => balance.tokenType !== NIGHT_TOKEN_TYPE,
+  );
+  const candidates = custom.length > 0 ? custom : balances;
+  return [...candidates].sort((a, b) =>
+    compareAmountsDescending(a.amount, b.amount),
+  )[0].tokenType;
+}
+
+/**
+ * Harvests new token-holding contracts from the indexer without touching any
+ * file: the contract addresses discovered in the scanned blocks that are not
+ * already listed are queried via contractAction, most recently active first,
+ * and the first MAX_TOKEN_HOLDING_CONTRACTS contracts with a positive
+ * unshielded balance are returned; the remaining addresses are not queried.
+ *
+ * Returns null when no new contract with a positive balance is found, so the
+ * caller leaves the existing fixture untouched: an indexer affected by #1245
+ * reports an empty unshieldedBalances for every contract, and writing an
+ * empty fixture would make the regression test skip instead of fail.
+ * Transient query failures are retried and then fail the generation run.
+ *
+ * @param blocks - The scanned blocks
+ * @param listedAddresses - Lower-case addresses already in the data file
+ * @returns The new token-holding contracts, or null when none was found
+ */
+async function harvestTokenHoldingContracts(
+  blocks: Block[],
+  listedAddresses: Set<string>,
+): Promise<TokenHoldingContract[] | null> {
+  try {
+    // Most recently active first: recent contracts are the most likely to
+    // still hold tokens.
+    const addresses = collectContractAddresses(blocks, {
+      mostRecentFirst: true,
+    }).filter((address) => !listedAddresses.has(address.toLowerCase()));
+    const graphqlUrl = `${INDEXER_HTTP_URL}/api/${INDEXER_API_VERSION}/graphql`;
+
+    console.info(
+      `[INFO ] - Looking for up to ${MAX_TOKEN_HOLDING_CONTRACTS} new token-holding ` +
+        `contract(s) among ${addresses.length} unlisted contract(s) ` +
+        `(${listedAddresses.size} already listed)`,
+    );
+
+    const tokenHoldingContracts: TokenHoldingContract[] = [];
+
+    for (const address of addresses) {
+      if (tokenHoldingContracts.length >= MAX_TOKEN_HOLDING_CONTRACTS) {
+        break;
+      }
+
+      const balances = (
+        await fetchContractUnshieldedBalances(graphqlUrl, address)
+      ).filter((balance) => BigInt(balance.amount) > 0n);
+
+      if (balances.length > 0) {
+        tokenHoldingContracts.push({
+          "contract-address": address,
+          "token-type": pickTokenType(balances),
+        });
+      }
+    }
+
+    if (tokenHoldingContracts.length === 0) {
+      console.warn(
+        "[WARN ] - No new contract with a positive unshielded balance found; " +
+          "leaving the token-holding contracts data file untouched",
+      );
+      return null;
+    }
+
+    return tokenHoldingContracts;
+  } catch (error) {
+    if (error instanceof TestDataHandlerError) {
+      throw error;
+    }
+    throw new TestDataHandlerError(
+      "Failed to harvest token-holding contracts data",
+      { originalError: error },
+    );
+  }
+}
+
+/**
+ * Loads the current token-holding contracts data file of the target
+ * environment, with its comments, or the template when the file does not exist
+ * yet. The file is merged into, never replaced: it can hold hand-written
+ * entries (e.g. boundary amounts) that no scan would find again.
+ *
+ * @param destinationPath - Path to the test data folder
+ * @returns The listed token-holding contracts
+ * @throws ParseError / ValidationError when the existing file is not a valid
+ *         JSONC array, so a broken file is never overwritten
+ */
+function loadTokenHoldingContractsDataFile(
+  destinationPath: string,
+): TokenHoldingContractsDataFile {
+  const { targetFilePath, templateFilePath } = buildFilePaths(
+    path.join(destinationPath, `${TARGET_ENV}`),
+    `token-holding-contracts.jsonc`,
+  );
+  if (!fs.existsSync(targetFilePath)) {
+    return loadTemplateFile<TokenHoldingContractsDataFile>(templateFilePath);
+  }
+
+  const content = readFileContent(targetFilePath);
+  let listed: unknown;
+  try {
+    listed = commentJson.parse(content);
+  } catch (error) {
+    throw new ParseError(`Failed to parse ${targetFilePath}`, content, {
+      originalError: error,
+    });
+  }
+  if (!Array.isArray(listed)) {
+    throw new ValidationError(`${targetFilePath} must hold a JSON array`, {
+      targetFilePath,
+    });
+  }
+  return listed as TokenHoldingContractsDataFile;
+}
+
+/**
+ * Appends the newly harvested token-holding contracts to the listed ones and
+ * writes the token-holding contracts data file. Existing entries, their
+ * comments and the file header are kept as they are.
+ *
+ * @param destinationPath - Path to the test data folder
+ * @param listedHolders - The listed contracts, as loaded by
+ *        loadTokenHoldingContractsDataFile
+ * @param newHolders - The newly harvested token-holding contracts
+ */
+function writeTokenHoldingContractsDataFile(
+  destinationPath: string,
+  listedHolders: TokenHoldingContractsDataFile,
+  newHolders: TokenHoldingContract[],
+): void {
+  try {
+    // Ensure the target directory exists
+    const targetDir: string = ensureTargetDirectory(destinationPath);
+    const { targetFilePath } = buildFilePaths(
+      targetDir,
+      `token-holding-contracts.jsonc`,
+    );
+
+    // The date tells generated entries apart from hand-written ones, whose
+    // header may carry its own snapshot date.
+    const harvestDate = new Date().toISOString().slice(0, 10);
+    for (const holder of newHolders) {
+      Object.assign(holder, {
+        [Symbol.for("before:contract-address")]: [
+          {
+            type: "LineComment",
+            value: ` Harvested by block-scanner on ${harvestDate}.`,
+            inline: false,
+          },
+        ],
+      });
+      listedHolders.push(holder);
+    }
+
+    writeJsonFile<TokenHoldingContractsDataFile>(
+      targetFilePath,
+      listedHolders,
+      `Token-holding contracts data file updated (${newHolders.length} added, ` +
+        `${listedHolders.length} listed): ${destinationPath}/${TARGET_ENV}/token-holding-contracts.jsonc`,
+    );
+  } catch (error) {
+    if (error instanceof TestDataHandlerError) {
+      throw error;
+    }
+    throw new TestDataHandlerError(
+      "Failed to update token-holding contracts data file",
       { destinationPath, originalError: error },
     );
   }

@@ -1,0 +1,59 @@
+pragma language_version >= 0.22;
+
+import CompactStandardLibrary;
+
+// Minimal fungible-token issuer, used to seed the pre-populated chain data
+// with a non-NIGHT token colour.
+//
+// This contract ONLY mints Midnight ledger tokens (zswap), coloured by this
+// contract's own address via a fixed domain separator. It deliberately does
+// NOT implement transfer / burn / balances: ledger tokens move through the
+// wallet / zswap, not through this contract.
+//
+// Two mint entry points send freshly minted tokens to a caller-supplied
+// recipient (an arbitrary target wallet, not necessarily this contract or the
+// caller).
+
+// Rolling nonce state for shielded mints. A shielded coin needs a unique nonce
+// per mint to avoid coin-commitment collisions and to keep coins unlinkable.
+// `mintCount` + `evolveNonce` deterministically derives a fresh nonce each
+// call. Both fields auto-initialize to their defaults (Counter -> 0,
+// Bytes<32> -> all-zero), so no constructor is required.
+export ledger nonce: Bytes<32>;
+
+export ledger mintCount: Counter;
+
+// Fixed domain separator that colours every token this contract issues.
+// tokenType(domainSep, thisContractAddress) yields the token colour.
+export pure circuit domainSep(): Bytes<32> {
+  return pad(32, "qa:token-issuer:");
+}
+
+// Mint `value` shielded ledger tokens to `recipient` (a target wallet's zswap
+// coin public key). Returns the created coin so the caller/wallet can observe
+// its colour, value, and nonce.
+export circuit mintShielded(recipient: ZswapCoinPublicKey, value: Uint<64>,): ShieldedCoinInfo {
+  // Advance the nonce: increment the counter, then evolve the stored nonce
+  // with the new count. Fresh, deterministic, non-repeating per mint.
+  mintCount.increment(1);
+  nonce = evolveNonce(mintCount.read() as Uint<128>, nonce);
+
+  return mintShieldedToken(
+           domainSep(),
+           disclose(value),
+           nonce,
+           left<ZswapCoinPublicKey, ContractAddress>(disclose(recipient)),
+           );
+}
+
+// Mint `value` unshielded ledger tokens to `recipient` (a target user
+// address). Returns the token colour (Bytes<32>) for this contract's token.
+// We do NOT call receiveUnshielded here: the tokens go to an external
+// recipient, not to this contract, so there is no self-balance to credit.
+export circuit mintUnshielded(recipient: UserAddress, value: Uint<64>,): Bytes<32> {
+  return mintUnshieldedToken(
+           domainSep(),
+           disclose(value),
+           right<ContractAddress, UserAddress>(disclose(recipient)),
+           );
+}

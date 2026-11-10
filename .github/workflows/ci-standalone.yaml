@@ -9,16 +9,28 @@ on:
       - main
       - feat/*
       - release/*
+  merge_group:
+  # Runs on main populate the Rust cache that pull requests restore from.
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - qa/**
   workflow_dispatch:
 
 concurrency:
   group: ${{github.workflow}}-${{github.head_ref || github.run_id}}
   cancel-in-progress: true
 
+env:
+  # Line tables keep backtraces readable while shrinking the cached target directory.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+
 jobs:
   # Detects whether the PR touches anything outside `qa/**`. Subsequent jobs
-  # only run when non-qa files changed, so qa-only PRs skip Rust CI while
-  # this workflow still reports success (keeping branch protection happy).
+  # only skip when the PR is qa-only, so qa-only PRs skip Rust CI while this
+  # workflow still reports success (keeping branch protection happy). If this
+  # job fails they still run, so a failed detection never passes as qa-only.
   changes:
     runs-on: ubuntu-latest
     outputs:
@@ -32,25 +44,7 @@ jobs:
 
       - name: Detect non-qa changes
         id: filter
-        env:
-          EVENT_NAME: ${{github.event_name}}
-          BASE_SHA: ${{github.event.pull_request.base.sha}}
-          HEAD_SHA: ${{github.event.pull_request.head.sha}}
-        run: |
-          if [ "$EVENT_NAME" != "pull_request" ]; then
-            echo "Non-PR event; running full pipeline."
-            echo "non_qa=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "Diffing $BASE_SHA..$HEAD_SHA"
-          changed=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
-          echo "Changed files:"
-          echo "$changed"
-          if echo "$changed" | grep -vE '^qa/' | grep -q .; then
-            echo "non_qa=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "non_qa=false" >> "$GITHUB_OUTPUT"
-          fi
+        uses: ./.github/actions/detect-non-qa-changes
 
       - name: Set toolchain
         id: set_toolchain
@@ -63,24 +57,21 @@ jobs:
   fmt-check:
     runs-on: ubuntu-latest
     needs: [changes]
-    if: needs.changes.outputs.non_qa == 'true'
+    if: ${{!cancelled() && needs.changes.outputs.non_qa != 'false'}}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           components: rustfmt
           toolchain: ${{needs.changes.outputs.toolchain}}
 
       - name: Install just
-        uses: taiki-e/install-action@065d6a08a14e61e89fb0a4c10eecdbdef39c7d8e # v2.85.4
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: just
-
-      - name: Setup Rust cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
       - name: just fmt-check
         run: |
@@ -89,24 +80,29 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     needs: [changes]
-    if: needs.changes.outputs.non_qa == 'true'
+    if: ${{!cancelled() && needs.changes.outputs.non_qa != 'false'}}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: ${{needs.changes.outputs.toolchain}}
           components: clippy
 
       - name: Install just
-        uses: taiki-e/install-action@065d6a08a14e61e89fb0a4c10eecdbdef39c7d8e # v2.85.4
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: just
 
       - name: Setup Rust cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # The default key is the job id, which ci-cloud shares.
+          key: standalone
+          # PR caches are visible only to their own PR, so only main saves.
+          save-if: ${{github.ref == 'refs/heads/main'}}
 
       - name: Init Env Vars
         uses: ./.github/actions/init-env
@@ -117,10 +113,14 @@ jobs:
           just feature=standalone lint
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-8-core-x64
     needs: [changes]
-    if: needs.changes.outputs.non_qa == 'true'
+    if: ${{!cancelled() && needs.changes.outputs.non_qa != 'false'}}
     timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      NODE_IMAGE: midnightntwrk/midnight-node
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -128,28 +128,33 @@ jobs:
       - name: Pre-pull Docker images
         run: |
           NODE_VERSION=$(tail -n 1 NODE_VERSIONS)
-          echo "Pre-pulling midnight-node:$NODE_VERSION..."
-          docker pull "midnightntwrk/midnight-node:$NODE_VERSION" || \
-          docker pull "midnightntwrk/midnight-node:$NODE_VERSION" || \
-          docker pull "midnightntwrk/midnight-node:$NODE_VERSION"
+          echo "Pre-pulling $NODE_IMAGE:$NODE_VERSION..."
+          docker pull "$NODE_IMAGE:$NODE_VERSION" || \
+          docker pull "$NODE_IMAGE:$NODE_VERSION" || \
+          docker pull "$NODE_IMAGE:$NODE_VERSION"
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: ${{needs.changes.outputs.toolchain}}
 
       - name: Install nextest
-        uses: taiki-e/install-action@065d6a08a14e61e89fb0a4c10eecdbdef39c7d8e # v2.85.4
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: nextest
 
       - name: Install just
-        uses: taiki-e/install-action@065d6a08a14e61e89fb0a4c10eecdbdef39c7d8e # v2.85.4
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: just
 
       - name: Setup Rust cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # The default key is the job id, which ci-cloud shares.
+          key: standalone
+          # PR caches are visible only to their own PR, so only main saves.
+          save-if: ${{github.ref == 'refs/heads/main'}}
 
       - name: Init Env Vars
         uses: ./.github/actions/init-env
@@ -162,24 +167,29 @@ jobs:
   doc:
     runs-on: ubuntu-latest
     needs: [changes]
-    if: needs.changes.outputs.non_qa == 'true'
+    if: ${{!cancelled() && needs.changes.outputs.non_qa != 'false'}}
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           components: rust-docs
           toolchain: ${{needs.changes.outputs.toolchain}}
 
       - name: Install just
-        uses: taiki-e/install-action@065d6a08a14e61e89fb0a4c10eecdbdef39c7d8e # v2.85.4
+        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: just
 
       - name: Setup Rust cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # The default key is the job id, which ci-cloud shares.
+          key: standalone
+          # PR caches are visible only to their own PR, so only main saves.
+          save-if: ${{github.ref == 'refs/heads/main'}}
 
       - name: just doc
         run: |

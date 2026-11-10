@@ -17,6 +17,7 @@ mod runtimes;
 use crate::{
     domain::{
         BlockRef, SystemParametersChange,
+        extrinsic::{EventIndex, Phase},
         node::{Block, Node, RegularTransaction, SystemTransaction, Transaction},
     },
     infra::subxt_node::{header::SubstrateHeaderExt, runtimes::BlockDetails},
@@ -32,7 +33,6 @@ use http::{
 use indexer_common::{
     domain::{
         BlockAuthor, BlockHash, ByteVec, NodeVersion, ProtocolVersion, ProtocolVersionError,
-        SerializedContractAddress,
         ledger::{self, ZswapMerkleTreeRoot},
     },
     error::BoxError,
@@ -70,8 +70,8 @@ pub(crate) struct ContentSource {
     pub(crate) extrinsic_bodies: Vec<Vec<u8>>,
 }
 
-const AURA_ENGINE_ID: ConsensusEngineId = [b'a', b'u', b'r', b'a'];
-const BABE_ENGINE_ID: ConsensusEngineId = [b'B', b'A', b'B', b'E'];
+const AURA_ENGINE_ID: ConsensusEngineId = *b"aura";
+const BABE_ENGINE_ID: ConsensusEngineId = *b"BABE";
 
 /// Name of the node runtime API reporting the active block-production engine, declared in
 /// `midnight-primitives-consensus-engine` and implemented alongside the pallet driving the
@@ -297,31 +297,36 @@ impl SubxtNode {
             transactions,
             mut dust_registration_events,
             bridge_events,
-        } = runtimes::make_block_details(
-            authorities,
-            content_node_version,
-            &block,
-            content_source.as_ref(),
-        )
-        .await?;
+        } = runtimes::make_block_details(authorities, content_node_version, &block, content_source)
+            .await?;
 
         // At genesis, Substrate does not emit events (Parity PR #5463). Fetch cNight
         // registrations from pallet storage instead.
         // Also fetch the ledger state root for genesis ledger state detection.
-        let ledger_state_root = if height == 0 {
-            let genesis_registrations =
-                runtimes::fetch_genesis_cnight_registrations(state_node_version, &block).await?;
-            dust_registration_events.extend(genesis_registrations);
+        let ledger_state_root =
+            if height == 0 {
+                let genesis_registrations =
+                    runtimes::fetch_genesis_cnight_registrations(state_node_version, &block)
+                        .await?;
+                // Registrations read from storage are part of the genesis state, which is set
+                // before any extrinsic; their index is their position in the read.
+                dust_registration_events.extend(genesis_registrations.into_iter().enumerate().map(
+                    |(position, event)| (Phase::Initialization, position as EventIndex, event),
+                ));
 
-            runtimes::get_ledger_state_root(state_node_version, &block)
-                .await?
-                .map(Into::into)
-        } else {
-            None
-        };
+                runtimes::get_ledger_state_root(state_node_version, &block)
+                    .await?
+                    .map(Into::into)
+            } else {
+                None
+            };
 
         let transactions = stream::iter(transactions)
-            .then(|t| make_transaction(t, protocol_version, state_node_version, &block))
+            .then(|(phase, transaction, outcome)| async move {
+                make_transaction(transaction, protocol_version)
+                    .await
+                    .map(|transaction| (phase, transaction, outcome))
+            })
             .try_collect::<Vec<_>>()
             .await?;
 
@@ -691,9 +696,6 @@ pub enum SubxtNodeError {
     #[error("cannot decode genesis cNight registration key")]
     DecodeGenesisCnightRegistrationKey(#[source] Box<subxt::error::StorageKeyError>),
 
-    #[error("cannot get contract state for address {0}")]
-    GetContractState(SerializedContractAddress, #[source] BoxError),
-
     #[error("cannot get zswap state root")]
     GetZswapStateRoot(#[source] BoxError),
 
@@ -827,12 +829,10 @@ fn decode_babe_authority_index(mut pre_digest: &[u8]) -> Result<u32, SubxtNodeEr
 async fn make_transaction(
     transaction: runtimes::Transaction,
     protocol_version: ProtocolVersion,
-    state_node_version: NodeVersion,
-    block: &OnlineClientAtBlock,
 ) -> Result<Transaction, SubxtNodeError> {
     match transaction {
         runtimes::Transaction::Regular(transaction) => {
-            make_regular_transaction(transaction, protocol_version, state_node_version, block).await
+            make_regular_transaction(transaction, protocol_version).await
         }
 
         runtimes::Transaction::System(transaction) => {
@@ -844,8 +844,6 @@ async fn make_transaction(
 async fn make_regular_transaction(
     transaction: ByteVec,
     protocol_version: ProtocolVersion,
-    state_node_version: NodeVersion,
-    block: &OnlineClientAtBlock,
 ) -> Result<Transaction, SubxtNodeError> {
     let ledger_transaction =
         ledger::Transaction::deserialize(&transaction, protocol_version.ledger_version())?;
@@ -855,10 +853,7 @@ async fn make_regular_transaction(
     let identifiers = ledger_transaction.identifiers()?;
 
     let contract_actions = ledger_transaction
-        .contract_actions(|address| async move {
-            runtimes::get_contract_state(address, state_node_version, block).await
-        })
-        .await?
+        .contract_actions()?
         .into_iter()
         .map(Into::into)
         .collect();

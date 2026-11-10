@@ -45,11 +45,12 @@ use crate::{
     graphql_ws_client,
 };
 use anyhow::{Context, bail};
+use dust_generations_subscription::DustGenerationsSubscriptionDustGenerations as DustGenerations;
 use futures::{StreamExt, TryStreamExt, future::ok};
 use graphql_client::{GraphQLQuery, Response};
 use indexer_api::infra::api::v4::{
     AddressType, HexEncodable, HexEncoded, dust::DustAddress, encode_address,
-    viewing_key::ViewingKey,
+    unshielded::UnshieldedAddress,
 };
 use indexer_common::domain::NetworkId;
 use itertools::Itertools;
@@ -60,7 +61,7 @@ use std::{future::ready, time::Duration};
 use tokio::time::sleep;
 use unshielded_transactions_subscription::UnshieldedTransactionsSubscriptionUnshieldedTransactions as UnshieldedTransactions;
 
-const MAX_HEIGHT: usize = 32;
+const MAX_HEIGHT: usize = 40;
 
 /// Run comprehensive e2e tests for the Indexer. It is expected that the Indexer is set up with all
 /// needed dependencies, e.g. a Node, and its API is exposed securely (https and wss) or insecurely
@@ -285,7 +286,14 @@ impl IndexerData {
         // Verify that there are contract actions.
         assert!(!contract_actions.is_empty());
 
-        // Verify that the contract action zswap state is non-empty.
+        // Verify that the contract action state and zswap state are non-empty. Both are resolved
+        // out of the ledger arena from the keys stored on the action, so this is the end-to-end
+        // guard that the key round trip actually serves bytes.
+        assert!(
+            contract_actions
+                .iter()
+                .all(|contract_action| !contract_action.state.as_ref().is_empty())
+        );
         assert!(
             contract_actions
                 .iter()
@@ -364,14 +372,14 @@ async fn test_connect_mutation(
     network_id: &NetworkId,
 ) -> anyhow::Result<HexEncoded> {
     // Valid viewing key.
-    let viewing_key = ViewingKey::from(viewing_key(network_id));
+    let viewing_key = viewing_key(network_id).to_owned();
     let variables = connect_mutation::Variables { viewing_key };
     let response = send_query::<ConnectMutation>(api_client, api_url, variables).await?;
     let session_id = response.connect;
 
     // Invalid viewing key.
     let variables = connect_mutation::Variables {
-        viewing_key: ViewingKey("invalid".to_string()),
+        viewing_key: "invalid".to_owned(),
     };
     let response = send_query::<ConnectMutation>(api_client, api_url, variables).await;
     assert!(response.is_err());
@@ -866,7 +874,8 @@ async fn test_contract_actions_subscription(
         .into_group_map();
 
     for (address, expected_contract_actions) in contract_actions_by_address {
-        // No offset.
+        // No offset: the stream starts at the latest block, past every contract action, so it
+        // replays nothing.
         let variables = contract_action_subscription::Variables {
             address: address.clone(),
             contract_action_subscription_offset: None,
@@ -875,12 +884,15 @@ async fn test_contract_actions_subscription(
             graphql_ws_client::subscribe::<ContractActionSubscription>(ws_api_url, variables)
                 .await
                 .context("subscribe to contract actions")?
-                .take(expected_contract_actions.len())
+                .take_until(sleep(Duration::from_secs(3)))
                 .map_ok(|data| data.contract_actions.to_json_value())
                 .try_collect::<Vec<_>>()
                 .await
                 .context("collect blocks from contract action subscription")?;
-        assert_eq!(contract_actions, expected_contract_actions);
+        assert!(
+            contract_actions.is_empty(),
+            "a stream without offset replays no contract action, got: {contract_actions:?}"
+        );
 
         // Genesis hash.
         let hash = indexer_data
@@ -899,7 +911,14 @@ async fn test_contract_actions_subscription(
                 .await
                 .context("subscribe to contract actions")?
                 .take(expected_contract_actions.len())
-                .map_ok(|data| data.contract_actions.to_json_value())
+                .map_ok(|data| {
+                    let action = data.contract_actions;
+                    assert_eq!(
+                        action.state_at.hash, action.transaction.block.hash,
+                        "an ordinary stream item's stateAt is its own block"
+                    );
+                    action.to_json_value()
+                })
                 .try_collect::<Vec<_>>()
                 .await
                 .context("collect blocks from contract action subscription")?;
@@ -917,7 +936,14 @@ async fn test_contract_actions_subscription(
                 .await
                 .context("subscribe to contract actions")?
                 .take(expected_contract_actions.len())
-                .map_ok(|data| data.contract_actions.to_json_value())
+                .map_ok(|data| {
+                    let action = data.contract_actions;
+                    assert_eq!(
+                        action.state_at.hash, action.transaction.block.hash,
+                        "an ordinary stream item's stateAt is its own block"
+                    );
+                    action.to_json_value()
+                })
                 .try_collect::<Vec<_>>()
                 .await
                 .context("collect blocks from contract action subscription")?;
@@ -946,7 +972,12 @@ async fn test_shielded_transactions_subscription(
             .map_ok(|data| data.shielded_transactions)
             .try_filter_map(|event| match event {
                 ShieldedTransactions::RelevantTransaction(t) => ok(Some(t)),
-                ShieldedTransactions::ShieldedTransactionsProgress(_) => ok(None),
+                ShieldedTransactions::ShieldedTransactionsProgress(progress) => {
+                    // Progress events carry the tip protocol version, which is how a wallet
+                    // without any relevant transactions learns about a protocol upgrade.
+                    assert!(progress.protocol_version > 0);
+                    ok(None)
+                }
             })
             .take(2)
             .take_until(sleep(Duration::from_secs(10)))
@@ -1011,6 +1042,35 @@ async fn test_unshielded_transactions_subscription(
                 .iter()
                 .any(|u| u.owner == unshielded_address)
         }));
+    }
+
+    // An address without any transactions only ever receives progress events. These carry the
+    // tip protocol version, which is the only way such a wallet learns about a protocol upgrade.
+    let network_id: NetworkId = "undeployed".try_into().unwrap();
+    let unused_address = UnshieldedAddress(encode_address(
+        [0u8; 32],
+        AddressType::Unshielded,
+        &network_id,
+    ));
+    let variables = unshielded_transactions_subscription::Variables {
+        address: unused_address,
+    };
+    let events =
+        graphql_ws_client::subscribe::<UnshieldedTransactionsSubscription>(ws_api_url, variables)
+            .await
+            .context("subscribe to unshielded transactions for an unused address")?
+            .take(1)
+            .map_ok(|data| data.unshielded_transactions)
+            .try_collect::<Vec<_>>()
+            .await
+            .context("collect unshielded transaction events for an unused address")?;
+
+    match events.first() {
+        Some(UnshieldedTransactions::UnshieldedTransactionsProgress(progress)) => {
+            assert_eq!(progress.highest_transaction_id, 0);
+            assert!(progress.protocol_version > 0);
+        }
+        event => panic!("expected an UnshieldedTransactionsProgress event, got: {event:?}"),
     }
 
     Ok(())
@@ -1097,7 +1157,7 @@ async fn test_dust_generations_subscription(
     let events = graphql_ws_client::subscribe::<DustGenerationsSubscription>(ws_api_url, variables)
         .await
         .context("subscribe to dust generations")?
-        .map_ok(|data| data.dust_generations.to_json_value())
+        .map_ok(|data| data.dust_generations)
         .take(1)
         .take_until(sleep(Duration::from_secs(5)))
         .try_collect::<Vec<_>>()
@@ -1110,12 +1170,18 @@ async fn test_dust_generations_subscription(
         "expected exactly one DustGenerationsProgress event"
     );
 
-    let event = &events[0];
-    assert_eq!(
-        event.get("__typename").and_then(|v| v.as_str()),
-        Some("DustGenerationsProgress"),
-        "expected DustGenerationsProgress for an address with no owned generations, got: {event:?}"
-    );
+    match &events[0] {
+        DustGenerations::DustGenerationsProgress(progress) => {
+            // The progress event carries the snapshot's protocol version, which is how a wallet
+            // without any generations learns about a protocol upgrade.
+            assert!(progress.protocol_version > 0);
+        }
+
+        event => panic!(
+            "expected DustGenerationsProgress for an address with no owned generations, \
+             got: {event:?}"
+        ),
+    }
 
     Ok(())
 }
@@ -1358,8 +1424,12 @@ mod graphql {
     use graphql_client::GraphQLQuery;
     use indexer_api::infra::api::v4::{
         CardanoRewardAddress, HexEncoded, dust::DustAddress, mutation::Unit,
-        unshielded::UnshieldedAddress, viewing_key::ViewingKey,
+        unshielded::UnshieldedAddress,
     };
+
+    // A client sends the viewing key as a plain string; the API type deliberately cannot be
+    // serialized.
+    type ViewingKey = String;
 
     #[derive(GraphQLQuery)]
     #[graphql(

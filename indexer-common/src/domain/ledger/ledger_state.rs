@@ -15,14 +15,16 @@ use crate::{
     domain::{
         AddressOrContract, ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome,
         ByteArray, ByteVec, IntentHash, LedgerEvent, LedgerEventAttributes, LedgerVersion,
-        NetworkId, Nonce, SerializedContractAddress, SerializedLedgerParameters,
-        SerializedLedgerStateKey, SerializedTransaction, SerializedZswapMerkleTreeRoot,
-        SerializedZswapState, TokenType, TransactionResult, UnshieldedAddress, UnshieldedUtxo,
+        NetworkId, Nonce, SerializedContractAddress, SerializedContractStateKey,
+        SerializedLedgerParameters, SerializedLedgerStateKey, SerializedTransaction,
+        SerializedZswapMerkleTreeRoot, SerializedZswapState, SerializedZswapStateKey, TokenType,
+        TransactionResult, UnshieldedAddress, UnshieldedUtxo,
         bridge::BridgeClaim,
         dust::{self},
         ledger::{
-            Error, IntentV8, IntentV9, SerializableExt, TaggedSerializableExt, TransactionV8,
-            TransactionV9,
+            ContractState, ContractZswapState, Error, IntentV8, IntentV9, LedgerDbContractState,
+            SerializableExt, TaggedSerializableExt, TransactionV8, TransactionV9, ZswapStateExt,
+            contract_state::ContractStateArenaKey,
         },
     },
     infra::ledger_db::v1_1,
@@ -104,7 +106,8 @@ use midnight_transient_crypto_v3::merkle_tree::{
 use midnight_zswap_v8::ledger::State as ZswapStateV8;
 use midnight_zswap_v9::ledger::State as ZswapStateV9;
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
+    io,
     ops::Deref,
     sync::LazyLock,
 };
@@ -156,6 +159,25 @@ pub enum LedgerState {
         // types (incl. SyntheticCost) are shared with the V8 variant.
         block_fullness: SyntheticCost,
     },
+}
+
+/// Leaf indices of each contract's entries in a ledger state's zswap commitment tree, by contract
+/// address.
+///
+/// It covers the leaves below the tree's `first_free` when it last caught up. Commitment tree
+/// leaves are never removed, so indices are only ever added.
+#[derive(Debug, Default)]
+pub struct ContractZswapIndices {
+    // The commitment tree's `first_free` when the indices last caught up; leaves below it are indexed.
+    first_free: u64,
+    // Each contract's leaf indices, ascending.
+    indices: HashMap<SerializedContractAddress, Vec<u64>>,
+}
+
+impl ContractZswapIndices {
+    fn get(&self, address: &SerializedContractAddress) -> &[u64] {
+        self.indices.get(address).map_or(&[], Vec::as_slice)
+    }
 }
 
 impl LedgerState {
@@ -289,6 +311,31 @@ impl LedgerState {
         Ok(ledger_state)
     }
 
+    /// Clears the ledger state accrued in memory and loads it lazily again from `key`, its
+    /// persisted key.
+    ///
+    /// A state held across blocks keeps every arena node it has loaded or created in memory. The
+    /// reloaded state holds its root's fields, by-reference ones as lazy handles, until later reads
+    /// load more, served from the ledger DB's node cache where possible.
+    ///
+    /// Call it only between blocks: a reloaded state starts with zero block fullness, which matches
+    /// only after `finalize_apply_transactions` has reset it.
+    ///
+    /// # Errors
+    /// Returns [Error::ReloadLedgerState] if the block fullness is not zero, and an error if `key`
+    /// cannot be deserialized or its state cannot be loaded.
+    pub fn reload(self, key: &SerializedLedgerStateKey) -> Result<Self, Error> {
+        let (Self::V8 { block_fullness, .. } | Self::V9 { block_fullness, .. }) = &self;
+        if *block_fullness != SyntheticCost::default() {
+            return Err(Error::ReloadLedgerState);
+        }
+
+        let ledger_version = self.ledger_version();
+        // Dropping first frees this state's nodes before the load allocates.
+        drop(self);
+        Self::load(key, ledger_version)
+    }
+
     pub fn translate(self, ledger_version: LedgerVersion) -> Result<Self, Error> {
         match (self, ledger_version) {
             (s @ LedgerState::V8 { .. }, LedgerVersion::V8) => Ok(s),
@@ -353,16 +400,21 @@ impl LedgerState {
                 ledger_state,
                 block_fullness,
             } => {
-                let mut ledger_state = Sp::new(ledger_state);
-                ledger_state.persist();
-                default_storage::<v1_1::LedgerDb>().with_backend(|b| b.flush_all_changes_to_db());
+                // The `Sp` holds a clone and drops at the end of this block. Unwrapping it with
+                // `Sp::into_inner` instead would leak its entry in storage-core's `Sp` cache, which
+                // only `Sp::drop` removes, and only once no other `Arc` holds the data.
+                let key = {
+                    let mut ledger_state = Sp::new(ledger_state.clone());
+                    ledger_state.persist();
+                    default_storage::<v1_1::LedgerDb>()
+                        .with_backend(|b| b.flush_all_changes_to_db());
 
-                let key = ledger_state
-                    .as_typed_key()
-                    .serialize()
-                    .map_err(|error| Error::Serialize("TypedArenaKeyV8", error))?;
+                    ledger_state
+                        .as_typed_key()
+                        .serialize()
+                        .map_err(|error| Error::Serialize("TypedArenaKeyV8", error))?
+                };
 
-                let ledger_state = Sp::into_inner(ledger_state).expect("ledger state exists");
                 let ledger_state = LedgerState::V8 {
                     ledger_state,
                     block_fullness,
@@ -375,16 +427,21 @@ impl LedgerState {
                 ledger_state,
                 block_fullness,
             } => {
-                let mut ledger_state = Sp::new(ledger_state);
-                ledger_state.persist();
-                default_storage::<v1_1::LedgerDb>().with_backend(|b| b.flush_all_changes_to_db());
+                // The `Sp` holds a clone and drops at the end of this block. Unwrapping it with
+                // `Sp::into_inner` instead would leak its entry in storage-core's `Sp` cache, which
+                // only `Sp::drop` removes, and only once no other `Arc` holds the data.
+                let key = {
+                    let mut ledger_state = Sp::new(ledger_state.clone());
+                    ledger_state.persist();
+                    default_storage::<v1_1::LedgerDb>()
+                        .with_backend(|b| b.flush_all_changes_to_db());
 
-                let key = ledger_state
-                    .as_typed_key()
-                    .serialize()
-                    .map_err(|error| Error::Serialize("TypedArenaKeyV9", error))?;
+                    ledger_state
+                        .as_typed_key()
+                        .serialize()
+                        .map_err(|error| Error::Serialize("TypedArenaKeyV9", error))?
+                };
 
-                let ledger_state = Sp::into_inner(ledger_state).expect("ledger state exists");
                 let ledger_state = LedgerState::V9 {
                     ledger_state,
                     block_fullness,
@@ -506,11 +563,11 @@ impl LedgerState {
     ///
     /// `block_timestamp` drives the block context passed to `apply`, and thus the timestamps the
     /// ledger writes into its state (e.g. dust generation `dtime`), so it must always be the real
-    /// block time. `well_formed_timestamp` is the `tblock` used only for the dust-validity-window
-    /// check in `well_formed`; it normally equals `block_timestamp` but is bumped ahead for the
-    /// first regular transaction in a block to reproduce the node's cached mempool validity result
-    /// (see `chain-indexer`'s `apply_transactions`). Bumping it only affects whether the check
-    /// passes, not the resulting state, since `well_formed` merely validates.
+    /// block time. `well_formed_timestamp` is the `tblock` of the intent TTL and dust validity
+    /// window checks in `well_formed`. It normally equals `block_timestamp`; the caller may pass
+    /// the `tblock` the node verified the transaction at instead (see `chain-indexer`'s
+    /// `apply_transactions`). It only affects whether the check passes, not the resulting state,
+    /// since `well_formed` merely validates.
     #[trace]
     pub fn apply_regular_transaction(
         &mut self,
@@ -556,9 +613,9 @@ impl LedgerState {
                 let (ledger_state, transaction_result) =
                     ledger_state.apply(&verified_ledger_transaction, &cx);
 
-                let (transaction_result, events, should_count_cost) = match transaction_result {
+                let (transaction_result, events, failure_reason) = match transaction_result {
                     TransactionResultV8::Success(events) => {
-                        (TransactionResult::Success, events, true)
+                        (TransactionResult::Success, events, None)
                     }
 
                     TransactionResultV8::PartialSuccess(segments, events) => {
@@ -566,11 +623,19 @@ impl LedgerState {
                             .into_iter()
                             .map(|(id, result)| (id, result.is_ok()))
                             .collect::<Vec<_>>();
-                        (TransactionResult::PartialSuccess(segments), events, true)
+                        (TransactionResult::PartialSuccess(segments), events, None)
                     }
 
-                    TransactionResultV8::Failure(_) => (TransactionResult::Failure, vec![], false),
+                    TransactionResultV8::Failure(reason) => (
+                        TransactionResult::Failure,
+                        vec![],
+                        Some(format!("{reason:?}")),
+                    ),
                 };
+                let should_count_cost = failure_reason.is_none();
+
+                // A failed transaction pays no fees.
+                let fees = if should_count_cost { fees } else { 0 };
 
                 // Only count cost for successful/partial transactions (match node behavior)
                 let block_fullness = if should_count_cost {
@@ -599,6 +664,7 @@ impl LedgerState {
                     spent_unshielded_utxos,
                     ledger_events,
                     fees,
+                    failure_reason,
                     // The bridge relies on ledger 9 primitives, so a `CardanoBridge` claim cannot
                     // occur on a ledger 8 chain; there is never a bridge claim to extract here.
                     bridge_claim: None,
@@ -624,10 +690,15 @@ impl LedgerState {
                     whitelist: None,
                 };
 
-                // The stateless `cost` estimates verifier-key sizes, under-costing
-                // contract calls; `cost_with_state` reads them from the ledger state.
-                // The ledger has no state-aware `fees`, so the fee is computed from
-                // the cost the same way `Transaction::fees` does.
+                // Must match the node byte-for-byte: the node feeds `block_fullness`
+                // with the stateless `cost`, and fee prices derive from this
+                // accumulator — a state-aware cost diverges on contract calls and
+                // poisons all fee-derived ledger values (shielded-sre#515).
+                let fullness_cost = transaction
+                    .cost(&ledger_state.parameters, true)
+                    .map_err(|error| Error::TransactionCost(error.into()))?;
+                // State-aware cost (accurate for contract calls) — for the reported
+                // `fees` only, never for consensus-relevant state.
                 let cost = transaction
                     .cost_with_state(&ledger_state.parameters, ledger_state, true)
                     .map_err(|error| Error::TransactionCost(error.into()))?;
@@ -652,9 +723,9 @@ impl LedgerState {
                 let (ledger_state, transaction_result) =
                     ledger_state.apply(&verified_ledger_transaction, &cx);
 
-                let (transaction_result, events, should_count_cost) = match transaction_result {
+                let (transaction_result, events, failure_reason) = match transaction_result {
                     TransactionResultV9::Success(events) => {
-                        (TransactionResult::Success, events, true)
+                        (TransactionResult::Success, events, None)
                     }
 
                     TransactionResultV9::PartialSuccess(segments, events) => {
@@ -662,15 +733,23 @@ impl LedgerState {
                             .into_iter()
                             .map(|(id, result)| (id, result.is_ok()))
                             .collect::<Vec<_>>();
-                        (TransactionResult::PartialSuccess(segments), events, true)
+                        (TransactionResult::PartialSuccess(segments), events, None)
                     }
 
-                    TransactionResultV9::Failure(_) => (TransactionResult::Failure, vec![], false),
+                    TransactionResultV9::Failure(reason) => (
+                        TransactionResult::Failure,
+                        vec![],
+                        Some(format!("{reason:?}")),
+                    ),
                 };
+                let should_count_cost = failure_reason.is_none();
+
+                // A failed transaction pays no fees.
+                let fees = if should_count_cost { fees } else { 0 };
 
                 // Only count cost for successful/partial transactions (match node behavior)
                 let block_fullness = if should_count_cost {
-                    *block_fullness + cost
+                    *block_fullness + fullness_cost
                 } else {
                     *block_fullness
                 };
@@ -711,6 +790,7 @@ impl LedgerState {
                     spent_unshielded_utxos,
                     ledger_events,
                     fees,
+                    failure_reason,
                     bridge_claim,
                 })
             }
@@ -885,6 +965,212 @@ impl LedgerState {
                 .serialize()
                 .map_err(|error| Error::Serialize("DustGenerationMerkleTreeRoot", error)),
         }
+    }
+
+    /// The given contract's state and the ledger-arena key referencing it, or `None` if the
+    /// contract is not in this ledger state — a failed action, or an address that does not (yet)
+    /// exist. Today that case is represented as an empty `state` blob.
+    ///
+    /// The returned node is rooted, so it survives garbage collection independently of the ledger
+    /// state it came from. Rooting is intentionally never balanced by an unpersist: a contract
+    /// state must stay readable for as long as the action referencing it exists, which is
+    /// forever. Reindexing a block therefore takes an existing root's count from K to K+1, which
+    /// is semantically free precisely because these roots are never released — the exact inverse
+    /// of the ledger-state retention invariant, where a double persist would corrupt the balance.
+    ///
+    /// Content addressing does the deduplication: consecutive identical states are one node with
+    /// one root row whose count is the number of actions sharing it.
+    /// Returns the key together with the state itself, rather than only the key, so that anything
+    /// derived from the state — the token balances, for instance — comes off the pointer that is
+    /// already in hand. Loading it back by key instead would be a second arena lookup for a node
+    /// that has been rooted but not yet flushed, which is only safe while it happens to still be
+    /// cached.
+    #[trace(properties = { "address": "{address}" })]
+    pub fn contract_state(
+        &self,
+        address: &SerializedContractAddress,
+    ) -> Result<Option<(SerializedContractStateKey, LedgerDbContractState)>, Error> {
+        // ORDER IS LOAD-BEARING: `persist()` before `as_typed_key()`. `ContractState`'s own node
+        // payload is under storage-core's small-object limit, so beforehand its key is an
+        // `ArenaKey::Direct` that inlines the payload instead of referencing a row; `persist()`
+        // promotes it to a `Ref`. Getting this backwards yields a fat key over an unrooted subtree.
+        //
+        // `lookup_sp` hands back the `Sp` that is already in the map, so nothing is hashed,
+        // copied or re-allocated here.
+        match self {
+            Self::V8 { ledger_state, .. } => {
+                let address = ContractAddressV8::deserialize(&mut address.as_ref(), 0)
+                    .map_err(|error| Error::Deserialize("ContractAddressV8", error))?;
+
+                ledger_state
+                    .contract
+                    .lookup_sp(&address)
+                    .map(|mut contract_state| {
+                        contract_state.persist();
+                        let key = contract_state
+                            .as_typed_key()
+                            .tagged_serialize()
+                            .map(SerializedContractStateKey::from)
+                            .map_err(|error| Error::Serialize("ContractStateKeyV8", error))?;
+
+                        Ok((key, ContractState::V3(contract_state)))
+                    })
+                    .transpose()
+            }
+
+            Self::V9 { ledger_state, .. } => {
+                let address = ContractAddressV9::deserialize(&mut address.as_ref(), 0)
+                    .map_err(|error| Error::Deserialize("ContractAddressV9", error))?;
+
+                ledger_state
+                    .contract
+                    .lookup_sp(&address)
+                    .map(|mut contract_state| {
+                        contract_state.persist();
+                        let key = contract_state
+                            .as_typed_key()
+                            .tagged_serialize()
+                            .map(SerializedContractStateKey::from)
+                            .map_err(|error| Error::Serialize("ContractStateKeyV9", error))?;
+
+                        Ok((key, ContractState::V4(contract_state)))
+                    })
+                    .transpose()
+            }
+        }
+    }
+
+    /// The ledger-arena key of the given contract's filtered zswap state, always available: unlike
+    /// the contract state this value is *constructed* from the global commitment tree rather than
+    /// resident, so it exists even for a failed action, matching what is stored today.
+    ///
+    /// Because it is constructed, its nodes are new to the arena and referenced by nothing else,
+    /// so it has to be allocated rather than looked up. `alloc` is content-addressed and
+    /// idempotent and the SQL write is an upsert, so an identical value maps onto an identical key
+    /// and is stored once however often it is captured.
+    ///
+    /// The filtered tree matches zswap's `State::filter`, but `contract_zswap_indices` supplies the
+    /// contract's entries in place of a scan of the whole commitment tree. The indices must have
+    /// been built against this ledger state or an earlier state of the same chain. Indices from
+    /// another chain produce a wrong tree without an error.
+    #[trace(properties = { "address": "{address}" })]
+    pub fn contract_zswap_state_key(
+        &self,
+        address: &SerializedContractAddress,
+        contract_zswap_indices: &mut ContractZswapIndices,
+    ) -> Result<SerializedZswapStateKey, Error> {
+        let storage = default_storage::<v1_1::LedgerDb>();
+
+        self.update_contract_zswap_indices(contract_zswap_indices)?;
+
+        // As above: persist before taking the key.
+        let key = match self {
+            Self::V8 { ledger_state, .. } => {
+                let mut contract_zswap_state = ZswapStateV8::new();
+                contract_zswap_state.coin_coms = ledger_state
+                    .zswap
+                    .filter_indices(contract_zswap_indices.get(address));
+
+                let mut contract_zswap_state = storage.alloc(contract_zswap_state);
+                contract_zswap_state.persist();
+                contract_zswap_state
+                    .as_typed_key()
+                    .tagged_serialize()
+                    .map_err(|error| Error::Serialize("ZswapStateKeyV8", error))?
+            }
+
+            Self::V9 { ledger_state, .. } => {
+                let mut contract_zswap_state = ZswapStateV9::new();
+                contract_zswap_state.coin_coms = ledger_state
+                    .zswap
+                    .filter_indices(contract_zswap_indices.get(address));
+
+                let mut contract_zswap_state = storage.alloc(contract_zswap_state);
+                contract_zswap_state.persist();
+                contract_zswap_state
+                    .as_typed_key()
+                    .tagged_serialize()
+                    .map_err(|error| Error::Serialize("ZswapStateKeyV9", error))?
+            }
+        };
+
+        Ok(key.into())
+    }
+
+    // Adds the contract entries committed since `contract_zswap_indices` last caught up with this
+    // ledger state, reading only the new leaves of the commitment tree.
+    fn update_contract_zswap_indices(
+        &self,
+        contract_zswap_indices: &mut ContractZswapIndices,
+    ) -> Result<(), Error> {
+        let first_free = self.zswap_first_free();
+
+        // A commitment tree shorter than the one already indexed belongs to another state.
+        if contract_zswap_indices.first_free > first_free {
+            *contract_zswap_indices = ContractZswapIndices::default();
+        }
+
+        let range = contract_zswap_indices.first_free..first_free;
+        let owned_leaves = match self {
+            Self::V8 { ledger_state, .. } => ledger_state
+                .zswap
+                .owned_leaves(range)
+                .map(|(index, address)| Ok((index, address.serialize()?)))
+                .collect::<Result<Vec<_>, io::Error>>()
+                .map_err(|error| Error::Serialize("ContractAddressV8", error))?,
+            Self::V9 { ledger_state, .. } => ledger_state
+                .zswap
+                .owned_leaves(range)
+                .map(|(index, address)| Ok((index, address.serialize()?)))
+                .collect::<Result<Vec<_>, io::Error>>()
+                .map_err(|error| Error::Serialize("ContractAddressV9", error))?,
+        };
+
+        for (index, address) in owned_leaves {
+            contract_zswap_indices
+                .indices
+                .entry(address)
+                .or_default()
+                .push(index);
+        }
+        contract_zswap_indices.first_free = first_free;
+
+        Ok(())
+    }
+
+    /// Whether the node a contract state key points at is still present in the ledger DB. Must be
+    /// checked before loading: `get_lazy` hands back a lazy pointer without reading anything, so a
+    /// missing node surfaces as a panic inside storage-core when the pointer is used, not as an
+    /// error.
+    pub fn contract_state_loadable(key: &SerializedContractStateKey) -> Result<bool, Error> {
+        let hash = ContractStateArenaKey::deserialize(key)?.hash().to_owned();
+
+        Ok(default_storage::<v1_1::LedgerDb>().with_backend(|b| b.get(&hash).is_some()))
+    }
+
+    /// Whether the given contract state key is in this ledger state's contract-state encoding:
+    /// `contract-state[v6]` for V8, `contract-state[v8]` for V9.
+    pub fn contract_state_key_in_current_encoding(
+        &self,
+        key: &SerializedContractStateKey,
+    ) -> Result<bool, Error> {
+        let key = ContractStateArenaKey::deserialize(key)?;
+
+        // The key variants are named after the dependency defining `ContractState`: V8 holds
+        // `midnight-onchain-runtime_v3`'s, V9 `midnight-onchain-runtime_v4`'s.
+        Ok(matches!(
+            (self, key),
+            (Self::V8 { .. }, ContractStateArenaKey::V3(_))
+                | (Self::V9 { .. }, ContractStateArenaKey::V4(_))
+        ))
+    }
+
+    /// Whether the node a contract zswap state key points at is still present in the ledger DB.
+    /// See [Self::contract_state_loadable].
+    pub fn contract_zswap_state_loadable(key: &SerializedZswapStateKey) -> Result<bool, Error> {
+        let hash = ContractZswapState::arena_key(key)?.key.hash().to_owned();
+
+        Ok(default_storage::<v1_1::LedgerDb>().with_backend(|b| b.get(&hash).is_some()))
     }
 
     /// Extract the zswap state for the given contract address.
@@ -2504,15 +2790,39 @@ fn dag_is_complete(
 
 #[cfg(test)]
 mod tests {
+    /// Regression scaffold for shielded-sre#515: the node feeds `block_fullness`
+    /// with the stateless `Transaction::cost`; a state-aware cost diverges on
+    /// contract calls and poisons fee-derived dust commitments.
+    ///
+    /// To arm: commit `tests/contract_deploy_tx.raw` + `tests/contract_call_tx.raw`
+    /// (generated against `tests/genesis_state.raw`), drop the `#[ignore]`, apply
+    /// both, then assert (1) `cost != cost_with_state` for the call tx and
+    /// (2) accumulated `block_fullness` equals the sum of the stateless costs.
+    /// On-chain repro: stagenet txs 0733c136… / 3c0898a7… (blocks 33532/33537).
+    #[test]
+    #[ignore = "requires contract deploy/call fixtures; see doc comment"]
+    fn block_fullness_uses_stateless_cost_node_parity() {
+        let deploy =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/contract_deploy_tx.raw");
+        let call =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/contract_call_tx.raw");
+        assert!(
+            deploy.exists() && call.exists(),
+            "contract fixtures missing — generate per the doc comment above"
+        );
+        unimplemented!("apply genesis + deploy + call; assert invariants 1 and 2 per doc comment");
+    }
+
     use crate::{
         domain::{
             AddressOrContract, LedgerEventAttributes, LedgerVersion,
             ledger::{
-                LedgerState,
+                LedgerState, contract_state,
                 ledger_state::{make_contract_event_attributes, take_either_address},
             },
         },
         error::BoxError,
+        infra::ledger_db::v1_1,
     };
     use anyhow::Context;
     use midnight_base_crypto_v1::{
@@ -2591,11 +2901,9 @@ mod tests {
                 .display()
                 .to_string();
 
-            let pool = SqlitePool::new(pool::sqlite::Config {
-                cnn_url: sqlite_file,
-            })
-            .await
-            .context("create pool")?;
+            let pool = SqlitePool::new(pool::sqlite::Config::with_url(sqlite_file))
+                .await
+                .context("create pool")?;
             migrations::sqlite::run(&pool)
                 .await
                 .context("run migrations")?;
@@ -2659,14 +2967,24 @@ mod tests {
              regenerate the fixture and re-check against the node"
         );
 
-        // Populated, NODE-VALIDATED coverage: a devnet ledger-8 genesis
+        // Populated, UPSTREAM-VALIDATED coverage: a devnet ledger-8 genesis
         // (extracted from node-0.22.0, `ledger-state[v13]`, ~67 KB) exercises the
         // table's MPT walking — contracts, bridge_receiving, treasury — that the
-        // empty state does not. The pinned v9 root below was produced by the
-        // node's own `StateTranslationTable` (midnight-node `fc39e708`, the 2.1.0
-        // migration runtime) over this same blob and matches byte-for-byte, so
-        // this fixture is authoritative for the translation itself. (The full
-        // live-fork `apply + 1` RPC-format check is still Phase 3.)
+        // empty state does not.
+        //
+        // The pinned v9 root below was reproduced byte-for-byte by the ledger
+        // team's `v8-to-v9-state-translation` crate, at the tag
+        // `node-2.1.101` itself translates with, over this same blob, so
+        // this fixture is authoritative for the translation. It moved when the
+        // ledger 8 -> 9 dust wipe landed (midnight-node #2012, backported as
+        // #2057): the v8 dust state is dropped rather than recast, which changes
+        // the arena root over any blob whose dust is non-empty.
+        //
+        // To re-derive after an upstream change, add
+        //   v8-to-v9-state-translation = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "<tag>" }
+        // to indexer-common's dev-dependencies and run both tables over this blob
+        // (see `state_translation_v8_to_v9`'s `matches_upstream_crate_on_devnet_genesis`).
+        // (The full live-fork `apply + 1` RPC-format check is still Phase 3.)
         let v8_devnet = std::fs::read(format!(
             "{}/tests/v8_genesis_devnet_0_22_0.raw",
             env!("CARGO_MANIFEST_DIR")
@@ -3005,6 +3323,480 @@ mod tests {
         );
 
         Ok(())
+    }
+
+    /// Translating a V8 state to V9 gives each contract a new `contract-state[v8]` key with the
+    /// same content, which survives a reload from the ledger DB.
+    #[cfg(any(feature = "cloud", feature = "standalone"))]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn translated_contract_state_key_is_tagged_for_ledger_9() -> Result<(), BoxError> {
+        use crate::domain::ledger::{LedgerDbContractState, SerializableExt};
+        use midnight_base_crypto_v1::hash::HashOutput;
+        use midnight_coin_structure_v2::{
+            coin::{TokenType as MidnightTokenType, UnshieldedTokenType},
+            contract::ContractAddress as ContractAddressV8,
+        };
+        use midnight_onchain_runtime_v3::state::ContractState as ContractStateV3;
+
+        const AMOUNT: u128 = 42;
+
+        let _ledger_db = init_ledger_db().await?;
+
+        let address = ContractAddressV8(HashOutput([11; 32]));
+        let serialized_address = address.serialize()?;
+        let mut state = LedgerState::new("undeployed".try_into()?, LedgerVersion::V8)
+            .expect("ledger state can be constructed");
+        match &mut state {
+            LedgerState::V8 { ledger_state, .. } => {
+                let mut contract_state = ContractStateV3::default();
+                contract_state.balance = contract_state.balance.insert(
+                    MidnightTokenType::Unshielded(UnshieldedTokenType(HashOutput([7; 32]))),
+                    AMOUNT,
+                );
+                ledger_state.contract = ledger_state.contract.insert(address, contract_state);
+            }
+            LedgerState::V9 { .. } => unreachable!("constructed as V8"),
+        }
+        let (v8_key, _) = state
+            .contract_state(&serialized_address)?
+            .expect("the contract is in the V8 ledger state");
+        assert!(state.contract_state_key_in_current_encoding(&v8_key)?);
+
+        let state = state.translate(LedgerVersion::V9)?;
+        let (v9_key, translated) = state
+            .contract_state(&serialized_address)?
+            .expect("the contract survives the translation");
+        assert_ne!(
+            v9_key, v8_key,
+            "the translated key carries the ledger-9 tag"
+        );
+        // The tag, then a by-reference key: one discriminant byte and the 32-byte hash.
+        assert!(
+            v9_key
+                .as_ref()
+                .starts_with(b"midnight:storage-key(contract-state[v8]):")
+        );
+        assert_eq!(v9_key.as_ref().len(), 41 + 1 + 32);
+        assert!(state.contract_state_key_in_current_encoding(&v9_key)?);
+        assert!(
+            !state.contract_state_key_in_current_encoding(&v8_key)?,
+            "the pre-fork key is not in the ledger-9 encoding"
+        );
+        let translated_bytes = translated.serialize()?;
+        assert!(
+            translated_bytes
+                .as_ref()
+                .starts_with(b"midnight:contract-state[v8]:"),
+            "the translated state must serialize with the ledger-9 tag"
+        );
+        let balances = translated.balances();
+        assert_eq!(balances.len(), 1);
+        assert_eq!(
+            balances[0].amount, AMOUNT,
+            "the translation keeps the balances"
+        );
+
+        let (state, _) = state.persist()?;
+        drop(state);
+
+        assert!(
+            LedgerState::contract_state_loadable(&v9_key)?,
+            "the translated key must be loadable after its ledger state is gone"
+        );
+        let reloaded = LedgerDbContractState::load_prefetched(&v9_key)?;
+        assert_eq!(
+            reloaded.serialize()?,
+            translated_bytes,
+            "re-serializing the reloaded translated state must be byte-identical"
+        );
+
+        Ok(())
+    }
+
+    /// The property the key-instead-of-blob change rests on: capturing a contract state's arena
+    /// key, dropping the ledger state it came from, then reloading and re-serializing must yield
+    /// exactly the bytes that state serializes to. It also covers the rooting, since the ledger
+    /// state whose `contract` map held the node is gone by the time the key is used.
+    ///
+    /// This goes through the real `v1_1::LedgerDb`, so it exercises the depth-0 `get_lazy` path
+    /// that made lazily reloaded Merkle trees serve stale hashes (#1265).
+    #[cfg(any(feature = "cloud", feature = "standalone"))]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn contract_state_key_round_trips_through_the_ledger_db() -> Result<(), BoxError> {
+        use crate::domain::{
+            SerializedContractStateKey,
+            ledger::{LedgerDbContractState, SerializableExt, TaggedSerializableExt},
+        };
+        use midnight_base_crypto_v1::hash::HashOutput;
+        use midnight_coin_structure_v2::{
+            coin::{TokenType as MidnightTokenType, UnshieldedTokenType},
+            contract::ContractAddress as ContractAddressV8,
+        };
+        use midnight_onchain_runtime_v3::state::ContractState as ContractStateV3;
+        use midnight_storage_core_v1::{DefaultDB, storage::default_storage};
+
+        const AMOUNT: u128 = 1_000_000;
+
+        let _ledger_db = init_ledger_db().await?;
+
+        let address = ContractAddressV8(HashOutput([9; 32]));
+        let serialized_address = address.serialize()?;
+
+        // The same logical state in the in-memory arena: content addressing is backend-independent
+        // (both arenas hash with `DefaultHasher`), so this is what the reload must serialize to.
+        let expected = {
+            let mut contract_state = ContractStateV3::<DefaultDB>::default();
+            contract_state.balance = contract_state.balance.insert(
+                MidnightTokenType::Unshielded(UnshieldedTokenType(HashOutput([7; 32]))),
+                AMOUNT,
+            );
+            contract_state.tagged_serialize()?
+        };
+
+        let mut state = LedgerState::new("undeployed".try_into()?, LedgerVersion::V8)
+            .expect("ledger state can be constructed");
+        match &mut state {
+            LedgerState::V8 { ledger_state, .. } => {
+                let mut contract_state = ContractStateV3::default();
+                contract_state.balance = contract_state.balance.insert(
+                    MidnightTokenType::Unshielded(UnshieldedTokenType(HashOutput([7; 32]))),
+                    AMOUNT,
+                );
+                ledger_state.contract = ledger_state.contract.insert(address, contract_state);
+            }
+            LedgerState::V9 { .. } => unreachable!("constructed as V8"),
+        }
+
+        let (key, captured) = state
+            .contract_state(&serialized_address)?
+            .expect("the contract is in the ledger state");
+
+        // The tag, then a by-reference key: one discriminant byte and the 32-byte hash.
+        assert!(
+            key.as_ref()
+                .starts_with(b"midnight:storage-key(contract-state[v6]):")
+        );
+        assert_eq!(key.as_ref().len(), 41 + 1 + 32);
+
+        // Anything derived from the state comes off the pointer the accessor hands back, without a
+        // second arena lookup for a node that is rooted but not yet flushed.
+        assert_eq!(captured.serialize()?, expected);
+
+        // Capturing the same state again is idempotent in the key — it is content-addressed — and
+        // takes the root count to two rather than replacing it. That is safe only because these
+        // roots are never unpersisted, which is the exact inverse of the ledger-state retention
+        // invariant, and it is what lets a reindexed block need no dedup logic on the write path.
+        assert_eq!(
+            state
+                .contract_state(&serialized_address)?
+                .expect("the contract is in the ledger state")
+                .0,
+            key
+        );
+
+        // `persist()` flushes the arena's pending writes, which is what gets the newly rooted
+        // contract state node into SQL; one flush per block covers all of that block's actions.
+        let (state, _) = state.persist()?;
+        drop(state);
+
+        let hash = contract_state::ContractStateArenaKey::deserialize(&key)?
+            .hash()
+            .to_owned();
+        assert_eq!(
+            default_storage::<v1_1::LedgerDb>()
+                .with_backend(|b| b.get_roots())
+                .get(&hash)
+                .copied(),
+            Some(2),
+            "two captures of one state share a single root row whose count is two"
+        );
+
+        assert!(
+            LedgerState::contract_state_loadable(&key)?,
+            "the captured key must be loadable after its ledger state is gone"
+        );
+
+        let reloaded = LedgerDbContractState::load_prefetched(&key)?;
+        assert_eq!(
+            reloaded.serialize()?,
+            expected,
+            "re-serializing the reloaded contract state must be byte-identical"
+        );
+
+        // Field reads must survive the lazy reload too, not just the byte-level walk.
+        let balances = reloaded.balances();
+        assert_eq!(balances.len(), 1);
+        assert_eq!(balances[0].amount, AMOUNT);
+
+        // An absent contract yields no key rather than an error, which is how a failed action is
+        // represented.
+        let absent = ContractAddressV8(HashOutput([1; 32])).serialize()?;
+        let state = LedgerState::load(
+            &LedgerState::new("undeployed".try_into()?, LedgerVersion::V8)
+                .expect("ledger state can be constructed")
+                .persist()?
+                .1,
+            LedgerVersion::V8,
+        )?;
+        assert!(state.contract_state(&absent)?.is_none());
+
+        // A key whose node was never written is reported as not loadable rather than panicking on
+        // use.
+        let unknown = SerializedContractStateKey::from({
+            let mut bytes = key.as_ref().to_vec();
+            *bytes.last_mut().expect("key is not empty") ^= 0xff;
+            bytes
+        });
+        assert!(!LedgerState::contract_state_loadable(&unknown)?);
+
+        Ok(())
+    }
+
+    /// A contract's zswap state is constructed rather than resident, so it is allocated into the
+    /// arena. Capturing it must round-trip to exactly the bytes `extract_contract_zswap_state`
+    /// produces today, and identical values must map onto identical keys.
+    #[cfg(any(feature = "cloud", feature = "standalone"))]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn contract_zswap_state_key_round_trips_and_dedups() -> Result<(), BoxError> {
+        use crate::domain::ledger::{ContractZswapIndices, ContractZswapState, SerializableExt};
+        use midnight_base_crypto_v1::hash::HashOutput;
+        use midnight_coin_structure_v2::contract::ContractAddress as ContractAddressV8;
+        use midnight_transient_crypto_v2::curve::Fr;
+        use std::ops::Deref;
+
+        const LEAVES: u64 = 12;
+
+        let _ledger_db = init_ledger_db().await?;
+
+        let serialized_address = ContractAddressV8(HashOutput([9; 32])).serialize()?;
+
+        let mut state = LedgerState::new("undeployed".try_into()?, LedgerVersion::V8)
+            .expect("ledger state can be constructed");
+        match &mut state {
+            LedgerState::V8 { ledger_state, .. } => {
+                let mut zswap = ledger_state.zswap.deref().to_owned();
+                zswap.coin_coms = (0..LEAVES).fold(zswap.coin_coms.clone(), |tree, i| {
+                    tree.try_update(i, &Fr::from(i + 1), None)
+                        .expect("insert coin commitment")
+                });
+                zswap.first_free = LEAVES;
+                ledger_state.zswap = Sp::new(zswap);
+            }
+            LedgerState::V9 { .. } => unreachable!("constructed as V8"),
+        }
+
+        let expected = state.extract_contract_zswap_state(&serialized_address)?;
+
+        let mut contract_zswap_indices = ContractZswapIndices::default();
+        let key =
+            state.contract_zswap_state_key(&serialized_address, &mut contract_zswap_indices)?;
+        // Allocation is content-addressed, so capturing the same value again yields the same key.
+        assert_eq!(
+            state.contract_zswap_state_key(&serialized_address, &mut contract_zswap_indices)?,
+            key
+        );
+
+        let (state, _) = state.persist()?;
+        drop(state);
+
+        assert!(LedgerState::contract_zswap_state_loadable(&key)?);
+
+        let reloaded = ContractZswapState::load_prefetched(&key)?;
+        assert_eq!(
+            reloaded.serialize()?,
+            expected,
+            "re-serializing the reloaded zswap state must be byte-identical to what is stored today"
+        );
+
+        Ok(())
+    }
+
+    // One test per ledger version: the commitment tree filtered with `ContractZswapIndices` is the one
+    // zswap's `State::filter` produces, for contracts with entries, a contract without, after the
+    // indices catch up with leaves added since their previous use, and after indices built against a
+    // longer tree are reused with a shorter one.
+    macro_rules! contract_zswap_indices_match_filter {
+        ($test:ident, $variant:ident, $address:path, $fr:path) => {
+            #[cfg(any(feature = "cloud", feature = "standalone"))]
+            #[tokio::test(flavor = "multi_thread")]
+            async fn $test() -> Result<(), BoxError> {
+                use crate::domain::ledger::{ContractZswapIndices, SerializableExt, ZswapStateExt};
+                use midnight_base_crypto_v1::hash::HashOutput;
+                use std::ops::{Deref, Range};
+                use $address as Address;
+                use $fr as Fr;
+
+                const LEAVES: u64 = 20;
+
+                let _ledger_db = init_ledger_db().await?;
+
+                let addresses = [1, 2, 3].map(|byte| Address(HashOutput([byte; 32])));
+
+                // The first address owns every third leaf and the last, so its final two leaves are
+                // adjacent and end the tree. The second owns adjacent leaves 1 and 2 and leaf 7.
+                // The third owns none.
+                let owner = |index: u64| match index {
+                    1 | 2 | 7 => Some(Sp::new(addresses[1])),
+                    index if index % 3 == 0 || index == LEAVES - 1 => Some(Sp::new(addresses[0])),
+                    _ => None,
+                };
+                let insert = |state: &mut LedgerState, leaves: Range<u64>| match state {
+                    LedgerState::$variant { ledger_state, .. } => {
+                        let mut zswap = ledger_state.zswap.deref().to_owned();
+                        zswap.coin_coms =
+                            leaves.clone().fold(zswap.coin_coms.clone(), |tree, index| {
+                                tree.try_update(index, &Fr::from(index + 1), owner(index))
+                                    .expect("insert coin commitment")
+                            });
+                        zswap.first_free = leaves.end;
+                        ledger_state.zswap = Sp::new(zswap);
+                    }
+                    _ => unreachable!("constructed as {}", stringify!($variant)),
+                };
+                // Updates the indices to `state` and checks the tree they filter is `State::filter`'s.
+                let assert_matches_filter = |state: &LedgerState,
+                                             contract_zswap_indices: &mut ContractZswapIndices,
+                                             address: Address|
+                 -> Result<(), BoxError> {
+                    state.update_contract_zswap_indices(contract_zswap_indices)?;
+                    let LedgerState::$variant { ledger_state, .. } = state else {
+                        unreachable!("constructed as {}", stringify!($variant))
+                    };
+                    assert!(
+                        ledger_state
+                            .zswap
+                            .filter_indices(contract_zswap_indices.get(&address.serialize()?))
+                            == ledger_state.zswap.filter(&[address])
+                    );
+                    Ok(())
+                };
+                let new_state = || {
+                    LedgerState::new("undeployed".try_into()?, LedgerVersion::$variant)
+                        .map_err(BoxError::from)
+                };
+
+                let mut contract_zswap_indices = ContractZswapIndices::default();
+
+                // The first range builds the indices from an empty tree. The second adds leaves, so
+                // the indices catch up with only those.
+                let mut state = new_state()?;
+                for Range { start, end } in [0..12, 12..LEAVES] {
+                    insert(&mut state, start..end);
+                    assert_eq!(contract_zswap_indices.first_free, start);
+                    for address in addresses {
+                        assert_matches_filter(&state, &mut contract_zswap_indices, address)?;
+                    }
+                    assert_eq!(contract_zswap_indices.first_free, end);
+                }
+
+                // Existing contract zswap indices covering a longer tree than the state's belong to
+                // another state, and would keep leaves the state does not have, so the update
+                // discards them and rebuilds from the state's tree.
+                let mut state = new_state()?;
+                insert(&mut state, 0..6);
+                for address in addresses {
+                    assert_matches_filter(&state, &mut contract_zswap_indices, address)?;
+                }
+                assert_eq!(contract_zswap_indices.first_free, 6);
+
+                Ok(())
+            }
+        };
+    }
+
+    contract_zswap_indices_match_filter!(
+        contract_zswap_indices_match_filter_v8,
+        V8,
+        midnight_coin_structure_v2::contract::ContractAddress,
+        midnight_transient_crypto_v2::curve::Fr
+    );
+    contract_zswap_indices_match_filter!(
+        contract_zswap_indices_match_filter_v9,
+        V9,
+        midnight_coin_structure_v3::contract::ContractAddress,
+        midnight_transient_crypto_v3::curve::Fr
+    );
+
+    #[cfg(feature = "cloud")]
+    async fn init_ledger_db()
+    -> Result<testcontainers::ContainerAsync<testcontainers_modules::postgres::Postgres>, BoxError>
+    {
+        use crate::infra::{ledger_db, migrations, pool::postgres::PostgresPool};
+        use sqlx::postgres::PgSslMode;
+        use std::time::Duration;
+        use testcontainers::{ImageExt, runners::AsyncRunner};
+        use testcontainers_modules::postgres::Postgres;
+
+        let postgres_container = Postgres::default()
+            .with_db_name("indexer")
+            .with_user("indexer")
+            .with_password(env!("APP__INFRA__STORAGE__PASSWORD"))
+            .with_tag("17.1-alpine")
+            .start()
+            .await
+            .context("start Postgres container")?;
+        let postgres_port = postgres_container
+            .get_host_port_ipv4(5432)
+            .await
+            .context("get Postgres port")?;
+
+        let config = crate::infra::pool::postgres::Config {
+            host: "localhost".to_string(),
+            port: postgres_port,
+            dbname: "indexer".to_string(),
+            user: "indexer".to_string(),
+            password: env!("APP__INFRA__STORAGE__PASSWORD").into(),
+            sslmode: PgSslMode::Prefer,
+            max_connections: 10,
+            idle_timeout: Duration::from_secs(60),
+            max_lifetime: Duration::from_secs(5 * 60),
+        };
+
+        let pool = PostgresPool::new(config).await.context("create pool")?;
+        migrations::postgres::run(&pool)
+            .await
+            .context("run migrations")?;
+
+        ledger_db::init(
+            ledger_db::Config {
+                cache_max_nodes: 1_024,
+            },
+            pool,
+        );
+
+        Ok(postgres_container)
+    }
+
+    #[cfg(feature = "standalone")]
+    async fn init_ledger_db() -> Result<tempfile::TempDir, BoxError> {
+        use crate::infra::{
+            ledger_db, migrations,
+            pool::{self, sqlite::SqlitePool},
+        };
+
+        let temp_dir = tempfile::tempdir().context("cannot create tempdir")?;
+        let sqlite_file = temp_dir.path().join("indexer.sqlite").display().to_string();
+        let sqlite_ledger_db_file = temp_dir
+            .path()
+            .join("ledger-db.sqlite")
+            .display()
+            .to_string();
+
+        let pool = SqlitePool::new(pool::sqlite::Config::with_url(sqlite_file))
+            .await
+            .context("create pool")?;
+        migrations::sqlite::run(&pool)
+            .await
+            .context("run migrations")?;
+
+        ledger_db::init(ledger_db::Config {
+            cache_max_nodes: 1_024,
+            cnn_url: sqlite_ledger_db_file,
+        })
+        .await
+        .context("init ledger db")?;
+
+        Ok(temp_dir)
     }
 
     /// Overflow in any dimension clamps to the corresponding limit; resulting `NormalizedCost`
@@ -3968,5 +4760,371 @@ mod merkle_collapsed_update_tests {
             served_root,
             "tree rebuilt from the collapsed update must match the rehashed served root",
         );
+    }
+}
+
+#[cfg(all(test, any(feature = "cloud", feature = "standalone")))]
+mod well_formed_timestamp_tests {
+    use crate::{
+        domain::{LedgerVersion, TransactionResult, ledger::LedgerState},
+        error::BoxError,
+        testing::{
+            Malformed, NETWORK_ID, NOW, dust_registration, init_ledger_db, malformed, millis,
+        },
+    };
+    use midnight_ledger_v8::structure::INITIAL_PARAMETERS as INITIAL_PARAMETERS_V8;
+    use midnight_ledger_v9::structure::INITIAL_PARAMETERS as INITIAL_PARAMETERS_V9;
+
+    // Intent TTL, in seconds after `NOW`, of transactions whose window the intent TTL bounds
+    // from above. It must lie in `[2, global_ttl - 1]` and be at most `dust_grace_period`: the
+    // block timestamp sits at its midpoint, the case one second before `NOW` must pass the TTL
+    // check to reach the dust check, and the case at the intent TTL must pass the dust check.
+    const TTL_OFFSET: u64 = 60;
+
+    // Block and parent block timestamps of every test block, in milliseconds. The block timestamp
+    // lies strictly inside `[NOW, NOW + TTL_OFFSET]`, so it differs from both ends of the window.
+    const BLOCK_TIMESTAMP: u64 = millis(NOW + TTL_OFFSET / 2);
+    const PARENT_BLOCK_TIMESTAMP: u64 = BLOCK_TIMESTAMP - 6_000;
+
+    // `well_formed_timestamp` is the `tblock` of both `well_formed` time checks: it must lie in
+    // `[ttl - global_ttl, ttl]` for the intent TTL and in `[ctime, ctime + dust_grace_period]` for
+    // the dust actions, with inclusive bounds at whole-second granularity.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn well_formed_timestamp_is_checked_against_intent_ttl_and_dust_window()
+    -> Result<(), BoxError> {
+        let _ledger_db = init_ledger_db().await?;
+        let ttl = NOW + TTL_OFFSET;
+
+        for ledger_version in [LedgerVersion::V8, LedgerVersion::V9] {
+            let (global_ttl, dust_grace_period) = time_parameters(ledger_version)?;
+            let late_ttl = NOW + dust_grace_period + TTL_OFFSET;
+            let far_ttl = NOW + global_ttl;
+
+            let cases = [
+                ("inside both windows", ttl, BLOCK_TIMESTAMP, Ok(())),
+                ("at the intent TTL", ttl, millis(ttl), Ok(())),
+                (
+                    "sub-second past the intent TTL",
+                    ttl,
+                    millis(ttl) + 999,
+                    Ok(()),
+                ),
+                (
+                    "one second past the intent TTL",
+                    ttl,
+                    millis(ttl + 1),
+                    Err(Malformed::IntentTtlExpired),
+                ),
+                ("at the global TTL horizon", far_ttl, millis(NOW), Ok(())),
+                // `NOW - 1` also lies before the dust ctime; the ledger checks the intent TTL
+                // first, so the TTL error is the one reported.
+                (
+                    "one second before the global TTL horizon",
+                    far_ttl,
+                    millis(NOW - 1),
+                    Err(Malformed::IntentTtlTooFarInFuture),
+                ),
+                ("at the dust ctime", ttl, millis(NOW), Ok(())),
+                (
+                    "one second before the dust ctime",
+                    ttl,
+                    millis(NOW - 1),
+                    Err(Malformed::OutOfDustValidityWindow),
+                ),
+                (
+                    "at the end of the dust grace period",
+                    late_ttl,
+                    millis(NOW + dust_grace_period),
+                    Ok(()),
+                ),
+                (
+                    "one second past the end of the dust grace period",
+                    late_ttl,
+                    millis(NOW + dust_grace_period + 1),
+                    Err(Malformed::OutOfDustValidityWindow),
+                ),
+            ];
+
+            // Intent TTL in seconds, `well_formed_timestamp` in milliseconds.
+            for (name, ttl, well_formed_timestamp, expected) in cases {
+                let transaction = dust_registration(ledger_version, ttl, NOW).await?;
+                let mut ledger_state = LedgerState::new(NETWORK_ID.try_into()?, ledger_version)?;
+                let actual = match ledger_state.apply_regular_transaction(
+                    &transaction,
+                    Default::default(),
+                    BLOCK_TIMESTAMP,
+                    PARENT_BLOCK_TIMESTAMP,
+                    well_formed_timestamp,
+                ) {
+                    Ok(_) => Ok(()),
+                    Err(error) => Err(malformed(&error)
+                        .ok_or_else(|| format!("{name}: unexpected error: {error:#}"))?),
+                };
+
+                assert_eq!(actual, expected, "{ledger_version}: {name}");
+            }
+        }
+
+        Ok(())
+    }
+
+    // `well_formed_timestamp` only decides whether `well_formed` passes: a transaction verified at
+    // either end of the window it admits produces the same ledger state as one verified at the
+    // block timestamp.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn well_formed_timestamp_does_not_change_the_applied_state() -> Result<(), BoxError> {
+        let _ledger_db = init_ledger_db().await?;
+        let ttl = NOW + TTL_OFFSET;
+
+        // The dust ctime and the intent TTL bound the window both time checks admit.
+        let min_well_formed_timestamp = millis(NOW);
+        let max_well_formed_timestamp = millis(ttl);
+
+        for ledger_version in [LedgerVersion::V8, LedgerVersion::V9] {
+            let transaction = dust_registration(ledger_version, ttl, NOW).await?;
+
+            let [min, at_block_timestamp, max] = [
+                min_well_formed_timestamp,
+                BLOCK_TIMESTAMP,
+                max_well_formed_timestamp,
+            ]
+            .map(|well_formed_timestamp| {
+                let mut ledger_state = LedgerState::new(NETWORK_ID.try_into()?, ledger_version)?;
+                let outcome = ledger_state.apply_regular_transaction(
+                    &transaction,
+                    Default::default(),
+                    BLOCK_TIMESTAMP,
+                    PARENT_BLOCK_TIMESTAMP,
+                    well_formed_timestamp,
+                )?;
+                Ok::<_, BoxError>((outcome.transaction_result, ledger_state.root()?))
+            });
+
+            let at_block_timestamp = at_block_timestamp?;
+            assert_eq!(
+                at_block_timestamp.0,
+                TransactionResult::Success,
+                "{ledger_version}"
+            );
+            assert_eq!(min?, at_block_timestamp, "{ledger_version}: min");
+            assert_eq!(max?, at_block_timestamp, "{ledger_version}: max");
+        }
+
+        Ok(())
+    }
+
+    // `apply` checks the intent TTL against the block timestamp: a transaction whose
+    // `well_formed_timestamp` lies inside its window but whose block timestamp lies past its TTL
+    // applies as a failure.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn block_timestamp_past_the_intent_ttl_fails_the_transaction() -> Result<(), BoxError> {
+        let _ledger_db = init_ledger_db().await?;
+        let ttl = NOW + TTL_OFFSET;
+
+        for ledger_version in [LedgerVersion::V8, LedgerVersion::V9] {
+            let transaction = dust_registration(ledger_version, ttl, NOW).await?;
+
+            for (block_timestamp, expected) in [
+                (millis(ttl), TransactionResult::Success),
+                (millis(ttl + 1), TransactionResult::Failure),
+            ] {
+                let mut ledger_state = LedgerState::new(NETWORK_ID.try_into()?, ledger_version)?;
+                let outcome = ledger_state.apply_regular_transaction(
+                    &transaction,
+                    Default::default(),
+                    block_timestamp,
+                    block_timestamp - 6_000,
+                    millis(ttl),
+                )?;
+
+                assert_eq!(
+                    outcome.transaction_result, expected,
+                    "{ledger_version}: block timestamp {block_timestamp}"
+                );
+
+                // A failed transaction pays no fees; a successful one does.
+                assert_eq!(
+                    outcome.fees == 0,
+                    expected == TransactionResult::Failure,
+                    "{ledger_version}: block timestamp {block_timestamp}: fees {}",
+                    outcome.fees
+                );
+
+                // Only a failure has a reason.
+                assert_eq!(
+                    outcome.failure_reason.is_some(),
+                    expected == TransactionResult::Failure,
+                    "{ledger_version}: block timestamp {block_timestamp}: {:?}",
+                    outcome.failure_reason
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    // Returns the global TTL and the dust grace period `LedgerState::new` starts from, in seconds.
+    fn time_parameters(ledger_version: LedgerVersion) -> Result<(u64, u64), BoxError> {
+        let (global_ttl, dust_grace_period) = match ledger_version {
+            LedgerVersion::V8 => (
+                INITIAL_PARAMETERS_V8.global_ttl,
+                INITIAL_PARAMETERS_V8.dust.dust_grace_period,
+            ),
+            LedgerVersion::V9 => (
+                INITIAL_PARAMETERS_V9.global_ttl,
+                INITIAL_PARAMETERS_V9.dust.dust_grace_period,
+            ),
+        };
+
+        Ok((
+            global_ttl.as_seconds().try_into()?,
+            dust_grace_period.as_seconds().try_into()?,
+        ))
+    }
+}
+
+#[cfg(all(test, feature = "standalone"))]
+mod reload_tests {
+    use super::{Error, SyntheticCost};
+    use crate::{
+        domain::{LedgerVersion, SerializedLedgerStateKey, TransactionResult, ledger::LedgerState},
+        infra::ledger_db::v1_1::LedgerDb,
+        testing::{NETWORK_ID, NOW, dust_registration, init_ledger_db, millis},
+    };
+    use anyhow::{Context, anyhow, ensure};
+    use midnight_storage_core_v1::storage::default_storage;
+
+    // Blocks each test indexes.
+    const BLOCKS: u64 = 50;
+    // Seconds between consecutive blocks.
+    const BLOCK_TIME: u64 = 6;
+
+    // The devnet genesis state, translated to `ledger_version`. Unlike a new state, it is large
+    // enough that the arena tracks its nodes by reference. The V8 state is persisted before the
+    // translation, as the chain-indexer does at the fork, so the translated state's references to
+    // V8 nodes resolve.
+    fn devnet_genesis(ledger_version: LedgerVersion) -> anyhow::Result<LedgerState> {
+        let raw = std::fs::read(format!(
+            "{}/tests/v8_genesis_devnet_0_22_0.raw",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .context("read v8 devnet genesis fixture")?;
+        let (ledger_state, _) = LedgerState::from_genesis(&raw, LedgerVersion::V8)?.persist()?;
+        Ok(ledger_state.translate(ledger_version)?)
+    }
+
+    // Indexes `BLOCKS` blocks from a new state, the first with a dust registration and the rest
+    // empty, and returns each block's persisted key, reloading after every block when `reload` is
+    // set.
+    async fn index_blocks(
+        ledger_version: LedgerVersion,
+        reload: bool,
+    ) -> anyhow::Result<Vec<SerializedLedgerStateKey>> {
+        // The intent TTL is block 1's timestamp, the latest the ledger accepts it at.
+        let transaction = dust_registration(ledger_version, NOW + BLOCK_TIME, NOW)
+            .await
+            .map_err(|error| anyhow!(error))?;
+        let mut ledger_state = LedgerState::new(NETWORK_ID.try_into()?, ledger_version)?;
+        let mut parent_block_timestamp = millis(NOW);
+        let mut keys = Vec::new();
+
+        for block in 1..=BLOCKS {
+            let block_timestamp = millis(NOW + block * BLOCK_TIME);
+            if block == 1 {
+                let outcome = ledger_state.apply_regular_transaction(
+                    &transaction,
+                    Default::default(),
+                    block_timestamp,
+                    parent_block_timestamp,
+                    block_timestamp,
+                )?;
+                ensure!(
+                    outcome.transaction_result == TransactionResult::Success,
+                    "{ledger_version}: dust registration failed"
+                );
+            }
+            ledger_state.finalize_apply_transactions(block_timestamp)?;
+
+            let (persisted, key) = ledger_state.persist()?;
+            ledger_state = if reload {
+                persisted.reload(&key)?
+            } else {
+                persisted
+            };
+            keys.push(key);
+            parent_block_timestamp = block_timestamp;
+        }
+
+        Ok(keys)
+    }
+
+    // A reloaded state carries on exactly where the held state would, so indexing with a reload
+    // after every block persists the same states.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn reload_keeps_the_state() -> anyhow::Result<()> {
+        let _ledger_db = init_ledger_db().await.map_err(|error| anyhow!(error))?;
+
+        for ledger_version in [LedgerVersion::V8, LedgerVersion::V9] {
+            let held = index_blocks(ledger_version, false).await?;
+            let reloaded = index_blocks(ledger_version, true).await?;
+            assert_eq!(held, reloaded, "{ledger_version:?}");
+        }
+
+        Ok(())
+    }
+
+    // A reload releases every node materialised since the state loaded, so the arena tracks no
+    // more nodes than it did right after loading the genesis state, and fewer than before the reload.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn reload_releases_materialised_nodes() -> anyhow::Result<()> {
+        let _ledger_db = init_ledger_db().await.map_err(|error| anyhow!(error))?;
+
+        for ledger_version in [LedgerVersion::V8, LedgerVersion::V9] {
+            let mut ledger_state = devnet_genesis(ledger_version)?;
+            let genesis = default_storage::<LedgerDb>().arena.size();
+            let mut key = SerializedLedgerStateKey::default();
+            for block in 1..=BLOCKS {
+                ledger_state.finalize_apply_transactions(millis(NOW + block * BLOCK_TIME))?;
+                (ledger_state, key) = ledger_state.persist()?;
+            }
+
+            let held = default_storage::<LedgerDb>().arena.size();
+            let ledger_state = ledger_state.reload(&key)?;
+            let reloaded = default_storage::<LedgerDb>().arena.size();
+            assert!(
+                reloaded < held && reloaded <= genesis,
+                "{ledger_version:?}: the arena tracks {reloaded} nodes after the reload, {held} \
+                 before it and {genesis} after loading the genesis state"
+            );
+            drop(ledger_state);
+        }
+
+        Ok(())
+    }
+
+    // A reload mid-block would drop the cost of the block's transactions so far, so it fails.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn reload_mid_block_fails() -> anyhow::Result<()> {
+        let _ledger_db = init_ledger_db().await.map_err(|error| anyhow!(error))?;
+
+        for ledger_version in [LedgerVersion::V8, LedgerVersion::V9] {
+            let mut ledger_state = devnet_genesis(ledger_version)?;
+            let block_fullness = match &mut ledger_state {
+                LedgerState::V8 { block_fullness, .. } => block_fullness,
+                LedgerState::V9 { block_fullness, .. } => block_fullness,
+            };
+            *block_fullness = SyntheticCost {
+                block_usage: 1,
+                ..Default::default()
+            };
+
+            let result = ledger_state.reload(&SerializedLedgerStateKey::default());
+            assert!(
+                matches!(result, Err(Error::ReloadLedgerState)),
+                "{ledger_version}: {result:?}"
+            );
+        }
+
+        Ok(())
     }
 }

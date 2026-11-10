@@ -16,9 +16,11 @@ Maintainer and contributor guides. For local setup see the top-level
 - [Ledger 8 → 9 devnet rehearsal](./hardfork-devnet-rehearsal-8to9.md) - release-gate
   procedure for validating the hard-fork crossing.
 - [Upgrading the node version](./updating-node-version.md) - `NODE_VERSIONS`,
-  metadata, per-version runtime modules.
+  metadata, per-runtime decode modules.
 - [Upgrading the ledger](./upgrading-ledger.md) - the `v8`/`v9` coexistence and
-  the `[patch.crates-io]` git-tag pins.
+  the node-matched pins.
+- [Reindexing from genesis](./reindexing.md) - which changes require it, and
+  why both stores must be wiped together.
 
 ## Other
 

@@ -69,3 +69,8 @@ subxt metadata \
     --url ws://localhost:9944 > \
     ./.node/$node_version/metadata.scale
 echo "Written node metadata to .node/$node_version/metadata.scale"
+
+# The same hash build.rs derives from the saved file, so two node versions
+# reporting one hash share a generated runtime module.
+subxt compatibility --nodes ws://localhost:9944 --allow-insecure \
+    | grep -o 'metadata hash "[0-9a-f]*"' | tr -d '"'
