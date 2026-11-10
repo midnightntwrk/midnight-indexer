@@ -208,6 +208,13 @@ The justfile defines recipes for each Indexer component to start it alongside it
 just run-chain-indexer
 ```
 
+#### Against a Forked Network
+
+To index real network history locally, `just fork-up` brings up a local fork of
+Preview (or another well-known network) with midnight-node's local-environment
+and runs the indexer against it. See
+[docs/running-against-a-fork.md](docs/running-against-a-fork.md).
+
 ## Development Setup
 
 ### Requirements

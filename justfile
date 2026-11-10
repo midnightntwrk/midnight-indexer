@@ -161,7 +161,7 @@ run-node node_version=latest_node_version:
 
 # --- Forked-network integration (midnight-node local-environment) ------------
 # Runs the cloud indexer stack against a forked well-known network (e.g. a
-# mainnet fork) brought up by midnight-node's `local-environment` tooling.
+# Preview fork) brought up by midnight-node's `local-environment` tooling.
 # See docs/running-against-a-fork.md. Set MIDNIGHT_NODE_DIR to an existing
 # midnight-node checkout to skip the sparse clone.
 
@@ -198,7 +198,7 @@ fork-clone:
     echo "midnight-node {{midnight_node_ref}} at $(git -C "$dir" rev-parse --short HEAD)"
 
 # Bring up the fork, then attach the indexer stack (NODE_IMAGE required; pass `--from-snapshot <url>` on first run).
-fork-up network="mainnet" *args="": fork-clone
+fork-up network="preview" *args="": fork-clone
     #!/usr/bin/env bash
     set -euo pipefail
     local_env="{{midnight_node_dir}}/local-environment"
@@ -239,7 +239,7 @@ fork-up network="mainnet" *args="": fork-clone
     echo "indexer-api: http://localhost:${INDEXER_API_PORT:-8088} (GraphQL at /api/v4/graphql)"
 
 # Tear down the indexer overlay, then the fork (overlay first so the fork can remove its network).
-fork-down network="mainnet":
+fork-down network="preview":
     #!/usr/bin/env bash
     set -euo pipefail
     local_env="{{midnight_node_dir}}/local-environment"
