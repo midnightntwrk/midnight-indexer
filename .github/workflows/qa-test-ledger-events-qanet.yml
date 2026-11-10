@@ -13,7 +13,7 @@ permissions:
 jobs:
   test-ledger-events:
     name: Test Ledger Events
-    uses: ./.github/workflows/qa-test-ledger-events-base-workflow.yml
+    uses: midnightntwrk/midnight-indexer/.github/workflows/qa-test-ledger-events-base-workflow.yml@87910bdff7b1b528d8bca5ef9b4e33d4e1b0f15c
     with:
       target_env: qanet
       indexer_api_version: v4
