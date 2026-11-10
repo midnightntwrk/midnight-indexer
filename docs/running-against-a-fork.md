@@ -45,7 +45,10 @@ just fork-down mainnet
    `.midnight-node/` at the tag matching the latest `NODE_VERSIONS` entry.
    Set `MIDNIGHT_NODE_DIR` to use an existing checkout instead, or
    `MIDNIGHT_NODE_REF` to pin a different tag/SHA.
-2. Brings up the fork via `npm run run:<network>`.
+2. Brings up the fork via `npm run run:<network>`, with mock-authorities
+   `ghcr.io/shieldedtech/mock-authorities:14cee4b`. Earlier images leave the
+   fork unfinalized and write a fork block that chain-indexer cannot decode.
+   Override with `MOCK_AUTHORITIES_IMAGE`.
 3. Checks the fork's node tag against `NODE_VERSIONS` — a fork running a node
    version without committed metadata here will be rejected by chain-indexer
    (see [updating-node-version.md](updating-node-version.md)). Set

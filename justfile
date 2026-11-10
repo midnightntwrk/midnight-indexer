@@ -164,6 +164,9 @@ run-node node_version=latest_node_version:
 midnight_node_dir := env_var_or_default("MIDNIGHT_NODE_DIR", ".midnight-node")
 midnight_node_repo := env_var_or_default("MIDNIGHT_NODE_REPO", "https://github.com/midnightntwrk/midnight-node")
 midnight_node_ref := env_var_or_default("MIDNIGHT_NODE_REF", "v" + latest_node_version)
+# Released local-environment versions default to an older image whose fork
+# never finalizes and whose fork block chain-indexer cannot decode.
+mock_authorities_image := env_var_or_default("MOCK_AUTHORITIES_IMAGE", "ghcr.io/shieldedtech/mock-authorities:14cee4b")
 
 # Sparse-clone midnight-node (local-environment only) at MIDNIGHT_NODE_REF.
 fork-clone:
@@ -183,7 +186,7 @@ fork-up network="mainnet" *args="": fork-clone
     set -euo pipefail
     local_env="{{midnight_node_dir}}/local-environment"
     [ -d "$local_env/node_modules" ] || (cd "$local_env" && npm ci)
-    (cd "$local_env" && npm run "run:{{network}}" -- {{args}})
+    (cd "$local_env" && MOCK_AUTHORITIES_IMAGE="{{mock_authorities_image}}" npm run "run:{{network}}" -- {{args}})
     manifest="$local_env/artifacts/{{network}}.manifest.env"
     [ -f "$manifest" ] || { echo "fork manifest not found: $manifest" >&2; exit 1; }
     # The fork must run a node version this indexer has metadata for, or
