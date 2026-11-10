@@ -33,6 +33,22 @@ export default defineConfig({
     },
     testTimeout: 15000,
     retry: 1,
+    // Run the e2e files one after another, never side by side.
+    //
+    // WHY. The e2e suites all spend from the same funding wallet, and under
+    // TX_BACKEND=moth each worker runs its own wallet sync engine over the same
+    // on-disk cache. Two workers then pick from the same unspent outputs at the
+    // same time, and one of the two transfers is left unconfirmed — which
+    // surfaces as a suite that skips every test rather than as a clear failure.
+    //
+    // This is the config equivalent of `--no-file-parallelism`, set here so that
+    // a run is correct by default instead of depending on the caller remembering
+    // the flag. It is a stopgap: supporting parallel runs properly means giving
+    // each suite its own wallet, not serialising them.
+    //
+    // An explicit `--file-parallelism` on the command line still overrides this,
+    // so global setup reports which mode is actually in effect.
+    fileParallelism: false,
     include: ['tests/e2e/**/*.test.ts'],
   },
   resolve: {

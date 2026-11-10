@@ -13,7 +13,8 @@
 
 use crate::domain::{Block, ContractAction, Transaction};
 use indexer_common::domain::ContractAttributes;
-use metrics::{Counter, Gauge, counter, gauge};
+use metrics::{Counter, Gauge, Histogram, counter, gauge, histogram};
+use std::time::Duration;
 
 pub struct Metrics {
     block_height: Counter,
@@ -23,6 +24,12 @@ pub struct Metrics {
     contract_deploy_count: Counter,
     contract_call_count: Counter,
     contract_update_count: Counter,
+    gc_run_count: Counter,
+    gc_culled_node_count: Counter,
+    gc_duration_seconds: Histogram,
+    gc_root_count: Gauge,
+    arena_node_count: Gauge,
+    uncaptured_contract_state_count: Counter,
 }
 
 impl Metrics {
@@ -39,6 +46,12 @@ impl Metrics {
             contract_deploy_count: counter!("indexer_contract_deploy_count"),
             contract_call_count: counter!("indexer_contract_call_count"),
             contract_update_count: counter!("indexer_contract_update_count"),
+            gc_run_count: counter!("indexer_gc_run_count"),
+            gc_culled_node_count: counter!("indexer_gc_culled_node_count"),
+            gc_duration_seconds: histogram!("indexer_gc_duration_seconds"),
+            gc_root_count: gauge!("indexer_gc_root_count"),
+            arena_node_count: gauge!("indexer_arena_node_count"),
+            uncaptured_contract_state_count: counter!("indexer_uncaptured_contract_state_count"),
         };
 
         if let Some(block_height) = block_height {
@@ -133,5 +146,31 @@ impl Metrics {
                 })
                 .count() as u64,
         );
+    }
+
+    /// Record one storage-core gc-v1 mark-and-sweep pass, along with the gc root count observed
+    /// after it.
+    ///
+    /// The root count is the growth number to watch: per-action contract state roots are never
+    /// unpersisted, so they accumulate with the number of *distinct* contract states. It is also the
+    /// only live-set proxy available from outside storage-core — the mark set that actually bounds
+    /// gc's memory is a `pub(crate)` field of `GcState`, so its size cannot be observed from here.
+    pub fn record_gc(&self, duration: Duration, nodes_culled: usize, root_count: usize) {
+        self.gc_run_count.increment(1);
+        self.gc_culled_node_count.increment(nodes_culled as u64);
+        self.gc_duration_seconds.record(duration.as_secs_f64());
+        self.gc_root_count.set(root_count as f64);
+    }
+
+    /// Record the number of rows in `ledger_db_nodes`, i.e. the size of the arena.
+    pub fn record_arena_node_count(&self, node_count: usize) {
+        self.arena_node_count.set(node_count as f64);
+    }
+
+    /// Record contract addresses in a block for which no contract state could be captured from the
+    /// ledger state. Expected to be non-zero only for failed actions, so a rising rate means states
+    /// are silently not being captured and `state` is reading back empty.
+    pub fn record_uncaptured_contract_states(&self, count: usize) {
+        self.uncaptured_contract_state_count.increment(count as u64);
     }
 }

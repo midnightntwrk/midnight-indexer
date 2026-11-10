@@ -11,14 +11,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! GraphQL types for the `contractEvents` query and subscription surface
-//! (public contract events, MIP-107 / CoIP-442).
+//! GraphQL types for the `contractEvents` query and subscription surface (#1161, public
+//! contract events per MIP-0002 / CoIP-442).
 //!
-//! `ContractEvent` is the polymorphic interface; concrete types per
-//! `LogEventType` variant (`ShieldedSpendEvent`, `MiscContractEvent`, etc.)
-//! implement it. Clients discriminate via `__typename`. See
-//! `docs/interactions/event-epic/8may-2026/contract-events-graphql-draft-v0.7.graphql`
-//! for the canonical reference shape.
+//! `ContractEvent` is the polymorphic interface; concrete types per `LogEventType` variant
+//! (`ShieldedSpendEvent`, `MiscContractEvent`, etc.) implement it. Clients discriminate via
+//! `__typename`.
 
 use crate::{
     domain::{
@@ -33,15 +31,16 @@ use crate::{
     infra::api::{
         ApiResult,
         v4::{
-            HexEncodable, HexEncoded, contract_action::get_transaction_by_id, directives::beta,
-            transaction::Transaction,
+            HexDecodeError, HexEncodable, HexEncoded, contract_action::get_transaction_by_id,
+            directives::beta, transaction::Transaction,
         },
     },
 };
 use async_graphql::{ComplexObject, Context, Enum, InputObject, Interface, SimpleObject};
 use derive_more::Debug;
 use indexer_common::domain::{
-    AddressOrContract as DomainAddressOrContract, ByteVec, LedgerEventAttributes,
+    AddressOrContract as DomainAddressOrContract, ByteVec, INDEXABLE_CONTRACT_FIELD_NAMES,
+    LedgerEventAttributes, SerializedContractAddress, TransactionHash,
 };
 use std::marker::PhantomData;
 use thiserror::Error;
@@ -54,17 +53,23 @@ use thiserror::Error;
 #[derive(Debug, Clone, SimpleObject)]
 #[graphql(directive = beta::apply())]
 pub struct AddressOrContract {
+    /// Which of the two address fields is populated.
     pub kind: AddressOrContractKind,
-    /// Bech32m-encoded user address; populated when kind = USER.
-    /// Hex-encoded here at the wire level; clients re-encode if needed.
+
+    /// The hex-encoded user address; populated when kind is USER.
     pub user_address: Option<HexEncoded>,
-    /// Hex-encoded contract address; populated when kind = CONTRACT.
+
+    /// The hex-encoded contract address; populated when kind is CONTRACT.
     pub contract_address: Option<HexEncoded>,
 }
 
+/// Discriminator for `AddressOrContract`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
 pub enum AddressOrContractKind {
+    /// The address is a user (zswap coin public key) address.
     User,
+
+    /// The address is a contract address.
     Contract,
 }
 
@@ -86,57 +91,78 @@ impl From<DomainAddressOrContract> for AddressOrContract {
 }
 
 /// Closed enum of contract event types the indexer surfaces. Used in filter
-/// input only, response discrimination is via `__typename`. Mirrors the
-/// 11 variants of `LogEventType` (onchain-vm/src/ops.rs, ledger-9 alpha).
+/// input only, response discrimination is via `__typename`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
 pub enum ContractEventType {
+    /// A contract spends a shielded coin.
     ShieldedSpend,
+
+    /// A contract or user receives a shielded coin.
     ShieldedReceive,
+
+    /// A contract mints a shielded coin.
     ShieldedMint,
+
+    /// A contract burns a shielded coin.
     ShieldedBurn,
+
+    /// A contract spends an unshielded coin.
     UnshieldedSpend,
+
+    /// A contract or user receives an unshielded coin.
     UnshieldedReceive,
+
+    /// A contract mints an unshielded coin.
     UnshieldedMint,
+
+    /// A contract burns an unshielded coin.
     UnshieldedBurn,
+
+    /// A contract is paused.
     Paused,
+
+    /// A contract is unpaused.
     Unpaused,
+
+    /// A custom event emitted by a contract.
     Misc,
 }
 
-/// Prefix filter on an indexed field of a standard event. Indexer resolves
-/// `fieldName` for all standard events from the variant; no descriptor needed.
-/// Not supported on Misc events.
+/// Prefix filter on an indexed field of a standard event; not supported on Misc events.
 #[derive(Debug, Clone, InputObject)]
 pub struct FieldPrefixFilter {
-    /// Field name (e.g. `nullifier`, `commitment`, `sender`). Must match an
-    /// indexed field of the filtered event type.
+    /// The indexed field name; one of `nullifier`, `commitment`, `ciphertext`, `domainSep`,
+    /// `tokenType`, `sender` or `recipient`.
     pub field_name: String,
-    /// Hex-encoded prefix bytes. Empty string matches all values; otherwise
-    /// the indexer returns events whose field value starts with this prefix,
-    /// client filters to exact match if needed.
+
+    /// The hex-encoded field value prefix. An empty string matches all values; otherwise
+    /// events whose field value starts with this prefix are returned.
     pub prefix: HexEncoded,
 }
 
-/// Filter for contract events queries and subscriptions. Block-range bounds
-/// live here so the same shape works for both (per Andrzej 21 May review).
+/// Filter for contract events queries and subscriptions; block-range bounds live here so the
+/// same shape works for both.
 #[derive(Debug, Clone, InputObject)]
 pub struct ContractEventFilter {
-    /// Required: the contract address to filter events for.
+    /// The hex-encoded contract address to filter events for.
     pub contract_address: HexEncoded,
-    /// Optional: filter to a subset of contract event types. Indexer translates
-    /// to `variant = ANY(...)` against the indexed variant column.
+
+    /// Event types to narrow to; must be non-empty when given.
     pub types: Option<Vec<ContractEventType>>,
-    /// Optional: prefix-match on indexed fields of the event. Standard events only.
+
+    /// Prefix matches on indexed event fields, combined with AND semantics; standard events
+    /// only.
     pub field_prefixes: Option<Vec<FieldPrefixFilter>>,
-    /// Optional: lower bound on the block height an event was emitted in. On
-    /// subscription, acts as a starting cursor (alternative to `id`).
+
+    /// Lower bound on the block height an event was emitted in; on subscription this acts as
+    /// a starting cursor alongside `id`.
     pub from_block: Option<u32>,
-    /// Optional: upper bound on the block height an event was emitted in. On
-    /// subscription, terminates the stream once the chain reaches this block.
+
+    /// Upper bound on the block height an event was emitted in; on subscription, the stream
+    /// completes once the chain has reached this block.
     pub to_block: Option<u32>,
-    /// Optional: hex-encoded transaction hash; narrows to events emitted from
-    /// transactions with this hash ("I just submitted tx X, give me its
-    /// events").
+
+    /// The hex-encoded transaction hash to narrow to events emitted by that transaction.
     pub transaction_hash: Option<HexEncoded>,
 }
 
@@ -205,14 +231,27 @@ pub struct ShieldedSpendEvent<S>
 where
     S: Storage,
 {
+    /// The ID of this contract event.
     pub id: u64,
+
+    /// The hex-encoded serialized event payload.
     pub raw: HexEncoded,
+
+    /// The maximum ID of all contract events.
     pub max_id: u64,
+
+    /// The protocol version.
     pub protocol_version: u32,
+
+    /// The event schema version, as declared by the emitting contract's compiler.
     pub version: u32,
+
+    /// The hex-encoded address of the emitting contract.
     pub contract_address: HexEncoded,
+
+    /// The ID of the transaction this event was emitted from.
     pub transaction_id: u64,
-    /// Indexed.
+    /// The hex-encoded nullifier; filterable via `fieldPrefixes`.
     pub nullifier: HexEncoded,
     #[graphql(skip)]
     _s: PhantomData<S>,
@@ -235,22 +274,34 @@ pub struct ShieldedReceiveEvent<S>
 where
     S: Storage,
 {
+    /// The ID of this contract event.
     pub id: u64,
+
+    /// The hex-encoded serialized event payload.
     pub raw: HexEncoded,
+
+    /// The maximum ID of all contract events.
     pub max_id: u64,
+
+    /// The protocol version.
     pub protocol_version: u32,
+
+    /// The event schema version, as declared by the emitting contract's compiler.
     pub version: u32,
+
+    /// The hex-encoded address of the emitting contract.
     pub contract_address: HexEncoded,
+
+    /// The ID of the transaction this event was emitted from.
     pub transaction_id: u64,
-    /// Indexed.
+    /// The hex-encoded commitment; filterable via `fieldPrefixes`.
     pub commitment: HexEncoded,
-    /// Indexed. Optional ciphertext for shielded coin receipt
-    /// (`Maybe<Bytes<512>>`). Hex-encoded, up to 512 bytes.
+    /// The hex-encoded optional ciphertext of the shielded coin receipt, up to 512 bytes;
+    /// filterable via `fieldPrefixes`.
     pub ciphertext: Option<HexEncoded>,
-    /// Set when received by a contract; null for user recipients
-    /// (`Maybe<ContractAddress>`). Renamed from `contractAddress` in the CoIP
-    /// to avoid collision with the top-level emitting `contractAddress`
-    /// inherited from the ContractEvent interface.
+
+    /// The hex-encoded receiving contract address; set when received by a contract, null for
+    /// user recipients. Named to avoid collision with the emitting `contractAddress`.
     pub receiving_contract_address: Option<HexEncoded>,
     #[graphql(skip)]
     _s: PhantomData<S>,
@@ -273,18 +324,32 @@ pub struct ShieldedMintEvent<S>
 where
     S: Storage,
 {
+    /// The ID of this contract event.
     pub id: u64,
+
+    /// The hex-encoded serialized event payload.
     pub raw: HexEncoded,
+
+    /// The maximum ID of all contract events.
     pub max_id: u64,
+
+    /// The protocol version.
     pub protocol_version: u32,
+
+    /// The event schema version, as declared by the emitting contract's compiler.
     pub version: u32,
+
+    /// The hex-encoded address of the emitting contract.
     pub contract_address: HexEncoded,
+
+    /// The ID of the transaction this event was emitted from.
     pub transaction_id: u64,
-    /// Indexed.
+    /// The hex-encoded commitment; filterable via `fieldPrefixes`.
     pub commitment: HexEncoded,
-    /// Indexed (per Andrzej, useful for token-type queries).
+    /// The hex-encoded domain separator; filterable via `fieldPrefixes`.
     pub domain_sep: HexEncoded,
-    /// Optional, hidden in some shielded mints (`Maybe<Uint<128>>`).
+
+    /// The optional amount as a decimal string; hidden in some shielded mints.
     pub amount: Option<String>,
     #[graphql(skip)]
     _s: PhantomData<S>,
@@ -307,16 +372,29 @@ pub struct ShieldedBurnEvent<S>
 where
     S: Storage,
 {
+    /// The ID of this contract event.
     pub id: u64,
+
+    /// The hex-encoded serialized event payload.
     pub raw: HexEncoded,
+
+    /// The maximum ID of all contract events.
     pub max_id: u64,
+
+    /// The protocol version.
     pub protocol_version: u32,
+
+    /// The event schema version, as declared by the emitting contract's compiler.
     pub version: u32,
+
+    /// The hex-encoded address of the emitting contract.
     pub contract_address: HexEncoded,
+
+    /// The ID of the transaction this event was emitted from.
     pub transaction_id: u64,
-    /// Indexed.
+    /// The hex-encoded nullifier; filterable via `fieldPrefixes`.
     pub nullifier: HexEncoded,
-    /// Optional, hidden in some shielded burns (`Maybe<Uint<128>>`).
+    /// The optional amount as a decimal string; hidden in some shielded burns.
     pub amount: Option<String>,
     #[graphql(skip)]
     _s: PhantomData<S>,
@@ -344,19 +422,36 @@ pub struct UnshieldedSpendEvent<S>
 where
     S: Storage,
 {
+    /// The ID of this contract event.
     pub id: u64,
+
+    /// The hex-encoded serialized event payload.
     pub raw: HexEncoded,
+
+    /// The maximum ID of all contract events.
     pub max_id: u64,
+
+    /// The protocol version.
     pub protocol_version: u32,
+
+    /// The event schema version, as declared by the emitting contract's compiler.
     pub version: u32,
+
+    /// The hex-encoded address of the emitting contract.
     pub contract_address: HexEncoded,
+
+    /// The ID of the transaction this event was emitted from.
     pub transaction_id: u64,
-    /// Indexed.
+    /// The spending user or contract address; filterable via `fieldPrefixes`.
     pub sender: AddressOrContract,
-    /// Indexed.
+
+    /// The hex-encoded domain separator; filterable via `fieldPrefixes`.
     pub domain_sep: HexEncoded,
-    /// Indexed; matches existing unshielded_utxos.token_type index.
+
+    /// The hex-encoded token type; filterable via `fieldPrefixes`.
     pub token_type: HexEncoded,
+
+    /// The amount as a decimal string.
     pub amount: String,
     #[graphql(skip)]
     _s: PhantomData<S>,
@@ -379,19 +474,36 @@ pub struct UnshieldedReceiveEvent<S>
 where
     S: Storage,
 {
+    /// The ID of this contract event.
     pub id: u64,
+
+    /// The hex-encoded serialized event payload.
     pub raw: HexEncoded,
+
+    /// The maximum ID of all contract events.
     pub max_id: u64,
+
+    /// The protocol version.
     pub protocol_version: u32,
+
+    /// The event schema version, as declared by the emitting contract's compiler.
     pub version: u32,
+
+    /// The hex-encoded address of the emitting contract.
     pub contract_address: HexEncoded,
+
+    /// The ID of the transaction this event was emitted from.
     pub transaction_id: u64,
-    /// Indexed.
+    /// The receiving user or contract address; filterable via `fieldPrefixes`.
     pub recipient: AddressOrContract,
-    /// Indexed.
+
+    /// The hex-encoded domain separator; filterable via `fieldPrefixes`.
     pub domain_sep: HexEncoded,
-    /// Indexed; matches existing unshielded_utxos.token_type index.
+
+    /// The hex-encoded token type; filterable via `fieldPrefixes`.
     pub token_type: HexEncoded,
+
+    /// The amount as a decimal string.
     pub amount: String,
     #[graphql(skip)]
     _s: PhantomData<S>,
@@ -414,17 +526,33 @@ pub struct UnshieldedMintEvent<S>
 where
     S: Storage,
 {
+    /// The ID of this contract event.
     pub id: u64,
+
+    /// The hex-encoded serialized event payload.
     pub raw: HexEncoded,
+
+    /// The maximum ID of all contract events.
     pub max_id: u64,
+
+    /// The protocol version.
     pub protocol_version: u32,
+
+    /// The event schema version, as declared by the emitting contract's compiler.
     pub version: u32,
+
+    /// The hex-encoded address of the emitting contract.
     pub contract_address: HexEncoded,
+
+    /// The ID of the transaction this event was emitted from.
     pub transaction_id: u64,
-    /// Indexed.
+    /// The hex-encoded domain separator; filterable via `fieldPrefixes`.
     pub domain_sep: HexEncoded,
-    /// Indexed; matches existing unshielded_utxos.token_type index.
+
+    /// The hex-encoded token type; filterable via `fieldPrefixes`.
     pub token_type: HexEncoded,
+
+    /// The amount as a decimal string.
     pub amount: String,
     #[graphql(skip)]
     _s: PhantomData<S>,
@@ -447,17 +575,33 @@ pub struct UnshieldedBurnEvent<S>
 where
     S: Storage,
 {
+    /// The ID of this contract event.
     pub id: u64,
+
+    /// The hex-encoded serialized event payload.
     pub raw: HexEncoded,
+
+    /// The maximum ID of all contract events.
     pub max_id: u64,
+
+    /// The protocol version.
     pub protocol_version: u32,
+
+    /// The event schema version, as declared by the emitting contract's compiler.
     pub version: u32,
+
+    /// The hex-encoded address of the emitting contract.
     pub contract_address: HexEncoded,
+
+    /// The ID of the transaction this event was emitted from.
     pub transaction_id: u64,
-    /// Indexed.
+    /// The spending user or contract address; filterable via `fieldPrefixes`.
     pub sender: AddressOrContract,
-    /// Indexed; matches existing unshielded_utxos.token_type index.
+
+    /// The hex-encoded token type; filterable via `fieldPrefixes`.
     pub token_type: HexEncoded,
+
+    /// The amount as a decimal string.
     pub amount: String,
     #[graphql(skip)]
     _s: PhantomData<S>,
@@ -484,12 +628,25 @@ pub struct PausedEvent<S>
 where
     S: Storage,
 {
+    /// The ID of this contract event.
     pub id: u64,
+
+    /// The hex-encoded serialized event payload.
     pub raw: HexEncoded,
+
+    /// The maximum ID of all contract events.
     pub max_id: u64,
+
+    /// The protocol version.
     pub protocol_version: u32,
+
+    /// The event schema version, as declared by the emitting contract's compiler.
     pub version: u32,
+
+    /// The hex-encoded address of the emitting contract.
     pub contract_address: HexEncoded,
+
+    /// The ID of the transaction this event was emitted from.
     pub transaction_id: u64,
     #[graphql(skip)]
     _s: PhantomData<S>,
@@ -512,12 +669,25 @@ pub struct UnpausedEvent<S>
 where
     S: Storage,
 {
+    /// The ID of this contract event.
     pub id: u64,
+
+    /// The hex-encoded serialized event payload.
     pub raw: HexEncoded,
+
+    /// The maximum ID of all contract events.
     pub max_id: u64,
+
+    /// The protocol version.
     pub protocol_version: u32,
+
+    /// The event schema version, as declared by the emitting contract's compiler.
     pub version: u32,
+
+    /// The hex-encoded address of the emitting contract.
     pub contract_address: HexEncoded,
+
+    /// The ID of the transaction this event was emitted from.
     pub transaction_id: u64,
     #[graphql(skip)]
     _s: PhantomData<S>,
@@ -544,17 +714,31 @@ pub struct MiscContractEvent<S>
 where
     S: Storage,
 {
+    /// The ID of this contract event.
     pub id: u64,
+
+    /// The hex-encoded serialized event payload.
     pub raw: HexEncoded,
+
+    /// The maximum ID of all contract events.
     pub max_id: u64,
+
+    /// The protocol version.
     pub protocol_version: u32,
+
+    /// The event schema version, as declared by the emitting contract's compiler.
     pub version: u32,
+
+    /// The hex-encoded address of the emitting contract.
     pub contract_address: HexEncoded,
+
+    /// The ID of the transaction this event was emitted from.
     pub transaction_id: u64,
-    /// Hex-encoded contract-defined event name (Compact Bytes<32>).
+    /// The hex-encoded contract-defined event name (32 bytes).
     pub name: HexEncoded,
-    /// Hex-encoded opaque payload (Compact Bytes<256>); consumer brings
-    /// descriptor to decode.
+
+    /// The hex-encoded opaque event payload, up to 256 bytes; consumers decode it with their
+    /// contract's descriptor.
     pub payload: HexEncoded,
     #[graphql(skip)]
     _s: PhantomData<S>,
@@ -582,9 +766,8 @@ where
     type Error = Box<UnexpectedContractEvent>;
 
     fn try_from(row: ContractEventRow) -> Result<Self, Self::Error> {
-        use LedgerEventAttributes::*;
         match &row.attributes {
-            ContractShieldedSpend {
+            LedgerEventAttributes::ContractShieldedSpend {
                 version, nullifier, ..
             } => {
                 let base = Base::from_row(&row, *version);
@@ -601,7 +784,7 @@ where
                 }))
             }
 
-            ContractShieldedReceive {
+            LedgerEventAttributes::ContractShieldedReceive {
                 version,
                 commitment,
                 ciphertext,
@@ -626,7 +809,7 @@ where
                 }))
             }
 
-            ContractShieldedMint {
+            LedgerEventAttributes::ContractShieldedMint {
                 version,
                 commitment,
                 domain_sep,
@@ -649,7 +832,7 @@ where
                 }))
             }
 
-            ContractShieldedBurn {
+            LedgerEventAttributes::ContractShieldedBurn {
                 version,
                 nullifier,
                 amount,
@@ -670,7 +853,7 @@ where
                 }))
             }
 
-            ContractUnshieldedSpend {
+            LedgerEventAttributes::ContractUnshieldedSpend {
                 version,
                 sender,
                 domain_sep,
@@ -695,7 +878,7 @@ where
                 }))
             }
 
-            ContractUnshieldedReceive {
+            LedgerEventAttributes::ContractUnshieldedReceive {
                 version,
                 recipient,
                 domain_sep,
@@ -720,7 +903,7 @@ where
                 }))
             }
 
-            ContractUnshieldedMint {
+            LedgerEventAttributes::ContractUnshieldedMint {
                 version,
                 domain_sep,
                 token_type,
@@ -743,7 +926,7 @@ where
                 }))
             }
 
-            ContractUnshieldedBurn {
+            LedgerEventAttributes::ContractUnshieldedBurn {
                 version,
                 sender,
                 token_type,
@@ -766,7 +949,7 @@ where
                 }))
             }
 
-            ContractPaused { version, .. } => {
+            LedgerEventAttributes::ContractPaused { version, .. } => {
                 let base = Base::from_row(&row, *version);
                 Ok(ContractEvent::Paused(PausedEvent {
                     id: base.id,
@@ -780,7 +963,7 @@ where
                 }))
             }
 
-            ContractUnpaused { version, .. } => {
+            LedgerEventAttributes::ContractUnpaused { version, .. } => {
                 let base = Base::from_row(&row, *version);
                 Ok(ContractEvent::Unpaused(UnpausedEvent {
                     id: base.id,
@@ -794,7 +977,7 @@ where
                 }))
             }
 
-            ContractMisc {
+            LedgerEventAttributes::ContractMisc {
                 version,
                 name,
                 payload,
@@ -829,51 +1012,73 @@ pub struct UnexpectedContractEvent(LedgerEventAttributes);
 // ============================================================================
 
 impl ContractEventFilter {
-    /// Convert into the domain filter shape consumed by the storage layer.
-    /// Validates that `contract_address` is non-empty and hex-decodable.
+    /// Convert into the domain filter shape consumed by the storage layer, validating the
+    /// user-supplied fields.
     pub fn into_domain(self) -> Result<DomainContractEventFilter, ContractEventFilterError> {
-        let contract_address: ByteVec = self
+        let contract_address = self
             .contract_address
-            .hex_decode()
-            .map_err(|e| ContractEventFilterError::InvalidContractAddress(e.to_string()))?;
+            .hex_decode::<SerializedContractAddress>()
+            .map_err(ContractEventFilterError::InvalidContractAddress)?;
         if contract_address.as_ref().is_empty() {
             return Err(ContractEventFilterError::EmptyContractAddress);
         }
 
-        let variants = self.types.map(|ts| {
-            ts.into_iter()
-                .map(contract_event_type_variant_name)
-                .collect::<Vec<_>>()
-        });
-
-        let field_prefixes = match self.field_prefixes {
-            None => Vec::new(),
-            Some(fps) => {
-                fps.into_iter()
-                    .map(|fp| {
-                        let prefix: ByteVec = fp.prefix.hex_decode().map_err(|e| {
-                            ContractEventFilterError::InvalidFieldPrefix(e.to_string())
-                        })?;
-                        Ok(DomainFieldPrefix {
-                            field_name: fp.field_name,
-                            prefix: prefix.as_ref().to_vec(),
-                        })
-                    })
-                    .collect::<Result<Vec<_>, _>>()?
+        let variants = match self.types {
+            Some(types) if types.is_empty() => {
+                return Err(ContractEventFilterError::EmptyTypes);
             }
+
+            Some(types) => types
+                .into_iter()
+                .map(ContractEventType::variant_name)
+                .collect(),
+
+            None => Vec::new(),
         };
+
+        let field_prefixes = self
+            .field_prefixes
+            .unwrap_or_default()
+            .into_iter()
+            .map(|field_prefix| {
+                if !INDEXABLE_CONTRACT_FIELD_NAMES.contains(&field_prefix.field_name.as_str()) {
+                    return Err(ContractEventFilterError::UnknownFieldName(
+                        field_prefix.field_name,
+                    ));
+                }
+
+                let prefix = field_prefix
+                    .prefix
+                    .hex_decode::<ByteVec>()
+                    .map_err(ContractEventFilterError::InvalidFieldPrefix)?;
+
+                Ok(DomainFieldPrefix {
+                    field_name: field_prefix.field_name,
+                    prefix,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        if let (Some(from_block), Some(to_block)) = (self.from_block, self.to_block)
+            && from_block > to_block
+        {
+            return Err(ContractEventFilterError::InvalidBlockRange {
+                from_block,
+                to_block,
+            });
+        }
 
         let transaction_hash = self
             .transaction_hash
-            .map(|hash| {
-                hash.hex_decode::<ByteVec>()
-                    .map(|hash| hash.as_ref().to_vec())
-                    .map_err(|e| ContractEventFilterError::InvalidTransactionHash(e.to_string()))
+            .map(|transaction_hash| {
+                transaction_hash
+                    .hex_decode::<TransactionHash>()
+                    .map_err(ContractEventFilterError::InvalidTransactionHash)
             })
             .transpose()?;
 
         Ok(DomainContractEventFilter {
-            contract_address: contract_address.as_ref().to_vec(),
+            contract_address,
             variants,
             field_prefixes,
             from_block: self.from_block,
@@ -883,35 +1088,47 @@ impl ContractEventFilter {
     }
 }
 
-fn contract_event_type_variant_name(t: ContractEventType) -> &'static str {
-    match t {
-        ContractEventType::ShieldedSpend => "ShieldedSpend",
-        ContractEventType::ShieldedReceive => "ShieldedReceive",
-        ContractEventType::ShieldedMint => "ShieldedMint",
-        ContractEventType::ShieldedBurn => "ShieldedBurn",
-        ContractEventType::UnshieldedSpend => "UnshieldedSpend",
-        ContractEventType::UnshieldedReceive => "UnshieldedReceive",
-        ContractEventType::UnshieldedMint => "UnshieldedMint",
-        ContractEventType::UnshieldedBurn => "UnshieldedBurn",
-        ContractEventType::Paused => "Paused",
-        ContractEventType::Unpaused => "Unpaused",
-        ContractEventType::Misc => "Misc",
+impl ContractEventType {
+    /// The `LEDGER_EVENT_VARIANT` value matching this type.
+    fn variant_name(self) -> &'static str {
+        match self {
+            Self::ShieldedSpend => "ShieldedSpend",
+            Self::ShieldedReceive => "ShieldedReceive",
+            Self::ShieldedMint => "ShieldedMint",
+            Self::ShieldedBurn => "ShieldedBurn",
+            Self::UnshieldedSpend => "UnshieldedSpend",
+            Self::UnshieldedReceive => "UnshieldedReceive",
+            Self::UnshieldedMint => "UnshieldedMint",
+            Self::UnshieldedBurn => "UnshieldedBurn",
+            Self::Paused => "Paused",
+            Self::Unpaused => "Unpaused",
+            Self::Misc => "Misc",
+        }
     }
 }
 
 #[derive(Debug, Error)]
 pub enum ContractEventFilterError {
-    #[error("invalid contractAddress: {0}")]
-    InvalidContractAddress(String),
+    #[error("invalid contractAddress")]
+    InvalidContractAddress(#[source] HexDecodeError),
 
-    #[error("contractAddress is required and must be non-empty")]
+    #[error("contractAddress must be non-empty")]
     EmptyContractAddress,
 
-    #[error("invalid fieldPrefix.prefix: {0}")]
-    InvalidFieldPrefix(String),
+    #[error("types must not be empty")]
+    EmptyTypes,
 
-    #[error("invalid transactionHash: {0}")]
-    InvalidTransactionHash(String),
+    #[error("unknown fieldPrefixes.fieldName {0}")]
+    UnknownFieldName(String),
+
+    #[error("invalid fieldPrefixes.prefix")]
+    InvalidFieldPrefix(#[source] HexDecodeError),
+
+    #[error("fromBlock {from_block} must not exceed toBlock {to_block}")]
+    InvalidBlockRange { from_block: u32, to_block: u32 },
+
+    #[error("invalid transactionHash")]
+    InvalidTransactionHash(#[source] HexDecodeError),
 }
 
 #[cfg(test)]
@@ -998,15 +1215,12 @@ mod tests {
     #[test]
     fn contract_event_type_variant_name_is_stable() {
         assert_eq!(
-            contract_event_type_variant_name(ContractEventType::ShieldedSpend),
+            ContractEventType::ShieldedSpend.variant_name(),
             "ShieldedSpend"
         );
+        assert_eq!(ContractEventType::Misc.variant_name(), "Misc");
         assert_eq!(
-            contract_event_type_variant_name(ContractEventType::Misc),
-            "Misc"
-        );
-        assert_eq!(
-            contract_event_type_variant_name(ContractEventType::UnshieldedReceive),
+            ContractEventType::UnshieldedReceive.variant_name(),
             "UnshieldedReceive"
         );
     }
@@ -1044,11 +1258,8 @@ mod tests {
         let domain = filter.into_domain().expect("valid");
         assert_eq!(domain.from_block, Some(100));
         assert_eq!(domain.to_block, Some(200));
-        assert_eq!(
-            domain.variants.as_deref(),
-            Some(&["ShieldedSpend", "Misc"][..])
-        );
-        assert_eq!(domain.contract_address.len(), 32);
+        assert_eq!(domain.variants, vec!["ShieldedSpend", "Misc"]);
+        assert_eq!(domain.contract_address.as_ref().len(), 32);
         assert_eq!(domain.transaction_hash, None);
     }
 
@@ -1063,7 +1274,81 @@ mod tests {
             transaction_hash: Some(HexEncoded::try_from("cd".repeat(32)).expect("valid hex")),
         };
         let domain = filter.into_domain().expect("valid");
-        assert_eq!(domain.transaction_hash, Some(vec![0xcd; 32]));
+        assert_eq!(
+            domain.transaction_hash,
+            Some(TransactionHash::from([0xcd; 32]))
+        );
+    }
+
+    #[test]
+    fn filter_into_domain_rejects_empty_types() {
+        let filter = ContractEventFilter {
+            contract_address: HexEncoded::try_from("ab".repeat(32)).expect("valid hex"),
+            types: Some(vec![]),
+            field_prefixes: None,
+            from_block: None,
+            to_block: None,
+            transaction_hash: None,
+        };
+        let err = filter.into_domain().expect_err("should reject");
+        assert!(matches!(err, ContractEventFilterError::EmptyTypes));
+    }
+
+    #[test]
+    fn filter_into_domain_rejects_unknown_field_name() {
+        let filter = ContractEventFilter {
+            contract_address: HexEncoded::try_from("ab".repeat(32)).expect("valid hex"),
+            types: None,
+            field_prefixes: Some(vec![FieldPrefixFilter {
+                field_name: "token_type".to_owned(),
+                prefix: HexEncoded::try_from("ab".to_owned()).expect("valid hex"),
+            }]),
+            from_block: None,
+            to_block: None,
+            transaction_hash: None,
+        };
+        let err = filter.into_domain().expect_err("should reject");
+        assert!(matches!(
+            err,
+            ContractEventFilterError::UnknownFieldName(name) if name == "token_type"
+        ));
+    }
+
+    #[test]
+    fn filter_into_domain_rejects_inverted_block_range() {
+        let filter = ContractEventFilter {
+            contract_address: HexEncoded::try_from("ab".repeat(32)).expect("valid hex"),
+            types: None,
+            field_prefixes: None,
+            from_block: Some(200),
+            to_block: Some(100),
+            transaction_hash: None,
+        };
+        let err = filter.into_domain().expect_err("should reject");
+        assert!(matches!(
+            err,
+            ContractEventFilterError::InvalidBlockRange {
+                from_block: 200,
+                to_block: 100,
+            }
+        ));
+    }
+
+    #[test]
+    fn filter_into_domain_rejects_wrong_length_transaction_hash() {
+        let filter = ContractEventFilter {
+            contract_address: HexEncoded::try_from("ab".repeat(32)).expect("valid hex"),
+            types: None,
+            field_prefixes: None,
+            from_block: None,
+            to_block: None,
+            transaction_hash: Some(HexEncoded::try_from("cd".repeat(3)).expect("valid hex")),
+        };
+        let err = filter.into_domain().expect_err("should reject");
+        assert!(matches!(
+            err,
+            ContractEventFilterError::InvalidTransactionHash(_)
+        ));
     }
 }
 

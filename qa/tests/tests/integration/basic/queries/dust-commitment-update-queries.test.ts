@@ -19,6 +19,7 @@ import { MerkleTreeCollapsedUpdateSchema } from '@utils/indexer/graphql/schema';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import type { RegularTransaction } from '@utils/indexer/indexer-types';
 import { TestContext } from 'vitest';
+import { env } from 'environment/model';
 
 const indexerHttpClient = new IndexerHttpClient();
 
@@ -84,41 +85,45 @@ describe('dust commitment merkle tree update queries', () => {
      * @when we query for a dust commitment update covering the full range from genesis
      * @then Indexer should return a valid collapsed update spanning the entire range
      */
-    test('should return a collapsed update for the full genesis dust range', async (ctx: TestContext) => {
-      ctx.task!.meta.custom = {
-        labels: ['Query', 'Dust', 'CommitmentMerkleTree', 'CollapsedUpdate', 'FullRange'],
-      };
+    // Genesis block has no regular transactions on mainnet: skip there.
+    test.skipIf(env.isMainnetEnv())(
+      'should return a collapsed update for the full genesis dust range',
+      async (ctx: TestContext) => {
+        ctx.task!.meta.custom = {
+          labels: ['Query', 'Dust', 'CommitmentMerkleTree', 'CollapsedUpdate', 'FullRange'],
+        };
 
-      // Get the highest dustCommitmentEndIndex from genesis block transactions
-      const genesisResponse = await indexerHttpClient.getBlockByOffset({ height: 0 });
-      expect(genesisResponse).toBeSuccess();
+        // Get the highest dustCommitmentEndIndex from genesis block transactions
+        const genesisResponse = await indexerHttpClient.getBlockByOffset({ height: 0 });
+        expect(genesisResponse).toBeSuccess();
 
-      const transactions = genesisResponse.data!.block.transactions;
-      const maxEndIndex = transactions.reduce((max, tx) => {
-        const regularTx = tx as RegularTransaction;
-        return regularTx.dustCommitmentEndIndex != null && regularTx.dustCommitmentEndIndex > max
-          ? regularTx.dustCommitmentEndIndex
-          : max;
-      }, 0);
+        const transactions = genesisResponse.data!.block.transactions;
+        const maxEndIndex = transactions.reduce((max, tx) => {
+          const regularTx = tx as RegularTransaction;
+          return regularTx.dustCommitmentEndIndex != null && regularTx.dustCommitmentEndIndex > max
+            ? regularTx.dustCommitmentEndIndex
+            : max;
+        }, 0);
 
-      log.debug(`Highest dustCommitmentEndIndex from genesis: ${maxEndIndex}`);
-      expect(maxEndIndex).toBeGreaterThan(0);
+        log.debug(`Highest dustCommitmentEndIndex from genesis: ${maxEndIndex}`);
+        expect(maxEndIndex).toBeGreaterThan(0);
 
-      // dustCommitmentEndIndex is exclusive, collapsed update endIndex is inclusive
-      const endIndex = maxEndIndex - 1;
+        // dustCommitmentEndIndex is exclusive, collapsed update endIndex is inclusive
+        const endIndex = maxEndIndex - 1;
 
-      log.debug(`Requesting dust commitment update with startIndex=0, endIndex=${endIndex}`);
-      const response = await indexerHttpClient.getDustCommitmentMerkleTreeUpdate(0, endIndex);
+        log.debug(`Requesting dust commitment update with startIndex=0, endIndex=${endIndex}`);
+        const response = await indexerHttpClient.getDustCommitmentMerkleTreeUpdate(0, endIndex);
 
-      expect(response).toBeSuccess();
-      expect(response.data?.dustCommitmentMerkleTreeUpdate).toBeDefined();
+        expect(response).toBeSuccess();
+        expect(response.data?.dustCommitmentMerkleTreeUpdate).toBeDefined();
 
-      const collapsedUpdate = response.data!.dustCommitmentMerkleTreeUpdate;
-      expect(collapsedUpdate.startIndex).toBe(0);
-      expect(collapsedUpdate.endIndex).toBe(endIndex);
-      expect(collapsedUpdate.update).toBeDefined();
-      expect(collapsedUpdate.protocolVersion).toBeDefined();
-    });
+        const collapsedUpdate = response.data!.dustCommitmentMerkleTreeUpdate;
+        expect(collapsedUpdate.startIndex).toBe(0);
+        expect(collapsedUpdate.endIndex).toBe(endIndex);
+        expect(collapsedUpdate.update).toBeDefined();
+        expect(collapsedUpdate.protocolVersion).toBeDefined();
+      },
+    );
   });
 
   describe('a collapsed update query with equal start and end indices', () => {

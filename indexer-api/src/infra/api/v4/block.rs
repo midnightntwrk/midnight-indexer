@@ -148,8 +148,9 @@ where
     /// The zswap commitment tree filtered to the given contract address, resolved from this
     /// block's ledger state; null if the contract does not exist at this block. Hex-encoded.
     /// For building transactions, compose with `ledgerParameters` and `contract { state }` in
-    /// one request, anchored to the same block; use the latest block, older trees age out of
-    /// the ledger's root window.
+    /// one request, anchored to the same block; use the latest block: older trees age out of
+    /// the ledger's root window, and blocks beyond the chain-indexer's ledger state retention
+    /// window no longer have a loadable ledger state and yield an error.
     #[graphql(directive = beta::apply())]
     async fn contract_zswap_state(
         &self,
@@ -163,25 +164,40 @@ where
             .map_err_into_client_error(|| "invalid address")?;
 
         // Null when the contract does not exist as of this block.
-        if storage
-            .get_contract_action_by_address_as_of_block_hash(address, self.raw_hash)
+        if !storage
+            .contract_action_exists_by_address_as_of_block_hash(address, self.raw_hash)
             .await
             .map_err_into_server_error(|| {
                 format!(
-                    "get contract action for address {address} as of block {}",
+                    "check contract existence for address {address} as of block {}",
                     self.hash
                 )
             })?
-            .is_none()
         {
             return Ok(None);
         }
 
-        let (_, protocol_version, ledger_state_key) = storage
+        let (_, _, protocol_version, ledger_state_key) = storage
             .get_ledger_state_at(self.raw_hash)
             .await
             .map_err_into_server_error(|| format!("get ledger state at block {}", self.hash))?
             .some_or_server_error(|| format!("no ledger state for block {}", self.hash))?;
+
+        // Bound concurrent ledger-DB work (issue #595): hold a permit across the availability
+        // check, load, and zswap-state extraction below so this unauthenticated field cannot
+        // exhaust the blocking pool that block_in_place hands the worker's core to.
+        let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
+
+        // Verify the root node is still in the ledger DB before loading: loading culled state
+        // panics inside storage-core rather than returning an error, so this check is what
+        // turns a block beyond the chain-indexer's ledger_state_retention into a clean client
+        // error.
+        domain::LedgerState::root_loadable(&ledger_state_key, protocol_version.ledger_version())
+            .map_err_into_server_error(|| "check ledger state availability")?
+            .then_some(())
+            .some_or_client_error(
+                || "ledger state for this block is no longer available, query a more recent block",
+            )?;
 
         let ledger_state =
             domain::LedgerState::load(&ledger_state_key, protocol_version.ledger_version())
@@ -192,6 +208,33 @@ where
             .map_err_into_server_error(|| format!("extract zswap state for contract {address}"))?;
 
         Ok(Some(zswap_state.hex_encode()))
+    }
+}
+
+/// A block's height, hash and protocol version. Query `block` with the hash for the full block.
+#[derive(Debug, SimpleObject)]
+pub struct BlockReference {
+    /// The block height.
+    height: u32,
+    /// The block hash.
+    hash: HexEncoded,
+    /// The protocol version.
+    protocol_version: u32,
+}
+
+impl From<domain::BlockReference> for BlockReference {
+    fn from(block: domain::BlockReference) -> Self {
+        let domain::BlockReference {
+            height,
+            hash,
+            protocol_version,
+        } = block;
+
+        Self {
+            height,
+            hash: hash.hex_encode(),
+            protocol_version: protocol_version.into(),
+        }
     }
 }
 

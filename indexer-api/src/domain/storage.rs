@@ -11,9 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg_attr(coverage_nightly, coverage(off))]
-
 pub mod block;
+pub mod bridge;
 pub mod contract_action;
 pub mod contract_event;
 pub mod dust;
@@ -28,7 +27,7 @@ pub mod unshielded;
 pub mod wallet;
 
 use crate::domain::storage::{
-    block::BlockStorage, contract_action::ContractActionStorage,
+    block::BlockStorage, bridge::BridgeStorage, contract_action::ContractActionStorage,
     contract_event::ContractEventStorage, dust::DustStorage,
     dust_generations::DustGenerationsStorage, ledger_events::LedgerEventStorage,
     ledger_state::LedgerStateStorage, shielded_nullifiers::ShieldedNullifiersStorage,
@@ -41,6 +40,7 @@ use crate::domain::storage::{
 pub trait Storage
 where
     Self: BlockStorage
+        + BridgeStorage
         + ContractActionStorage
         + ContractEventStorage
         + DustStorage

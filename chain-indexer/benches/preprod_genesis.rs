@@ -14,13 +14,13 @@
 //! `LedgerState::from_genesis` on live-node genesis bytes (preprod by default,
 //! override with `BENCH_NODE_URL`). Network hit once at setup; bytes cached.
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use indexer_common::{
     domain::{LedgerVersion, ledger::LedgerState},
     infra::ledger_db,
 };
 use serde::Deserialize;
-use std::{env, time::Duration};
+use std::{env, hint::black_box, time::Duration};
 use tokio::runtime::Runtime;
 
 const DEFAULT_NODE_URL: &str = "https://rpc.preprod.midnight.network";
@@ -44,7 +44,7 @@ fn init_ledger_db(rt: &Runtime) -> tempfile::TempDir {
         .to_string();
     rt.block_on(async {
         ledger_db::init(ledger_db::Config {
-            cache_size: 1_024,
+            cache_max_nodes: 1_024,
             cnn_url: sqlite_file,
         })
         .await

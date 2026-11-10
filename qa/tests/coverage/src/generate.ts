@@ -282,7 +282,7 @@ const buildExpandedSchema = (schemaText: string): SchemaFieldVariant[] => {
         const typeName = unwrapTypeName(arg.type);
         const required = isNonNull(arg.type);
         const oneOfMeta = inputMeta.get(typeName);
-        let choices: string[] = [];
+        let choices: string[];
         if (oneOfMeta?.oneOf) {
           choices = oneOfMeta.fields.map((f) => `${argName}=${f.name}`);
         } else {

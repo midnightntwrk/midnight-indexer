@@ -13,6 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import { CONTRACT_ACTION_STATE_AT_BODY } from './contract-queries';
+
 export const SHIELDED_TRANSACTION_SUBSCRIPTION_BY_SESSION_ID = `subscription WalletSyncEventSubscription ($SESSION_ID: String){
     shieldedTransactions (sessionId: $SESSION_ID) {
         ... on RelevantTransaction {
@@ -106,6 +108,53 @@ export const UNSHIELDED_TX_SUBSCRIPTION_BY_ADDRESS = `subscription UnshieldedTxS
         ${UNSHIELDED_TX_SUBSCRIPTION_FRAGMENT}
     }
 }`;
+
+// Progress-only documents that select `protocolVersion` on the progress updates
+// (midnight-indexer#1463). They are separate operations rather than additions to
+// the documents above on purpose: selecting a field an environment does not serve
+// fails GraphQL validation, so folding it into the shared documents would turn
+// every existing progress test into a hard failure on every environment that does
+// not yet carry the change. Consumers must gate on
+// `isProgressProtocolVersionSupported()` before sending them.
+export const UNSHIELDED_TX_PROGRESS_SUBSCRIPTION_BY_ADDRESS = `subscription UnshieldedTxProgressSubscription($ADDRESS: UnshieldedAddress) {
+    unshieldedTransactions(address: $ADDRESS) {
+        __typename
+        ... on UnshieldedTransactionsProgress {
+            highestTransactionId
+            protocolVersion
+        }
+    }
+}`;
+
+export const SHIELDED_TX_PROGRESS_SUBSCRIPTION_BY_SESSION_ID = `subscription WalletSyncProgressSubscription($SESSION_ID: String) {
+    shieldedTransactions(sessionId: $SESSION_ID) {
+        __typename
+        ... on ShieldedTransactionsProgress {
+            highestZswapEndIndex
+            highestCheckedZswapEndIndex
+            highestRelevantZswapEndIndex
+            protocolVersion
+        }
+    }
+}`;
+
+export const DUST_GENERATIONS_PROGRESS_SUBSCRIPTION = `
+  subscription DustGenerationsProgressSubscription($dustAddress: DustAddress!, $blockHash: HexEncoded!, $dtimeCutoffHeight: Int!) {
+    dustGenerations(dustAddress: $dustAddress, blockHash: $blockHash, dtimeCutoffHeight: $dtimeCutoffHeight) {
+      __typename
+      ... on DustGenerationsProgress {
+        highestIndex
+        protocolVersion
+        collapsedMerkleTree {
+          startIndex
+          endIndex
+          update
+          protocolVersion
+        }
+      }
+    }
+  }
+`;
 
 export const BLOCKS_SUBSCRIPTION_FROM_LATEST_BLOCK = `subscription BlocksSubscriptionFromLatestBlock {
    blocks {
@@ -291,6 +340,26 @@ export const CONTRACT_ACTIONS_SUBSCRIPTION_FROM_BLOCK_BY_OFFSET = `subscription 
     }
 }`;
 
+// Only the fields the no-offset test checks: address, transaction and block height.
+export const CONTRACT_ACTIONS_WITH_HEIGHT_FROM_LATEST_BLOCK = `subscription ContractActionsWithHeightFromLatestBlock($ADDRESS: HexEncoded!) {
+    contractActions(address: $ADDRESS) {
+        __typename
+        address
+        transaction {
+            hash
+            block {
+                height
+            }
+        }
+    }
+}`;
+
+export const CONTRACT_ACTIONS_STATE_AT_SUBSCRIPTION = `subscription ContractActionsStateAt($ADDRESS: HexEncoded!, $OFFSET: BlockOffset) {
+    contractActions(address: $ADDRESS, offset: $OFFSET) {
+        ${CONTRACT_ACTION_STATE_AT_BODY}
+    }
+}`;
+
 export const DUST_LEDGER_EVENTS_SUBSCRIPTION_DEFAULT = `
   subscription DustLedgerEvents {
     dustLedgerEvents {
@@ -348,8 +417,8 @@ export const ZSWAP_LEDGER_EVENTS_SUBSCRIPTION_FROM_ID = `
 `;
 
 export const DUST_GENERATIONS_SUBSCRIPTION = `
-  subscription DustGenerations($dustAddress: DustAddress!, $startIndex: Int!, $endIndex: Int!) {
-    dustGenerations(dustAddress: $dustAddress, startIndex: $startIndex, endIndex: $endIndex) {
+  subscription DustGenerations($dustAddress: DustAddress!, $blockHash: HexEncoded!, $dtimeCutoffHeight: Int!) {
+    dustGenerations(dustAddress: $dustAddress, blockHash: $blockHash, dtimeCutoffHeight: $dtimeCutoffHeight) {
       ... on DustGenerationsItem {
         __typename
         commitmentMtIndex
@@ -418,6 +487,75 @@ export const SHIELDED_NULLIFIER_TRANSACTIONS_SUBSCRIPTION = `
       nullifier
       transaction {
         hash
+      }
+    }
+  }
+`;
+
+// c2m-bridge event stream (#942). `from` is an event-id cursor: the subscription
+// replays matching historical events with id > from, then live-tails. Omitting
+// `from` streams from the beginning. There is no completion sentinel.
+export const BRIDGE_EVENTS_SUBSCRIPTION_DEFAULT = `
+  subscription BridgeEvents($RECIPIENT: HexEncoded, $VARIANT: BridgeEventVariant) {
+    bridgeEvents(recipient: $RECIPIENT, variant: $VARIANT) {
+      __typename
+      ... on BridgeUserTransfer {
+        id
+        blockHeight
+        midnightTxHash
+        cardanoTxHash
+        amount
+        recipient
+      }
+    }
+  }
+`;
+
+export const BRIDGE_EVENTS_SUBSCRIPTION_FROM = `
+  subscription BridgeEventsFrom($FROM: Int, $RECIPIENT: HexEncoded, $VARIANT: BridgeEventVariant) {
+    bridgeEvents(from: $FROM, recipient: $RECIPIENT, variant: $VARIANT) {
+      __typename
+      ... on BridgeUserTransfer {
+        id
+        blockHeight
+        midnightTxHash
+        cardanoTxHash
+        amount
+        recipient
+      }
+    }
+  }
+`;
+
+// bridgeBalance emits the current balance immediately on connect, then re-emits
+// on every relevant event for the address.
+export const BRIDGE_BALANCE_SUBSCRIPTION = `
+  subscription BridgeBalance($ADDRESS: HexEncoded!) {
+    bridgeBalance(address: $ADDRESS) {
+      deposited
+      claimed
+      balance
+    }
+  }
+`;
+
+// c2m-bridge pool observability stream (#944). Emits an initial snapshot on
+// subscribe (newEvent = null), then a refreshed summary paired with each new
+// pool-affecting event.
+export const BRIDGE_POOL_UPDATES_SUBSCRIPTION = `
+  subscription BridgePoolUpdates {
+    bridgePoolUpdates {
+      newEvent {
+        __typename
+      }
+      pool {
+        reserveTotal
+        treasuryByReason {
+          reason
+          total
+        }
+        subminimumTxCount
+        lastEventBlockHeight
       }
     }
   }

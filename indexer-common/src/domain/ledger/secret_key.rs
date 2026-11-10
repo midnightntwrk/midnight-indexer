@@ -11,12 +11,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{ByteArray, VIEWING_KEY_LEN, ledger::Error};
+use crate::domain::{ViewingKey, ledger::Error};
 use fastrace::trace;
 use midnight_serialize_v1::Deserializable;
+use secrecy::{ExposeSecret, SecretBox, zeroize::Zeroizing};
 
-#[derive(Debug, Clone)]
-pub struct SecretKey(midnight_transient_crypto_v2::encryption::SecretKey);
+/// Held in a [SecretBox], which zeroizes the key on drop.
+#[derive(Debug)]
+pub struct SecretKey(SecretBox<midnight_transient_crypto_v2::encryption::SecretKey>);
 
 impl SecretKey {
     #[trace]
@@ -26,11 +28,14 @@ impl SecretKey {
             0,
         )
         .map_err(|error| Error::Deserialize("SecretKey", error))?;
-        Ok(Self(inner))
+        Ok(Self(SecretBox::new(Box::new(inner))))
     }
+}
 
-    /// Get the repr of this secret key.
-    pub fn expose_secret(&self) -> ByteArray<VIEWING_KEY_LEN> {
-        self.0.repr().into()
+impl From<SecretKey> for ViewingKey {
+    /// Writes the key into the viewing key's [SecretBox] in place.
+    fn from(secret_key: SecretKey) -> Self {
+        let repr = Zeroizing::new(secret_key.0.expose_secret().repr());
+        Self::init_with_mut(|viewing_key| viewing_key.copy_from_slice(repr.as_slice()))
     }
 }

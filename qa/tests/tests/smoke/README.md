@@ -23,7 +23,7 @@ Smoke tests should be executed:
 
 ```bash
 # Run only smoke tests
-TARGET_ENV=undeployed yarn test:smoke
+TARGET_ENV=undeployed bun run test:smoke
 ```
 
 These tests run quickly (typically under 1 second) and do not require any pre-seeded data or cache warmup.

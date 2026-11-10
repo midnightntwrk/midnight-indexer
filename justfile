@@ -4,8 +4,9 @@ set shell := ["bash", "-uc"]
 feature := "cloud"
 packages := "indexer-common chain-indexer wallet-indexer indexer-api spo-indexer indexer-standalone indexer-tests"
 rust_version := `grep channel rust-toolchain.toml | sed -r 's/channel = "(.*)"/\1/'`
-nightly := "nightly-2026-06-09"
 latest_node_version := `tail -n 1 NODE_VERSIONS`
+cargo_auditable_version := `grep -E '^\s+CARGO_AUDITABLE_VERSION:' .github/workflows/build-indexer-images.yaml | sed -E 's/#.*//; s/^[^:]*:[[:space:]]*//; s/[[:space:]]+$//' | tr -d \"\'`
+cargo_chef_version := `grep -E '^\s+CARGO_CHEF_VERSION:' .github/workflows/build-indexer-images.yaml | sed -E 's/#.*//; s/^[^:]*:[[:space:]]*//; s/[[:space:]]+$//' | tr -d \"\'`
 
 check:
     for package in {{packages}}; do \
@@ -36,27 +37,26 @@ lint-fix:
 
 test:
     # We must build the executables needed by the e2e tests!
-    if [ "{{feature}}" = "cloud" ]; then \
-        cargo build -p chain-indexer -p wallet-indexer -p indexer-api --features cloud; \
-    fi
-    if [ "{{feature}}" = "standalone" ]; then \
-        cargo build -p indexer-standalone --features standalone; \
-    fi
+    # Selecting the whole workspace with tests resolves the same dependency features as nextest, so nextest and the schema check reuse these artifacts.
+    # Naming the binaries keeps this build from overwriting the other feature's executables in target/debug. Cargo still rebuilds chain-indexer because its integration tests need its binary.
+    cargo build --workspace --tests --features {{feature}} --bin indexer-api-cli \
+        {{ if feature == "cloud" { "--bin chain-indexer --bin wallet-indexer --bin indexer-api" } else { "--bin indexer-standalone" } }}
     cargo nextest run --workspace --exclude indexer-standalone --features {{feature}}
     # Check indexer-api schema:
-    cargo run -p indexer-api --features {{feature}} --bin indexer-api-cli print-api-schema-v4 > \
+    "${CARGO_TARGET_DIR:-target}/debug/indexer-api-cli" print-api-schema-v4 > \
         indexer-api/graphql/schema-v4.graphql.check
     @if ! cmp -s indexer-api/graphql/schema-v4.graphql indexer-api/graphql/schema-v4.graphql.check; then \
         echo "schema-v4.graphql has changes!"; exit 1; \
     fi
 
+# `doc_cfg` (feature badges) is unstable; RUSTC_BOOTSTRAP=1 lets the pinned stable toolchain accept it.
 doc:
-    RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +{{nightly}} doc -p indexer-common --no-deps --features {{feature}}
-    RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +{{nightly}} doc -p chain-indexer  --no-deps --features {{feature}}
-    RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +{{nightly}} doc -p wallet-indexer --no-deps --features {{feature}}
-    RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +{{nightly}} doc -p indexer-api    --no-deps --features {{feature}}
+    RUSTC_BOOTSTRAP=1 RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo doc -p indexer-common --no-deps --features {{feature}}
+    RUSTC_BOOTSTRAP=1 RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo doc -p chain-indexer  --no-deps --features {{feature}}
+    RUSTC_BOOTSTRAP=1 RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo doc -p wallet-indexer --no-deps --features {{feature}}
+    RUSTC_BOOTSTRAP=1 RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo doc -p indexer-api    --no-deps --features {{feature}}
     if [ "{{feature}}" = "standalone" ]; then \
-        RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo +{{nightly}} doc -p indexer-standalone --no-deps --features standalone; \
+        RUSTC_BOOTSTRAP=1 RUSTDOCFLAGS="-D warnings --cfg docsrs" cargo doc -p indexer-standalone --no-deps --features standalone; \
     fi
 
 bench:
@@ -69,7 +69,7 @@ all-all:
     just feature=standalone all
 
 coverage:
-    ./coverage.sh {{nightly}}
+    ./coverage.sh
 
 generate-indexer-api-schema:
     cargo run -p indexer-api --features {{feature}} --bin indexer-api-cli print-api-schema-v4 > \
@@ -84,6 +84,8 @@ build-docker-image package profile="dev":
     docker build \
         --build-arg "RUST_VERSION={{rust_version}}" \
         --build-arg "PROFILE={{profile}}" \
+        --build-arg "CARGO_AUDITABLE_VERSION={{cargo_auditable_version}}" \
+        --build-arg "CARGO_CHEF_VERSION={{cargo_chef_version}}" \
         -t midnightntwrk/{{package}}:${tag} \
         -t midnightntwrk/{{package}}:latest \
         -f {{package}}/Dockerfile \
@@ -129,26 +131,21 @@ run-indexer-standalone node="ws://localhost:9944" network_id="undeployed":
         APP__INFRA__LEDGER_DB__CNN_URL=target/data/ledger-db.sqlite \
         cargo run -p indexer-standalone --features standalone
 
-update-node: generate-node-data get-node-metadata
+# generate-node-data wipes `.node/<node_version>`, so it has to run before
+# get-node-metadata writes metadata.scale there.
+update-node node_version=latest_node_version toolkit_version=node_version: (generate-node-data node_version toolkit_version) (get-node-metadata node_version)
 
-generate-node-data:
-    ./generate_node_data.sh {{latest_node_version}}
+generate-node-data node_version=latest_node_version toolkit_version=node_version:
+    ./generate_node_data.sh {{node_version}} {{toolkit_version}}
 
-get-node-metadata:
-    ./get_node_metadata.sh {{latest_node_version}}
+get-node-metadata node_version=latest_node_version:
+    ./get_node_metadata.sh {{node_version}}
 
 generate-txs:
     ./generate_txs.sh {{latest_node_version}}
 
 run-node node_version=latest_node_version:
     #!/usr/bin/env bash
-    # Release images live on Docker Hub (midnightntwrk), pre-release builds on GHCR
-    # (ghcr.io/midnight-ntwrk); use whichever registry has the tag.
-    node_image=midnightntwrk/midnight-node:{{node_version}}
-    if ! docker image inspect $node_image >/dev/null 2>&1 \
-        && ! docker manifest inspect $node_image >/dev/null 2>&1; then
-        node_image=ghcr.io/midnight-ntwrk/midnight-node:{{node_version}}
-    fi
     node_dir=$(mktemp -d)
     cp -r ./.node/{{node_version}}/ $node_dir
     # SIDECHAIN_BLOCK_BENEFICIARY specifies the wallet that receives block rewards and transaction fees (DUST).
@@ -160,4 +157,4 @@ run-node node_version=latest_node_version:
         -e CFG_PRESET=dev \
         -e SIDECHAIN_BLOCK_BENEFICIARY="04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e" \
         -v $node_dir:/node \
-        $node_image
+        midnightntwrk/midnight-node:{{node_version}}

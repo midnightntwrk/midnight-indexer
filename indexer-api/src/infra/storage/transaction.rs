@@ -13,7 +13,7 @@
 
 use crate::{
     domain::{
-        RegularTransaction, SystemTransaction, Transaction,
+        RegularTransaction, SystemTransaction, Transaction, bridge::BridgeClaim,
         storage::transaction::TransactionStorage,
     },
     infra::storage::Storage,
@@ -25,13 +25,78 @@ use indexer_common::{
     domain::{
         SerializedTransactionIdentifier, TransactionHash, TransactionVariant, UnshieldedAddress,
     },
+    infra::sqlx::U128BeBytes,
     stream::flatten_chunks,
 };
 use indoc::indoc;
-use sqlx::{FromRow, Row, types::Uuid};
 #[cfg(feature = "standalone")]
-use sqlx::{QueryBuilder, Sqlite};
-use std::num::NonZeroU32;
+use sqlx::Sqlite;
+use sqlx::{FromRow, QueryBuilder, Row, types::Uuid};
+use std::{collections::HashMap, num::NonZeroU32};
+
+#[cfg(feature = "cloud")]
+type Db = sqlx::Postgres;
+#[cfg(feature = "standalone")]
+type Db = sqlx::Sqlite;
+
+/// Build a `BridgeClaim` from a `bridge_claims` row selecting `recipient` and `amount`.
+fn make_bridge_claim(row: &<Db as sqlx::Database>::Row) -> Result<BridgeClaim, sqlx::Error> {
+    let recipient = row.try_get::<Vec<u8>, _>("recipient")?;
+    let amount = row.try_get::<U128BeBytes, _>("amount")?;
+    Ok(BridgeClaim {
+        recipient: UnshieldedAddress::try_from(recipient)
+            .map_err(|error| sqlx::Error::Decode(Box::new(error)))?,
+        amount: amount.into(),
+    })
+}
+
+impl Storage {
+    /// Attach bridge-claim payloads to any regular transactions that are CardanoBridge claims, by
+    /// looking them up in `bridge_claims` in a single batched query. Non-claim transactions are
+    /// left untouched. Used by the `Vec`-returning read paths.
+    async fn attach_bridge_claims<'a>(
+        &self,
+        transactions: impl IntoIterator<Item = &'a mut Transaction>,
+    ) -> Result<(), sqlx::Error> {
+        let regulars = transactions
+            .into_iter()
+            .filter_map(|transaction| match transaction {
+                Transaction::Regular(regular) => Some(regular),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if regulars.is_empty() {
+            return Ok(());
+        }
+
+        let mut builder = QueryBuilder::<Db>::new(
+            "SELECT transaction_id, recipient, amount FROM bridge_claims WHERE transaction_id IN (",
+        );
+        let mut separated = builder.separated(", ");
+        for regular in regulars.iter() {
+            separated.push_bind(regular.id as i64);
+        }
+        builder.push(")");
+
+        let claims = builder
+            .build()
+            .fetch_all(&*self.pool)
+            .await?
+            .iter()
+            .map(|row| {
+                let transaction_id = row.try_get::<i64, _>("transaction_id")? as u64;
+                Ok((transaction_id, make_bridge_claim(row)?))
+            })
+            .collect::<Result<HashMap<_, _>, sqlx::Error>>()?;
+
+        for regular in regulars {
+            let id = regular.id;
+            regular.bridge_claim = claims.get(&id).cloned().map(Box::new);
+        }
+
+        Ok(())
+    }
+}
 
 impl TransactionStorage for Storage {
     #[trace(properties = { "ids": "{ids:?}" })]
@@ -95,7 +160,7 @@ impl TransactionStorage for Storage {
         let ids = ids.iter().map(|id| *id as i64).collect::<Vec<_>>();
 
         #[cfg(feature = "cloud")]
-        let transactions = sqlx::query(query)
+        let mut transactions = sqlx::query(query)
             .bind(ids)
             .fetch(&*self.pool)
             .map_ok(make_transaction)
@@ -173,6 +238,8 @@ impl TransactionStorage for Storage {
             }
         }
 
+        self.attach_bridge_claims(transactions.iter_mut()).await?;
+
         Ok(transactions)
     }
 
@@ -183,7 +250,10 @@ impl TransactionStorage for Storage {
         if ids.is_empty() {
             return Ok(vec![]);
         }
-        self.fetch_transactions_by_block_ids(ids).await
+        let mut transactions = self.fetch_transactions_by_block_ids(ids).await?;
+        self.attach_bridge_claims(transactions.iter_mut().map(|(_, transaction)| transaction))
+            .await?;
+        Ok(transactions)
     }
 
     #[trace(properties = { "hash": "{hash}" })]
@@ -312,6 +382,8 @@ impl TransactionStorage for Storage {
             }
         }
 
+        self.attach_bridge_claims(transactions.iter_mut()).await?;
+
         Ok(transactions)
     }
 
@@ -393,23 +465,28 @@ impl TransactionStorage for Storage {
             }
         }
 
+        self.attach_bridge_claims(transactions.iter_mut()).await?;
+
         Ok(transactions)
     }
 
     fn get_relevant_transactions(
         &self,
         wallet_id: Uuid,
-        mut index: u64,
+        index: u64,
+        mut from_transaction_id: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<RegularTransaction, sqlx::Error>> + Send {
+        // Page by transaction ID, not by zswap index: the zswap indices of a transaction without
+        // commitments do not advance.
         let chunks = try_stream! {
             loop {
                 let transactions = self
-                    .get_relevant_transactions(wallet_id, index, batch_size)
+                    .get_relevant_transactions(wallet_id, index, from_transaction_id, batch_size)
                     .await?;
 
                 match transactions.last() {
-                    Some(transaction) => index = transaction.zswap_end_index,
+                    Some(transaction) => from_transaction_id = transaction.id + 1,
                     None => break,
                 }
 
@@ -449,13 +526,22 @@ impl TransactionStorage for Storage {
         &self,
         address: UnshieldedAddress,
     ) -> Result<Option<u64>, sqlx::Error> {
+        // Highest transaction id across both link columns for the owner. Each
+        // inner MAX is a top-1 reverse probe of unshielded_utxos(owner, <link>);
+        // aggregate MAX ignores NULLs (unspent rows, absent owner) in both
+        // Postgres and SQLite, so no IS NOT NULL guards are needed.
         let query = indoc! {"
-            SELECT MAX(transactions.id)
-            FROM transactions
-            INNER JOIN unshielded_utxos ON
-                unshielded_utxos.creating_transaction_id = transactions.id OR
-                unshielded_utxos.spending_transaction_id = transactions.id
-            WHERE unshielded_utxos.owner = $1
+            SELECT MAX(tx_id) FROM (
+                SELECT MAX(creating_transaction_id) AS tx_id
+                FROM unshielded_utxos
+                WHERE owner = $1
+
+                UNION ALL
+
+                SELECT MAX(spending_transaction_id)
+                FROM unshielded_utxos
+                WHERE owner = $1
+            ) AS t
         "};
 
         let (id,) = sqlx::query_as::<_, (Option<i64>,)>(query)
@@ -518,12 +604,14 @@ impl Storage {
     #[trace(properties = {
         "wallet_id": "{wallet_id}",
         "index": "{index}",
+        "from_transaction_id": "{from_transaction_id}",
         "batch_size": "{batch_size}"
     })]
     async fn get_relevant_transactions(
         &self,
         wallet_id: Uuid,
         index: u64,
+        from_transaction_id: u64,
         batch_size: NonZeroU32,
     ) -> Result<Vec<RegularTransaction>, sqlx::Error> {
         #[cfg(feature = "cloud")]
@@ -553,8 +641,9 @@ impl Storage {
             WHERE wallets.id = $1
             AND wallets.session_id IS NOT NULL
             AND regular_transactions.zswap_start_index >= $2
+            AND transactions.id >= $3
             ORDER BY transactions.id
-            LIMIT $3
+            LIMIT $4
         "};
 
         #[cfg(feature = "standalone")]
@@ -583,14 +672,16 @@ impl Storage {
             WHERE wallets.id = $1
             AND wallets.session_id IS NOT NULL
             AND regular_transactions.zswap_start_index >= $2
+            AND transactions.id >= $3
             ORDER BY transactions.id
-            LIMIT $3
+            LIMIT $4
         "};
 
         #[cfg_attr(feature = "cloud", allow(unused_mut))]
         let mut transactions = sqlx::query_as::<_, RegularTransaction>(query)
             .bind(wallet_id)
             .bind(index as i64)
+            .bind(from_transaction_id as i64)
             .bind(batch_size.get() as i64)
             .fetch(&*self.pool)
             .try_collect::<Vec<_>>()
@@ -616,129 +707,88 @@ impl Storage {
         transaction_id: u64,
         batch_size: NonZeroU32,
     ) -> Result<Vec<Transaction>, sqlx::Error> {
+        // Collect matching tx ids in a deduplicated UNION subquery (replacing
+        // the old SELECT DISTINCT), then probe transactions by primary key.
+        // LEFT JOIN regular_transactions: the chain-indexer writes exactly one
+        // such row per Regular tx (atomically), so NULLs occur exactly for System.
         #[cfg(feature = "cloud")]
         let query = indoc! {"
-            SELECT DISTINCT *
-            FROM (
-                SELECT
-                    transactions.id,
-                    transactions.variant,
-                    transactions.hash,
-                    transactions.protocol_version,
-                    transactions.raw,
-                    blocks.hash AS block_hash,
-                    regular_transactions.transaction_result,
-                    regular_transactions.zswap_merkle_tree_root,
-                    regular_transactions.zswap_start_index,
-                    regular_transactions.zswap_end_index,
-                    regular_transactions.dust_commitment_start_index,
-                    regular_transactions.dust_commitment_end_index,
-                    regular_transactions.dust_generation_start_index,
-                    regular_transactions.dust_generation_end_index,
-                    regular_transactions.paid_fees,
-                    regular_transactions.estimated_fees,
-                    regular_transactions.identifiers
-                FROM transactions
-                INNER JOIN blocks ON blocks.id = transactions.block_id
-                INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
-                INNER JOIN unshielded_utxos ON
-                    unshielded_utxos.creating_transaction_id = transactions.id OR
-                    unshielded_utxos.spending_transaction_id = transactions.id
-                WHERE unshielded_utxos.owner = $1
-                AND transactions.id >= $2
+            SELECT
+                transactions.id,
+                transactions.variant,
+                transactions.hash,
+                transactions.protocol_version,
+                transactions.raw,
+                blocks.hash AS block_hash,
+                regular_transactions.transaction_result,
+                regular_transactions.zswap_merkle_tree_root,
+                regular_transactions.zswap_start_index,
+                regular_transactions.zswap_end_index,
+                regular_transactions.dust_commitment_start_index,
+                regular_transactions.dust_commitment_end_index,
+                regular_transactions.dust_generation_start_index,
+                regular_transactions.dust_generation_end_index,
+                regular_transactions.paid_fees,
+                regular_transactions.estimated_fees,
+                regular_transactions.identifiers
+            FROM transactions
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            LEFT JOIN regular_transactions ON regular_transactions.id = transactions.id
+            WHERE transactions.id IN (
+                SELECT creating_transaction_id
+                FROM unshielded_utxos
+                WHERE owner = $1
+                AND creating_transaction_id >= $2
 
-                UNION ALL
+                UNION
 
-                SELECT
-                    transactions.id,
-                    transactions.variant,
-                    transactions.hash,
-                    transactions.protocol_version,
-                    transactions.raw,
-                    blocks.hash AS block_hash,
-                    NULL AS transaction_result,
-                    NULL AS zswap_merkle_tree_root,
-                    NULL AS zswap_start_index,
-                    NULL AS zswap_end_index,
-                    NULL AS dust_commitment_start_index,
-                    NULL AS dust_commitment_end_index,
-                    NULL AS dust_generation_start_index,
-                    NULL AS dust_generation_end_index,
-                    NULL AS paid_fees,
-                    NULL AS estimated_fees,
-                    NULL AS identifiers
-                FROM transactions
-                INNER JOIN blocks ON blocks.id = transactions.block_id
-                INNER JOIN unshielded_utxos ON
-                    unshielded_utxos.creating_transaction_id = transactions.id OR
-                    unshielded_utxos.spending_transaction_id = transactions.id
-                WHERE unshielded_utxos.owner = $1
-                AND transactions.id >= $2
-                AND transactions.variant = 'System'
+                SELECT spending_transaction_id
+                FROM unshielded_utxos
+                WHERE owner = $1
+                AND spending_transaction_id IS NOT NULL
+                AND spending_transaction_id >= $2
             )
-            ORDER BY id
+            ORDER BY transactions.id
             LIMIT $3
         "};
 
         #[cfg(feature = "standalone")]
         let query = indoc! {"
-            SELECT DISTINCT *
-            FROM (
-                SELECT
-                    transactions.id,
-                    transactions.variant,
-                    transactions.hash,
-                    transactions.protocol_version,
-                    transactions.raw,
-                    blocks.hash AS block_hash,
-                    regular_transactions.transaction_result,
-                    regular_transactions.zswap_merkle_tree_root,
-                    regular_transactions.zswap_start_index,
-                    regular_transactions.zswap_end_index,
-                    regular_transactions.dust_commitment_start_index,
-                    regular_transactions.dust_commitment_end_index,
-                    regular_transactions.dust_generation_start_index,
-                    regular_transactions.dust_generation_end_index,
-                    regular_transactions.paid_fees,
-                    regular_transactions.estimated_fees
-                FROM transactions
-                INNER JOIN blocks ON blocks.id = transactions.block_id
-                INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
-                INNER JOIN unshielded_utxos ON
-                    unshielded_utxos.creating_transaction_id = transactions.id OR
-                    unshielded_utxos.spending_transaction_id = transactions.id
-                WHERE unshielded_utxos.owner = $1
-                AND transactions.id >= $2
+            SELECT
+                transactions.id,
+                transactions.variant,
+                transactions.hash,
+                transactions.protocol_version,
+                transactions.raw,
+                blocks.hash AS block_hash,
+                regular_transactions.transaction_result,
+                regular_transactions.zswap_merkle_tree_root,
+                regular_transactions.zswap_start_index,
+                regular_transactions.zswap_end_index,
+                regular_transactions.dust_commitment_start_index,
+                regular_transactions.dust_commitment_end_index,
+                regular_transactions.dust_generation_start_index,
+                regular_transactions.dust_generation_end_index,
+                regular_transactions.paid_fees,
+                regular_transactions.estimated_fees
+            FROM transactions
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            LEFT JOIN regular_transactions ON regular_transactions.id = transactions.id
+            WHERE transactions.id IN (
+                SELECT creating_transaction_id
+                FROM unshielded_utxos
+                WHERE owner = $1
+                AND creating_transaction_id >= $2
 
-                UNION ALL
+                UNION
 
-                SELECT
-                    transactions.id,
-                    transactions.variant,
-                    transactions.hash,
-                    transactions.protocol_version,
-                    transactions.raw,
-                    blocks.hash AS block_hash,
-                    NULL AS transaction_result,
-                    NULL AS zswap_merkle_tree_root,
-                    NULL AS zswap_start_index,
-                    NULL AS zswap_end_index,
-                    NULL AS dust_commitment_start_index,
-                    NULL AS dust_commitment_end_index,
-                    NULL AS dust_generation_start_index,
-                    NULL AS dust_generation_end_index,
-                    NULL AS paid_fees,
-                    NULL AS estimated_fees
-                FROM transactions
-                INNER JOIN blocks ON blocks.id = transactions.block_id
-                INNER JOIN unshielded_utxos ON
-                    unshielded_utxos.creating_transaction_id = transactions.id OR
-                    unshielded_utxos.spending_transaction_id = transactions.id
-                WHERE unshielded_utxos.owner = $1
-                AND transactions.id >= $2
-                AND transactions.variant = 'System'
+                SELECT spending_transaction_id
+                FROM unshielded_utxos
+                WHERE owner = $1
+                AND spending_transaction_id IS NOT NULL
+                AND spending_transaction_id >= $2
             )
-            ORDER BY id
+            ORDER BY transactions.id
             LIMIT $3
         "};
 
@@ -760,6 +810,8 @@ impl Storage {
                     get_identifiers_for_transaction(transaction.id, &self.pool).await?;
             }
         }
+
+        self.attach_bridge_claims(transactions.iter_mut()).await?;
 
         Ok(transactions)
     }

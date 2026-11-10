@@ -35,7 +35,7 @@ clash-safety rules.
 
 ```bash
 # From qa/tests
-NODE_TAG=1.0.0-rc.8 INDEXER_TAG=4.3.2-rc.1 TARGET_ENV=undeployed yarn test:integration
+NODE_TAG=1.0.0-rc.8 INDEXER_TAG=4.3.2-rc.1 TARGET_ENV=undeployed bun run test:integration
 ```
 
 These tests run without the toolkit cache warmup and start as soon as the

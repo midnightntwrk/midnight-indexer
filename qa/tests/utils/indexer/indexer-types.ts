@@ -26,6 +26,15 @@ export type TransactionResponse = GraphQLResponse<{ transactions: Transaction[] 
 
 export type ContractActionResponse = GraphQLResponse<{ contractAction: ContractAction }>;
 
+/** A contract action streamed by CONTRACT_ACTIONS_WITH_HEIGHT_FROM_LATEST_BLOCK. */
+export type ContractActionWithHeightResponse = GraphQLResponse<{
+  contractActions: {
+    __typename: string;
+    address: string;
+    transaction: { hash: string; block: { height: number } };
+  };
+}>;
+
 export interface ZswapMerkleTreeCollapsedUpdateResult {
   startIndex: number;
   endIndex: number;
@@ -181,6 +190,8 @@ export interface ShieldedTransactionsProgress {
   highestZswapEndIndex: number;
   highestCheckedZswapEndIndex: number;
   highestRelevantZswapEndIndex: number;
+  /** Chain tip protocol version. Only present when the document selects it. */
+  protocolVersion?: number;
 }
 
 export type UnshieldedTransactionEvent = UnshieldedTransaction | UnshieldedTransactionsProgress;
@@ -188,6 +199,8 @@ export type UnshieldedTransactionEvent = UnshieldedTransaction | UnshieldedTrans
 export interface UnshieldedTransactionsProgress {
   __typename: 'UnshieldedTransactionsProgress';
   highestTransactionId: number;
+  /** Chain tip protocol version. Only present when the document selects it. */
+  protocolVersion?: number;
 }
 
 export interface UnshieldedTransaction {
@@ -238,6 +251,160 @@ export interface ContractBalance {
   tokenType: string;
   amount: string;
 }
+
+export type ContractEventResponse = GraphQLResponse<{ contractEvents: ContractEvent[] }>;
+
+/**
+ * The 11 standard contract-event variants per MIP-0002 Appendix A. Mirrors the
+ * `ContractEventType` GraphQL enum used by `ContractEventFilter.types`.
+ */
+export type ContractEventType =
+  | 'SHIELDED_SPEND'
+  | 'SHIELDED_RECEIVE'
+  | 'SHIELDED_MINT'
+  | 'SHIELDED_BURN'
+  | 'UNSHIELDED_SPEND'
+  | 'UNSHIELDED_RECEIVE'
+  | 'UNSHIELDED_MINT'
+  | 'UNSHIELDED_BURN'
+  | 'PAUSED'
+  | 'UNPAUSED'
+  | 'MISC';
+
+export const CONTRACT_EVENT_TYPES: ContractEventType[] = [
+  'SHIELDED_SPEND',
+  'SHIELDED_RECEIVE',
+  'SHIELDED_MINT',
+  'SHIELDED_BURN',
+  'UNSHIELDED_SPEND',
+  'UNSHIELDED_RECEIVE',
+  'UNSHIELDED_MINT',
+  'UNSHIELDED_BURN',
+  'PAUSED',
+  'UNPAUSED',
+  'MISC',
+];
+
+/** Prefix filter on an indexed contract-event field (e.g. nullifier, tokenType). */
+export interface FieldPrefixFilter {
+  fieldName: string;
+  prefix: string;
+}
+
+export interface ContractEventFilter {
+  contractAddress: string;
+  types?: ContractEventType[];
+  fieldPrefixes?: FieldPrefixFilter[];
+  fromBlock?: number;
+  toBlock?: number;
+  transactionHash?: string;
+}
+
+/**
+ * Tagged union for `Either<ZswapCoinPublicKey, ContractAddress>` fields
+ * (UnshieldedSpend/Receive `sender`/`recipient`, UnshieldedBurn `sender`).
+ * Exactly one of `userAddress` / `contractAddress` is populated per `kind`.
+ */
+export interface AddressOrContract {
+  kind: 'USER' | 'CONTRACT';
+  userAddress?: string;
+  contractAddress?: string;
+}
+
+/** Fields common to every concrete contract event (the `ContractEvent` interface). */
+export interface ContractEventBase {
+  __typename: string;
+  id: number;
+  raw: string;
+  maxId: number;
+  protocolVersion: number;
+  version: number;
+  contractAddress: string;
+  transactionId: number;
+  transaction: Transaction;
+}
+
+export interface ShieldedSpendEvent extends ContractEventBase {
+  __typename: 'ShieldedSpendEvent';
+  nullifier: string;
+}
+
+export interface ShieldedReceiveEvent extends ContractEventBase {
+  __typename: 'ShieldedReceiveEvent';
+  commitment: string;
+  ciphertext?: string | null;
+  receivingContractAddress?: string | null;
+}
+
+export interface ShieldedMintEvent extends ContractEventBase {
+  __typename: 'ShieldedMintEvent';
+  commitment: string;
+  domainSep: string;
+  amount?: string | null;
+}
+
+export interface ShieldedBurnEvent extends ContractEventBase {
+  __typename: 'ShieldedBurnEvent';
+  nullifier: string;
+  amount?: string | null;
+}
+
+export interface UnshieldedSpendEvent extends ContractEventBase {
+  __typename: 'UnshieldedSpendEvent';
+  sender: AddressOrContract;
+  domainSep: string;
+  tokenType: string;
+  amount: string;
+}
+
+export interface UnshieldedReceiveEvent extends ContractEventBase {
+  __typename: 'UnshieldedReceiveEvent';
+  recipient: AddressOrContract;
+  domainSep: string;
+  tokenType: string;
+  amount: string;
+}
+
+export interface UnshieldedMintEvent extends ContractEventBase {
+  __typename: 'UnshieldedMintEvent';
+  domainSep: string;
+  tokenType: string;
+  amount: string;
+}
+
+export interface UnshieldedBurnEvent extends ContractEventBase {
+  __typename: 'UnshieldedBurnEvent';
+  sender: AddressOrContract;
+  tokenType: string;
+  amount: string;
+}
+
+export interface PausedEvent extends ContractEventBase {
+  __typename: 'PausedEvent';
+}
+
+export interface UnpausedEvent extends ContractEventBase {
+  __typename: 'UnpausedEvent';
+}
+
+export interface MiscContractEvent extends ContractEventBase {
+  __typename: 'MiscContractEvent';
+  name: string;
+  payload: string;
+}
+
+export type ContractEvent =
+  | ShieldedSpendEvent
+  | ShieldedReceiveEvent
+  | ShieldedMintEvent
+  | ShieldedBurnEvent
+  | UnshieldedSpendEvent
+  | UnshieldedReceiveEvent
+  | UnshieldedMintEvent
+  | UnshieldedBurnEvent
+  | PausedEvent
+  | UnpausedEvent
+  | MiscContractEvent;
 
 export interface DustGenerationStatus {
   cardanoRewardAddress: string;
@@ -312,6 +479,127 @@ export type DustGenerationsResponse = GraphQLResponse<{
   dustGenerations: DustGenerations[];
 }>;
 
+// c2m-bridge query surface (#941). Only BridgeUserTransfer carries fully-populated
+// fields today; other variants are discriminated by __typename until data exists.
+export interface BridgeUserTransfer {
+  __typename: 'BridgeUserTransfer';
+  id: number;
+  blockHeight: number;
+  midnightTxHash: string;
+  cardanoTxHash: string;
+  amount: string;
+  recipient: string;
+}
+
+// c2m-bridge pool observability surface (#944).
+export type BridgeTreasuryReason = 'INVALID' | 'UNAPPROVED' | 'SUBMINIMAL_FLUSH';
+
+export const BRIDGE_TREASURY_REASONS: BridgeTreasuryReason[] = [
+  'INVALID',
+  'UNAPPROVED',
+  'SUBMINIMAL_FLUSH',
+];
+
+export interface BridgeTreasuryAggregate {
+  reason: BridgeTreasuryReason;
+  total: string;
+}
+
+export interface BridgePoolSummary {
+  reserveTotal: string;
+  treasuryByReason: BridgeTreasuryAggregate[];
+  subminimumTxCount: number;
+  lastEventBlockHeight: number | null;
+}
+
+export type BridgePoolSummaryResponse = GraphQLResponse<{ bridgePoolSummary: BridgePoolSummary }>;
+
+// Inflow event lists. Only BridgeReserveTransfer carries populated fields today;
+// treasury variants are discriminated by __typename until data exists.
+export interface BridgeReserveTransfer {
+  __typename: 'BridgeReserveTransfer';
+  id: number;
+  blockHeight: number;
+  midnightTxHash: string;
+  cardanoTxHash: string;
+  amount: string;
+}
+
+export interface BridgeEventOther {
+  __typename: string;
+  id?: number;
+  recipient?: string;
+  amount?: string;
+}
+
+export type BridgeEvent = BridgeUserTransfer | BridgeReserveTransfer | BridgeEventOther;
+
+export type BridgeEventsResponse = GraphQLResponse<{ bridgeEvents: BridgeEvent[] }>;
+
+export type BridgeDepositsResponse = GraphQLResponse<{ bridgeDeposits: BridgeEvent[] }>;
+
+export interface BridgeBalance {
+  deposited: string;
+  claimed: string;
+  balance: string;
+}
+
+export type BridgeBalanceResponse = GraphQLResponse<{ bridgeBalance: BridgeBalance }>;
+
+export type BridgeReserveInflowsResponse = GraphQLResponse<{ bridgeReserveInflows: BridgeEvent[] }>;
+
+export type BridgeTreasuryInflowsResponse = GraphQLResponse<{
+  bridgeTreasuryInflows: BridgeEvent[];
+}>;
+
+// #1304: Block.contractZswapState and the composed CCC execution-inputs read.
+export type BlockContractZswapStateResponse = GraphQLResponse<{
+  block: {
+    hash: string;
+    height: number;
+    contractZswapState: string | null;
+  } | null;
+}>;
+
+export type ExecutionInputsResponse = GraphQLResponse<{
+  block: {
+    hash: string;
+    ledgerParameters: string;
+    contractZswapState: string | null;
+  } | null;
+  contract: { state: string } | null;
+}>;
+
+// #1275: top-level Contract type and contract(address, offset) query.
+export type ContractMaintenanceVerifyingKeyKind = 'SCHNORR' | 'ECDSA';
+
+export interface ContractMaintenanceVerifyingKey {
+  kind: ContractMaintenanceVerifyingKeyKind;
+  key: string;
+}
+
+export interface ContractMaintenanceAuthority {
+  committee: ContractMaintenanceVerifyingKey[];
+  threshold: number;
+  counter: number;
+}
+
+export type ContractActionTypeEnum = 'DEPLOY' | 'CALL' | 'UPDATE';
+
+export interface ContractTypeActionRef {
+  __typename: string;
+  address: string;
+}
+
+export interface ContractType {
+  address: string;
+  state: string;
+  maintenanceAuthority: ContractMaintenanceAuthority;
+  actions: ContractTypeActionRef[];
+}
+
+export type ContractResponse = GraphQLResponse<{ contract: ContractType | null }>;
+
 export interface DustCommitmentMerkleTreeUpdateResult {
   startIndex: number;
   endIndex: number;
@@ -359,6 +647,8 @@ export interface DustGenerationsProgress {
   __typename: 'DustGenerationsProgress';
   highestIndex: number;
   collapsedMerkleTree: CollapsedMerkleTree | null;
+  /** Protocol version of the snapshot's block, not the tip. Only present when selected. */
+  protocolVersion?: number;
 }
 
 export interface DustGenerationDtimeUpdateItem {
@@ -373,9 +663,7 @@ export interface DustGenerationDtimeUpdateItem {
 }
 
 export type DustGenerationsEvent =
-  | DustGenerationsItem
-  | DustGenerationsProgress
-  | DustGenerationDtimeUpdateItem;
+  DustGenerationsItem | DustGenerationsProgress | DustGenerationDtimeUpdateItem;
 
 export interface DustNullifierTransaction {
   nullifierLeBytes: string;
@@ -397,3 +685,198 @@ export interface ShieldedNullifierTransaction {
 }
 
 export type ViewingKey = string & { __brand: 'ViewingKey' };
+
+// SPO indexer surface (#1003). dParameterHistory and termsAndConditionsHistory
+// are written by chain-indexer; epoch/committee data by spo-indexer; the
+// registration surface (Spo, SpoIdentity, PoolMetadata, EpochPerf, StakeShare,
+// stakePoolOperators) is empty until post-mainnet registration.
+
+export interface DParameterChange {
+  blockHeight: number;
+  blockHash: string;
+  timestamp: number;
+  numPermissionedCandidates: number;
+  numRegisteredCandidates: number;
+}
+
+export interface EpochInfo {
+  epochNo: number;
+  durationSeconds: number;
+  elapsedSeconds: number;
+}
+
+export interface CommitteeMember {
+  epochNo: number;
+  position: number;
+  sidechainPubkeyHex: string;
+  expectedSlots: number;
+  auraPubkeyHex: string | null;
+  poolIdHex: string | null;
+  spoSkHex: string | null;
+}
+
+export interface Spo {
+  poolIdHex: string;
+  validatorClass: string;
+  sidechainPubkeyHex: string;
+  auraPubkeyHex: string | null;
+  name: string | null;
+  ticker: string | null;
+  homepageUrl: string | null;
+  logoUrl: string | null;
+}
+
+export interface SpoIdentity {
+  poolIdHex: string;
+  mainchainPubkeyHex: string;
+  sidechainPubkeyHex: string;
+  auraPubkeyHex: string | null;
+  validatorClass: string;
+}
+
+export interface RegisteredTotals {
+  epochNo: number;
+  totalRegistered: number;
+  newlyRegistered: number;
+}
+
+export type RegisteredTotalsSeriesResponse = GraphQLResponse<{
+  registeredTotalsSeries: RegisteredTotals[];
+}>;
+
+export interface RegisteredStat {
+  epochNo: number;
+  federatedValidCount: number;
+  federatedInvalidCount: number;
+  registeredValidCount: number;
+  registeredInvalidCount: number;
+  dparam: number | null;
+}
+
+export type RegisteredSpoSeriesResponse = GraphQLResponse<{
+  registeredSpoSeries: RegisteredStat[];
+}>;
+
+export interface PresenceEvent {
+  epochNo: number;
+  idKey: string;
+  source: string;
+  status: string | null;
+}
+
+export type RegisteredPresenceResponse = GraphQLResponse<{
+  registeredPresence: PresenceEvent[];
+}>;
+
+export type DParameterHistoryResponse = GraphQLResponse<{ dParameterHistory: DParameterChange[] }>;
+export type CurrentEpochInfoResponse = GraphQLResponse<{ currentEpochInfo: EpochInfo | null }>;
+export type CommitteeResponse = GraphQLResponse<{ committee: CommitteeMember[] }>;
+export type SpoCountResponse = GraphQLResponse<{ spoCount: number | null }>;
+export type SpoListResponse = GraphQLResponse<{ spoList: Spo[] }>;
+export type SpoIdentitiesResponse = GraphQLResponse<{ spoIdentities: SpoIdentity[] }>;
+export type StakePoolOperatorsResponse = GraphQLResponse<{ stakePoolOperators: string[] }>;
+export type SpoByPoolIdResponse = GraphQLResponse<{ spoByPoolId: Spo | null }>;
+export type SpoIdentityByPoolIdResponse = GraphQLResponse<{
+  spoIdentityByPoolId: SpoIdentity | null;
+}>;
+export interface TermsAndConditionsChange {
+  blockHeight: number;
+  blockHash: string;
+  timestamp: number;
+  hash: string;
+  url: string;
+}
+
+export interface DParameter {
+  numPermissionedCandidates: number;
+  numRegisteredCandidates: number;
+}
+
+export interface TermsAndConditions {
+  hash: string;
+  url: string;
+}
+
+export interface SystemParameters {
+  dParameter: DParameter;
+  termsAndConditions: TermsAndConditions | null;
+}
+
+// The Block projection used by GET_BLOCK_SYSTEM_PARAMETERS. `timestamp` is a
+// GraphQL Int; the wider `Block` interface above types it as string.
+export interface BlockSystemParameters {
+  hash: string;
+  height: number;
+  timestamp: number;
+  systemParameters: SystemParameters;
+}
+
+export interface PoolMetadata {
+  poolIdHex: string;
+  hexId: string | null;
+  name: string | null;
+  ticker: string | null;
+  homepageUrl: string | null;
+  logoUrl: string | null;
+}
+
+export interface EpochPerf {
+  epochNo: number;
+  spoSkHex: string;
+  produced: number;
+  expected: number;
+  identityLabel: string | null;
+  stakeSnapshot: string | null;
+  poolIdHex: string | null;
+  validatorClass: string | null;
+}
+
+export interface SpoComposite {
+  identity: SpoIdentity | null;
+  metadata: PoolMetadata | null;
+  performance: EpochPerf[];
+}
+
+export interface FirstValidEpoch {
+  idKey: string;
+  firstValidEpoch: number;
+}
+
+export interface StakeShare {
+  poolIdHex: string;
+  name: string | null;
+  ticker: string | null;
+  homepageUrl: string | null;
+  logoUrl: string | null;
+  liveStake: string | null;
+  activeStake: string | null;
+  liveDelegators: number | null;
+  liveSaturation: number | null;
+  declaredPledge: string | null;
+  livePledge: string | null;
+  stakeShare: number | null;
+}
+
+export type TermsAndConditionsHistoryResponse = GraphQLResponse<{
+  termsAndConditionsHistory: TermsAndConditionsChange[];
+}>;
+export type BlockSystemParametersResponse = GraphQLResponse<{
+  block: BlockSystemParameters | null;
+}>;
+export type PoolMetadataResponse = GraphQLResponse<{ poolMetadata: PoolMetadata | null }>;
+export type PoolMetadataListResponse = GraphQLResponse<{ poolMetadataList: PoolMetadata[] }>;
+export type SpoCompositeByPoolIdResponse = GraphQLResponse<{
+  spoCompositeByPoolId: SpoComposite | null;
+}>;
+export type SpoPerformanceLatestResponse = GraphQLResponse<{
+  spoPerformanceLatest: EpochPerf[];
+}>;
+export type SpoPerformanceBySpoSkResponse = GraphQLResponse<{
+  spoPerformanceBySpoSk: EpochPerf[];
+}>;
+export type EpochPerformanceResponse = GraphQLResponse<{ epochPerformance: EpochPerf[] }>;
+export type EpochUtilizationResponse = GraphQLResponse<{ epochUtilization: number | null }>;
+export type RegisteredFirstValidEpochsResponse = GraphQLResponse<{
+  registeredFirstValidEpochs: FirstValidEpoch[];
+}>;
+export type StakeDistributionResponse = GraphQLResponse<{ stakeDistribution: StakeShare[] }>;

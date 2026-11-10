@@ -35,6 +35,7 @@ import {
 import { IndexerWsClient } from '@utils/indexer/websocket-client';
 import { EventCoordinator } from '@utils/event-coordinator';
 import { collectValidDustLedgerEvents } from 'tests/shared/dust-ledger-utils';
+import { deriveAddresses } from '@utils/moth/moth-addresses';
 
 /**
  * Subscribe to shielded transaction events for an open wallet session and resolve `true` as soon
@@ -88,8 +89,20 @@ describe('shielded transactions', () => {
   let transactionResult: ToolkitTransactionResult;
 
   // Deterministic seeds (hex) that work with the toolkit
-  const sourceSeed = dataProvider.getFundingSeed();
-  const destinationSeed = '0000000000000000000000000000000000000000000000000000000987654321';
+  const sourceSeed = dataProvider.getTransferFundingSeed();
+  // Self-transfer: the funding wallet sends to itself, so its balance stays flat
+  // and a funded wallet can run this suite indefinitely.
+  //
+  // This used to be a hard-coded seed. On preview under TX_BACKEND=moth that seed
+  // happened to BE the funding wallet's, so the suite was already self-transferring
+  // by accident — and the source and destination viewing-key tests were quietly
+  // asserting on the same key. Deriving it from the funding seed makes that
+  // intentional and true on every environment instead of one.
+  //
+  // The cost is the same as for the unshielded suites: the paired source/destination
+  // tests now assert the same thing twice. The "unrelated viewing key" test below is
+  // what still proves the indexer does not leak a transaction to a third party.
+  const destinationSeed = sourceSeed;
 
   let destinationAddress: string;
 
@@ -104,7 +117,7 @@ describe('shielded transactions', () => {
     await toolkit.start();
 
     // Derive shielded addresses from seeds
-    destinationAddress = (await toolkit.showAddress(destinationSeed)).shielded;
+    destinationAddress = (await deriveAddresses(destinationSeed, toolkit)).shielded;
 
     const beforeDustEvents = await collectValidDustLedgerEvents(
       indexerWsClient,
@@ -153,6 +166,17 @@ describe('shielded transactions', () => {
     log.info(`\nTX hashes from toolkit: ${JSON.stringify(summary, null, 2)} \n`);
 
     await resolveBlockHash(transactionResult);
+
+    // Under the moth backend the status is `sent` at submit time and only `resolveBlockHash`
+    // promotes it to `confirmed`, by asking the indexer, which is the system under test. If the
+    // indexer never indexes the transfer, `resolveBlockHash` only logs a warning, so fail here:
+    // otherwise every test below would skip on "not confirmed" and the run would be green.
+    if (transactionResult.status !== 'confirmed') {
+      throw new Error(
+        `Transaction ${transactionResult.txHash} was not reported in a block by the indexer ` +
+          `(status: ${transactionResult.status}), so the suite cannot proceed.`,
+      );
+    }
   }, 200_000);
 
   afterAll(async () => {
@@ -174,10 +198,7 @@ describe('shielded transactions', () => {
         testKey: 'PM-17709',
       };
 
-      ctx.skip?.(
-        transactionResult.status !== 'confirmed',
-        "Toolkit transaction hasn't been confirmed",
-      );
+      ctx.skip?.(transactionResult.status !== 'confirmed', "Transaction hasn't been confirmed");
 
       // The expected block might take a bit more to show up by indexer, so we retry a few times
       const blockResponse = await getBlockByHashWithRetry(transactionResult.blockHash!);
@@ -202,10 +223,7 @@ describe('shielded transactions', () => {
         testKey: 'PM-17710',
       };
 
-      ctx.skip?.(
-        transactionResult.status !== 'confirmed',
-        "Toolkit transaction hasn't been confirmed",
-      );
+      ctx.skip?.(transactionResult.status !== 'confirmed', "Transaction hasn't been confirmed");
 
       log.info(
         `Verifying indexer reports a shielded transaction by hash: ${transactionResult.txHash}`,
@@ -241,15 +259,50 @@ describe('shielded transactions', () => {
      * After a shielded transaction is confirmed, the indexer streams the Zswap
      * events in sequence, followed by a DustSpendProcessed event.
      *
+     * The number of Zswap events depends on wallet-side coin selection (input + recipient output,
+     * plus a change output only when the selected coin exceeds the amount), so the expected events
+     * are taken from the transaction itself rather than hard-coded.
+     *
+     * Both the Zswap and the Dust event ids are taken from the transaction itself: `maxId` is the
+     * chain-wide maximum for the group when the query runs, so on a shared chain another transaction
+     * can land in between and shift it.
+     *
      * @given a confirmed shielded transaction
-     * @when we subscribe to Zswap events starting from (previousMaxId + 1)
-     * @then the Zswap events are delivered in order
-     * @and the following event is DustSpendProcessed
+     * @when we subscribe to Zswap events starting from the transaction's first Zswap event id
+     * @then the transaction's Zswap events are delivered in order
+     * @and the transaction's first Dust event follows them and is DustSpendProcessed
      */
     test(
       'should stream Zswap events followed by DustSpendProcessed after a shielded transaction',
       { timeout: 90_000 },
-      async () => {
+      async (ctx: TestContext) => {
+        ctx.task!.meta.custom = {
+          labels: ['Subscription', 'Zswap', 'Dust', 'LedgerEvents', 'ShieldedTokens'],
+        };
+
+        const transactionResponse = await getTransactionByHashWithRetry(transactionResult.txHash);
+        expect(transactionResponse).toBeSuccess();
+        const tx = transactionResponse.data!.transactions.find(
+          (t: Transaction) => t.hash === transactionResult.txHash,
+        );
+        expect(tx).toBeDefined();
+
+        const expectedZswapIds = (tx!.zswapLedgerEvents ?? [])
+          .map((e) => e.id)
+          .sort((a, b) => a - b);
+        // At minimum the spent input and the recipient output
+        expect(expectedZswapIds.length).toBeGreaterThanOrEqual(2);
+        expect(expectedZswapIds[0]).toBeGreaterThan(previousMaxLedgerId);
+        log.debug(`Transaction zswap ledger event ids: ${expectedZswapIds.join(', ')}`);
+
+        // The fee spend is recorded as the transaction's first Dust event. Ledger events share one
+        // id sequence across groups, so it comes after the transaction's Zswap events.
+        const expectedDustIds = (tx!.dustLedgerEvents ?? []).map((e) => e.id).sort((a, b) => a - b);
+        expect(expectedDustIds.length).toBeGreaterThanOrEqual(1);
+        const expectedDustId = expectedDustIds[0];
+        expect(expectedDustId).toBeGreaterThan(expectedZswapIds.at(-1)!);
+        log.debug(`Transaction dust ledger event ids: ${expectedDustIds.join(', ')}`);
+
         // Reconnect WS client - the connection may have gone stale during the long toolkit transaction
         await indexerWsClient.connectionClose();
         await indexerWsClient.connectionInit();
@@ -257,11 +310,12 @@ describe('shielded transactions', () => {
         const received = await collectValidZswapEvents(
           indexerWsClient,
           indexerEventCoordinator,
-          3,
-          previousMaxLedgerId + 1,
+          expectedZswapIds.length,
+          expectedZswapIds[0],
           30_000,
         );
-        expect(received).toHaveLength(3);
+        expect(received).toHaveLength(expectedZswapIds.length);
+        expect(received.map((m) => m.data!.zswapLedgerEvents.id)).toEqual(expectedZswapIds);
 
         received.forEach((msg) => {
           const event = msg.data!.zswapLedgerEvents;
@@ -280,20 +334,18 @@ describe('shielded transactions', () => {
           expect(e.id).toBe(events[i].id + 1);
         });
 
-        const lastZswapMaxId = received.at(-1)!.data!.zswapLedgerEvents.maxId;
-
-        // verify the Dust event directly follows the Zswap events
+        // verify the transaction's Dust event is streamed and is the fee spend
         const dustEvents = await collectValidDustLedgerEvents(
           indexerWsClient,
           indexerEventCoordinator,
           1,
-          lastZswapMaxId + 1,
+          expectedDustId,
           30_000,
         );
         expect(dustEvents).toHaveLength(1);
         const dust = dustEvents[0].data!.dustLedgerEvents;
         expect(dust.__typename).toBe('DustSpendProcessed');
-        expect(dust.id).toBe(lastZswapMaxId + 1);
+        expect(dust.id).toBe(expectedDustId);
       },
     );
 
@@ -310,10 +362,7 @@ describe('shielded transactions', () => {
         labels: ['Query', 'Transaction', 'Zswap', 'ShieldedTokens'],
       };
 
-      ctx.skip?.(
-        transactionResult.status !== 'confirmed',
-        "Toolkit transaction hasn't been confirmed",
-      );
+      ctx.skip?.(transactionResult.status !== 'confirmed', "Transaction hasn't been confirmed");
 
       const transactionResponse = await getTransactionByHashWithRetry(transactionResult.txHash);
       expect(transactionResponse).toBeSuccess();
@@ -344,10 +393,7 @@ describe('shielded transactions', () => {
         labels: ['Query', 'Transaction', 'Dust', 'CommitmentMerkleTree', 'ShieldedTokens'],
       };
 
-      ctx.skip?.(
-        transactionResult.status !== 'confirmed',
-        "Toolkit transaction hasn't been confirmed",
-      );
+      ctx.skip?.(transactionResult.status !== 'confirmed', "Transaction hasn't been confirmed");
 
       const transactionResponse = await getTransactionByHashWithRetry(transactionResult.txHash);
       expect(transactionResponse).toBeSuccess();
@@ -388,10 +434,7 @@ describe('shielded transactions', () => {
           labels: ['Subscription', 'ShieldedTransaction', 'ViewingKey', 'Source'],
         };
 
-        ctx.skip?.(
-          transactionResult.status !== 'confirmed',
-          "Toolkit transaction hasn't been confirmed",
-        );
+        ctx.skip?.(transactionResult.status !== 'confirmed', "Transaction hasn't been confirmed");
 
         // Reconnect WS client - the connection may have gone stale during the long toolkit transaction
         await indexerWsClient.connectionClose();
@@ -426,10 +469,7 @@ describe('shielded transactions', () => {
           labels: ['Subscription', 'ShieldedTransaction', 'ViewingKey', 'Destination'],
         };
 
-        ctx.skip?.(
-          transactionResult.status !== 'confirmed',
-          "Toolkit transaction hasn't been confirmed",
-        );
+        ctx.skip?.(transactionResult.status !== 'confirmed', "Transaction hasn't been confirmed");
 
         // Reconnect WS client - the connection may have gone stale during the long toolkit transaction
         await indexerWsClient.connectionClose();
@@ -468,10 +508,7 @@ describe('shielded transactions', () => {
           labels: ['Subscription', 'ShieldedTransaction', 'ViewingKey', 'Privacy'],
         };
 
-        ctx.skip?.(
-          transactionResult.status !== 'confirmed',
-          "Toolkit transaction hasn't been confirmed",
-        );
+        ctx.skip?.(transactionResult.status !== 'confirmed', "Transaction hasn't been confirmed");
 
         // Reconnect WS client - the connection may have gone stale during the long toolkit transaction
         await indexerWsClient.connectionClose();

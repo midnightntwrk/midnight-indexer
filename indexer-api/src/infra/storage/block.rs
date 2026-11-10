@@ -12,14 +12,18 @@
 // limitations under the License.
 
 use crate::{
-    domain::{Block, storage::block::BlockStorage},
+    domain::{Block, BlockReference, storage::block::BlockStorage},
     infra::storage::Storage,
 };
 use async_stream::try_stream;
 use fastrace::trace;
 use futures::Stream;
-use indexer_common::{domain::BlockHash, stream::flatten_chunks};
+use indexer_common::{
+    domain::{BlockHash, ProtocolVersion},
+    stream::flatten_chunks,
+};
 use indoc::indoc;
+use sqlx::FromRow;
 use std::num::NonZeroU32;
 
 impl BlockStorage for Storage {
@@ -47,6 +51,25 @@ impl BlockStorage for Storage {
         "};
 
         sqlx::query_as(query).fetch_optional(&*self.pool).await
+    }
+
+    #[trace]
+    async fn get_latest_protocol_version(&self) -> Result<Option<ProtocolVersion>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT protocol_version
+            FROM blocks
+            ORDER BY height DESC
+            LIMIT 1
+        "};
+
+        sqlx::query_as::<_, (i64,)>(query)
+            .fetch_optional(&*self.pool)
+            .await?
+            .map(|(protocol_version,)| {
+                ProtocolVersion::try_from(protocol_version)
+                    .map_err(|error| sqlx::Error::Decode(error.into()))
+            })
+            .transpose()
     }
 
     async fn get_blocks_by_hashes(&self, hashes: &[BlockHash]) -> Result<Vec<Block>, sqlx::Error> {
@@ -83,6 +106,45 @@ impl BlockStorage for Storage {
             .bind(height as i64)
             .fetch_optional(&*self.pool)
             .await
+    }
+
+    #[trace(properties = { "height": "{height}" })]
+    async fn get_block_reference_by_height(
+        &self,
+        height: u32,
+    ) -> Result<Option<BlockReference>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT height, hash, protocol_version
+            FROM blocks
+            WHERE height = $1
+        "};
+
+        sqlx::query_as(query)
+            .bind(height as i64)
+            .fetch_optional(&*self.pool)
+            .await
+    }
+
+    #[trace(properties = { "ids": "{ids:?}" })]
+    async fn get_block_references_by_transaction_ids(
+        &self,
+        ids: &[u64],
+    ) -> Result<Vec<(u64, BlockReference)>, sqlx::Error> {
+        if ids.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let block_references = self.get_block_references_by_transaction_ids(ids).await?;
+
+        Ok(block_references
+            .into_iter()
+            .map(
+                |TransactionBlockReference {
+                     transaction_id,
+                     block,
+                 }| (transaction_id, block),
+            )
+            .collect())
     }
 
     fn get_blocks(
@@ -172,6 +234,56 @@ impl Storage {
         query.build_query_as().fetch_all(&*self.pool).await
     }
 
+    #[cfg(feature = "cloud")]
+    async fn get_block_references_by_transaction_ids(
+        &self,
+        ids: &[u64],
+    ) -> Result<Vec<TransactionBlockReference>, sqlx::Error> {
+        let query = indoc! {"
+            SELECT
+                transactions.id AS transaction_id,
+                blocks.height,
+                blocks.hash,
+                blocks.protocol_version
+            FROM transactions
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            WHERE transactions.id = ANY($1)
+        "};
+
+        sqlx::query_as(query)
+            .bind(ids.iter().map(|id| *id as i64).collect::<Vec<_>>())
+            .fetch_all(&*self.pool)
+            .await
+    }
+
+    #[cfg(feature = "standalone")]
+    async fn get_block_references_by_transaction_ids(
+        &self,
+        ids: &[u64],
+    ) -> Result<Vec<TransactionBlockReference>, sqlx::Error> {
+        use sqlx::{QueryBuilder, Sqlite};
+
+        let query = indoc! {"
+            SELECT
+                transactions.id AS transaction_id,
+                blocks.height,
+                blocks.hash,
+                blocks.protocol_version
+            FROM transactions
+            INNER JOIN blocks ON blocks.id = transactions.block_id
+            WHERE transactions.id IN (
+        "};
+
+        let mut query = QueryBuilder::<Sqlite>::new(query);
+        let mut ids_separated = query.separated(", ");
+        for id in ids {
+            ids_separated.push_bind(*id as i64);
+        }
+        query.push(")");
+
+        query.build_query_as().fetch_all(&*self.pool).await
+    }
+
     #[trace(properties = { "height": "{height}", "batch_size": "{batch_size}" })]
     async fn get_blocks(
         &self,
@@ -206,4 +318,14 @@ impl Storage {
             .fetch_all(&*self.pool)
             .await
     }
+}
+
+// A reference to a block with the ID of one of its transactions. sqlx decodes each tuple element
+// from one column, so a `(i64, BlockReference)` tuple cannot hold the reference's columns.
+#[derive(FromRow)]
+struct TransactionBlockReference {
+    #[sqlx(try_from = "i64")]
+    transaction_id: u64,
+    #[sqlx(flatten)]
+    block: BlockReference,
 }

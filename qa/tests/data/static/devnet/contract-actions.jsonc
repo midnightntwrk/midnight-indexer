@@ -1,0 +1,23 @@
+// Array of contract actions
+[
+  {
+    "contract-address": "f4430b2cab4ab2014aef38ede47315c4fb98603547362477612a13c070a96b3e",
+    "contract-actions": [
+      {
+        "action-type": "ContractDeploy",
+        "block-height": 8635,
+        "block-hash": "ad6b1fef4f3e9810c668d8f03dc7f7cfb8bc17d38c96c3d2df0714fdd6b48e18"
+      },
+      {
+        "action-type": "ContractCall",
+        "block-height": 8731,
+        "block-hash": "b37ddca00a8a79482b46c79db187b5c4984bd87b67ede7ff86a454029487821e"
+      },
+      {
+        "action-type": "ContractUpdate",
+        "block-height": 400773,
+        "block-hash": "ca74e121de44270e06cc7803975861ad67d83d2f28cb2b00326a754ca4dd76a4"
+      }
+    ]
+  }
+]

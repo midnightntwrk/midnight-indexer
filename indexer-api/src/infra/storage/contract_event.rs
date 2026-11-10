@@ -11,10 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Storage impl for the `contractEvents` query and subscription surface
-//! (ticket #1161). Pattern follows `get_ledger_events` in `ledger_events.rs`
-//! but joins through `blocks` for block-range filtering and through
-//! `contract_event_indexed_fields` for prefix lookup.
+//! Storage impl for the `contractEvents` query and subscription surface (#1161). Pattern
+//! follows `get_ledger_events` in `ledger_events.rs` but joins through `blocks` for
+//! block-range filtering and through `contract_event_indexed_fields` for prefix lookup.
 
 use crate::{
     domain::{
@@ -27,50 +26,57 @@ use async_stream::try_stream;
 use fastrace::trace;
 use futures::Stream;
 use indexer_common::stream::flatten_chunks;
+use indoc::indoc;
 use std::num::NonZeroU32;
+
+#[cfg(feature = "cloud")]
+type Db = sqlx::Postgres;
+#[cfg(feature = "standalone")]
+type Db = sqlx::Sqlite;
 
 impl ContractEventStorage for Storage {
     #[trace(properties = {
-        "limit": "{limit:?}",
-        "offset": "{offset:?}"
+        "limit": "{limit}",
+        "offset": "{offset}"
     })]
     async fn get_contract_events(
         &self,
-        filter: ContractEventFilter,
-        limit: Option<u32>,
-        offset: Option<u32>,
+        filter: &ContractEventFilter,
+        limit: u32,
+        offset: u32,
     ) -> Result<Vec<ContractEventRow>, sqlx::Error> {
-        let mut qb = base_query_builder(&filter);
-        qb.push(" ORDER BY le.id ASC ");
-        if let Some(l) = limit {
-            qb.push(" LIMIT ").push_bind(l as i64);
-        }
-        if let Some(o) = offset {
-            qb.push(" OFFSET ").push_bind(o as i64);
-        }
-        qb.build_query_as::<ContractEventRow>()
+        let mut query_builder = base_query_builder(filter);
+        query_builder
+            .push(" ORDER BY ledger_events.id LIMIT ")
+            .push_bind(limit as i64)
+            .push(" OFFSET ")
+            .push_bind(offset as i64);
+
+        query_builder
+            .build_query_as::<ContractEventRow>()
             .fetch_all(&*self.pool)
             .await
     }
 
-    async fn get_contract_events_after_id(
+    async fn get_contract_events_from_id(
         &self,
-        filter: ContractEventFilter,
-        mut after_id: u64,
+        filter: &ContractEventFilter,
+        mut id: u64,
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<ContractEventRow, sqlx::Error>> + Send {
         let chunks = try_stream! {
             loop {
-                let rows = self
-                    .fetch_contract_events_chunk(&filter, after_id, batch_size)
-                    .await?;
+                let rows = self.get_contract_events_chunk(filter, id, batch_size).await?;
+
                 match rows.last() {
-                    Some(last) => after_id = last.id + 1,
+                    Some(last) => id = last.id + 1,
                     None => break,
                 }
+
                 yield rows;
             }
         };
+
         flatten_chunks(chunks)
     }
 
@@ -83,195 +89,176 @@ impl ContractEventStorage for Storage {
             return Ok(vec![]);
         }
 
-        let mut qb = ids_query_builder();
-        let mut separated = qb.separated(", ");
-        for id in ids {
-            separated.push_bind(*id as i64);
-        }
-        qb.push(") ORDER BY le.id ASC");
+        #[cfg(feature = "cloud")]
+        let rows = {
+            let query = indoc! {"
+                SELECT
+                    ledger_events.id,
+                    ledger_events.contract_address,
+                    ledger_events.transaction_id,
+                    ledger_events.contract_action_id,
+                    ledger_events.raw,
+                    ledger_events.attributes,
+                    (SELECT MAX(id) FROM ledger_events WHERE grouping = 'Contract') AS max_id,
+                    transactions.protocol_version
+                FROM ledger_events
+                INNER JOIN transactions ON transactions.id = ledger_events.transaction_id
+                WHERE ledger_events.grouping = 'Contract'
+                AND ledger_events.contract_action_id = ANY($1)
+                ORDER BY ledger_events.id
+            "};
 
-        let rows: Vec<ContractEventRow> = qb
-            .build_query_as::<ContractEventRow>()
-            .fetch_all(&*self.pool)
-            .await?;
+            let ids = ids.iter().map(|id| *id as i64).collect::<Vec<_>>();
+
+            sqlx::query_as::<_, ContractEventRow>(query)
+                .bind(ids)
+                .fetch_all(&*self.pool)
+                .await?
+        };
+
+        #[cfg(feature = "standalone")]
+        let rows = {
+            let mut query_builder = sqlx::QueryBuilder::<Db>::new(indoc! {"
+                SELECT
+                    ledger_events.id,
+                    ledger_events.contract_address,
+                    ledger_events.transaction_id,
+                    ledger_events.contract_action_id,
+                    ledger_events.raw,
+                    ledger_events.attributes,
+                    (SELECT MAX(id) FROM ledger_events WHERE grouping = 'Contract') AS max_id,
+                    transactions.protocol_version
+                FROM ledger_events
+                INNER JOIN transactions ON transactions.id = ledger_events.transaction_id
+                WHERE ledger_events.grouping = 'Contract'
+                AND ledger_events.contract_action_id IN (
+            "});
+
+            let mut separated = query_builder.separated(", ");
+            for id in ids {
+                separated.push_bind(*id as i64);
+            }
+            query_builder.push(") ORDER BY ledger_events.id");
+
+            query_builder
+                .build_query_as::<ContractEventRow>()
+                .fetch_all(&*self.pool)
+                .await?
+        };
 
         Ok(rows
             .into_iter()
-            .filter_map(|r| r.contract_action_id.map(|key| (key, r)))
+            .filter_map(|row| row.contract_action_id.map(|key| (key, row)))
             .collect())
     }
 }
 
-#[cfg(feature = "cloud")]
-fn ids_query_builder<'a>() -> sqlx::QueryBuilder<'a, sqlx::Postgres> {
-    sqlx::QueryBuilder::<sqlx::Postgres>::new(indoc::indoc! {"
-        SELECT
-            le.id,
-            le.contract_address,
-            le.transaction_id,
-            le.contract_action_id,
-            le.raw,
-            le.attributes,
-            (SELECT MAX(id) FROM ledger_events WHERE grouping = 'Contract') AS max_id,
-            transactions.protocol_version
-        FROM ledger_events le
-        INNER JOIN transactions ON transactions.id = le.transaction_id
-        WHERE le.grouping = 'Contract'
-        AND le.contract_action_id IN (
-    "})
-}
-
-#[cfg(feature = "standalone")]
-fn ids_query_builder<'a>() -> sqlx::QueryBuilder<'a, sqlx::Sqlite> {
-    sqlx::QueryBuilder::<sqlx::Sqlite>::new(indoc::indoc! {"
-        SELECT
-            le.id,
-            le.contract_address,
-            le.transaction_id,
-            le.contract_action_id,
-            le.raw,
-            le.attributes,
-            (SELECT MAX(id) FROM ledger_events WHERE grouping = 'Contract') AS max_id,
-            transactions.protocol_version
-        FROM ledger_events le
-        INNER JOIN transactions ON transactions.id = le.transaction_id
-        WHERE le.grouping = 'Contract'
-        AND le.contract_action_id IN (
-    "})
-}
-
 impl Storage {
-    async fn fetch_contract_events_chunk(
+    #[trace(properties = {
+        "id": "{id}",
+        "batch_size": "{batch_size}"
+    })]
+    async fn get_contract_events_chunk(
         &self,
         filter: &ContractEventFilter,
-        after_id: u64,
+        id: u64,
         batch_size: NonZeroU32,
     ) -> Result<Vec<ContractEventRow>, sqlx::Error> {
-        let mut qb = base_query_builder(filter);
-        qb.push(" AND le.id >= ").push_bind(after_id as i64);
-        qb.push(" ORDER BY le.id ASC LIMIT ")
+        let mut query_builder = base_query_builder(filter);
+        query_builder
+            .push(" AND ledger_events.id >= ")
+            .push_bind(id as i64)
+            .push(" ORDER BY ledger_events.id LIMIT ")
             .push_bind(batch_size.get() as i64);
-        qb.build_query_as::<ContractEventRow>()
+
+        query_builder
+            .build_query_as::<ContractEventRow>()
             .fetch_all(&*self.pool)
             .await
     }
 }
 
-/// Shared SELECT + WHERE construction for both query and subscription paths.
-/// Caller appends ORDER/LIMIT/OFFSET as appropriate.
-#[cfg(feature = "cloud")]
-fn base_query_builder<'a>(
-    filter: &'a ContractEventFilter,
-) -> sqlx::QueryBuilder<'a, sqlx::Postgres> {
-    use sqlx::QueryBuilder;
-    let mut qb = QueryBuilder::<sqlx::Postgres>::new(indoc::indoc! {"
+/// Shared SELECT + WHERE construction for both the query and subscription paths; the caller
+/// appends ORDER/LIMIT/OFFSET as appropriate.
+fn base_query_builder<'a>(filter: &'a ContractEventFilter) -> sqlx::QueryBuilder<'a, Db> {
+    let mut query_builder = sqlx::QueryBuilder::<Db>::new(indoc! {"
         SELECT
-            le.id,
-            le.contract_address,
-            le.transaction_id,
-            le.contract_action_id,
-            le.raw,
-            le.attributes,
+            ledger_events.id,
+            ledger_events.contract_address,
+            ledger_events.transaction_id,
+            ledger_events.contract_action_id,
+            ledger_events.raw,
+            ledger_events.attributes,
             (SELECT MAX(id) FROM ledger_events WHERE grouping = 'Contract') AS max_id,
             transactions.protocol_version
-        FROM ledger_events le
-        INNER JOIN transactions ON transactions.id = le.transaction_id
+        FROM ledger_events
+        INNER JOIN transactions ON transactions.id = ledger_events.transaction_id
         INNER JOIN blocks ON blocks.id = transactions.block_id
-        WHERE le.grouping = 'Contract'
+        WHERE ledger_events.grouping = 'Contract'
     "});
-    qb.push(" AND le.contract_address = ")
-        .push_bind(filter.contract_address.clone());
 
-    if let Some(variants) = &filter.variants
-        && !variants.is_empty()
-    {
-        qb.push(" AND le.variant::text = ANY(")
-            .push_bind(variants.iter().map(|v| v.to_string()).collect::<Vec<_>>())
+    query_builder
+        .push(" AND ledger_events.contract_address = ")
+        .push_bind(filter.contract_address.as_ref());
+
+    if !filter.variants.is_empty() {
+        // The variant column is a Postgres enum (cast to text to compare) and a SQLite TEXT.
+        #[cfg(feature = "cloud")]
+        query_builder
+            .push(" AND ledger_events.variant::text = ANY(")
+            .push_bind(&filter.variants)
+            .push(") ");
+
+        #[cfg(feature = "standalone")]
+        {
+            query_builder.push(" AND ledger_events.variant IN (");
+            let mut separated = query_builder.separated(", ");
+            for variant in &filter.variants {
+                separated.push_bind(*variant);
+            }
+            query_builder.push(") ");
+        }
+    }
+
+    if let Some(from_block) = filter.from_block {
+        query_builder
+            .push(" AND blocks.height >= ")
+            .push_bind(from_block as i64);
+    }
+    if let Some(to_block) = filter.to_block {
+        query_builder
+            .push(" AND blocks.height <= ")
+            .push_bind(to_block as i64);
+    }
+    if let Some(transaction_hash) = &filter.transaction_hash {
+        query_builder
+            .push(" AND transactions.hash = ")
+            .push_bind(transaction_hash.as_ref());
+    }
+
+    for (index, field_prefix) in filter.field_prefixes.iter().enumerate() {
+        let alias = format!("cef{index}");
+        query_builder
+            .push(format!(
+                " AND EXISTS (SELECT 1 FROM contract_event_indexed_fields {alias} "
+            ))
+            .push(format!(
+                "WHERE {alias}.ledger_event_id = ledger_events.id AND {alias}.field_name = "
+            ))
+            .push_bind(&field_prefix.field_name)
+            .push(format!(" AND substr({alias}.field_value, 1, "));
+
+        // Postgres substr takes an int4 length; SQLite an integer.
+        #[cfg(feature = "cloud")]
+        query_builder.push_bind(field_prefix.prefix.len() as i32);
+        #[cfg(feature = "standalone")]
+        query_builder.push_bind(field_prefix.prefix.len() as i64);
+
+        query_builder
+            .push(") = ")
+            .push_bind(field_prefix.prefix.as_ref())
             .push(") ");
     }
 
-    if let Some(from) = filter.from_block {
-        qb.push(" AND blocks.height >= ").push_bind(from as i64);
-    }
-    if let Some(to) = filter.to_block {
-        qb.push(" AND blocks.height <= ").push_bind(to as i64);
-    }
-    if let Some(hash) = &filter.transaction_hash {
-        qb.push(" AND transactions.hash = ").push_bind(hash.clone());
-    }
-
-    for (i, fp) in filter.field_prefixes.iter().enumerate() {
-        let alias = format!("cef{i}");
-        qb.push(format!(
-            " AND EXISTS (SELECT 1 FROM contract_event_indexed_fields {alias} \
-             WHERE {alias}.ledger_event_id = le.id AND {alias}.field_name = "
-        ))
-        .push_bind(fp.field_name.clone())
-        .push(format!(" AND substr({alias}.field_value, 1, "))
-        .push_bind(fp.prefix.len() as i32)
-        .push(") = ")
-        .push_bind(fp.prefix.clone())
-        .push(") ");
-    }
-
-    qb
-}
-
-#[cfg(feature = "standalone")]
-fn base_query_builder<'a>(filter: &'a ContractEventFilter) -> sqlx::QueryBuilder<'a, sqlx::Sqlite> {
-    use sqlx::QueryBuilder;
-    let mut qb = QueryBuilder::<sqlx::Sqlite>::new(indoc::indoc! {"
-        SELECT
-            le.id,
-            le.contract_address,
-            le.transaction_id,
-            le.contract_action_id,
-            le.raw,
-            le.attributes,
-            (SELECT MAX(id) FROM ledger_events WHERE grouping = 'Contract') AS max_id,
-            transactions.protocol_version
-        FROM ledger_events le
-        INNER JOIN transactions ON transactions.id = le.transaction_id
-        INNER JOIN blocks ON blocks.id = transactions.block_id
-        WHERE le.grouping = 'Contract'
-    "});
-    qb.push(" AND le.contract_address = ")
-        .push_bind(filter.contract_address.clone());
-
-    if let Some(variants) = &filter.variants
-        && !variants.is_empty()
-    {
-        qb.push(" AND le.variant IN (");
-        let mut sep = qb.separated(", ");
-        for v in variants {
-            sep.push_bind(v.to_string());
-        }
-        qb.push(") ");
-    }
-
-    if let Some(from) = filter.from_block {
-        qb.push(" AND blocks.height >= ").push_bind(from as i64);
-    }
-    if let Some(to) = filter.to_block {
-        qb.push(" AND blocks.height <= ").push_bind(to as i64);
-    }
-    if let Some(hash) = &filter.transaction_hash {
-        qb.push(" AND transactions.hash = ").push_bind(hash.clone());
-    }
-
-    for (i, fp) in filter.field_prefixes.iter().enumerate() {
-        let alias = format!("cef{i}");
-        qb.push(format!(
-            " AND EXISTS (SELECT 1 FROM contract_event_indexed_fields {alias} \
-             WHERE {alias}.ledger_event_id = le.id AND {alias}.field_name = "
-        ))
-        .push_bind(fp.field_name.clone())
-        .push(format!(" AND substr({alias}.field_value, 1, "))
-        .push_bind(fp.prefix.len() as i64)
-        .push(") = ")
-        .push_bind(fp.prefix.clone())
-        .push(") ");
-    }
-
-    qb
+    query_builder
 }

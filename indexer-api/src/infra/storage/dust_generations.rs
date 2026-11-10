@@ -19,7 +19,7 @@ use crate::{
         },
         storage::dust_generations::DustGenerationsStorage,
     },
-    infra::storage::Storage,
+    infra::storage::{Storage, lookup_prefixes, prefix_range},
 };
 use async_stream::try_stream;
 use fastrace::trace;
@@ -42,6 +42,7 @@ impl DustGenerationsStorage for Storage {
         cardano_reward_addresses: &[CardanoRewardAddress],
         ledger_version: LedgerVersion,
     ) -> Result<Vec<DustGenerations>, sqlx::Error> {
+        let dust_epoch = ledger_version.dust_epoch();
         let dust_params = ledger::dust_parameters(ledger_version)
             .expect("DUST parameters should be available for supported protocol version");
         let generation_decay_rate = dust_params.generation_decay_rate as u128;
@@ -80,15 +81,23 @@ impl DustGenerationsStorage for Storage {
             let mut registration_data = Vec::with_capacity(registrations.len());
 
             for (dust_address, valid, utxo_tx_hash, utxo_output_index) in registrations {
+                // Scoped to the live dust epoch: a hard fork that wipes dust
+                // leaves the previous epoch's rows behind with `dtime IS NULL`
+                // (nothing retires them -- the wipe is inside the state
+                // translation, not a transaction), so summing across epochs
+                // reports a holder's NIGHT balance and generation rate as the
+                // sum of the wiped entries and the replayed ones.
                 let generations_query = indoc! {"
                     SELECT value, ctime
                     FROM dust_generation_info
                     WHERE owner = $1
                     AND dtime IS NULL
+                    AND dust_epoch = $2
                 "};
 
                 let generations = sqlx::query_as::<_, (U128BeBytes, i64)>(generations_query)
                     .bind(dust_address.as_ref())
+                    .bind(dust_epoch)
                     .fetch_all(&*self.pool)
                     .await?;
 
@@ -144,9 +153,11 @@ impl DustGenerationsStorage for Storage {
         mut start_index: u64,
         end_index: u64,
         batch_size: NonZeroU32,
+        ledger_version: LedgerVersion,
     ) -> impl Stream<Item = Result<DustGenerationEntry, sqlx::Error>> + Send {
         let pool = self.pool.clone();
         let dust_address = dust_address.to_vec();
+        let dust_epoch = ledger_version.dust_epoch();
 
         try_stream! {
             loop {
@@ -171,6 +182,7 @@ impl DustGenerationsStorage for Storage {
                     WHERE dust_generation_info.owner = $1
                     AND dust_generation_info.generation_index >= $2
                     AND dust_generation_info.generation_index <= $3
+                    AND dust_generation_info.dust_epoch = $5
                     ORDER BY dust_generation_info.generation_index
                     LIMIT $4
                 "};
@@ -180,6 +192,7 @@ impl DustGenerationsStorage for Storage {
                     .bind(start_index as i64)
                     .bind(end_index as i64)
                     .bind(batch_size.get() as i64)
+                    .bind(dust_epoch)
                     .fetch_all(&*pool)
                     .await?;
 
@@ -206,9 +219,11 @@ impl DustGenerationsStorage for Storage {
         upper_block_id: u64,
         mut after_event_id: u64,
         batch_size: NonZeroU32,
+        ledger_version: LedgerVersion,
     ) -> impl Stream<Item = Result<DustGenerationDtimeUpdateEntry, sqlx::Error>> + Send {
         let pool = self.pool.clone();
         let dust_address = dust_address.to_vec();
+        let dust_epoch = ledger_version.dust_epoch();
 
         try_stream! {
             loop {
@@ -250,6 +265,7 @@ impl DustGenerationsStorage for Storage {
                     AND t.block_id > $1
                     AND t.block_id <= $5
                     AND dgi.owner = $2
+                    AND dgi.dust_epoch = $6
                     AND le.id > $3
                     ORDER BY le.id
                     LIMIT $4
@@ -287,6 +303,7 @@ impl DustGenerationsStorage for Storage {
                     WHERE t.block_id > $1
                     AND t.block_id <= $5
                     AND dgi.owner = $2
+                    AND dgi.dust_epoch = $6
                     ORDER BY e.ledger_event_id
                     LIMIT $4
                 "};
@@ -297,6 +314,7 @@ impl DustGenerationsStorage for Storage {
                     .bind(after_event_id as i64)
                     .bind(batch_size.get() as i64)
                     .bind(upper_block_id as i64)
+                    .bind(dust_epoch)
                     .fetch_all(&*pool)
                     .await?;
 
@@ -353,42 +371,29 @@ impl DustGenerationsStorage for Storage {
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<DustNullifierTransaction, sqlx::Error>> + Send {
         let pool = self.pool.clone();
-        let nullifier_prefixes = nullifier_prefixes.to_vec();
+        let nullifier_prefixes = lookup_prefixes(nullifier_prefixes);
 
         try_stream! {
             for prefix in &nullifier_prefixes {
-                let mut next_prefix = prefix.clone();
-                if let Some(last) = next_prefix.last_mut() {
-                    if *last < 255 {
-                        *last += 1;
-                    } else {
-                        next_prefix.push(0);
-                    }
-                }
-
                 let mut cursor = 0i64;
 
                 loop {
-                    let query = indoc! {"
+                    let mut query = sqlx::QueryBuilder::new(indoc! {"
                         SELECT dn.id, dn.nullifier, dn.commitment, t.id, t.hash, b.height, b.hash
                         FROM dust_nullifiers dn
                         JOIN transactions t ON t.id = dn.transaction_id
                         JOIN blocks b ON b.id = dn.block_id
-                        WHERE dn.nullifier >= $1 AND dn.nullifier < $2
-                        AND b.height >= $3
-                        AND b.height <= $4
-                        AND dn.id > $5
-                        ORDER BY dn.id
-                        LIMIT $6
-                    "};
+                        WHERE
+                    "});
+                    prefix_range(&mut query, "dn.nullifier", prefix);
+                    query
+                        .push(" AND b.height >= ").push_bind(from_block.min(i64::MAX as u64) as i64)
+                        .push(" AND b.height <= ").push_bind(to_block.min(i64::MAX as u64) as i64)
+                        .push(" AND dn.id > ").push_bind(cursor)
+                        .push(" ORDER BY dn.id LIMIT ").push_bind(batch_size.get() as i64);
 
-                    let rows = sqlx::query_as::<_, (i64, ByteVec, ByteVec, i64, TransactionHash, i64, ByteVec)>(query)
-                        .bind(&prefix[..])
-                        .bind(&next_prefix[..])
-                        .bind(from_block as i64)
-                        .bind(to_block.min(i64::MAX as u64) as i64)
-                        .bind(cursor)
-                        .bind(batch_size.get() as i64)
+                    let rows = query
+                        .build_query_as::<(i64, ByteVec, ByteVec, i64, TransactionHash, i64, ByteVec)>()
                         .fetch_all(&*pool)
                         .await?;
 

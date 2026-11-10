@@ -11,6 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod contract_state_cache;
+pub mod ledger_query_limit;
 pub mod progress_cache;
 pub mod quota;
 pub mod v4;
@@ -18,12 +20,14 @@ pub mod v4;
 use crate::{
     domain::{Api, LedgerStateCache, storage::Storage},
     infra::api::{
+        contract_state_cache::{ContractStateCache, ContractStateCacheConfig},
+        ledger_query_limit::LedgerQueryLimiter,
         progress_cache::{ProgressCache, ProgressCacheConfig},
         quota::{PerConnectionCounter, QuotaConfig, SubscriptionQuotas},
         v4::dataloader::{
-            BlockByHashLoader, ContractActionsByTransactionIdLoader,
-            ContractEventsByContractActionIdLoader, TransactionByIdLoader,
-            TransactionsByBlockIdLoader,
+            BlockByHashLoader, BlockReferenceByTransactionIdLoader,
+            ContractActionsByTransactionIdLoader, ContractEventsByContractActionIdLoader,
+            TransactionByIdLoader, TransactionsByBlockIdLoader,
         },
     },
 };
@@ -75,14 +79,21 @@ pub struct AxumApi<S, B> {
     config: Config,
     storage: S,
     subscriber: B,
+    ledger_query_limiter: LedgerQueryLimiter,
 }
 
 impl<S, B> AxumApi<S, B> {
-    pub fn new(config: Config, storage: S, subscriber: B) -> Self {
+    pub fn new(
+        config: Config,
+        storage: S,
+        subscriber: B,
+        ledger_query_limiter: LedgerQueryLimiter,
+    ) -> Self {
         Self {
             config,
             storage,
             subscriber,
+            ledger_query_limiter,
         }
     }
 }
@@ -108,6 +119,7 @@ where
             max_depth,
             subscription_config,
             quota_config,
+            contract_state_cache_config,
         } = self.config;
 
         let app = make_app(
@@ -115,11 +127,13 @@ where
             network_id,
             self.storage,
             self.subscriber,
+            self.ledger_query_limiter,
             request_body_limit as usize,
             max_complexity,
             max_depth,
             subscription_config,
             quota_config,
+            contract_state_cache_config,
         );
 
         let listener = TcpListener::bind((address, port))
@@ -151,6 +165,9 @@ pub struct Config {
 
     #[serde(rename = "quota")]
     pub quota_config: QuotaConfig,
+
+    #[serde(rename = "contract_state_cache")]
+    pub contract_state_cache_config: ContractStateCacheConfig,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -186,6 +203,16 @@ pub struct ContractEventsSubscriptionConfig {
 #[derive(Debug, Clone, Copy, Deserialize)]
 pub struct DustGenerationsSubscriptionConfig {
     pub batch_size: NonZeroU32,
+
+    /// Maximum age in blocks of the snapshot `block_hash`; older ones are rejected with a
+    /// re-subscribe hint. Must stay well below chain-indexer's ledger_state_retention, which
+    /// bounds how long a block's ledger state remains loadable.
+    #[serde(default = "max_snapshot_age_default")]
+    pub max_snapshot_age: u32,
+}
+
+fn max_snapshot_age_default() -> u32 {
+    500
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -257,11 +284,13 @@ fn make_app<S, B>(
     network_id: NetworkId,
     storage: S,
     subscriber: B,
+    ledger_query_limiter: LedgerQueryLimiter,
     request_body_limit: usize,
     max_complexity: usize,
     max_depth: usize,
     subscription_config: SubscriptionConfig,
     quota_config: QuotaConfig,
+    contract_state_cache_config: ContractStateCacheConfig,
 ) -> Router
 where
     S: Storage,
@@ -270,17 +299,20 @@ where
     let ledger_state_cache = LedgerStateCache::default();
     let quotas = SubscriptionQuotas::new(quota_config);
     let progress_cache = ProgressCache::new(subscription_config.progress_cache);
+    let contract_state_cache = ContractStateCache::new(contract_state_cache_config);
 
     let v4_app = v4::make_app(
         network_id,
         ledger_state_cache,
         storage,
         subscriber,
+        ledger_query_limiter,
         max_complexity,
         max_depth,
         subscription_config,
         quotas,
         progress_cache,
+        contract_state_cache,
     );
 
     // For some reason the FastraceLayer and RequestBodyLimitLayer cannot be put into a
@@ -392,6 +424,12 @@ trait ContextExt {
     where
         S: Storage;
 
+    fn get_block_reference_by_transaction_id_loader<S>(
+        &self,
+    ) -> &DataLoader<BlockReferenceByTransactionIdLoader<S>>
+    where
+        S: Storage;
+
     fn get_transactions_by_block_id_loader<S>(&self) -> &DataLoader<TransactionsByBlockIdLoader<S>>
     where
         S: Storage;
@@ -414,6 +452,8 @@ trait ContextExt {
 
     fn get_ledger_state_cache(&self) -> &LedgerStateCache;
 
+    fn get_contract_state_cache(&self) -> &ContractStateCache;
+
     fn get_metrics(&self) -> &Metrics;
 
     fn get_subscription_config(&self) -> &SubscriptionConfig;
@@ -423,6 +463,8 @@ trait ContextExt {
     fn get_progress_cache(&self) -> &ProgressCache;
 
     fn get_per_connection_counter(&self) -> &Arc<AtomicUsize>;
+
+    fn get_ledger_query_limiter(&self) -> &LedgerQueryLimiter;
 }
 
 impl ContextExt for Context<'_> {
@@ -452,6 +494,16 @@ impl ContextExt for Context<'_> {
     {
         self.data::<DataLoader<TransactionByIdLoader<S>>>()
             .expect("TransactionByIdLoader is stored in Context")
+    }
+
+    fn get_block_reference_by_transaction_id_loader<S>(
+        &self,
+    ) -> &DataLoader<BlockReferenceByTransactionIdLoader<S>>
+    where
+        S: Storage,
+    {
+        self.data::<DataLoader<BlockReferenceByTransactionIdLoader<S>>>()
+            .expect("BlockReferenceByTransactionIdLoader is stored in Context")
     }
 
     fn get_transactions_by_block_id_loader<S>(&self) -> &DataLoader<TransactionsByBlockIdLoader<S>>
@@ -514,11 +566,21 @@ impl ContextExt for Context<'_> {
             .expect("ProgressCache is stored in Context")
     }
 
+    fn get_contract_state_cache(&self) -> &ContractStateCache {
+        self.data::<ContractStateCache>()
+            .expect("ContractStateCache is stored in Context")
+    }
+
     fn get_per_connection_counter(&self) -> &Arc<AtomicUsize> {
         &self
             .data::<PerConnectionCounter>()
             .expect("PerConnectionCounter is stored in per-connection Data via on_connection_init")
             .0
+    }
+
+    fn get_ledger_query_limiter(&self) -> &LedgerQueryLimiter {
+        self.data::<LedgerQueryLimiter>()
+            .expect("LedgerQueryLimiter is stored in Context")
     }
 }
 

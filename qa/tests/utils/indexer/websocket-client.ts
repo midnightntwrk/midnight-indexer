@@ -16,7 +16,7 @@
 import { env } from 'environment/model';
 import { GraphQLError } from 'graphql';
 import log from '@utils/logging/logger';
-import { retry } from '@utils/retry-helper';
+import { NonRetryableError, retry } from '@utils/retry-helper';
 import type {
   Block,
   BlockOffset,
@@ -28,8 +28,14 @@ import type {
   ShieldedTransactionsEvent,
   UnshieldedTransactionEvent,
   ContractAction,
+  ContractEvent,
+  ContractEventFilter,
   GraphQLResponse,
+  BridgeEvent,
+  BridgeBalance,
+  BridgePoolSummary,
 } from './indexer-types';
+import { CONTRACT_EVENTS_SUBSCRIPTION } from './graphql/contract-event-queries';
 import {
   BLOCKS_SUBSCRIPTION_FROM_BLOCK_BY_OFFSET,
   BLOCKS_SUBSCRIPTION_FROM_LATEST_BLOCK,
@@ -45,9 +51,22 @@ import {
   SHIELDED_NULLIFIER_TRANSACTIONS_SUBSCRIPTION,
   ZSWAP_LEDGER_EVENTS_SUBSCRIPTION_DEFAULT,
   ZSWAP_LEDGER_EVENTS_SUBSCRIPTION_FROM_ID,
+  BRIDGE_EVENTS_SUBSCRIPTION_DEFAULT,
+  BRIDGE_EVENTS_SUBSCRIPTION_FROM,
+  BRIDGE_BALANCE_SUBSCRIPTION,
+  BRIDGE_POOL_UPDATES_SUBSCRIPTION,
 } from './graphql/subscriptions';
 
 export type BlockSubscriptionResponse = GraphQLResponse<{ blocks: Block }>;
+
+export interface BridgePoolUpdate {
+  newEvent: BridgeEvent | null;
+  pool: BridgePoolSummary;
+}
+
+export type BridgePoolUpdateSubscriptionResponse = GraphQLResponse<{
+  bridgePoolUpdates: BridgePoolUpdate;
+}>;
 
 export type UnshieldedTxSubscriptionResponse = GraphQLResponse<{
   unshieldedTransactions: UnshieldedTransactionEvent;
@@ -69,6 +88,10 @@ export type DustGenerationsSubscriptionResponse = GraphQLResponse<{
   dustGenerations: DustGenerationsEvent;
 }>;
 
+export type BridgeEventSubscriptionResponse = GraphQLResponse<{ bridgeEvents: BridgeEvent }>;
+
+export type BridgeBalanceSubscriptionResponse = GraphQLResponse<{ bridgeBalance: BridgeBalance }>;
+
 export type DustNullifierTransactionSubscriptionResponse = GraphQLResponse<{
   dustNullifierTransactions: DustNullifierTransaction;
 }>;
@@ -81,12 +104,16 @@ export type ZswapLedgerEventSubscriptionResponse = GraphQLResponse<{
   zswapLedgerEvents: ZswapLedgerEvent;
 }>;
 
+export type ContractEventSubscriptionResponse = GraphQLResponse<{
+  contractEvents: ContractEvent;
+}>;
+
 /**
  * Handlers used to respond to incoming GraphQL subscription messages.
  */
 export interface SubscriptionHandlers<T> {
-  /** Called when a new payload is received */
-  next: (value: T) => void;
+  /** Called when a new payload is received (optional: the client invokes it as `next?.()`) */
+  next?: (value: T) => void;
 
   /** Called when an error is received */
   error?: (err: Error | GraphQLError) => void;
@@ -166,6 +193,16 @@ export interface GraphQLCompleteMessage {
 }
 
 /**
+ * Raised when the websocket can no longer deliver subscription events, either
+ * because it is closed or because it has gone silent despite the keepalive.
+ *
+ * Extends {@link NonRetryableError} so `retry` gives up immediately: a poll
+ * against a dead socket has nothing left to wait for, and reporting that is
+ * more useful than exhausting the budget and reporting "not found yet".
+ */
+export class DeadSocketError extends NonRetryableError {}
+
+/**
  * A low-level WebSocket client that directly implements the GraphQL over WebSocket protocol.
  * Supports mutations and streaming subscriptions to blocks, transactions, contracts and wallet
  * related events
@@ -185,6 +222,44 @@ export class IndexerWsClient {
 
   /** Maps operation IDs to their registered event handlers */
   private handlersMap = new Map<string, SubscriptionHandlers<unknown>>();
+
+  /**
+   * Keepalive timer, and the flag that disables it.
+   *
+   * WHY THIS EXISTS. An idle websocket to a hosted indexer is closed 60 s after
+   * the last message the server sent, with no close frame — the client sees a
+   * bare `1006`. The indexer's own configuration has no websocket idle timeout,
+   * so this is the ingress in front of the hosted environments rather than the
+   * indexer itself, and the undeployed stack has no such limit. But the progress
+   * subscription deliberately backs off while the chain is idle (since indexer
+   * 4.4.0: 30 s doubling to 240 s, ±20 % jitter), so the server goes quiet for
+   * longer than the idle limit and the subscription it chose to throttle is
+   * dropped. Measured against preview: three sockets carrying 1, 2 and 4
+   * subscriptions all closed exactly 60.0 s after their last inbound message.
+   *
+   * graphql-transport-ws allows a client `ping` at any time, which the server
+   * answers with `pong`. That answer is an outbound message, so it resets the
+   * idle timer. Pinging every 25 s keeps a quiet subscription alive without
+   * changing anything server-side.
+   */
+  private keepAliveTimer: ReturnType<typeof setInterval> | null = null;
+
+  /** Interval between client pings. Comfortably inside the 60 s idle limit. */
+  private static readonly KEEPALIVE_INTERVAL_MS = 25_000;
+
+  /**
+   * How long a socket may receive nothing at all before it is declared dead.
+   *
+   * With the keepalive running the server answers every ping, so silence for
+   * this long means the connection is gone even if the socket has not reported
+   * a close. Waiting instead of failing turns a knowable 60 s problem into a
+   * test that burns its full timeout — a run that should have failed fast took
+   * 25 minutes to report it.
+   */
+  private static readonly DEAD_SOCKET_AFTER_MS = 90_000;
+
+  /** Timestamp of the last message received from the server, of any type. */
+  private lastInboundAt = 0;
 
   /**
    * Lightweight constructor: only stores the target URL. The actual connection
@@ -209,12 +284,21 @@ export class IndexerWsClient {
       log.warn(
         `WebSocket onclose: code=${event.code}, reason=${event.reason || '(no reason)'}, wasClean=${event.wasClean}`,
       );
+      // A server-side close (the bare 1006 this keepalive exists to prevent)
+      // never goes through connectionClose(), so the timer has to be released
+      // here too — otherwise it outlives the socket for the worker's lifetime.
+      this.stopKeepAlive();
     };
     return ws;
   }
 
   /** Creates a new WebSocket, attaches handlers, and assigns to this.ws */
   private createWebSocket(): void {
+    // A timer left over from an earlier socket must not survive into the new
+    // one: it would ping before `connection_ack`, which graphql-transport-ws
+    // requires the server to reject with 4401.
+    this.stopKeepAlive();
+
     // A previous failed connection attempt may have left a socket in CONNECTING
     // or OPEN. Detach handlers and close it so a retry does not leak orphan
     // sockets that keep handshaking against the gateway and add to load.
@@ -301,6 +385,7 @@ export class IndexerWsClient {
         });
 
         assert((await response).type == 'connection_ack');
+        this.startKeepAlive();
       },
       {
         maxRetries: 2,
@@ -308,6 +393,84 @@ export class IndexerWsClient {
         retryLabel: 'websocket connection',
       },
     );
+  }
+
+  /**
+   * Start pinging the server so an idle subscription is not dropped.
+   *
+   * Opt out with `INDEXER_WS_KEEPALIVE=off`, which the integration suite uses to
+   * prove an unpinged idle socket really is closed — the behaviour this
+   * keepalive exists to work around. Without that test, a future change could
+   * quietly remove the need for the keepalive, or quietly make it insufficient,
+   * and nothing would notice.
+   */
+  private startKeepAlive(): void {
+    this.stopKeepAlive();
+    this.lastInboundAt = Date.now();
+
+    if (process.env.INDEXER_WS_KEEPALIVE?.trim().toLowerCase() === 'off') {
+      log.debug('WebSocket keepalive disabled via INDEXER_WS_KEEPALIVE=off');
+      return;
+    }
+
+    this.keepAliveTimer = setInterval(() => {
+      const ws = this.ws;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      try {
+        ws.send(JSON.stringify({ type: 'ping' }));
+      } catch (error) {
+        log.debug(`WebSocket keepalive ping failed: ${String(error)}`);
+      }
+    }, IndexerWsClient.KEEPALIVE_INTERVAL_MS);
+
+    // Never hold the process open for the sake of a keepalive.
+    this.keepAliveTimer.unref?.();
+  }
+
+  /** Stop the keepalive timer, if one is running. */
+  private stopKeepAlive(): void {
+    if (this.keepAliveTimer !== null) {
+      clearInterval(this.keepAliveTimer);
+      this.keepAliveTimer = null;
+    }
+  }
+
+  /** Whether the socket is currently open, without judging how long it has been quiet. */
+  isSocketOpen(): boolean {
+    return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
+  }
+
+  /**
+   * Throw when the socket is closed, or — while the keepalive is running — has
+   * heard nothing for longer than {@link DEAD_SOCKET_AFTER_MS}.
+   *
+   * Callers that poll for an event use this so a dead connection surfaces as a
+   * clear error instead of an expired timeout that says only "not found yet".
+   * The error is a {@link NonRetryableError}, so a poll wrapped in `retry`
+   * stops on the spot rather than spending its remaining attempts on a
+   * connection that can no longer deliver anything.
+   */
+  assertSocketAlive(): void {
+    if (!this.isSocketOpen()) {
+      throw new DeadSocketError(
+        'The indexer websocket is closed, so no further subscription events can arrive. ' +
+          'An idle socket is dropped 60s after the last message the server sent; the client ' +
+          'pings every 25s to prevent that, so a close here means the connection genuinely failed.',
+      );
+    }
+
+    // Silence only proves a dead connection while the keepalive is pinging:
+    // with it disabled, a quiet subscription on a healthy socket is silent too.
+    if (this.keepAliveTimer === null) return;
+
+    const silentFor = Date.now() - this.lastInboundAt;
+    if (this.lastInboundAt > 0 && silentFor > IndexerWsClient.DEAD_SOCKET_AFTER_MS) {
+      throw new DeadSocketError(
+        `The indexer websocket has delivered nothing for ${Math.round(silentFor / 1000)}s, ` +
+          'including no reply to the keepalive ping, so it is no longer usable. ' +
+          'Waiting longer cannot help.',
+      );
+    }
   }
 
   /**
@@ -322,6 +485,9 @@ export class IndexerWsClient {
     // "Cannot read properties of null (reading 'removeEventListener')"
     // uncaught exception under parallel test execution.
     const ws = this.ws;
+    // Release the keepalive before closing, so its timer cannot outlive the
+    // socket and ping into a closed connection during teardown.
+    this.stopKeepAlive();
 
     const closePromise = new Promise<void>((resolve) => {
       const onClose = () => {
@@ -355,7 +521,28 @@ export class IndexerWsClient {
     const message = JSON.parse(event.data);
     const { id, payload, type } = message;
 
+    // Any inbound frame proves the connection is alive, including the `pong`
+    // answering our own keepalive `ping`.
+    this.lastInboundAt = Date.now();
+
     if (type === 'connection_ack') {
+      return;
+    }
+
+    // The server may also ping us; the protocol requires a pong back.
+    if (type === 'ping') {
+      // Guarded like the keepalive ping: a server ping racing a local close
+      // would otherwise throw out of this event handler as an uncaught
+      // exception during parallel teardown.
+      try {
+        this.ws?.send(JSON.stringify({ type: 'pong' }));
+      } catch (error) {
+        log.debug(`Could not answer the server ping with a pong: ${String(error)}`);
+      }
+      return;
+    }
+
+    if (type === 'pong') {
       return;
     }
 
@@ -431,6 +618,60 @@ export class IndexerWsClient {
       const stopMessage: GraphQLStopMessage = { id, type: 'stop' };
       this.getWs().send(JSON.stringify(stopMessage));
       this.handlersMap.delete(id);
+    };
+  }
+
+  /**
+   * Subscribes to public contract events matching a filter.
+   *
+   * The stream starts from the later of `id` (event-id resumption cursor) and
+   * `filter.fromBlock`; if `filter.toBlock` is set the stream terminates once the
+   * chain reaches that block (the server sends a `complete` message).
+   *
+   * @param handlers - Object containing callback functions for subscription events
+   * @param filter - The contract event filter (contractAddress is required)
+   * @param id - Optional event-id resumption cursor
+   * @param queryOverride - Optional custom GraphQL subscription. If provided, the
+   *                        caller is responsible for matching the variables
+   *
+   * @returns An object with subscription ID and unsubscribe function
+   */
+  subscribeToContractEvents(
+    handlers: SubscriptionHandlers<ContractEventSubscriptionResponse>,
+    filter: ContractEventFilter,
+    id?: number,
+    queryOverride?: string,
+  ): { unsubscribe: () => void; id: string } {
+    const subscriptionId = this.getNextId();
+
+    const query = queryOverride ?? CONTRACT_EVENTS_SUBSCRIPTION;
+    const variables: Record<string, unknown> = {
+      FILTER: filter,
+      ...(id !== undefined && { ID: id }),
+    };
+
+    log.debug(`Contract events subscription query:\n${query}`);
+    log.debug(`Contract events subscription variables:\n${JSON.stringify(variables, null, 2)}`);
+
+    const payload: GraphQLStartMessage = {
+      id: subscriptionId,
+      type: 'start',
+      payload: {
+        query,
+        variables,
+      },
+    };
+
+    this.handlersMap.set(subscriptionId, handlers as SubscriptionHandlers<unknown>);
+    this.getWs().send(JSON.stringify(payload));
+
+    return {
+      id: subscriptionId,
+      unsubscribe: () => {
+        const stopMessage: GraphQLStopMessage = { id: subscriptionId, type: 'stop' };
+        this.getWs().send(JSON.stringify(stopMessage));
+        this.handlersMap.delete(subscriptionId);
+      },
     };
   }
 
@@ -1016,15 +1257,17 @@ export class IndexerWsClient {
   }
 
   /**
-   * Subscribes to dust generation entries for a dust address within an index range.
+   * Subscribes to a dust address's generations as a consistent snapshot at a block hash.
    *
-   * Entries are interleaved with collapsed Merkle tree updates to fill gaps.
-   * The subscription finishes after reaching the end index with a final collapsed update.
+   * Owned dtime updates after the cutoff height are issued first, then owned generation
+   * entries interleaved with collapsed Merkle tree updates for the non-owned gaps, all
+   * served at the given block's state. The subscription completes once emitted.
    *
    * @param handlers - Callback functions for handling incoming dust generation events
    * @param dustAddress - Bech32m-encoded dust address to subscribe for
-   * @param startIndex - Start index into the dust commitment tree
-   * @param endIndex - End index into the dust commitment tree
+   * @param blockHash - Hex-encoded block hash the generation snapshot is pinned to
+   * @param dtimeCutoffHeight - Block height after which owned dtime updates are replayed
+   *                            (pass 0 to replay all)
    * @param queryOverride - Optional custom GraphQL subscription query
    *
    * @returns An object with subscription ID and unsubscribe function
@@ -1032,12 +1275,12 @@ export class IndexerWsClient {
   subscribeToDustGenerations(
     handlers: SubscriptionHandlers<DustGenerationsSubscriptionResponse>,
     dustAddress: string,
-    startIndex: number,
-    endIndex: number,
+    blockHash: string,
+    dtimeCutoffHeight: number,
     queryOverride?: string,
   ): { unsubscribe: () => void; id: string } {
     const query = queryOverride || DUST_GENERATIONS_SUBSCRIPTION;
-    const variables = { dustAddress, startIndex, endIndex };
+    const variables = { dustAddress, blockHash, dtimeCutoffHeight };
 
     const subscriptionId = this.getNextId();
 
@@ -1173,6 +1416,135 @@ export class IndexerWsClient {
           id: subscriptionId,
           type: 'stop',
         };
+        this.getWs().send(JSON.stringify(stopMessage));
+        this.handlersMap.delete(subscriptionId);
+      },
+    };
+  }
+
+  /**
+   * Subscribes to c2m-bridge events (#942).
+   *
+   * - Without `from`: streams historical events from the beginning, then live-tails.
+   * - With `from`: replays events with id greater than the cursor, then live-tails.
+   *
+   * There is no completion sentinel; callers terminate on their own condition.
+   *
+   * @param handlers - Callbacks for incoming bridge event messages
+   * @param opts - Optional `from` event-id cursor, `recipient` and `variant` filters
+   * @param queryOverride - Optional custom GraphQL subscription query
+   * @returns An object with subscription ID and unsubscribe function
+   */
+  subscribeToBridgeEvents(
+    handlers: SubscriptionHandlers<BridgeEventSubscriptionResponse>,
+    opts: { from?: number; recipient?: string; variant?: string } = {},
+    queryOverride?: string,
+  ): { unsubscribe: () => void; id: string } {
+    const hasFrom = opts.from !== undefined;
+    const query =
+      queryOverride ||
+      (hasFrom ? BRIDGE_EVENTS_SUBSCRIPTION_FROM : BRIDGE_EVENTS_SUBSCRIPTION_DEFAULT);
+    const variables = {
+      FROM: opts.from,
+      RECIPIENT: opts.recipient,
+      VARIANT: opts.variant,
+    };
+
+    const subscriptionId = this.getNextId();
+
+    const payload: GraphQLStartMessage = {
+      id: subscriptionId,
+      type: 'start',
+      payload: { query, variables },
+    };
+
+    log.debug(`Bridge Events payload:\n${JSON.stringify(payload, null, 2)}`);
+
+    this.handlersMap.set(subscriptionId, handlers as SubscriptionHandlers<unknown>);
+    this.getWs().send(JSON.stringify(payload));
+
+    return {
+      id: subscriptionId,
+      unsubscribe: () => {
+        const stopMessage: GraphQLStopMessage = { id: subscriptionId, type: 'stop' };
+        this.getWs().send(JSON.stringify(stopMessage));
+        this.handlersMap.delete(subscriptionId);
+      },
+    };
+  }
+
+  /**
+   * Subscribes to a c2m-bridge address balance (#942). Emits the current balance
+   * immediately on connect, then re-emits on every relevant event for the address.
+   *
+   * @param handlers - Callbacks for incoming bridge balance messages
+   * @param address - The hex-encoded address to observe
+   * @param queryOverride - Optional custom GraphQL subscription query
+   * @returns An object with subscription ID and unsubscribe function
+   */
+  subscribeToBridgeBalance(
+    handlers: SubscriptionHandlers<BridgeBalanceSubscriptionResponse>,
+    address: string,
+    queryOverride?: string,
+  ): { unsubscribe: () => void; id: string } {
+    const query = queryOverride || BRIDGE_BALANCE_SUBSCRIPTION;
+    const variables = { ADDRESS: address };
+
+    const subscriptionId = this.getNextId();
+
+    const payload: GraphQLStartMessage = {
+      id: subscriptionId,
+      type: 'start',
+      payload: { query, variables },
+    };
+
+    log.debug(`Bridge Balance payload:\n${JSON.stringify(payload, null, 2)}`);
+
+    this.handlersMap.set(subscriptionId, handlers as SubscriptionHandlers<unknown>);
+    this.getWs().send(JSON.stringify(payload));
+
+    return {
+      id: subscriptionId,
+      unsubscribe: () => {
+        const stopMessage: GraphQLStopMessage = { id: subscriptionId, type: 'stop' };
+        this.getWs().send(JSON.stringify(stopMessage));
+        this.handlersMap.delete(subscriptionId);
+      },
+    };
+  }
+
+  /**
+   * Subscribes to c2m-bridge pool updates (#944). Emits an initial snapshot on
+   * connect (newEvent = null, pool = current summary), then a refreshed summary
+   * paired with each new pool-affecting event. There is no completion sentinel.
+   *
+   * @param handlers - Callbacks for incoming pool update messages
+   * @param queryOverride - Optional custom GraphQL subscription query
+   * @returns An object with subscription ID and unsubscribe function
+   */
+  subscribeToBridgePoolUpdates(
+    handlers: SubscriptionHandlers<BridgePoolUpdateSubscriptionResponse>,
+    queryOverride?: string,
+  ): { unsubscribe: () => void; id: string } {
+    const query = queryOverride || BRIDGE_POOL_UPDATES_SUBSCRIPTION;
+
+    const subscriptionId = this.getNextId();
+
+    const payload: GraphQLStartMessage = {
+      id: subscriptionId,
+      type: 'start',
+      payload: { query },
+    };
+
+    log.debug(`Bridge Pool Updates payload:\n${JSON.stringify(payload, null, 2)}`);
+
+    this.handlersMap.set(subscriptionId, handlers as SubscriptionHandlers<unknown>);
+    this.getWs().send(JSON.stringify(payload));
+
+    return {
+      id: subscriptionId,
+      unsubscribe: () => {
+        const stopMessage: GraphQLStopMessage = { id: subscriptionId, type: 'stop' };
         this.getWs().send(JSON.stringify(stopMessage));
         this.handlersMap.delete(subscriptionId);
       },

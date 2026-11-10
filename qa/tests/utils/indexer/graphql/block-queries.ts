@@ -50,6 +50,55 @@ query GetLatestBlock{
   }
 }`;
 
+// #1304: the contract's global zswap commitment tree filtered to one contract,
+// resolved from a block's ledger state (nullable; null when the contract does
+// not exist as of that block). Latest block when OFFSET is omitted.
+export const GET_BLOCK_CONTRACT_ZSWAP_STATE = `
+query BlockContractZswapState($ADDRESS: HexEncoded!, $OFFSET: BlockOffset) {
+  block(offset: $OFFSET) {
+    hash
+    height
+    contractZswapState(address: $ADDRESS)
+  }
+}`;
+
+// The composed cross-contract-calls (CCC) execution-inputs read documented on
+// the #1304 field: contract state, its zswap state and the ledger parameters,
+// all anchored to one block.
+export const GET_EXECUTION_INPUTS = `
+query ExecutionInputs($ADDRESS: HexEncoded!) {
+  block {
+    hash
+    ledgerParameters
+    contractZswapState(address: $ADDRESS)
+  }
+  contract(address: $ADDRESS) {
+    state
+  }
+}`;
+
+// Governance parameters (D-parameter, Terms and Conditions) in force at a block,
+// used to cross-check the dParameterHistory / termsAndConditionsHistory queries
+// (#1003). Latest block when OFFSET is omitted.
+export const GET_BLOCK_SYSTEM_PARAMETERS = `
+query BlockSystemParameters($OFFSET: BlockOffset) {
+  block(offset: $OFFSET) {
+    hash
+    height
+    timestamp
+    systemParameters {
+      dParameter {
+        numPermissionedCandidates
+        numRegisteredCandidates
+      }
+      termsAndConditions {
+        hash
+        url
+      }
+    }
+  }
+}`;
+
 export const GET_BLOCK_BY_OFFSET = `
 query GetBlock($OFFSET: BlockOffset!){
   block (offset: $OFFSET){

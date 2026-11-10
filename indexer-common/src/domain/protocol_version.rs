@@ -22,6 +22,7 @@ pub enum ProtocolVersion {
     V0_22(u32),
     V1_0(u32),
     V2_0(u32),
+    V2_1(u32),
 }
 
 impl ProtocolVersion {
@@ -30,6 +31,7 @@ impl ProtocolVersion {
             ProtocolVersion::V0_22(_) => LedgerVersion::V8,
             ProtocolVersion::V1_0(_) => LedgerVersion::V8,
             ProtocolVersion::V2_0(_) => LedgerVersion::V9,
+            ProtocolVersion::V2_1(_) => LedgerVersion::V9,
         }
     }
 
@@ -38,6 +40,7 @@ impl ProtocolVersion {
             ProtocolVersion::V0_22(_) => NodeVersion::V0_22,
             ProtocolVersion::V1_0(_) => NodeVersion::V1_0,
             ProtocolVersion::V2_0(_) => NodeVersion::V2_0,
+            ProtocolVersion::V2_1(_) => NodeVersion::V2_1,
         }
     }
 
@@ -52,6 +55,7 @@ impl From<ProtocolVersion> for u32 {
             ProtocolVersion::V0_22(n) => n,
             ProtocolVersion::V1_0(n) => n,
             ProtocolVersion::V2_0(n) => n,
+            ProtocolVersion::V2_1(n) => n,
         }
     }
 }
@@ -75,6 +79,8 @@ impl TryFrom<u32> for ProtocolVersion {
             Ok(Self::V1_0(version))
         } else if (2_000_000..2_001_000).contains(&version) {
             Ok(Self::V2_0(version))
+        } else if (2_001_000..2_002_000).contains(&version) {
+            Ok(Self::V2_1(version))
         } else {
             Err(ProtocolVersionError::Unsupported(version))
         }
@@ -115,6 +121,33 @@ impl LedgerVersion {
     // stagenet under the node 2.0 rollout). Deriving the version per chain
     // rather than from this constant is the tracked follow-up.
     pub const LATEST: Self = Self::V9;
+
+    /// Which incarnation of the DUST generation tree this ledger version writes
+    /// into.
+    ///
+    /// A hard fork whose state translation *wipes* dust state starts the tree
+    /// over: `first_free` returns to zero, and generation/commitment tree
+    /// indices are reused for entirely different leaves. Rows recorded before
+    /// such a wipe are dead - the ledger no longer holds those entries - and
+    /// their indices name leaves that no longer exist, so mixing epochs
+    /// double-counts NIGHT balances and hands out Merkle indices into a tree
+    /// that is gone. Every read of `dust_generation_info` therefore scopes to
+    /// one epoch (see `indexer-api`'s dust storage).
+    ///
+    /// The mapping is deliberately explicit rather than derived from the
+    /// version number: a future ledger major that does *not* wipe dust must
+    /// keep the same epoch, or it would hide entries that are still live.
+    ///
+    /// - V8 -> 0
+    /// - V9 -> 1, because the 8 -> 9 translation replaces dust state with
+    ///   `DustState::default()` (midnight-node #2012, backported as #2057) and
+    ///   the node then replays only cNIGHT's slice of the generating set.
+    pub const fn dust_epoch(self) -> i64 {
+        match self {
+            Self::V8 => 0,
+            Self::V9 => 1,
+        }
+    }
 }
 
 #[derive(Debug, Display, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -122,6 +155,7 @@ pub enum NodeVersion {
     V0_22,
     V1_0,
     V2_0,
+    V2_1,
 }
 
 #[cfg(test)]
@@ -143,8 +177,8 @@ mod tests {
         let version = ProtocolVersion::try_from(1_001_000_u32);
         assert_matches!(version, Err(ProtocolVersionError::Unsupported(v)) if v == 1_001_000);
 
-        let version = ProtocolVersion::try_from(2_001_000_u32);
-        assert_matches!(version, Err(ProtocolVersionError::Unsupported(v)) if v == 2_001_000);
+        let version = ProtocolVersion::try_from(2_002_000_u32);
+        assert_matches!(version, Err(ProtocolVersionError::Unsupported(v)) if v == 2_002_000);
 
         let version =
             ProtocolVersion::try_from(0_022_666_u32).expect("0_022_666 is valid protocol version");
@@ -160,5 +194,10 @@ mod tests {
             ProtocolVersion::try_from(2_000_000_u32).expect("2_000_000 is valid protocol version");
         assert_eq!(version.ledger_version(), LedgerVersion::V9);
         assert_eq!(version.node_version(), NodeVersion::V2_0);
+
+        let version =
+            ProtocolVersion::try_from(2_001_000_u32).expect("2_001_000 is valid protocol version");
+        assert_eq!(version.ledger_version(), LedgerVersion::V9);
+        assert_eq!(version.node_version(), NodeVersion::V2_1);
     }
 }

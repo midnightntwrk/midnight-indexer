@@ -29,6 +29,11 @@ query BlockQuery($block_offset: BlockOffset) {
             }
             contractActions {
                 address
+                state
+                stateAt {
+                    hash
+                    height
+                }
                 zswapState
                 transaction {
                     hash
@@ -188,6 +193,11 @@ query TransactionsQuery($transaction_offset: TransactionOffset!) {
         }
         contractActions {
             address
+            state
+            stateAt {
+                hash
+                height
+            }
             zswapState
             transaction {
                 hash
@@ -343,6 +353,11 @@ query ContractActionQuery(
 ) {
     contractAction(address: $address, offset: $contract_action_offset) {
         address
+        state
+        stateAt {
+            hash
+            height
+        }
         zswapState
         transaction {
             hash
@@ -452,6 +467,11 @@ subscription BlockSubscription($block_offset: BlockOffset) {
             }
             contractActions {
                 address
+                state
+                stateAt {
+                    hash
+                    height
+                }
                 zswapState
                 transaction {
                     hash
@@ -611,6 +631,11 @@ subscription ContractActionSubscription(
         offset: $contract_action_subscription_offset
     ) {
         address
+        state
+        stateAt {
+            hash
+            height
+        }
         zswapState
         transaction {
             hash
@@ -665,6 +690,7 @@ subscription ShieldedTransactionsSubscription($sessionId: HexEncoded!) {
             highestEndIndex
             highestCheckedEndIndex
             highestRelevantEndIndex
+            protocolVersion
         }
     }
 }
@@ -763,6 +789,7 @@ subscription UnshieldedTransactionsSubscription($address: UnshieldedAddress!) {
         __typename
         ... on UnshieldedTransactionsProgress {
             highestTransactionId
+            protocolVersion
         }
     }
 }
@@ -801,6 +828,7 @@ subscription DustGenerationsSubscription(
         }
         ... on DustGenerationsProgress {
             highestIndex
+            protocolVersion
         }
         ... on DustGenerationDtimeUpdateItem {
             generationMtIndex

@@ -11,20 +11,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod bridge;
 pub mod dust;
 pub mod ledger;
 
 mod bytes;
 mod protocol_version;
 mod pub_sub;
+mod session_id;
 mod viewing_key;
 
 pub use bytes::*;
 pub use protocol_version::*;
 pub use pub_sub::*;
+pub use session_id::*;
 pub use viewing_key::*;
 
-use derive_more::{Deref, Display, Into};
+use derive_more::{AsRef, Deref, Display, From, Into};
 use serde::{Deserialize, Serialize};
 use sqlx::Type;
 use std::str::FromStr;
@@ -35,7 +38,6 @@ pub type BlockAuthor = ByteArray<32>;
 pub type BlockHash = ByteArray<32>;
 pub type IntentHash = ByteArray<32>;
 pub type Nonce = ByteArray<32>;
-pub type SessionId = ByteArray<32>;
 pub type ViewingKeyHash = ByteArray<32>;
 pub type TermsAndConditionsHash = ByteArray<32>;
 pub type TokenType = ByteArray<32>;
@@ -63,6 +65,58 @@ pub type SerializedLedgerEvent = ByteVec;
 pub type SerializedLedgerParameters = ByteVec;
 pub type SerializedTransaction = ByteVec;
 pub type SerializedZswapState = ByteVec;
+
+/// Tagged-serialized `TypedArenaKey` of a contract state node in the ledger arena, i.e. a
+/// reference to a contract state rather than the state itself.
+///
+/// A real newtype, not another `ByteVec` alias: a key and a state are both bytes, so aliases
+/// would let a blob and a reference to a blob be swapped for each other silently. The tag makes
+/// the key self-describing about its ledger version — `storage-key(contract-state[v6])` versus
+/// `storage-key(contract-state[v8])` — which matters because arena node payloads carry no version
+/// tag of their own and the two `ContractState` layouts are not compatible.
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    AsRef,
+    Deref,
+    Display,
+    From,
+    Into,
+    Serialize,
+    Deserialize,
+    Type,
+)]
+#[as_ref([u8])]
+#[from(ByteVec, Vec<u8>)]
+#[sqlx(transparent)]
+pub struct SerializedContractStateKey(pub ByteVec);
+
+/// Tagged-serialized `TypedArenaKey` of a contract's filtered zswap state node in the ledger
+/// arena. See [SerializedContractStateKey] for why this is a newtype.
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    AsRef,
+    Deref,
+    Display,
+    From,
+    Into,
+    Serialize,
+    Deserialize,
+    Type,
+)]
+#[as_ref([u8])]
+#[from(ByteVec, Vec<u8>)]
+#[sqlx(transparent)]
+pub struct SerializedZswapStateKey(pub ByteVec);
 
 /// Network identifier.
 #[derive(Debug, Display, Clone, PartialEq, Eq, Hash, Deref, Into, Deserialize)]
@@ -159,6 +213,12 @@ pub struct ApplyRegularTransactionOutcome {
     pub spent_unshielded_utxos: Vec<UnshieldedUtxo>,
     pub ledger_events: Vec<LedgerEvent>,
     pub fees: u128,
+    /// The ledger's reason for a `Failure`, rendered; `None` otherwise.
+    pub failure_reason: Option<String>,
+    /// Populated when the transaction is a `ClaimRewards(claim)` with
+    /// `claim.kind == ClaimKind::CardanoBridge`. The recipient is the claim's
+    /// owner (32-byte address); the amount is the claim's value.
+    pub bridge_claim: Option<crate::domain::bridge::BridgeClaim>,
 }
 
 /// The outcome of applying a system transaction to the ledger state along with extracted data.
@@ -174,12 +234,28 @@ pub enum TransactionResult {
     /// All guaranteed and fallible coins succeeded.
     Success,
 
-    /// Not all fallible coins succeeded; the value maps segemt ID to success.
+    /// Not all fallible coins succeeded; the value maps segment ID to success.
     PartialSuccess(Vec<(u16, bool)>),
 
     /// Guaranteed coins failed.
     #[default]
     Failure,
+}
+
+impl TransactionResult {
+    /// Whether a logical segment was applied to the ledger state.
+    ///
+    /// A missing entry in a partial-success result is kept distinct from an explicit failure so
+    /// callers cannot silently discard data if the ledger's result shape changes.
+    pub fn segment_succeeded(&self, segment: u16) -> Option<bool> {
+        match self {
+            Self::Success => Some(true),
+            Self::PartialSuccess(segments) => segments
+                .iter()
+                .find_map(|&(id, succeeded)| (id == segment).then_some(succeeded)),
+            Self::Failure => Some(false),
+        }
+    }
 }
 
 /// The variant of a transaction: regular or system.
@@ -190,11 +266,24 @@ pub enum TransactionVariant {
     System,
 }
 
-/// A contract action.
+/// A contract action, as extracted from a ledger transaction. The contract state it refers to is
+/// captured separately, once per block, from the indexer's own ledger state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContractAction {
     pub address: SerializedContractAddress,
-    pub state: SerializedContractState,
+
+    /// The physical intent segment this action belongs to; used to drop actions from segments that
+    /// never applied.
+    pub segment: u16,
+
+    /// A Call with a guaranteed transcript also executes in logical segment 0, independently of
+    /// whether its physical/fallible segment succeeds. Always false for Deploy and Update.
+    pub has_guaranteed_transcript: bool,
+
+    /// Original Call entry-point bytes for event correlation, before display decoding.
+    /// None for Deploy and Update; not persisted in the action's JSON attributes.
+    pub raw_entry_point: Option<ByteVec>,
+
     pub attributes: ContractAttributes,
 }
 
@@ -274,7 +363,7 @@ pub struct LedgerEvent {
     /// (`LedgerEventGrouping::Contract`); `None` for zswap/dust events. Mapped
     /// onto the indexed `ledger_events.contract_address` column for fast
     /// filtering on the `contractEvents` query/subscription surface.
-    pub contract_address: Option<ByteVec>,
+    pub contract_address: Option<SerializedContractAddress>,
 }
 
 impl LedgerEvent {
@@ -376,25 +465,12 @@ impl LedgerEvent {
     /// callers that already know the id (e.g. future upstream attribution).
     pub fn contract_event(
         raw: SerializedLedgerEvent,
-        contract_address: ByteVec,
+        contract_address: SerializedContractAddress,
         contract_action_id: Option<u64>,
         attributes: LedgerEventAttributes,
     ) -> Self {
         debug_assert!(
-            matches!(
-                attributes,
-                LedgerEventAttributes::ContractShieldedSpend { .. }
-                    | LedgerEventAttributes::ContractShieldedReceive { .. }
-                    | LedgerEventAttributes::ContractShieldedMint { .. }
-                    | LedgerEventAttributes::ContractShieldedBurn { .. }
-                    | LedgerEventAttributes::ContractUnshieldedSpend { .. }
-                    | LedgerEventAttributes::ContractUnshieldedReceive { .. }
-                    | LedgerEventAttributes::ContractUnshieldedMint { .. }
-                    | LedgerEventAttributes::ContractUnshieldedBurn { .. }
-                    | LedgerEventAttributes::ContractPaused { .. }
-                    | LedgerEventAttributes::ContractUnpaused { .. }
-                    | LedgerEventAttributes::ContractMisc { .. }
-            ),
+            attributes.contract_entry_point().is_some(),
             "contract_event() called with non-contract attributes"
         );
         Self {
@@ -412,23 +488,24 @@ impl LedgerEvent {
     /// non-contract events and for `Paused`/`Unpaused`/`Misc` (no indexable
     /// fields per the design).
     pub fn indexable_contract_fields(&self) -> Vec<(&'static str, ByteVec)> {
-        use LedgerEventAttributes::*;
         match &self.attributes {
-            ContractShieldedSpend { nullifier, .. } => {
+            LedgerEventAttributes::ContractShieldedSpend { nullifier, .. } => {
                 vec![("nullifier", nullifier.clone())]
             }
-            ContractShieldedReceive {
+
+            LedgerEventAttributes::ContractShieldedReceive {
                 commitment,
                 ciphertext,
                 ..
             } => {
-                let mut out = vec![("commitment", commitment.clone())];
-                if let Some(c) = ciphertext {
-                    out.push(("ciphertext", c.clone()));
+                let mut fields = vec![("commitment", commitment.clone())];
+                if let Some(ciphertext) = ciphertext {
+                    fields.push(("ciphertext", ciphertext.clone()));
                 }
-                out
+                fields
             }
-            ContractShieldedMint {
+
+            LedgerEventAttributes::ContractShieldedMint {
                 commitment,
                 domain_sep,
                 ..
@@ -436,30 +513,34 @@ impl LedgerEvent {
                 ("commitment", commitment.clone()),
                 ("domainSep", domain_sep.clone()),
             ],
-            ContractShieldedBurn { nullifier, .. } => {
+
+            LedgerEventAttributes::ContractShieldedBurn { nullifier, .. } => {
                 vec![("nullifier", nullifier.clone())]
             }
-            ContractUnshieldedSpend {
+
+            LedgerEventAttributes::ContractUnshieldedSpend {
                 sender,
                 domain_sep,
                 token_type,
                 ..
             } => vec![
-                ("sender", sender.as_bytes()),
+                ("sender", sender.to_bytes()),
                 ("domainSep", domain_sep.clone()),
                 ("tokenType", token_type.clone()),
             ],
-            ContractUnshieldedReceive {
+
+            LedgerEventAttributes::ContractUnshieldedReceive {
                 recipient,
                 domain_sep,
                 token_type,
                 ..
             } => vec![
-                ("recipient", recipient.as_bytes()),
+                ("recipient", recipient.to_bytes()),
                 ("domainSep", domain_sep.clone()),
                 ("tokenType", token_type.clone()),
             ],
-            ContractUnshieldedMint {
+
+            LedgerEventAttributes::ContractUnshieldedMint {
                 domain_sep,
                 token_type,
                 ..
@@ -467,33 +548,47 @@ impl LedgerEvent {
                 ("domainSep", domain_sep.clone()),
                 ("tokenType", token_type.clone()),
             ],
-            ContractUnshieldedBurn {
+
+            LedgerEventAttributes::ContractUnshieldedBurn {
                 sender, token_type, ..
             } => vec![
-                ("sender", sender.as_bytes()),
+                ("sender", sender.to_bytes()),
                 ("tokenType", token_type.clone()),
             ],
-            ContractPaused { .. }
-            | ContractUnpaused { .. }
-            | ContractMisc { .. }
-            | ZswapInput { .. }
-            | ZswapOutput
-            | ParamChange
-            | DustInitialUtxo { .. }
-            | DustGenerationDtimeUpdate { .. }
-            | DustSpendProcessed { .. } => vec![],
+
+            LedgerEventAttributes::ContractPaused { .. }
+            | LedgerEventAttributes::ContractUnpaused { .. }
+            | LedgerEventAttributes::ContractMisc { .. }
+            | LedgerEventAttributes::ZswapInput { .. }
+            | LedgerEventAttributes::ZswapOutput
+            | LedgerEventAttributes::ParamChange
+            | LedgerEventAttributes::DustInitialUtxo { .. }
+            | LedgerEventAttributes::DustGenerationDtimeUpdate { .. }
+            | LedgerEventAttributes::DustSpendProcessed { .. } => vec![],
         }
     }
 }
+
+/// Every field name `LedgerEvent::indexable_contract_fields` can emit; the closed set of valid
+/// `fieldName` values for the contract events field-prefix filter.
+pub const INDEXABLE_CONTRACT_FIELD_NAMES: [&str; 7] = [
+    "nullifier",
+    "commitment",
+    "ciphertext",
+    "domainSep",
+    "tokenType",
+    "sender",
+    "recipient",
+];
 
 impl AddressOrContract {
     /// Flat byte representation for sidecar storage (32 bytes). Indexer
     /// filters by the raw bytes regardless of whether the address is a user
     /// or contract; the `kind` discriminator is in the JSONB payload only.
-    pub fn as_bytes(&self) -> ByteVec {
+    fn to_bytes(&self) -> ByteVec {
         match self {
-            AddressOrContract::User(b) => b.clone(),
-            AddressOrContract::Contract(b) => b.clone(),
+            Self::User(bytes) => bytes.clone(),
+            Self::Contract(bytes) => bytes.clone(),
         }
     }
 }
@@ -503,26 +598,25 @@ impl LedgerEventAttributes {
     /// for zswap and dust events. Used by the chain-indexer to correlate
     /// contract events with the emitting `ContractCall` (ticket #1162).
     pub fn contract_entry_point(&self) -> Option<&ByteVec> {
-        use LedgerEventAttributes::*;
         match self {
-            ContractShieldedSpend { entry_point, .. }
-            | ContractShieldedReceive { entry_point, .. }
-            | ContractShieldedMint { entry_point, .. }
-            | ContractShieldedBurn { entry_point, .. }
-            | ContractUnshieldedSpend { entry_point, .. }
-            | ContractUnshieldedReceive { entry_point, .. }
-            | ContractUnshieldedMint { entry_point, .. }
-            | ContractUnshieldedBurn { entry_point, .. }
-            | ContractPaused { entry_point, .. }
-            | ContractUnpaused { entry_point, .. }
-            | ContractMisc { entry_point, .. } => Some(entry_point),
+            Self::ContractShieldedSpend { entry_point, .. }
+            | Self::ContractShieldedReceive { entry_point, .. }
+            | Self::ContractShieldedMint { entry_point, .. }
+            | Self::ContractShieldedBurn { entry_point, .. }
+            | Self::ContractUnshieldedSpend { entry_point, .. }
+            | Self::ContractUnshieldedReceive { entry_point, .. }
+            | Self::ContractUnshieldedMint { entry_point, .. }
+            | Self::ContractUnshieldedBurn { entry_point, .. }
+            | Self::ContractPaused { entry_point, .. }
+            | Self::ContractUnpaused { entry_point, .. }
+            | Self::ContractMisc { entry_point, .. } => Some(entry_point),
 
-            ZswapInput { .. }
-            | ZswapOutput
-            | ParamChange
-            | DustInitialUtxo { .. }
-            | DustGenerationDtimeUpdate { .. }
-            | DustSpendProcessed { .. } => None,
+            Self::ZswapInput { .. }
+            | Self::ZswapOutput
+            | Self::ParamChange
+            | Self::DustInitialUtxo { .. }
+            | Self::DustGenerationDtimeUpdate { .. }
+            | Self::DustSpendProcessed { .. } => None,
         }
     }
 }
@@ -889,11 +983,34 @@ mod contract_event_tests {
     }
 
     #[test]
-    fn address_or_contract_as_bytes_returns_inner() {
+    fn address_or_contract_to_bytes_returns_inner() {
         let user = AddressOrContract::User(bv(&[0xab; 32]));
         let contract = AddressOrContract::Contract(bv(&[0xcd; 32]));
-        assert_eq!(user.as_bytes().as_ref(), &[0xab; 32]);
-        assert_eq!(contract.as_bytes().as_ref(), &[0xcd; 32]);
+        assert_eq!(user.to_bytes().as_ref(), &[0xab; 32]);
+        assert_eq!(contract.to_bytes().as_ref(), &[0xcd; 32]);
+    }
+
+    #[test]
+    fn indexable_contract_field_names_cover_every_emitted_field() {
+        let all_attrs = [
+            shielded_spend_attrs(),
+            shielded_receive_attrs(),
+            shielded_mint_attrs(),
+            shielded_burn_attrs(),
+            unshielded_spend_attrs(),
+            unshielded_receive_attrs(),
+            unshielded_mint_attrs(),
+            unshielded_burn_attrs(),
+            paused_attrs(),
+            unpaused_attrs(),
+            misc_attrs(),
+        ];
+        for attrs in all_attrs {
+            let event = LedgerEvent::contract_event(bv(b"raw"), bv(&[0x01; 32]), None, attrs);
+            for (name, _) in event.indexable_contract_fields() {
+                assert!(INDEXABLE_CONTRACT_FIELD_NAMES.contains(&name));
+            }
+        }
     }
 
     #[test]
@@ -946,5 +1063,26 @@ mod contract_event_tests {
             let decoded: LedgerEventAttributes = serde_json::from_str(&json).expect("deserialize");
             assert_eq!(original, decoded, "round-trip mismatch");
         }
+    }
+}
+
+#[cfg(test)]
+mod transaction_result_tests {
+    use super::*;
+
+    #[test]
+    fn test_segment_succeeded() {
+        assert_eq!(TransactionResult::Success.segment_succeeded(0), Some(true));
+        assert_eq!(
+            TransactionResult::Success.segment_succeeded(u16::MAX),
+            Some(true)
+        );
+        assert_eq!(TransactionResult::Failure.segment_succeeded(0), Some(false));
+
+        let result = TransactionResult::PartialSuccess(vec![(0, true), (7, false), (42, true)]);
+        assert_eq!(result.segment_succeeded(0), Some(true));
+        assert_eq!(result.segment_succeeded(7), Some(false));
+        assert_eq!(result.segment_succeeded(42), Some(true));
+        assert_eq!(result.segment_succeeded(99), None);
     }
 }

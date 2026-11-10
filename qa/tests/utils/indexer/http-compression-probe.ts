@@ -48,11 +48,20 @@ const INTROSPECTION_QUERY = `{
  * remain accessible — graphql-request parses and discards them before
  * surfacing the response to callers.
  *
- * Note on Node.js fetch (undici): undici automatically decompresses the
- * response body when Content-Encoding is present, so `response.json()` works
- * transparently regardless of the encoding. The Content-Encoding header is
- * still preserved in `response.headers` and reflects what the server actually
- * sent.
+ * Note on fetch decompression: gzip, deflate and brotli are decompressed
+ * transparently by both Node (undici) and Bun. `zstd`, however, is NOT
+ * auto-decompressed by Node's fetch on the versions we run on — undici only
+ * gained zstd support in v7.11 (Node >= 24.4.0), and the entire Node 22.x /
+ * 23.x line ships undici 6.x/early-7.x without it (Bun does decompress zstd).
+ * So for zstd we read the raw bytes and decompress them ourselves (see below).
+ * The Content-Encoding header is preserved in `response.headers` regardless and
+ * reflects what the server actually sent.
+ *
+ * Note on the zstd runtime requirement: `zstdDecompressSync` was only added to
+ * `node:zlib` in Node 22.15.0. We import it lazily, inside the zstd branch, so
+ * the gzip / brotli / identity probes keep working on earlier Node 22.x
+ * releases — only the zstd decompression path needs Node >= 22.15.0 (see the
+ * prerequisites note in qa/tests/README.md).
  *
  * Note on identity responses: undici unconditionally appends its own
  * `Accept-Encoding` (gzip, deflate, br) to every outgoing request. To test
@@ -81,11 +90,42 @@ export async function probeGraphQLCompression(
     signal: AbortSignal.timeout(30_000),
   });
 
-  const data = await response.json();
+  const contentEncoding = response.headers.get('content-encoding');
+
+  // Node's fetch (undici < 7.11, i.e. all Node 22.x/23.x) does NOT
+  // auto-decompress `Content-Encoding: zstd`, so `response.json()` would try to
+  // parse raw zstd bytes and throw. Read the body as bytes and decompress zstd
+  // ourselves, but only when the server actually sent zstd AND the payload
+  // still carries the zstd magic number (0x28 B5 2F FD). The magic-number guard
+  // makes this a no-op on runtimes that already decompressed (Bun, Node >=
+  // 24.4.0), so the gzip / brotli / identity paths are unaffected.
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const isRawZstd =
+    contentEncoding === 'zstd' &&
+    buffer.length >= 4 &&
+    buffer[0] === 0x28 &&
+    buffer[1] === 0xb5 &&
+    buffer[2] === 0x2f &&
+    buffer[3] === 0xfd;
+
+  let payload = buffer;
+  if (isRawZstd) {
+    // Import lazily so the module still loads on Node 22.x < 22.15, where
+    // `zstdDecompressSync` does not exist — only this branch needs it.
+    const { zstdDecompressSync } = await import('node:zlib');
+    if (typeof zstdDecompressSync !== 'function') {
+      throw new Error(
+        'Received a zstd-compressed response but node:zlib.zstdDecompressSync ' +
+          'is unavailable; Node >= 22.15.0 is required to decompress zstd.',
+      );
+    }
+    payload = zstdDecompressSync(buffer);
+  }
+  const data = JSON.parse(payload.toString('utf8'));
 
   return {
     status: response.status,
-    contentEncoding: response.headers.get('content-encoding'),
+    contentEncoding,
     data,
   };
 }

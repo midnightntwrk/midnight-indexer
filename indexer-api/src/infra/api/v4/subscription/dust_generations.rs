@@ -86,6 +86,10 @@ pub struct DustGenerationsProgress {
     pub highest_index: u64,
     /// Final collapsed Merkle tree update covering remaining range.
     pub collapsed_merkle_tree: Option<MerkleTreeCollapsedUpdate>,
+    /// The protocol version at the snapshot's block, i.e. the one this snapshot is encoded at.
+    /// Allows a wallet without any generations to observe a protocol upgrade, which it would
+    /// otherwise only learn about from the items it receives.
+    pub protocol_version: u32,
 }
 
 /// A dust generation dtime update emitted when the backing Night UTXO is
@@ -133,10 +137,13 @@ where
         dtime_cutoff_height: u64,
     ) -> impl Stream<Item = ApiResult<DustGenerationsEvent>> {
         let storage = cx.get_storage::<S>();
-        let batch_size = cx.get_subscription_config().dust_generations.batch_size;
+        let dust_generations_config = cx.get_subscription_config().dust_generations;
+        let batch_size = dust_generations_config.batch_size;
+        let max_snapshot_age = dust_generations_config.max_snapshot_age;
         let network_id = cx.get_network_id();
         let quotas = cx.get_subscription_quotas();
         let per_connection_counter = cx.get_per_connection_counter();
+        let ledger_query_limiter = cx.get_ledger_query_limiter();
 
         try_stream! {
             let _quota_guard = quotas
@@ -154,15 +161,51 @@ where
             // Pin the whole snapshot to one block: load the ledger state at `block_hash` so the
             // generation tree (and every collapsed update built from it) reflects the state as of
             // that block. This is what makes the response deterministic and free of tip-drift.
-            let (snapshot_block_id, protocol_version, ledger_state_key) = storage
+            let (snapshot_block_id, snapshot_height, protocol_version, ledger_state_key) = storage
                 .get_ledger_state_at(block_hash)
                 .await
                 .map_err_into_server_error(|| "get ledger state at block")?
                 .some_or_client_error(|| "unknown block hash")?;
 
-            let ledger_state =
+            // The chain-indexer only keeps the ledger states of the most recent
+            // ledger_state_retention blocks loadable (older ones are garbage collected), so
+            // reject stale snapshots up front with a re-subscribe hint instead of failing
+            // mid-stream on culled state.
+            let latest_height = storage
+                .get_latest_block()
+                .await
+                .map_err_into_server_error(|| "get latest block")?
+                .map(|block| block.height)
+                .unwrap_or_default();
+            (latest_height.saturating_sub(snapshot_height) <= max_snapshot_age)
+                .then_some(())
+                .some_or_client_error(|| {
+                    "block hash is older than the snapshot freshness window, re-subscribe with \
+                     a more recent block hash"
+                })?;
+
+            // Verify the root node is still in the ledger DB before loading: loading culled
+            // state panics inside storage-core rather than returning an error, so this check is
+            // what turns a gc'd snapshot (possible when max_snapshot_age is misconfigured to
+            // exceed the chain-indexer's ledger_state_retention) into a clean client error.
+            // Bound concurrent ledger-DB work (issue #595): hold a permit only around the
+            // synchronous availability check and load, and around each collapsed-update walk
+            // below — never across the `yield`s — so a slow consumer cannot pin a permit for the
+            // whole snapshot.
+            let ledger_state = {
+                let _ledger_permit = ledger_query_limiter.acquire().await;
+
+                LedgerState::root_loadable(&ledger_state_key, protocol_version.ledger_version())
+                    .map_err_into_server_error(|| "check ledger state availability")?
+                    .then_some(())
+                    .some_or_client_error(|| {
+                        "ledger state for this block is no longer available, re-subscribe with \
+                         a more recent block hash"
+                    })?;
+
                 LedgerState::load(&ledger_state_key, protocol_version.ledger_version())
-                    .map_err_into_server_error(|| "load ledger state at block")?;
+                    .map_err_into_server_error(|| "load ledger state at block")?
+            };
 
             // Exclusive end of the generation tree at this block.
             let end_index = ledger_state.dust_generations_first_free();
@@ -192,6 +235,7 @@ where
                     snapshot_block_id,
                     0,
                     batch_size,
+                    protocol_version.ledger_version(),
                 )
                 .await;
             let mut updates = pin!(updates);
@@ -207,7 +251,13 @@ where
             //    Merkle tree updates (pinned to the block) filling the non-owned gaps.
             let mut cursor = 0u64;
             let entries = storage
-                .get_dust_generation_entries(&dust_address_bytes, 0, last_index, batch_size)
+                .get_dust_generation_entries(
+                    &dust_address_bytes,
+                    0,
+                    last_index,
+                    batch_size,
+                    protocol_version.ledger_version(),
+                )
                 .await;
             let mut entries = pin!(entries);
             while let Some(entry) = entries
@@ -215,12 +265,15 @@ where
                 .await
                 .map_err_into_server_error(|| "get next dust generation entry")?
             {
-                let collapsed_merkle_tree = make_collapsed_update(
-                    &ledger_state,
-                    cursor,
-                    entry.generation_mt_index,
-                    protocol_version,
-                )?;
+                let collapsed_merkle_tree = {
+                    let _ledger_permit = ledger_query_limiter.acquire().await;
+                    make_collapsed_update(
+                        &ledger_state,
+                        cursor,
+                        entry.generation_mt_index,
+                        protocol_version,
+                    )?
+                };
 
                 cursor = entry.generation_mt_index + 1;
 
@@ -243,11 +296,13 @@ where
             let final_update = if end_index == 0 {
                 None
             } else {
+                let _ledger_permit = ledger_query_limiter.acquire().await;
                 make_final_collapsed_update(&ledger_state, cursor, last_index, protocol_version)?
             };
             yield DustGenerationsEvent::DustGenerationsProgress(DustGenerationsProgress {
                 highest_index: last_index,
                 collapsed_merkle_tree: final_update,
+                protocol_version: protocol_version.into(),
             });
         }
     }

@@ -2,9 +2,15 @@
 
 set -euxo pipefail
 
-# Cleanup function to ensure node container is removed.
+# Cleanup function to ensure node container and scratch build dir are removed.
+token_issuer_build_dir=""
 cleanup() {
     docker rm -f node >/dev/null 2>&1 || true
+    # `[ -n ... ] && rm` as the trap's last command would make a successful run
+    # exit 1 whenever the build dir was never set.
+    if [ -n "$token_issuer_build_dir" ]; then
+        rm -rf "$token_issuer_build_dir"
+    fi
 }
 
 # Set up trap to cleanup on exit.
@@ -12,80 +18,169 @@ trap cleanup EXIT
 
 if [ -z "$1" ]; then
     echo "Error: node version parameter is required" >&2
-    echo "Usage: $0 <node_version>" >&2
+    echo "Usage: $0 <node_version> [toolkit_version]" >&2
     exit 1
 fi
 readonly node_version="$1"
-
-# Release images live on Docker Hub (midnightntwrk), pre-release builds on GHCR
-# (ghcr.io/midnight-ntwrk). Resolve whichever registry has the tag, preferring a
-# locally present image, then Docker Hub.
-resolve_image() {
-    local image="$1"
-    local candidate
-    for candidate in "midnightntwrk/$image" "ghcr.io/midnight-ntwrk/$image"; do
-        if docker image inspect "$candidate" >/dev/null 2>&1 \
-            || docker manifest inspect "$candidate" >/dev/null 2>&1; then
-            echo "$candidate"
-            return
-        fi
-    done
-    echo "Error: $image not found on Docker Hub (midnightntwrk) or GHCR (midnight-ntwrk)" >&2
-    return 1
-}
-
-toolkit_image=$(resolve_image "midnight-node-toolkit:$node_version")
-node_image=$(resolve_image "midnight-node:$node_version")
-readonly toolkit_image node_image
-
-# Remove a directory that may contain root-owned files. The contract compile step runs the
-# toolkit's compactc/zkir as root (they cannot write their caches as a non-root uid), so the
-# `managed/` output it leaves in a work dir is root-owned and a plain host `rm -rf` (as the
-# invoking user) fails with EPERM, aborting the script under `set -e`. Delete via a throwaway
-# root container instead of chowning host files.
-rm_root_dir() {
-    local dir="$1"
-    docker run --rm -v "$(dirname "$dir")":/parent --entrypoint sh "$toolkit_image" \
-        -c "rm -rf /parent/$(basename "$dir")"
-}
-
-# Capture a deployed contract's on-chain state, polling until it is actually available instead of
-# assuming a fixed `sleep` is long enough for the deploy tx to land. `contract-state` only writes a
-# populated state file once the deploy has been included on chain, so we retry until the output is
-# non-empty (bounded by a timeout). A fixed delay is flaky on slow/CI runners: it can read stale or
-# empty state and bake a bad fixture (the follow-up circuit call then proves against wrong state).
-# Args: <contract-address> </out dest file (e.g. /out/emit_onchain_state.mn)>.
-wait_for_contract_state() {
-    local address="$1" dest="$2"
-    local timeout=120 start
-    # `dest` lives in the persistent `toolkit_out` volume, so a leftover file from a prior run (or
-    # CI retry) would otherwise satisfy the non-empty check below before this deploy has landed,
-    # capturing stale state. Delete it up front so the check can only pass on this run's output.
-    docker run --rm -v toolkit_out:/out --entrypoint sh $toolkit_image -c "rm -f '$dest'"
-    start=$(date +%s)
-    while true; do
-        docker run --rm --network host -v toolkit_out:/out $toolkit_image \
-            contract-state --contract-address "$address" --dest-file "$dest" >/dev/null 2>&1 || true
-        if docker run --rm -v toolkit_out:/out --entrypoint sh $toolkit_image -c "test -s '$dest'"; then
-            return 0
-        fi
-        if (( $(date +%s) - start > timeout )); then
-            echo "Timeout after ${timeout}s waiting for contract-state of $address" >&2
-            return 1
-        fi
-        sleep 3
-    done
-}
+# A node release names the toolkit release it ships with, and the two carry
+# independent version numbers: node-1.0.2 ships toolkit-1.0.0.
+readonly toolkit_version="${2:-$node_version}"
+readonly toolkit_image="midnightntwrk/midnight-node-toolkit:$toolkit_version"
 readonly rng_seed="0000000000000000000000000000000000000000000000000000000000000037"
 readonly node_dir="$(pwd)/.node/$node_version"
 
-# Set up fresh node data directory. The node container runs as root and writes root-owned
-# data here, so a prior (or partial) run leaves files the invoking user cannot delete; remove
-# via a root container.
+# The compactc version to build contracts/token-issuer with is toolkit-js's
+# compiler pin, not midnight-js's, and that pin ties to the WHOLE ledger stack
+# a toolkit build targets, not just a compact-runtime number: each compactc
+# release binds one onchain-runtime/ledger major via a fixed compact-runtime
+# dependency, and compact-runtime's own version check demands an EXACT minor
+# match under its 0.x versioning, so there is no forward- or
+# backward-compatible choice here — one compactc version per ledger line,
+# full stop.
+#
+#   ledger | node/toolkit line          | compactc    | compact-runtime
+#   -------|-----------------------------|-------------|----------------
+#   v8     | 1.x                         | 0.30.0      | 0.15.0
+#   v9     | 2.1.0-beta.1 to 2.1.0       | 0.33.0-rc.2 | 0.18.0-rc.1
+#   v9     | 2.1.100+                    | 0.35.0      | 0.20.0
+#
+# The default follows node_version per the table above; set COMPACTC_VERSION
+# to override it. Ledger tokens token-issuer mints go to whichever wallet its
+# mintUnshielded call names as recipient.
+case "$node_version" in
+    2.1.0*) default_compactc_version="0.33.0-rc.2" ;;
+    2.1.*) default_compactc_version="0.35.0" ;;
+    *) default_compactc_version="0.30.0" ;;
+esac
+readonly compactc_version="${COMPACTC_VERSION:-$default_compactc_version}"
+readonly token_issuer_dir="$(pwd)/contracts/token-issuer"
+readonly token_issuer_mint_seed="0000000000000000000000000000000000000000000000000000000000000001"
+readonly token_issuer_mint_amount="100000000000"
+
+# A GITHUB_TOKEN exported but empty (not merely unset) makes the `compact`
+# CLI authenticate with a blank credential and fail every GitHub call outright
+# ("Bad credentials") instead of falling back to an unauthenticated request.
+if [ -z "${GITHUB_TOKEN:-}" ]; then
+    unset GITHUB_TOKEN
+fi
+
+# The target triple compactc's release ASSETS are named with, for the
+# direct-download fallback below.
+compactc_asset_triple() {
+    case "$(uname -s)-$(uname -m)" in
+        Linux-x86_64) echo "x86_64-unknown-linux-musl" ;;
+        Linux-aarch64|Linux-arm64) echo "aarch64-unknown-linux-musl" ;;
+        Darwin-x86_64) echo "x86_64-darwin" ;;
+        Darwin-arm64|Darwin-aarch64) echo "aarch64-darwin" ;;
+        *)
+            echo "Error: no known compactc release asset for $(uname -s)-$(uname -m)" >&2
+            exit 1
+            ;;
+    esac
+}
+
+# The directory name the `compact` CLI resolves a compiler under, i.e.
+# versions/<version>/<triple>/compactc. It matches the asset triple everywhere
+# except Intel macOS, where the asset ships as x86_64-darwin but the CLI's
+# Target type renders x86_64-apple-darwin -- unpacking under the asset name
+# there installs a compiler the CLI can never find.
+compactc_install_triple() {
+    case "$(uname -s)-$(uname -m)" in
+        Darwin-x86_64) echo "x86_64-apple-darwin" ;;
+        *) compactc_asset_triple ;;
+    esac
+}
+
+# Make sure compactc $compactc_version is installed, fetching it if not.
+ensure_compactc() {
+    local version="$1"
+    local install_triple dest
+    install_triple="$(compactc_install_triple)"
+    dest="$HOME/.compact/versions/$version/$install_triple"
+    # Mirror the CLI's own definition of "installed" -- the compiler binary is
+    # present -- rather than parsing `compact list --installed`, whose output
+    # only indents entries when a default compiler is set and marks the current
+    # one with a configurable icon, so a grep on it misses exactly the machines
+    # this fallback has just provisioned.
+    if [ -x "$dest/compactc" ]; then
+        return
+    fi
+    if compact update "$version" --no-set-default >/dev/null 2>&1; then
+        return
+    fi
+    # `compact update`/`list` only surface FINAL releases. Some versions (0.33.0
+    # among them, needed for ledger v9) were never cut as a final release --
+    # only as release-candidate tags (compactc-v0.33.0-rc.0/1/2) -- so pass the
+    # exact upstream tag suffix as COMPACTC_VERSION (e.g. "0.33.0-rc.2") and
+    # this fetches it straight from the compiler's upstream home,
+    # LFDT-Minokawa/compact, which is where these tags are actually published
+    # (midnightntwrk/compact exists, but only mirrors final releases).
+    echo "compact CLI has no final release '$version'; fetching it from LFDT-Minokawa/compact directly" >&2
+    if ! command -v gh >/dev/null 2>&1; then
+        echo "Error: the 'gh' CLI is required to fetch compactc $version, which has no final release" >&2
+        exit 1
+    fi
+    # `gh release download` hits the API as a user, so it fails on an
+    # unauthenticated host even for a public repo.
+    if ! gh auth status >/dev/null 2>&1; then
+        echo "Error: 'gh' is not authenticated; run 'gh auth login' or export GH_TOKEN to fetch compactc $version" >&2
+        exit 1
+    fi
+    if ! command -v unzip >/dev/null 2>&1; then
+        echo "Error: 'unzip' is required to unpack the compactc $version release asset" >&2
+        exit 1
+    fi
+    local asset_triple tmp_zip_dir tag found_tag
+    asset_triple="$(compactc_asset_triple)"
+    tmp_zip_dir="$(mktemp -d)"
+    found_tag=""
+    # Releases from 0.31.0 on are tagged compactc-v<version>; older ones
+    # (0.30.0-rc.*) are tagged plain v<version>.
+    for tag in "compactc-v$version" "v$version"; do
+        if gh release download "$tag" --repo LFDT-Minokawa/compact \
+            -p "*${asset_triple}.zip" -O "$tmp_zip_dir/compactc.zip" --clobber 2>/dev/null; then
+            found_tag="$tag"
+            break
+        fi
+    done
+    if [ -z "$found_tag" ]; then
+        rm -rf "$tmp_zip_dir"
+        echo "Error: no compactc release for $asset_triple at LFDT-Minokawa/compact under tag compactc-v$version or v$version" >&2
+        exit 1
+    fi
+    mkdir -p "$dest"
+    unzip -oq "$tmp_zip_dir/compactc.zip" -d "$dest"
+    chmod +x "$dest"/*
+    rm -rf "$tmp_zip_dir"
+}
+
+# Set up fresh node data directory.
 if [ -d $node_dir ]; then
-    rm_root_dir "$node_dir"
+    rm -r $node_dir;
 fi
 mkdir -p $node_dir
+
+# Compile token-issuer on the host: toolkit-js's own config.ts imports
+# @midnight-ntwrk/compact-js/effect, which only resolves under /toolkit-js
+# inside the toolkit image, so the compiled contract and its config.ts are
+# seeded into the toolkit_out volume and dual-mounted there for that step.
+if ! command -v compact >/dev/null 2>&1; then
+    echo "Error: the 'compact' CLI is required to build contracts/token-issuer (see https://docs.midnight.network for install instructions)" >&2
+    exit 1
+fi
+ensure_compactc "$compactc_version"
+token_issuer_build_dir="$(mktemp -d)"
+compact compile "+$compactc_version" "$token_issuer_dir/token-issuer.compact" "$token_issuer_build_dir/out"
+
+docker run \
+    --rm \
+    -v toolkit_out:/out \
+    -v "$token_issuer_build_dir/out":/src/out:ro \
+    -v "$token_issuer_dir/token-issuer.config.ts":/src/token-issuer.config.ts:ro \
+    --entrypoint sh \
+    $toolkit_image \
+    -c 'rm -rf /out/out /out/token-issuer.config.ts && cp -r /src/out /out/out && cp /src/token-issuer.config.ts /out/token-issuer.config.ts'
+rm -rf "$token_issuer_build_dir"
 
 # Start the node container.
 docker run \
@@ -97,7 +192,7 @@ docker run \
     -e SIDECHAIN_BLOCK_BENEFICIARY="04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e" \
     -e THRESHOLD=0 \
     -v $node_dir:/node \
-    $node_image
+    midnightntwrk/midnight-node:$node_version
 
 # Wait for node to be ready.
 echo "Waiting for node to be ready..."
@@ -118,7 +213,7 @@ while true; do
             "id":1,
             "method":"chain_getFinalizedHead",
             "params":[]
-        }' | jq -r .result || true)
+        }' | jq -r .result)
     if [[ -z "$finalized_hash" || "$finalized_hash" == "null" ]]; then
         echo "No finalized hash"
         continue
@@ -131,7 +226,7 @@ while true; do
             \"id\":2,
             \"method\":\"chain_getHeader\",
             \"params\":[\"$finalized_hash\"]
-        }" | jq -r '.result.number' || true)
+        }" | jq -r '.result.number')
     if [[ -z "$finalized_number" || "$finalized_number" == "null" ]]; then
         echo "No finalized number"
         continue
@@ -216,207 +311,108 @@ docker run \
     --contract-address $(cat /tmp/contract_address.mn) \
     --new-authority-seed 1000000000000000000000000000000000000000000000000000000000000001
 
-# Emit a standard contract event so the e2e chain exercises the `contractEvents` query and
-# subscription (#1163; test_contract_event_query / test_contract_events_subscription in
-# indexer-tests/src/e2e.rs). The emit contract source lives in indexer-tests/emit-contract; it is
-# compiled with the compactc bundled in the toolkit image and driven through the toolkit's
-# generate-intent / send-intent custom-contract pipeline (see util/toolkit README in midnight-node).
-readonly emit_work=$(mktemp -d)
-cp indexer-tests/emit-contract/emitcounter.compact indexer-tests/emit-contract/contract.config.ts "$emit_work"
-# World-writable so the toolkit-js config loader (runs as appuser via the entrypoint's
-# `runuser`, not root) can write the transpiled contract.config.js into the bind mount.
-chmod -R a+rwX "$emit_work"
-
-# Compile the emit contract with the bundled compactc (runs as root via the shell entrypoint so it
-# can write into the bind mount).
+# Deploy token-issuer and mint unshielded tokens to wallet 01 (the same funding
+# wallet used elsewhere in this script), so the pre-populated
+# chain also has a non-NIGHT unshielded token colour to query against.
 docker run \
     --rm \
-    -v "$emit_work":/toolkit-js/contract-emit \
-    --entrypoint sh \
+    --network host \
+    -v toolkit_out:/out \
+    -v toolkit_out:/toolkit-js/token-issuer \
+    -e TOOLKIT_JS_PATH=/toolkit-js \
     $toolkit_image \
-    -c 'cd /toolkit-js/contract-emit && /compact-home/compactc emitcounter.compact managed/emitcounter'
-
-readonly emit_coin_public=$(docker run --rm $toolkit_image show-address \
+    generate-intent deploy \
+    --toolkit-js-path /toolkit-js \
+    --config /toolkit-js/token-issuer/token-issuer.config.ts \
+    --coin-public aa0d72bb77ea46f986a800c66d75c4e428a95bd7e1244f1ed059374e6266eb98 \
     --network undeployed \
-    --seed 0000000000000000000000000000000000000000000000000000000000000001 \
-    --coin-public | tail -1)
+    --output-intent /toolkit-js/token-issuer/deploy.intent \
+    --output-private-state /toolkit-js/token-issuer/deploy.private \
+    --output-zswap-state /toolkit-js/token-issuer/deploy.zswap
 
-# Deploy the emit contract: intent -> proven tx file -> send.
-docker run \
-    --rm \
-    --network host \
-    -v "$emit_work":/toolkit-js/contract-emit \
-    -v toolkit_out:/out \
-    $toolkit_image \
-    generate-intent deploy \
-    -c /toolkit-js/contract-emit/contract.config.ts \
-    --toolkit-js-path /toolkit-js \
-    --coin-public "$emit_coin_public" \
-    --output-intent /out/emit_deploy.bin \
-    --output-private-state /out/emit_private_state.json \
-    --output-zswap-state /out/emit_zswap.json \
-    0
-docker run \
-    --rm \
-    --network host \
-    -v "$emit_work":/toolkit-js/contract-emit \
-    -v toolkit_out:/out \
-    $toolkit_image \
-    send-intent \
-    --intent-file /out/emit_deploy.bin \
-    --compiled-contract-dir /toolkit-js/contract-emit/managed/emitcounter \
-    --dest-file /out/emit_deploy_tx.mn
-docker run \
-    --rm \
-    -v toolkit_out:/out \
-    $toolkit_image \
-    contract-address --src-file /out/emit_deploy_tx.mn > /tmp/emit_contract_address.mn
 docker run \
     --rm \
     --network host \
     -v toolkit_out:/out \
     $toolkit_image \
-    generate-txs --src-file /out/emit_deploy_tx.mn --dest-url ws://127.0.0.1:9944 send
+    generate-txs contract-custom \
+    --funding-seed "0000000000000000000000000000000000000000000000000000000000000001" \
+    --compiled-contract-dir /out/out \
+    --intent-file /out/deploy.intent \
+    --dest-file /out/token_issuer_deploy.mn
 
-# Wait for the deploy to land on chain (poll rather than a fixed sleep), capturing the emit
-# contract's on-chain state for the circuit call.
-wait_for_contract_state "$(cat /tmp/emit_contract_address.mn)" /out/emit_onchain_state.mn
-
-# Call the emit_unpaused circuit: intent -> proven tx file -> send.
 docker run \
     --rm \
     --network host \
-    -v "$emit_work":/toolkit-js/contract-emit \
     -v toolkit_out:/out \
+    $toolkit_image \
+    generate-txs --src-file /out/token_issuer_deploy.mn \
+    send
+
+docker run \
+    --rm \
+    --network host \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    contract-address --src-file /out/token_issuer_deploy.mn > /tmp/token_issuer_address.mn
+
+docker run \
+    --rm \
+    --network host \
+    -v toolkit_out:/out \
+    $toolkit_image \
+    contract-state --contract-address $(cat /tmp/token_issuer_address.mn) \
+    --dest-file /out/token_issuer_state.bin
+
+token_issuer_recipient_address=$(docker run \
+    --rm \
+    $toolkit_image \
+    show-address --network undeployed --seed $token_issuer_mint_seed \
+    | jq -r .userAddress)
+
+docker run \
+    --rm \
+    --network host \
+    -v toolkit_out:/out \
+    -v toolkit_out:/toolkit-js/token-issuer \
+    -e TOOLKIT_JS_PATH=/toolkit-js \
     $toolkit_image \
     generate-intent circuit \
-    -c /toolkit-js/contract-emit/contract.config.ts \
     --toolkit-js-path /toolkit-js \
-    --contract-address $(cat /tmp/emit_contract_address.mn) \
-    --coin-public "$emit_coin_public" \
-    --input-onchain-state /out/emit_onchain_state.mn \
-    --input-private-state /out/emit_private_state.json \
-    --output-intent /out/emit_call.bin \
-    --output-private-state /out/emit_ps2.json \
-    --output-zswap-state /out/emit_zswap2.json \
-    emit_unpaused
-docker run \
-    --rm \
-    --network host \
-    -v "$emit_work":/toolkit-js/contract-emit \
-    -v toolkit_out:/out \
-    $toolkit_image \
-    send-intent \
-    --intent-file /out/emit_call.bin \
-    --compiled-contract-dir /toolkit-js/contract-emit/managed/emitcounter \
-    --dest-file /out/emit_call_tx.mn
-docker run \
-    --rm \
-    --network host \
-    -v toolkit_out:/out \
-    $toolkit_image \
-    generate-txs --src-file /out/emit_call_tx.mn --dest-url ws://127.0.0.1:9944 send
-
-rm_root_dir "$emit_work"
-
-# Deploy the zswap-holder contract and call selfMint so the e2e chain has data for the
-# contractZswapState query (test_contract_zswap_state_query in indexer-tests/src/e2e.rs, #1253).
-# The deploy gives an empty-but-present zswap state; selfMint(1000) mints a real shielded coin
-# to the contract, changing the tree so point-in-time assertions can compare before vs after.
-readonly zswap_work=$(mktemp -d)
-cp indexer-tests/query-swap/zswap-holder.compact indexer-tests/query-swap/contract.config.ts "$zswap_work"
-# World-writable so the toolkit-js config loader (appuser, see emit-contract note above)
-# can write the transpiled contract.config.js into the bind mount.
-chmod -R a+rwX "$zswap_work"
-
-docker run \
-    --rm \
-    -v "$zswap_work":/toolkit-js/contract-zswap \
-    --entrypoint sh \
-    $toolkit_image \
-    -c 'cd /toolkit-js/contract-zswap && /compact-home/compactc zswap-holder.compact managed/zswap-holder'
+    --config /toolkit-js/token-issuer/token-issuer.config.ts \
+    --contract-address $(cat /tmp/token_issuer_address.mn) \
+    --coin-public aa0d72bb77ea46f986a800c66d75c4e428a95bd7e1244f1ed059374e6266eb98 \
+    --input-onchain-state /toolkit-js/token-issuer/token_issuer_state.bin \
+    --input-private-state /toolkit-js/token-issuer/deploy.private \
+    --output-intent /toolkit-js/token-issuer/mint.intent \
+    --output-private-state /toolkit-js/token-issuer/mint.private \
+    --output-zswap-state /toolkit-js/token-issuer/mint.zswap \
+    mintUnshielded "{bytes:'0x$token_issuer_recipient_address'}" $token_issuer_mint_amount
 
 docker run \
     --rm \
     --network host \
-    -v "$zswap_work":/toolkit-js/contract-zswap \
     -v toolkit_out:/out \
     $toolkit_image \
-    generate-intent deploy \
-    -c /toolkit-js/contract-zswap/contract.config.ts \
-    --toolkit-js-path /toolkit-js \
-    --coin-public "$emit_coin_public" \
-    --output-intent /out/zswap_deploy.bin \
-    --output-private-state /out/zswap_private_state.json \
-    --output-zswap-state /out/zswap_zswap.json
-docker run \
-    --rm \
-    --network host \
-    -v "$zswap_work":/toolkit-js/contract-zswap \
-    -v toolkit_out:/out \
-    $toolkit_image \
-    send-intent \
-    --intent-file /out/zswap_deploy.bin \
-    --compiled-contract-dir /toolkit-js/contract-zswap/managed/zswap-holder \
-    --dest-file /out/zswap_deploy_tx.mn
-docker run \
-    --rm \
-    -v toolkit_out:/out \
-    $toolkit_image \
-    contract-address --src-file /out/zswap_deploy_tx.mn > /tmp/zswap_holder_address.mn
-docker run \
-    --rm \
-    --network host \
-    -v toolkit_out:/out \
-    $toolkit_image \
-    generate-txs --src-file /out/zswap_deploy_tx.mn --dest-url ws://127.0.0.1:9944 send
-
-# Wait for the deploy to land on chain (poll rather than a fixed sleep), capturing the zswap-holder
-# contract's on-chain state for the selfMint circuit call.
-wait_for_contract_state "$(cat /tmp/zswap_holder_address.mn)" /out/zswap_onchain_state.mn
+    generate-txs contract-custom \
+    --funding-seed "0000000000000000000000000000000000000000000000000000000000000001" \
+    --compiled-contract-dir /out/out \
+    --intent-file /out/mint.intent \
+    --dest-file /out/token_issuer_mint.mn
 
 docker run \
     --rm \
     --network host \
-    -v "$zswap_work":/toolkit-js/contract-zswap \
     -v toolkit_out:/out \
     $toolkit_image \
-    generate-intent circuit \
-    -c /toolkit-js/contract-zswap/contract.config.ts \
-    --toolkit-js-path /toolkit-js \
-    --contract-address $(cat /tmp/zswap_holder_address.mn) \
-    --coin-public "$emit_coin_public" \
-    --input-onchain-state /out/zswap_onchain_state.mn \
-    --input-private-state /out/zswap_private_state.json \
-    --output-intent /out/zswap_call.bin \
-    --output-private-state /out/zswap_ps2.json \
-    --output-zswap-state /out/zswap_zswap2.json \
-    selfMint 1000
-docker run \
-    --rm \
-    --network host \
-    -v "$zswap_work":/toolkit-js/contract-zswap \
-    -v toolkit_out:/out \
-    $toolkit_image \
-    send-intent \
-    --intent-file /out/zswap_call.bin \
-    --compiled-contract-dir /toolkit-js/contract-zswap/managed/zswap-holder \
-    --zswap-state-file /out/zswap_zswap2.json \
-    --dest-file /out/zswap_call_tx.mn
-docker run \
-    --rm \
-    --network host \
-    -v toolkit_out:/out \
-    $toolkit_image \
-    generate-txs --src-file /out/zswap_call_tx.mn --dest-url ws://127.0.0.1:9944 send
+    generate-txs --src-file /out/token_issuer_mint.mn \
+    send
 
-rm_root_dir "$zswap_work"
-
-# Wait for enough blocks to be finalized so that the pre-populated chain data contains sufficient
-# blocks for e2e tests. The store/emit/zswap contracts (deploy + circuit call, each gated on a
-# ~15s finalization wait) span up to ~block 65, and the e2e tests collect blocks 0..=MAX_HEIGHT
-# (= 72 in e2e.rs), so the chain must finalize comfortably past that with leeway.
-readonly min_finalized_height=85
+# Wait for enough blocks to be finalized so that the pre-populated chain data
+# contains sufficient blocks for e2e tests (MAX_HEIGHT = 40 in e2e.rs). Every
+# transaction above must land at or below MAX_HEIGHT, or the e2e subscriptions
+# return events the collected blocks lack.
+readonly min_finalized_height=40
 echo "Waiting for finalized height >= $min_finalized_height..."
 timeout=360
 start_time=$(date +%s)
@@ -435,7 +431,7 @@ while true; do
             "id":1,
             "method":"chain_getFinalizedHead",
             "params":[]
-        }' | jq -r .result || true)
+        }' | jq -r .result)
     if [[ -z "$finalized_hash" || "$finalized_hash" == "null" ]]; then
         continue
     fi
@@ -447,7 +443,7 @@ while true; do
             \"id\":2,
             \"method\":\"chain_getHeader\",
             \"params\":[\"$finalized_hash\"]
-        }" | jq -r '.result.number' || true)
+        }" | jq -r '.result.number')
     if [[ -z "$finalized_number" || "$finalized_number" == "null" ]]; then
         continue
     fi

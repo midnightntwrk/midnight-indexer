@@ -16,6 +16,20 @@
 import log from '@utils/logging/logger';
 
 /**
+ * Base class for failures that retrying cannot fix.
+ *
+ * `retry` re-throws these immediately instead of spending the remaining
+ * attempts on a condition that will not change: a dead websocket delivers
+ * nothing however long the caller waits, so a poll against one should report
+ * the connection, not run out its budget and report "not found yet".
+ * See `DeadSocketError` in `@utils/indexer/websocket-client`.
+ */
+export class NonRetryableError extends Error {}
+
+/** Resolves after `ms` milliseconds. */
+export const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/**
  * Options for configuring retry behavior
  */
 export interface RetryOptions {
@@ -79,6 +93,8 @@ export interface RetryOptions {
  * @param fn - The async function to retry
  * @param options - Configuration options for retry behavior
  * @returns The result of fn() if successful
+ * @throws The original error, without further attempts, when it is a
+ *   {@link NonRetryableError}
  * @throws Error with context if all attempts fail
  */
 export async function retry<T>(fn: () => Promise<T>, options: RetryOptions = {}): Promise<T> {
@@ -92,6 +108,12 @@ export async function retry<T>(fn: () => Promise<T>, options: RetryOptions = {})
       // Try to execute the function
       return await fn();
     } catch (error) {
+      // Terminal failure: stop now so the caller sees the real cause instead of
+      // the generic "failed after N attempts" that arrives a whole budget later.
+      if (error instanceof NonRetryableError) {
+        throw error;
+      }
+
       lastError = error as Error;
 
       // If we have more attempts left, wait before retrying
@@ -103,7 +125,7 @@ export async function retry<T>(fn: () => Promise<T>, options: RetryOptions = {})
         log.warn(`${attemptMessage}\n${errorMessage}\n${retryMessage}`);
 
         // Wait before the next attempt (this is why the function must be async)
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        await sleep(delayMs);
       }
     }
   }

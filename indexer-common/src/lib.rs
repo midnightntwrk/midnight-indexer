@@ -12,7 +12,6 @@
 // limitations under the License.
 
 #![allow(clippy::zero_prefixed_literal)]
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod cipher;
@@ -22,4 +21,6 @@ pub mod error;
 pub mod infra;
 pub mod stream;
 pub mod telemetry;
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
 pub mod version;
