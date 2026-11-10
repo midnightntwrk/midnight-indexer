@@ -232,9 +232,7 @@ SQLite 9→11). See [docs/re-indexing.md](docs/re-indexing.md) before deploying.
 - Per-block dust merkle roots (#1267)
   - Adds migration `block_dust_merkle_roots` (postgres `004`, sqlite `006`)
 - *(indexer-api)* Compress HTTP responses and subscription WebSockets (#1252)
-- Expand process docs (#1287)
 - *(indexer-api)* Block-hash dust generations sync (#1291)
-- Let's try removing netrc (#1301)
 - *(indexer)* [**breaking**] Adopt storage-core gc-v1 with a ledger state retention window (#1308)
   - Requires chain-indexer config `gc_bound` (shipped `200ms`) and `ledger_state_retention` (shipped `1000` blocks); a config file without them fails to load
   - indexer-standalone defaults both to the same values
@@ -248,10 +246,10 @@ SQLite 9→11). See [docs/re-indexing.md](docs/re-indexing.md) before deploying.
 ### 🐛 Bug Fixes
 
 - Contract action unshieldedBalances always empty (#1246)
-- Clippy is a superset of check (#1322)
 
 ### 📚 Documentation
 
+- Add architecture and testing guides and expand the release process docs (#1287)
 - *(api)* Update v4 API documentation to match main (#1294)
 - Add telemetry notes (logging, tracing, metrics) (#1325)
 
@@ -272,6 +270,8 @@ SQLite 9→11). See [docs/re-indexing.md](docs/re-indexing.md) before deploying.
 - Add Claude skill for formatting indexer release notes (#1103)
 - *(test)* Use ledger v9 token types in the v9 balances test (#1299)
 - *(indexer-common)* Log NATS reconnects at info (#1297)
+- Build without a `~/.netrc` GitHub token (#1301)
+- Drop the CI check job, which clippy covers (#1322)
 
 ## [4.3.5] - 2026-07-25
 
