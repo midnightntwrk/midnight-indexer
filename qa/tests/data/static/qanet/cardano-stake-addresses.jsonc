@@ -18,6 +18,9 @@
   // one DustGenerationDtimeUpdateItem. Used as the regression fixture for #1167.
   // Observed on 2026-06-03: 19 DustGenerationsItem + 9 DustGenerationDtimeUpdateItem events.
   // Also present in the multi-utxo array (first entry); duplicated here for named access.
+  // Stale since the ledger-9 fork (block 3370894): its spent generations were wiped, and on
+  // 2026-11-04 it yields 10 DustGenerationsItem + 0 dtime updates. The dtime cutoff tests now
+  // use `with-dtime-updates` from dust-addresses.jsonc instead.
   "registered-with-dust-and-spent": "stake_test1uqg6d2c4nmmf8088j8cejsxdcanms5x6et5x87rg6v5x03shyhyd8",
 
   // ---------------------------------------------------------------------------

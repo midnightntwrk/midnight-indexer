@@ -26,7 +26,7 @@
 //
 // The contract itself is the fixture from the guaranteed/fallible segment
 // investigation (segment-probe, "pink tawny owl"), recompiled here with
-// compactc 0.31.1. This suite deliberately exercises only its FIRST call, which
+// compactc 0.36.0. This suite deliberately exercises only its FIRST call, which
 // applies normally — the stale-call behaviour it was built for belongs in that
 // probe, not in indexer query assertions.
 //
@@ -47,15 +47,20 @@ import {
   closeMothContractContexts,
   deployContractViaMoth,
 } from '@utils/moth/moth-contracts';
+import { mothHandlesContracts } from '@utils/moth/ledger';
 import {
+  awaitIndexedTx,
   getBlockByHashWithRetry,
   getContractDeploymentHashes,
   getTransactionByHashWithRetry,
-  resolveBlockHash,
 } from './test-utils';
 import type { Transaction } from '@utils/indexer/indexer-types';
 
-const CONTRACT_ACTION_TIMEOUT = 150_000; // 2.5 minutes
+// 10 minutes, as in the other moth contract suites: a deploy or call first waits
+// up to 3 minutes for the dust trees to reach the tip (`awaitDustRootsCurrent`),
+// then proves and submits. A shorter hook masks that wait's own error with
+// a generic hook timeout.
+const CONTRACT_ACTION_TIMEOUT = 600_000;
 const TEST_TIMEOUT = 10_000; // 10 seconds
 
 /** The compiled segment-split artifact committed alongside the tests. */
@@ -77,6 +82,14 @@ function sameHash(a: string | undefined, b: string | undefined): boolean {
 
 const isMoth = env.getTxBackend() === 'moth';
 
+/**
+ * Non-empty when moth cannot build contract transactions on this chain: its
+ * contract path is midnight-js 5, whose current era is ledger 9, and this suite
+ * has no toolkit fallback (the segment-split contract is not one the toolkit
+ * ships). Every test skips with it rather than failing.
+ */
+let skipReason = '';
+
 describe.skipIf(!isMoth).sequential('segment-split contract actions', () => {
   let indexerHttpClient: IndexerHttpClient;
   let fundingSeed: string;
@@ -88,6 +101,12 @@ describe.skipIf(!isMoth).sequential('segment-split contract actions', () => {
   beforeAll(async () => {
     indexerHttpClient = new IndexerHttpClient();
     fundingSeed = dataProvider.getFundingSeed();
+    if (!(await mothHandlesContracts())) {
+      skipReason =
+        'ledger v8: moth builds contract transactions through midnight-js 5 ' +
+        '(ledger 9 is its current era), and the segment-split contract has no toolkit path';
+      log.warn(`Skipping the segment-split suite: ${skipReason}`);
+    }
   });
 
   // No toolkit here, so nothing else releases the wallet this suite opened.
@@ -98,6 +117,7 @@ describe.skipIf(!isMoth).sequential('segment-split contract actions', () => {
 
   describe('a transaction to deploy a segment-split smart contract', () => {
     beforeAll(async () => {
+      if (skipReason) return;
       const deployed = await deployContractViaMoth(fundingSeed, ARTIFACT_DIR);
       contractAddress = deployed.contractAddress;
       // The deploy's own transaction and block hashes come from the indexer
@@ -120,6 +140,7 @@ describe.skipIf(!isMoth).sequential('segment-split contract actions', () => {
         context.task!.meta.custom = {
           labels: ['Query', 'Transaction', 'ByHash', 'ContractDeploy'],
         };
+        context.skip?.(skipReason !== '', skipReason);
 
         const transactionResponse = await getTransactionByHashWithRetry(deployTxHash);
 
@@ -145,6 +166,7 @@ describe.skipIf(!isMoth).sequential('segment-split contract actions', () => {
         context.task!.meta.custom = {
           labels: ['Query', 'Block', 'ByHash', 'ContractDeploy'],
         };
+        context.skip?.(skipReason !== '', skipReason);
 
         const blockResponse = await getBlockByHashWithRetry(deployBlockHash);
 
@@ -168,6 +190,7 @@ describe.skipIf(!isMoth).sequential('segment-split contract actions', () => {
         context.task!.meta.custom = {
           labels: ['Query', 'ContractAction', 'ByAddress', 'ContractDeploy'],
         };
+        context.skip?.(skipReason !== '', skipReason);
 
         const contractActionResponse = await indexerHttpClient.getContractAction(contractAddress);
         expect(contractActionResponse?.data?.contractAction).toBeDefined();
@@ -188,10 +211,14 @@ describe.skipIf(!isMoth).sequential('segment-split contract actions', () => {
     let callBlockHash: string;
 
     beforeAll(async () => {
+      if (skipReason) return;
+      if (!contractAddress) {
+        throw new Error(
+          'The segment-split deploy did not succeed (see the deploy hook), so there is nothing to call.',
+        );
+      }
       callTxHash = await callCircuitViaMoth(fundingSeed, contractAddress, CIRCUIT, ARTIFACT_DIR);
-      const result = { txHash: callTxHash, blockHash: '', status: 'sent' as const, rawOutput: '' };
-      await resolveBlockHash(result);
-      callBlockHash = result.blockHash;
+      callBlockHash = (await awaitIndexedTx(callTxHash, `the ${CIRCUIT} call`)).blockHash;
       log.debug(`segment-split ${CIRCUIT} call tx ${callTxHash}, block ${callBlockHash}`);
     }, CONTRACT_ACTION_TIMEOUT);
 
@@ -206,6 +233,7 @@ describe.skipIf(!isMoth).sequential('segment-split contract actions', () => {
         context.task!.meta.custom = {
           labels: ['Query', 'Transaction', 'ByHash', 'ContractCall'],
         };
+        context.skip?.(skipReason !== '', skipReason);
 
         const transactionResponse = await getTransactionByHashWithRetry(callTxHash);
 
@@ -229,6 +257,7 @@ describe.skipIf(!isMoth).sequential('segment-split contract actions', () => {
         context.task!.meta.custom = {
           labels: ['Query', 'Block', 'ByHash', 'ContractCall'],
         };
+        context.skip?.(skipReason !== '', skipReason);
 
         const blockResponse = await getBlockByHashWithRetry(callBlockHash);
 
@@ -252,6 +281,7 @@ describe.skipIf(!isMoth).sequential('segment-split contract actions', () => {
         context.task!.meta.custom = {
           labels: ['Query', 'ContractAction', 'ByAddress', 'ContractCall'],
         };
+        context.skip?.(skipReason !== '', skipReason);
 
         const contractActionResponse = await indexerHttpClient.getContractAction(contractAddress);
         expect(contractActionResponse?.data?.contractAction).toBeDefined();

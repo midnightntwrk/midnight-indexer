@@ -126,8 +126,10 @@ class TestDataProvider {
   private unshieldedAddresses: Record<string, string>;
   private customUnshieldedTokenTypes: string[] | null;
   private multiUtxoCandidates: MultiUtxoCandidate[] | null;
+  private dustAddresses: Record<string, string> | null;
 
   constructor() {
+    this.dustAddresses = null;
     this.cardanoRewardAddresses = {};
     this.unshieldedAddresses = {};
     this.customUnshieldedTokenTypes = null;
@@ -607,6 +609,36 @@ class TestDataProvider {
       );
     }
     return this.cardanoRewardAddresses[property];
+  }
+
+  /**
+   * Retrieves a dust address fixture for a given property.
+   * Loaded lazily from `dust-addresses.jsonc` for the current environment.
+   * @param property - The property name to look up.
+   * @returns The bech32m dust address as a string.
+   * @throws Error if the fixture file or the property is missing for the current environment.
+   */
+  getDustAddress(property: string) {
+    const envName = env.getCurrentEnvironmentName();
+    if (this.dustAddresses === null) {
+      try {
+        this.dustAddresses = importJsoncData(
+          `data/static/${envName}/dust-addresses.jsonc`,
+        ) as Record<string, string>;
+      } catch (error) {
+        throw new Error(
+          `Test data provider is missing the dust address file for ${envName} environment`,
+          { cause: error },
+        );
+      }
+    }
+    const dustAddress = this.dustAddresses[property];
+    if (dustAddress === undefined) {
+      throw new Error(
+        `Test data provider is missing the dust address data for ${property} for ${envName} environment`,
+      );
+    }
+    return dustAddress;
   }
 
   /**

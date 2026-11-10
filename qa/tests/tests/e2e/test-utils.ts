@@ -121,6 +121,37 @@ export async function resolveBlockHash(result: ToolkitTransactionResult): Promis
   }
 }
 
+/**
+ * The result of a transaction midnight-js submitted through the moth backend,
+ * once the indexer reports the block it landed in.
+ *
+ * midnight-js resolves with the transaction hash alone: it waits for the
+ * transaction to be in a block, but does not say which. The indexer knows, so
+ * ask it, and take its answer as confirmation the way {@link resolveBlockHash}
+ * does. A transaction the indexer never reports is not something a suite can
+ * go on from — every assertion after it reads that block — so it fails here,
+ * naming the action, rather than in the first query that meets an empty hash.
+ *
+ * @param txHash - The hash midnight-js reported for the submitted transaction.
+ * @param what - The action that produced it, for the failure message.
+ */
+export async function awaitIndexedTx(
+  txHash: string,
+  what: string,
+): Promise<ToolkitTransactionResult> {
+  const result: ToolkitTransactionResult = {
+    txHash,
+    blockHash: '',
+    status: 'sent',
+    rawOutput: `moth/midnight-js submitted ${txHash}`,
+  };
+  await resolveBlockHash(result);
+  if (!result.blockHash) {
+    throw new Error(`The indexer never reported a block for ${what} (tx ${txHash}).`);
+  }
+  return result;
+}
+
 export function getBlockByHashWithRetry(hash: string): Promise<BlockResponse> {
   return retry(
     () => new IndexerHttpClient().getBlockByOffset({ hash: hash }),

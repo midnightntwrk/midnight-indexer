@@ -314,6 +314,19 @@ cd qa/tests
 NODE_TAG=1.0.0 INDEXER_TAG=4.3.2 TARGET_ENV=undeployed bun run test:e2e
 ```
 
+#### Transaction backend: toolkit or moth
+
+`TX_BACKEND` picks what builds and submits the e2e transactions. The default,
+`toolkit`, replays the chain inside a `midnight-node-toolkit` container on every
+call, which grows with the chain. `TX_BACKEND=moth` builds them in-process with
+moth-wallet's sync engine, which restores a wallet's own state from
+`~/.moth/sync/<network>/` and catches up in seconds:
+
+```bash
+TX_BACKEND=moth NODE_TAG=2.1.101 INDEXER_TAG=<tag> NODE_TOOLKIT_TAG=2.1.101 \
+  TARGET_ENV=undeployed bun run test:e2e
+```
+
 ### Clash safety
 
 If the indexer is already reachable on `http://localhost:8088/ready` when the
@@ -450,6 +463,13 @@ TARGET_ENV=preprod INDEXER_API_VERSION=v3 bun run test:integration
 | `VITEST_MAX_WORKERS`  | No                                | all available CPUs     | Cap the Vitest worker pool. Accepts a positive integer (`1`, `2`, …) or a percentage (`"50%"`).       |
 | `MN_FETCH_CACHE`      | No (managed by harness)           | auto                   | Postgres-backed toolkit fetch cache. The `toolkit-postgres` container is started automatically.       |
 | `INDEXER_INSTANCE`    | No                                | (primary)              | Blue/green indexer instance to target: `blue` / `green`. Unset → primary (bare `indexer.<env>`). Only meaningful on `qanet`/`preview`/`preprod`; ignored for `undeployed`. A `/ready` preflight fails fast if the colour isn't routed. |
+| `TX_BACKEND`          | No                                | `toolkit`              | What builds e2e transactions: `toolkit` (container) or `moth` (in-process moth-wallet). See [Transaction backend](#transaction-backend-toolkit-or-moth). |
+| `TX_BACKEND_MOTH_WALLET` | No                                | `qa-<seed fingerprint>` | Name of moth's on-disk wallet cache under `~/.moth/sync/<network>/`, to keep a dedicated light wallet warm. |
+| `FUNDING_SEED_<ENV>_LIGHT` | No                                | `FUNDING_SEED_<ENV>`   | Under `TX_BACKEND=moth`, a funded wallet with little history for transfers; its restore cost tracks the wallet's state, not the chain. |
+| `PROOF_SERVER_TAG`    | No                                | by ledger: `8.1.0` / `9.0.0` | `midnightntwrk/proof-server` image tag for the on-demand proof server (moth backend only). |
+| `PROOF_SERVER_URL`    | No                                | (started on demand)    | A proof server you run yourself; nothing is started when set (moth backend only). |
+| `MOTH_REGISTER_DUST`  | No                                | unset                  | Under `TX_BACKEND=moth`, `1` lets the harness register a spending wallet's NIGHT for DUST generation when it holds NIGHT but no DUST (after a hard fork); otherwise it fails with that diagnosis. |
+| `MN_SYNC_TIMEOUT_MS`  | No                                | `21600000` (6 h)       | Bound on a moth wallet sync that makes no progress. Lower it on CI; a warm wallet syncs in seconds. |
 
 **Sync test project only** (`bun run test:sync`, see [tests/sync/README.md](tests/sync/README.md)):
 

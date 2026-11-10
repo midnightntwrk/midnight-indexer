@@ -29,6 +29,12 @@ const DOCKERFILE = path.join(HERE, 'compact-toolchain.Dockerfile');
 const GENERATE_NODE_DATA = path.resolve(HERE, '../../../../generate_node_data.sh');
 
 /**
+ * The compactc moth's contract path needs: 0.36.0 emits compact-runtime 0.21.0,
+ * the runtime midnight-js 5.0.0 pins (see `utils/moth/moth-contracts.ts`).
+ */
+export const MOTH_COMPACTC_VERSION = '0.36.0';
+
+/**
  * The compactc release fixtures are compiled with.
  *
  * Pinned rather than floating: compiled output declares the
@@ -45,10 +51,16 @@ const GENERATE_NODE_DATA = path.resolve(HERE, '../../../../generate_node_data.sh
  *
  * The pin follows the node line under test, using the same rule
  * `generate_node_data.sh` uses for the chain data, read from that script so the
- * two cannot drift apart. Set `COMPACT_COMPILER_VERSION` to override it.
+ * two cannot drift apart. Under `TX_BACKEND=moth` the fixtures are loaded by
+ * moth's midnight-js 5 rather than the toolkit, so the pin is the compactc that
+ * emits the compact-runtime midnight-js 5 carries ({@link MOTH_COMPACTC_VERSION}),
+ * whatever `NODE_TAG` says — on a deployed env `NODE_TAG` is not set and falls
+ * back to a default that has nothing to do with the chain. Set
+ * `COMPACT_COMPILER_VERSION` to override either.
  */
 export const COMPACT_COMPILER_VERSION =
-  process.env.COMPACT_COMPILER_VERSION ?? compactcForNode(env.getNodeVersion());
+  process.env.COMPACT_COMPILER_VERSION ??
+  (env.getTxBackend() === 'moth' ? MOTH_COMPACTC_VERSION : compactcForNode(env.getNodeVersion()));
 
 /**
  * The compactc version `generate_node_data.sh` picks for a node tag, read from

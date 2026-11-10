@@ -78,8 +78,11 @@ interface StalePair {
 
 // Undeployed only: the toolkit rebuilds ledger state from genesis on every call, which on a
 // long-lived deployed chain takes hours per step (see Env gating in the test conventions).
+// Toolkit only: the fixture builds a second call from an old state snapshot and decodes it with
+// the toolkit's own deserializer. midnight-js always builds against live state, so moth has no
+// way to produce the stale call, and the suite skips under TX_BACKEND=moth.
 describe
-  .skipIf(!env.isUndeployedEnv())
+  .skipIf(!env.isUndeployedEnv() || env.getTxBackend() === 'moth')
   .sequential('contract actions in a guaranteed/fallible segment split', () => {
     let toolkit: ToolkitWrapper;
     let fundingSeed: string;

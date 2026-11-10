@@ -26,7 +26,12 @@ import {
 import { env } from 'environment/model';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
 import type { ContractAction } from '@utils/indexer/indexer-types';
-import { getBlockByHashWithRetry, getTransactionByHashWithRetry, retry } from './test-utils';
+import {
+  awaitIndexedTx,
+  getBlockByHashWithRetry,
+  getTransactionByHashWithRetry,
+  retry,
+} from './test-utils';
 import {
   ToolkitWrapper,
   type CustomContractCall,
@@ -34,6 +39,14 @@ import {
   type DeployContractResult,
   type ToolkitTransactionResult,
 } from '@utils/toolkit/toolkit-wrapper';
+import { closeMothWallets } from '@utils/moth/moth-backend';
+import {
+  callCircuitViaMoth,
+  closeMothContractContexts,
+  deployContractViaMoth,
+  describeUnprovenCallViaMoth,
+} from '@utils/moth/moth-contracts';
+import { mothHandlesContracts } from '@utils/moth/ledger';
 
 // First use also builds the Compact toolchain image and pulls the toolkit image.
 const SETUP_TIMEOUT = 900_000; // 15 minutes
@@ -48,81 +61,163 @@ const SHIELDED_BALANCE_DIR = path.resolve(
 const SHIELDED_BALANCE_SOURCE = 'shielded-balance.compact';
 const SHIELDED_BALANCE: CustomContractSpec = { configFile: 'shielded-balance.config.ts' };
 
-// Undeployed only: the toolkit rebuilds ledger state from genesis on every call, which on a
-// long-lived deployed chain takes hours per step (see Env gating in the test conventions).
+/**
+ * What the suite needs from a transaction backend. Two calls are made, each
+ * built only after the previous one is in a block: building two up front makes
+ * them spend the same DUST fee input and the node rejects the second one.
+ */
+interface ShieldedBalanceBackend {
+  /** Deploy the contract and return its untagged address. */
+  deploy(): Promise<string>;
+  /**
+   * Build the `holdShielded` call against current state and return the
+   * transaction as decoded by the backend itself, not the indexer.
+   */
+  describeHold(): Promise<string>;
+  /** Send a call and return once its transaction and block are known. */
+  send(circuitId: 'holdShielded' | 'ping'): Promise<ToolkitTransactionResult>;
+  stop(): Promise<void>;
+}
+
+/**
+ * The toolkit builds a call from a snapshot of the contract state and sends it
+ * as a separate step, so `holdShielded` is sent exactly as it was decoded.
+ */
+async function toolkitBackend(
+  compiledDir: string,
+  fundingSeed: string,
+): Promise<ShieldedBalanceBackend> {
+  const toolkit = new ToolkitWrapper({
+    customContractDir: compiledDir,
+    compactcVersion: COMPACT_COMPILER_VERSION,
+  });
+  await toolkit.start();
+  const requiredRuntime = compiledRuntimeVersion(compiledDir);
+  if (requiredRuntime) {
+    await toolkit.assertCompactRuntimeSupported(requiredRuntime);
+  }
+
+  let deployment: DeployContractResult;
+  let holdCall: CustomContractCall | undefined;
+
+  const buildCall = async (circuitId: string, label: string): Promise<CustomContractCall> => {
+    const contractAddress = deployment['contract-address-untagged'];
+    const stateFile = await toolkit.snapshotContractState(contractAddress, `${label}_state.bin`);
+    return toolkit.generateCustomContractCall({
+      circuitId,
+      deploymentResult: deployment,
+      contract: SHIELDED_BALANCE,
+      onchainStateFile: stateFile,
+      label,
+      fundingSeed,
+    });
+  };
+
+  return {
+    deploy: async () => {
+      deployment = await toolkit.deployCustomContract(SHIELDED_BALANCE, [], fundingSeed);
+      return deployment['contract-address-untagged'];
+    },
+    describeHold: async () => {
+      holdCall = await buildCall('holdShielded', 'hold_shielded');
+      return toolkit.showTransaction(holdCall);
+    },
+    send: async (circuitId) =>
+      toolkit.sendCustomContractCall(
+        circuitId === 'holdShielded' ? holdCall! : await buildCall('ping', 'ping_after_hold'),
+      ),
+    stop: () => toolkit.stop(),
+  };
+}
+
+/**
+ * moth builds every call through midnight-js against the contract's live state.
+ * `describeHold` builds an unproven `holdShielded` and prints it with the
+ * ledger; `send` builds, proves and submits a fresh one, which carries the same
+ * effects because the circuit reads no state that changes in between.
+ */
+function mothBackend(compiledDir: string, fundingSeed: string): ShieldedBalanceBackend {
+  const artifactDir = path.join(compiledDir, 'managed');
+  let contractAddress: string;
+  return {
+    deploy: async () => {
+      contractAddress = (await deployContractViaMoth(fundingSeed, artifactDir)).contractAddress;
+      return contractAddress;
+    },
+    describeHold: () =>
+      describeUnprovenCallViaMoth(fundingSeed, contractAddress, 'holdShielded', artifactDir),
+    send: async (circuitId) =>
+      awaitIndexedTx(
+        await callCircuitViaMoth(fundingSeed, contractAddress, circuitId, artifactDir),
+        `the ${circuitId} call`,
+      ),
+    stop: async () => {
+      closeMothContractContexts();
+      await closeMothWallets();
+    },
+  };
+}
+
+const isMoth = env.getTxBackend() === 'moth';
+
+// Undeployed only under the toolkit: it rebuilds ledger state from genesis on every call, which
+// on a long-lived deployed chain takes hours per step (see Env gating in the test conventions).
+// Under TX_BACKEND=moth the calls go through midnight-js on a moth-synced wallet instead, no
+// toolkit is started, and the suite runs on deployed envs too.
 describe
-  .skipIf(!env.isUndeployedEnv())
+  .skipIf(!env.isUndeployedEnv() && !isMoth)
   .sequential('a contract whose balance map holds a shielded token', () => {
-    let toolkit: ToolkitWrapper;
-    let fundingSeed: string;
-    let deployment: DeployContractResult;
+    let backend: ShieldedBalanceBackend | undefined;
     let contractAddress: string;
-    let holdCall: CustomContractCall;
     let holdDecoded: string;
     let hold: ToolkitTransactionResult | undefined;
     let ping: ToolkitTransactionResult | undefined;
 
     beforeAll(async () => {
-      fundingSeed = dataProvider.getFundingSeed();
+      const fundingSeed = dataProvider.getFundingSeed();
 
       const compiledDir = await compileCompactContract({
         sourceDir: SHIELDED_BALANCE_DIR,
         sourceFile: SHIELDED_BALANCE_SOURCE,
         stage: [SHIELDED_BALANCE.configFile],
       });
-      const requiredRuntime = compiledRuntimeVersion(compiledDir);
       log.info(
         `shielded-balance compiled by compactc ${COMPACT_COMPILER_VERSION} ` +
-          `for compact-runtime ${requiredRuntime ?? 'unknown'}`,
+          `for compact-runtime ${compiledRuntimeVersion(compiledDir) ?? 'unknown'}`,
       );
 
-      toolkit = new ToolkitWrapper({
-        customContractDir: compiledDir,
-        compactcVersion: COMPACT_COMPILER_VERSION,
-      });
-      await toolkit.start();
-      if (requiredRuntime) {
-        await toolkit.assertCompactRuntimeSupported(requiredRuntime);
+      // moth's contract path is midnight-js 5, whose current era is ledger 9. On a ledger-8
+      // chain the toolkit builds the calls, as ToolkitWrapper does for the other contract
+      // suites — which is only viable on undeployed, for the reason above.
+      const viaMoth = isMoth && (await mothHandlesContracts());
+      if (!viaMoth && !env.isUndeployedEnv()) {
+        throw new Error(
+          'TX_BACKEND=moth cannot build contract calls on this ledger-8 chain, and the toolkit ' +
+            'is not usable on a deployed env',
+        );
       }
+      backend = viaMoth
+        ? mothBackend(compiledDir, fundingSeed)
+        : await toolkitBackend(compiledDir, fundingSeed);
     }, SETUP_TIMEOUT);
 
-    // The toolkit only exists once the image build and the compile succeeded;
+    // The backend only exists once the compile (and, for the toolkit, the image) succeeded;
     // stopping an unassigned one here would bury the failure that stopped setup.
     afterAll(async () => {
-      await toolkit?.stop();
+      await backend?.stop();
     });
 
     /**
-     * Build one call against the contract's current on-chain state. Each call is
-     * built only after the previous one is in a block: building two up front makes
-     * them spend the same DUST fee input and the node rejects the second one.
-     */
-    async function buildCall(circuitId: string, label: string): Promise<CustomContractCall> {
-      const stateFile = await toolkit.snapshotContractState(contractAddress, `${label}_state.bin`);
-      return toolkit.generateCustomContractCall({
-        circuitId,
-        deploymentResult: deployment,
-        contract: SHIELDED_BALANCE,
-        onchainStateFile: stateFile,
-        label,
-        fundingSeed,
-      });
-    }
-
-    /**
      * Deploy and build the `holdShielded` call, but do not send it yet. Sending is
-     * part of the tests below: the wrapper learns a call's block from the indexer
-     * (the toolkit does not print it), so on an indexer that stops at that block
-     * the send itself never completes. Doing it inside a test turns that into a
-     * clear failure instead of a setup error that skips everything.
+     * part of the tests below: both backends learn a call's block from the indexer,
+     * so on an indexer that stops at that block the send itself never completes.
+     * Doing it inside a test turns that into a clear failure instead of a setup
+     * error that skips everything.
      */
     beforeAll(async () => {
-      deployment = await toolkit.deployCustomContract(SHIELDED_BALANCE, [], fundingSeed);
-      contractAddress = deployment['contract-address-untagged'];
+      contractAddress = await backend!.deploy();
       log.info(`shielded-balance contract deployed at ${contractAddress}`);
-
-      holdCall = await buildCall('holdShielded', 'hold_shielded');
-      holdDecoded = await toolkit.showTransaction(holdCall);
+      holdDecoded = await backend!.describeHold();
     }, CONTRACT_ACTION_TIMEOUT);
 
     /** Fail the dependent tests with a message that points at the real cause. */
@@ -149,9 +244,9 @@ describe
     test(
       'the holdShielded call should declare a shielded token in its unshielded inputs',
       async () => {
-        // Checked with the toolkit itself, not the indexer, so the fixture can never
+        // Checked with the backend itself, not the indexer, so the fixture can never
         // silently stop producing the condition under test.
-        log.debug(`holdShielded as decoded by the toolkit:\n${holdDecoded}`);
+        log.debug(`holdShielded as decoded by the backend:\n${holdDecoded}`);
         expect(holdDecoded).toMatch(/unshielded_inputs:\s*\{\s*Shielded\(\s*ShieldedTokenType\(/);
       },
       TEST_TIMEOUT,
@@ -162,7 +257,7 @@ describe
       async () => {
         let sendError: unknown;
         try {
-          hold = await toolkit.sendCustomContractCall(holdCall);
+          hold = await backend!.send('holdShielded');
         } catch (error) {
           sendError = error;
         }
@@ -186,7 +281,7 @@ describe
         const holdResult = requireHold();
         // Built only now that holdShielded is in a block: building both up front
         // makes them spend the same DUST fee input and the node rejects the second.
-        ping = await toolkit.sendCustomContractCall(await buildCall('ping', 'ping_after_hold'));
+        ping = await backend!.send('ping');
         log.info(`ping included in block ${ping.blockHash} (tx ${ping.txHash})`);
 
         const holdBlock = await getBlockByHashWithRetry(holdResult.blockHash);
