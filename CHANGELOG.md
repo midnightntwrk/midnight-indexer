@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.4.0] - 2026-11-09
+
 ## [4.4.0-rc.6] - 2026-11-02
 
 ### 🚀 Features
@@ -220,6 +222,56 @@ SQLite 9→11). See [docs/re-indexing.md](docs/re-indexing.md) before deploying.
 
 - Add `pallet_session` support for the 2.1.0 runtime upgrade (#1333).
 - Pin `cargo-audit` (#1387).
+
+## [4.4.0-rc.1] - 2026-07-22
+
+### 🚀 Features
+
+- Support ledger v9 and node v2.0 (#1232)
+- Rehash merkle tree before building collapsed updates (#1266)
+- Per-block dust merkle roots (#1267)
+  - Adds migration `block_dust_merkle_roots` (postgres `004`, sqlite `006`)
+- *(indexer-api)* Compress HTTP responses and subscription WebSockets (#1252)
+- *(indexer-api)* Block-hash dust generations sync (#1291)
+- *(indexer)* [**breaking**] Adopt storage-core gc-v1 with a ledger state retention window (#1308)
+  - Requires chain-indexer config `gc_bound` (shipped `200ms`) and `ledger_state_retention` (shipped `1000` blocks); a config file without them fails to load
+  - indexer-standalone defaults both to the same values
+  - Adds indexer-api config `dust_generations.max_snapshot_age` (default `500` blocks), which must stay below `ledger_state_retention`
+- *(bridge)* C2m-bridge events, claims, queries and subscriptions (#1102)
+  - Adds migration `bridge_events` (postgres `005`, sqlite `007`)
+- [**breaking**] Public contract events and CCC execution-inputs queries (#1158-#1162, #1275, #1304) (#1185)
+  - Adds migration `contract_events` (postgres `006`, sqlite `008`)
+  - Requires indexer-api config `infra.api.subscription.contract_events.batch_size` (shipped `20`); a config file without it fails to load
+
+### 🐛 Bug Fixes
+
+- Contract action unshieldedBalances always empty (#1246)
+
+### 📚 Documentation
+
+- Add architecture and testing guides and expand the release process docs (#1287)
+- *(api)* Update v4 API documentation to match main (#1294)
+- Add telemetry notes (logging, tracing, metrics) (#1325)
+
+### ⚡ Performance
+
+- *(indexer-common)* Add UNIQUE index on blocks.height for sqlite (#1187)
+  - Adds migration `blocks_height_idx` (sqlite `005`)
+- *(indexer-api)* Jitter and idle-backoff subscription polling, throttle keep-alive (#1233)
+  - Raises the default `keep_wallet_alive_interval` from `1m` to `10m`
+- *(indexer-api)* [**breaking**] Cache shielded/unshielded progress across subscribers (#1234)
+  - Requires indexer-api config `infra.api.subscription.progress_cache` (shipped `max_capacity` `10000`, `time_to_live` `5s`); a config file without it fails to load
+- *(indexer-api)* Drop OR-in-JOIN from unshielded transaction queries (#1133)
+  - Adds migration `unshielded_utxos_owner_composite_indexes` (postgres `007`, sqlite `009`)
+
+### ⚙️ Miscellaneous Tasks
+
+- Use stable rustfmt for formatting (#1258)
+- Add Claude skill for formatting indexer release notes (#1103)
+- *(test)* Use ledger v9 token types in the v9 balances test (#1299)
+- *(indexer-common)* Log NATS reconnects at info (#1297)
+- Build without a `~/.netrc` GitHub token (#1301)
+- Drop the CI check job, which clippy covers (#1322)
 
 ## [4.3.5] - 2026-07-25
 
