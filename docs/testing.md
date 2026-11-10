@@ -67,7 +67,7 @@ that the zswap/state-root match guards each block.
 
 - CI runs against an **ephemeral fresh node**, never a deployed env.
 - Scheduled monitors (`.github/workflows/qa-test-*`, business hours) hit
-  `indexer.<env>.midnight.network` for devnet / qanet / preprod / preview and run
+  `indexer.<env>.midnight.network` for preprod / preview and run
   block-subscription + ledger-event streaming tests - they validate the **API** (streaming
   continuity, shape), **not** an indexer-vs-node root diff.
 
