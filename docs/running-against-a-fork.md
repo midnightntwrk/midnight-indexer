@@ -28,23 +28,26 @@ or rebuilt without touching the fork (and vice versa).
 ## Quick start
 
 ```bash
-# First bring-up: restores the snapshot (mainnet is ~119 GB per validator!)
-NODE_IMAGE=ghcr.io/midnight-ntwrk/midnight-node:1.0.0 \
-  just fork-up mainnet --from-snapshot https://example.com/snapshots/mainnet-<block>.tar.gz
+# First bring-up: restores the snapshot (an http(s) URL)
+NODE_IMAGE=ghcr.io/midnightntwrk/midnight-node:2.1.101 \
+  just fork-up preview --num-validators 3 \
+  --from-snapshot https://snapshots.midnight.network/preview/<path>/preview-epoch-<epoch>-block-<block>-v2.1.101-<hash>.tar.gz
 
 # Subsequent runs reuse the restored state:
-NODE_IMAGE=ghcr.io/midnight-ntwrk/midnight-node:1.0.0 just fork-up mainnet
+NODE_IMAGE=ghcr.io/midnightntwrk/midnight-node:2.1.101 just fork-up preview --num-validators 3
 
 # Tear everything down (indexer overlay first, then the fork):
-just fork-down mainnet
+just fork-down preview
 ```
 
 `just fork-up`:
 
 1. Sparse-clones midnight-node (only `local-environment/`) into
-   `.midnight-node/` at the tag matching the latest `NODE_VERSIONS` entry.
-   Set `MIDNIGHT_NODE_DIR` to use an existing checkout instead, or
-   `MIDNIGHT_NODE_REF` to pin a different tag/SHA.
+   `.midnight-node/` at `main`: no node release yet has the local-environment
+   that converts the boot node along with the validators (midnight-node#2308),
+   without which the fork's validators never peer. Set `MIDNIGHT_NODE_DIR` to
+   use an existing checkout instead, or `MIDNIGHT_NODE_REF` to pin a different
+   branch or tag.
 2. Brings up the fork via `npm run run:<network>`, with mock-authorities
    `ghcr.io/shieldedtech/mock-authorities:14cee4b`. Earlier images leave the
    fork unfinalized and write a fork block that chain-indexer cannot decode.
@@ -57,7 +60,7 @@ just fork-down mainnet
 
 The GraphQL API is then available at `http://localhost:8088` (override with
 `INDEXER_API_PORT`). Indexer images default to the released
-`midnightntwrk/*:4.3.3`; override with `INDEXER_TAG` / `IMAGE_REGISTRY` to test
+`midnightntwrk/*:4.4.101`; override with `INDEXER_TAG` / `IMAGE_REGISTRY` to test
 locally built images (`just build-docker-image <package>`).
 
 ## Iterating on the indexer only

@@ -167,7 +167,9 @@ run-node node_version=latest_node_version:
 
 midnight_node_dir := env_var_or_default("MIDNIGHT_NODE_DIR", ".midnight-node")
 midnight_node_repo := env_var_or_default("MIDNIGHT_NODE_REPO", "https://github.com/midnightntwrk/midnight-node")
-midnight_node_ref := env_var_or_default("MIDNIGHT_NODE_REF", "v" + latest_node_version)
+# Forks need local-environment to convert the boot node too (midnight-node#2308),
+# which no node release includes yet; use `node-<version>` once one does.
+midnight_node_ref := env_var_or_default("MIDNIGHT_NODE_REF", "main")
 # Released local-environment versions default to an older image whose fork
 # never finalizes and whose fork block chain-indexer cannot decode.
 mock_authorities_image := env_var_or_default("MOCK_AUTHORITIES_IMAGE", "ghcr.io/shieldedtech/mock-authorities:14cee4b")

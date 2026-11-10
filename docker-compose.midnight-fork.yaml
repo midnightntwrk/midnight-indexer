@@ -31,7 +31,7 @@ x-fork-secret-env: &fork-secret-env
 
 services:
   chain-indexer:
-    image: "${IMAGE_REGISTRY:-midnightntwrk}/chain-indexer:${INDEXER_TAG:-4.3.3}"
+    image: "${IMAGE_REGISTRY:-midnightntwrk}/chain-indexer:${INDEXER_TAG:-4.4.101}"
     # The fork lives in another compose project, so there is no depends_on
     # health gate for the node; retry until it is reachable instead.
     restart: "on-failure"
@@ -57,7 +57,7 @@ services:
       retries: 2
 
   wallet-indexer:
-    image: "${IMAGE_REGISTRY:-midnightntwrk}/wallet-indexer:${INDEXER_TAG:-4.3.3}"
+    image: "${IMAGE_REGISTRY:-midnightntwrk}/wallet-indexer:${INDEXER_TAG:-4.4.101}"
     restart: "no"
     depends_on:
       postgres:
@@ -76,7 +76,7 @@ services:
       retries: 2
 
   indexer-api:
-    image: "${IMAGE_REGISTRY:-midnightntwrk}/indexer-api:${INDEXER_TAG:-4.3.3}"
+    image: "${IMAGE_REGISTRY:-midnightntwrk}/indexer-api:${INDEXER_TAG:-4.4.101}"
     restart: "no"
     depends_on:
       postgres:
