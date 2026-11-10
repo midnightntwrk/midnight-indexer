@@ -126,8 +126,11 @@ class TestDataProvider {
   private unshieldedAddresses: Record<string, string>;
   private customUnshieldedTokenTypes: string[] | null;
   private multiUtxoCandidates: MultiUtxoCandidate[] | null;
+  /** `null` until first read; `undefined` when this environment has no fixture file. */
+  private dustAddresses: Record<string, string> | null | undefined;
 
   constructor() {
+    this.dustAddresses = null;
     this.cardanoRewardAddresses = {};
     this.unshieldedAddresses = {};
     this.customUnshieldedTokenTypes = null;
@@ -607,6 +610,58 @@ class TestDataProvider {
       );
     }
     return this.cardanoRewardAddresses[property];
+  }
+
+  /**
+   * Retrieves a dust address fixture for a given property.
+   * Loaded lazily from `dust-addresses.jsonc` for the current environment.
+   *
+   * Only an environment with no fixture file at all reads as "none provided". A file that
+   * exists but cannot be parsed, or that lacks the property, is a broken fixture and throws:
+   * a caller with a fallback must not silently take it because of a typo.
+   *
+   * @param property - The property name to look up.
+   * @returns The bech32m dust address, or `undefined` when this environment has no
+   *          `dust-addresses.jsonc`.
+   * @throws Error if the fixture file is unreadable or does not carry the property.
+   */
+  findDustAddress(property: string): string | undefined {
+    const envName = env.getCurrentEnvironmentName();
+    const filePath = `data/static/${envName}/dust-addresses.jsonc`;
+    if (this.dustAddresses === null) {
+      try {
+        this.dustAddresses = importJsoncData(filePath) as Record<string, string>;
+      } catch (error) {
+        if ((error as { code?: string }).code !== 'ENOENT') {
+          throw new Error(`Test data provider cannot read ${filePath}`, { cause: error });
+        }
+        this.dustAddresses = undefined;
+      }
+    }
+    if (this.dustAddresses === undefined) return undefined;
+    const dustAddress = this.dustAddresses[property];
+    if (typeof dustAddress !== 'string' || dustAddress === '') {
+      throw new Error(
+        `Test data provider is missing the dust address data for ${property} in ${filePath}`,
+      );
+    }
+    return dustAddress;
+  }
+
+  /**
+   * Retrieves a dust address fixture for a given property, for callers with no fallback.
+   * @param property - The property name to look up.
+   * @returns The bech32m dust address as a string.
+   * @throws Error if the fixture file or the property is missing for the current environment.
+   */
+  getDustAddress(property: string): string {
+    const dustAddress = this.findDustAddress(property);
+    if (dustAddress === undefined) {
+      throw new Error(
+        `Test data provider is missing the dust address file for ${env.getCurrentEnvironmentName()} environment`,
+      );
+    }
+    return dustAddress;
   }
 
   /**

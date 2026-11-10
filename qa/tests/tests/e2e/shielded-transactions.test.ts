@@ -35,7 +35,8 @@ import {
 import { IndexerWsClient } from '@utils/indexer/websocket-client';
 import { EventCoordinator } from '@utils/event-coordinator';
 import { collectValidDustLedgerEvents } from 'tests/shared/dust-ledger-utils';
-import { deriveAddresses } from '@utils/moth/moth-addresses';
+import { deriveAddresses, deriveViewingKey } from '@utils/moth/moth-addresses';
+import { env } from 'environment/model';
 
 /**
  * Subscribe to shielded transaction events for an open wallet session and resolve `true` as soon
@@ -111,10 +112,15 @@ describe('shielded transactions', () => {
     indexerEventCoordinator = new EventCoordinator();
     indexerHttpClient = new IndexerHttpClient();
     await indexerWsClient.connectionInit();
-    // Start a one-off toolkit container
+    // The wrapper is always constructed — `generateSingleTx` dispatches on
+    // TX_BACKEND inside it — but its container is only started on the toolkit
+    // backend. On moth nothing in this suite touches the container: the
+    // transfer goes through moth's sync engine, and the addresses and viewing
+    // keys come from local key derivation.
     toolkit = new ToolkitWrapper({});
-
-    await toolkit.start();
+    if (env.getTxBackend() === 'toolkit') {
+      await toolkit.start();
+    }
 
     // Derive shielded addresses from seeds
     destinationAddress = (await deriveAddresses(destinationSeed, toolkit)).shielded;
@@ -440,7 +446,7 @@ describe('shielded transactions', () => {
         await indexerWsClient.connectionClose();
         await indexerWsClient.connectionInit();
 
-        const viewingKey = await toolkit.showViewingKey(sourceSeed);
+        const viewingKey = await deriveViewingKey(sourceSeed, toolkit);
         const sessionId = await indexerWsClient.openWalletSession(viewingKey);
 
         const delivered = await awaitRelevantTransaction(
@@ -475,7 +481,7 @@ describe('shielded transactions', () => {
         await indexerWsClient.connectionClose();
         await indexerWsClient.connectionInit();
 
-        const viewingKey = await toolkit.showViewingKey(destinationSeed);
+        const viewingKey = await deriveViewingKey(destinationSeed, toolkit);
         const sessionId = await indexerWsClient.openWalletSession(viewingKey);
 
         const delivered = await awaitRelevantTransaction(
@@ -514,7 +520,7 @@ describe('shielded transactions', () => {
         await indexerWsClient.connectionClose();
         await indexerWsClient.connectionInit();
 
-        const viewingKey = await toolkit.showViewingKey(unrelatedSeed);
+        const viewingKey = await deriveViewingKey(unrelatedSeed, toolkit);
         const sessionId = await indexerWsClient.openWalletSession(viewingKey);
 
         const delivered = await awaitRelevantTransaction(
