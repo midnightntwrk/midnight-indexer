@@ -118,12 +118,13 @@ jobs:
       XRAY_PROJECT_KEY: "PM"
       XRAY_TEST_PLAN_KEY: "PM-19197"
       XRAY_REPORT_TESTS_MISSING_METADATA: "false"
-    # The runner group admits only approved workflow refs.
+    # Restrict both the reusable workflow and the checked-out caller commit.
     if: >-
       ${{ !(inputs.target_env == 'devnet' || inputs.target_env == 'qanet') ||
           (github.repository == 'midnightntwrk/midnight-indexer' &&
-           ((github.event_name == 'schedule' && github.ref == 'refs/heads/main') ||
-            github.event_name == 'workflow_dispatch')) }}
+           (github.ref == 'refs/heads/main' ||
+            (github.event_name == 'workflow_dispatch' && github.sha == vars.INDEXER_ARC_VALIDATION_SHA)) &&
+           (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')) }}
     runs-on: ${{ (inputs.target_env == 'devnet' || inputs.target_env == 'qanet') && 'arc-midnightntwrk' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v 7.0.1

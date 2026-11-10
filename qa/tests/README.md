@@ -521,7 +521,10 @@ The integration, block-subscription and ledger-event base workflows select
 `arc-midnightntwrk` for devnet/qanet. These jobs only run through schedules on `main` or manual dispatch in
 `midnightntwrk/midnight-indexer`. The runner-group allowlist restricts the
 job-defining workflows to `main`; pre-merge validation requires a temporary
-allowlist entry for the exact reviewed commit SHA, removed after testing.
+allowlist entry for the exact reviewed commit SHA and the repository variable
+`INDEXER_ARC_VALIDATION_SHA` set to that same SHA. Remove both after testing.
+This also prevents a branch caller from executing unreviewed checkout code
+through an allowlisted reusable workflow.
 Private-network integration jobs check out the triggering commit, ignoring the optional
 `ref` input. Other environments retain GitHub-hosted runners.
 
