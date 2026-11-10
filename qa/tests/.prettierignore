@@ -2,3 +2,7 @@ node_modules
 dist
 coverage
 .tmp
+# Compiled Compact artifacts: the integrity manifest (compiler/contract-manifest.json)
+# hashes every file in managed/, so reformatting contract/index.js breaks ZK config
+# verification in midnight-js. Never format them.
+contracts/*/managed
