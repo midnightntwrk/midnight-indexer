@@ -43,19 +43,24 @@ just fork-down preview
 `just fork-up`:
 
 1. Sparse-clones midnight-node (only `local-environment/`) into
-   `.midnight-node/` at `main`: no node release yet has the local-environment
-   that converts the boot node along with the validators (midnight-node#2308),
-   without which the fork's validators never peer. Set `MIDNIGHT_NODE_DIR` to
-   use an existing checkout instead, or `MIDNIGHT_NODE_REF` to pin a different
-   branch or tag.
+   `.midnight-node/` and checks out `main`: no node release yet has the
+   local-environment that converts the boot node along with the validators
+   (midnight-node#2308), without which the fork's validators never peer. Set
+   `MIDNIGHT_NODE_REF` to a branch, tag or commit SHA to pin something else.
+   The ref is fetched on every run, so changing it or moving a branch takes
+   effect, and `npm ci` reruns whenever `package-lock.json` changes. Set
+   `MIDNIGHT_NODE_DIR` to use your own checkout as-is instead.
 2. Brings up the fork via `npm run run:<network>`, with mock-authorities
    `ghcr.io/shieldedtech/mock-authorities:14cee4b`. Earlier images leave the
    fork unfinalized and write a fork block that chain-indexer cannot decode.
    Override with `MOCK_AUTHORITIES_IMAGE`.
-3. Checks the fork's node tag against `NODE_VERSIONS` — a fork running a node
-   version without committed metadata here will be rejected by chain-indexer
-   (see [updating-node-version.md](updating-node-version.md)). Set
-   `FORK_SKIP_VERSION_CHECK=1` to override.
+3. Checks that the indexer images being run support the fork's node version
+   exactly, using the `NODE_VERSIONS` of the indexer release named by
+   `INDEXER_TAG`, or this checkout's when `INDEXER_TAG` is not a release.
+   chain-indexer rejects a node version it has no metadata for (see
+   [updating-node-version.md](updating-node-version.md)). A `NODE_IMAGE`
+   without a tag, or pinned by digest, cannot be checked. Set
+   `FORK_SKIP_VERSION_CHECK=1` to proceed anyway.
 4. Starts this overlay with `docker compose --env-file <manifest>`.
 
 The GraphQL API is then available at `http://localhost:8088` (override with
