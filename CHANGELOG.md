@@ -235,14 +235,15 @@ SQLite 9→11). See [docs/re-indexing.md](docs/re-indexing.md) before deploying.
 - Expand process docs (#1287)
 - *(indexer-api)* Block-hash dust generations sync (#1291)
 - Let's try removing netrc (#1301)
-- *(indexer)* Adopt storage-core gc-v1 with a ledger state retention window (#1308)
-  - Adds chain-indexer config `gc_bound` (default `200ms`)
-  - Adds chain-indexer config `ledger_state_retention` (default `1000` blocks)
+- *(indexer)* [**breaking**] Adopt storage-core gc-v1 with a ledger state retention window (#1308)
+  - Requires chain-indexer config `gc_bound` (shipped `200ms`) and `ledger_state_retention` (shipped `1000` blocks); a config file without them fails to load
+  - indexer-standalone defaults both to the same values
   - Adds indexer-api config `dust_generations.max_snapshot_age` (default `500` blocks), which must stay below `ledger_state_retention`
 - *(bridge)* C2m-bridge events, claims, queries and subscriptions (#1102)
   - Adds migration `bridge_events` (postgres `005`, sqlite `007`)
-- Public contract events and CCC execution-inputs queries (#1158-#1162, #1275, #1304) (#1185)
+- [**breaking**] Public contract events and CCC execution-inputs queries (#1158-#1162, #1275, #1304) (#1185)
   - Adds migration `contract_events` (postgres `006`, sqlite `008`)
+  - Requires indexer-api config `infra.api.subscription.contract_events.batch_size` (shipped `20`); a config file without it fails to load
 
 ### 🐛 Bug Fixes
 
@@ -261,7 +262,7 @@ SQLite 9→11). See [docs/re-indexing.md](docs/re-indexing.md) before deploying.
 - *(indexer-api)* Jitter and idle-backoff subscription polling, throttle keep-alive (#1233)
   - Raises the default `keep_wallet_alive_interval` from `1m` to `10m`
 - *(indexer-api)* [**breaking**] Cache shielded/unshielded progress across subscribers (#1234)
-  - Requires indexer-api config `infra.api.subscription.progress_cache` (`max_capacity` 10000, `time_to_live` `5s`); a config file without it fails to load
+  - Requires indexer-api config `infra.api.subscription.progress_cache` (shipped `max_capacity` `10000`, `time_to_live` `5s`); a config file without it fails to load
 - *(indexer-api)* Drop OR-in-JOIN from unshielded transaction queries (#1133)
   - Adds migration `unshielded_utxos_owner_composite_indexes` (postgres `007`, sqlite `009`)
 
