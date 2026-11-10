@@ -1,0 +1,30 @@
+fragment EventFields on ContractEvent {
+  id raw maxId protocolVersion version contractAddress transactionId __typename
+  transaction { __typename hash block { height } }
+  ... on ShieldedSpendEvent { nullifier }
+  ... on ShieldedReceiveEvent { commitment ciphertext receivingContractAddress }
+  ... on ShieldedMintEvent { commitment domainSep amount }
+  ... on ShieldedBurnEvent { nullifier amount }
+  ... on UnshieldedSpendEvent { sender { kind userAddress contractAddress } domainSep tokenType amount }
+  ... on UnshieldedReceiveEvent { recipient { kind userAddress contractAddress } domainSep tokenType amount }
+  ... on UnshieldedMintEvent { domainSep tokenType amount }
+  ... on UnshieldedBurnEvent { sender { kind userAddress contractAddress } tokenType amount }
+  ... on MiscContractEvent { name payload }
+}
+query ContractEventQuery($filter: ContractEventFilter!, $limit: Int, $offset: Int) {
+  contractEvents(filter: $filter, limit: $limit, offset: $offset) { ...EventFields }
+}
+subscription ContractEventSubscription($filter: ContractEventFilter!, $id: Int) {
+  contractEvents(filter: $filter, id: $id) { ...EventFields }
+}
+query ContractEventBlockQuery($height: Int!) {
+  block(offset: {height: $height}) {
+    transactions {
+      __typename
+      contractActions {
+        address __typename
+        ... on ContractCall { entryPoint contractEvents { ...EventFields } }
+      }
+    }
+  }
+}

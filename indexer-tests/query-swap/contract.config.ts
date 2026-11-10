@@ -12,7 +12,7 @@
 // limitations under the License.
 
 import { CompiledContract, ContractExecutable } from '@midnight-ntwrk/compact-js/effect';
-import { Contract as C_ } from './managed/zswap-holder/contract/index.js';
+import { Contract as C_ } from './out/contract/index.js';
 
 type ZswapHolderContract = C_<{}>;
 const ZswapHolderContract = C_;
@@ -20,13 +20,13 @@ const ZswapHolderContract = C_;
 export default {
   contractExecutable: CompiledContract.make<ZswapHolderContract>('ZswapHolderContract', ZswapHolderContract).pipe(
     CompiledContract.withVacantWitnesses,
-    CompiledContract.withCompiledFileAssets('./managed/zswap-holder'),
+    CompiledContract.withCompiledFileAssets('./out'),
     ContractExecutable.make
   ),
   createInitialPrivateState: () => ({}),
   config: {
     keys: {
-      coinPublic: '1bd4f827be97ff013c4a702e4b08f30ec378728a54670cf7cc92cb9b1a14eff6',
+      coinPublic: 'aa0d72bb77ea46f986a800c66d75c4e428a95bd7e1244f1ed059374e6266eb98',
     },
     network: 'undeployed'
   }

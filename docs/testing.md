@@ -37,7 +37,7 @@ that the zswap/state-root match guards each block.
   wallet-indexer / indexer-api binaries (cloud) or `indexer-standalone` + SQLite (standalone).
   It SIGTERMs and restarts chain-indexer once to exercise reconnect.
 - `indexer-tests/src/e2e.rs` then runs the assertions. It **collects the blocks subscription
-  (heights 0..=40) as the source of truth**, validating structural invariants as it goes: heights
+  (heights 0..=80) as the source of truth**, validating structural invariants as it goes: heights
   increment by one, parent-hash linkage, transactions reference their block and share its protocol
   version, segment results match the transaction status, fees parse, a contract call shares its
   deploy's address, unshielded balances have a valid token type + amount, and zswap/dust ledger
@@ -53,6 +53,35 @@ that the zswap/state-root match guards each block.
 
 `indexer-tests/src/main.rs` (the `e2e` bin) can point the same suite at a **deployed** indexer
 (`--host/--port/--network-id`), but no workflow wires it up - it is a manual tool.
+
+## Standard contract events
+
+The current v9 node fixture also contains a real `emit_all` call from
+`indexer-tests/emit-contract/emitcounter.compact`. It emits all eleven MIP-0002
+variants with fixed, recognisable payloads. These are test log messages, not
+token transfers. A separate `query-swap` fixture mints a real shielded coin to
+its own contract for the contract-zswap-state assertions already on this branch.
+
+`indexer-tests/src/e2e/contract_events.rs` checks every variant and decoded field,
+type and indexed-field prefix filters (including AND and nonmatching cases),
+block and transaction filters, nested `ContractCall.contractEvents`, ordered
+subscription replay, cursor resumption, and server-side `toBlock` completion.
+The bounded subscriptions must actually complete; collecting a fixed number of
+events would hide a broken terminator. Missing fixtures fail rather than skip.
+The native harness separately reads the database to verify the exact indexed
+field rows, their values, and the absence of sidecar fields for signal/Misc
+events. Both the cloud/PostgreSQL and standalone/SQLite CI jobs run these checks.
+
+The `midnight-serialize` package uses its release deserialization depth limit
+(250) in dev/test profiles. Its debug-only limit of 50 cannot reload some valid
+nodes from the v9 fixture during garbage collection; using the same limit as the
+released indexer lets the native suite exercise normal GC as well.
+
+Regenerate with `./generate_node_data.sh 2.1.101` (the compiler pin is selected
+from the node line). Set `COMPACTC_PATH` to an explicitly provisioned matching
+compiler if the Compact CLI is unavailable. The compiler, toolkit and node must
+use the same ledger line. Only the contract sources/configuration and generated
+node data are checked in; proving keys and compiler output are temporary.
 
 ## The QA TypeScript suite (`qa/tests/`)
 

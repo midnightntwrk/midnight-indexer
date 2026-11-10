@@ -1,29 +1,22 @@
-import { CompiledContract, ContractExecutable, type Contract } from '@midnight-ntwrk/compact-js/effect';
-import { Contract as C_ } from './managed/emitcounter/contract/index.js';
+// This file is part of midnight-indexer.
+// Copyright (C) Midnight Foundation
+// SPDX-License-Identifier: Apache-2.0
+import { CompiledContract, ContractExecutable } from '@midnight-ntwrk/compact-js/effect';
+import { Contract as C_ } from './out/contract/index.js';
 
-type PrivateState = {
-  count: number;
-};
-
-type EmitCounterContract = C_<PrivateState>;
+type EmitCounterContract = C_<{}>;
 const EmitCounterContract = C_;
-
-const witnesses: Contract.Contract.Witnesses<EmitCounterContract> = {
-  private_increment: ({ privateState }, amount) => [{ count: privateState.count + Number(amount) }, []]
-};
-
-const createInitialPrivateState: () => PrivateState = () => ({ count: 0 });
 
 export default {
   contractExecutable: CompiledContract.make<EmitCounterContract>('EmitCounterContract', EmitCounterContract).pipe(
-    CompiledContract.withWitnesses(witnesses),
-    CompiledContract.withCompiledFileAssets('./managed/emitcounter'),
+    CompiledContract.withVacantWitnesses,
+    CompiledContract.withCompiledFileAssets('./out'),
     ContractExecutable.make
   ),
-  createInitialPrivateState,
+  createInitialPrivateState: () => ({}),
   config: {
     keys: {
-      coinPublic: '1bd4f827be97ff013c4a702e4b08f30ec378728a54670cf7cc92cb9b1a14eff6',
+      coinPublic: 'aa0d72bb77ea46f986a800c66d75c4e428a95bd7e1244f1ed059374e6266eb98',
     },
     network: 'undeployed'
   }
