@@ -9,6 +9,7 @@ on:
       - main
       - feat/*
       - release/*
+  merge_group:
   # Runs on main populate the Rust cache that pull requests restore from.
   push:
     branches:
