@@ -260,8 +260,8 @@ SQLite 9→11). See [docs/re-indexing.md](docs/re-indexing.md) before deploying.
   - Adds migration `blocks_height_idx` (sqlite `005`)
 - *(indexer-api)* Jitter and idle-backoff subscription polling, throttle keep-alive (#1233)
   - Raises the default `keep_wallet_alive_interval` from `1m` to `10m`
-- *(indexer-api)* Cache shielded/unshielded progress across subscribers (#1234)
-  - Adds indexer-api config `progress_cache` (`max_capacity` 10000, `time_to_live` `5s`)
+- *(indexer-api)* [**breaking**] Cache shielded/unshielded progress across subscribers (#1234)
+  - Requires indexer-api config `infra.api.subscription.progress_cache` (`max_capacity` 10000, `time_to_live` `5s`); a config file without it fails to load
 - *(indexer-api)* Drop OR-in-JOIN from unshielded transaction queries (#1133)
   - Adds migration `unshielded_utxos_owner_composite_indexes` (postgres `007`, sqlite `009`)
 
