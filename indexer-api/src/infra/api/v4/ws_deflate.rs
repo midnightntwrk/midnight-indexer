@@ -451,6 +451,38 @@ mod tests {
         assert!(next["payload"]["data"]["__schema"]["types"].is_array());
     }
 
+    #[tokio::test]
+    async fn accepts_deflate_next_to_an_unknown_protocol() {
+        for offer in [
+            "unknown, graphql-transport-ws+deflate",
+            "graphql-transport-ws+deflate, unknown",
+        ] {
+            let actual = extract(&[HeaderValue::from_static(offer)]).await;
+            assert_eq!(actual, graphql_transport_ws().await, "offer: {offer}");
+        }
+    }
+
+    #[tokio::test]
+    async fn near_misses_of_the_deflate_protocol_are_not_rewritten() {
+        for offer in [
+            "graphql-transport-ws+deflate2",
+            "graphql-transport-ws+",
+            "GRAPHQL-TRANSPORT-WS+DEFLATE",
+            "graphql-ws, graphql-transport-ws+deflate2",
+        ] {
+            let offers = [HeaderValue::from_static(offer)];
+            let actual = extract(&offers).await;
+            assert_eq!(actual, extract_standard(&offers).await, "offer: {offer}");
+        }
+    }
+
+    #[tokio::test]
+    async fn rejects_a_non_utf8_protocol_header() {
+        let offer = HeaderValue::from_bytes(b"graphql-transport-ws+deflate, \xff")
+            .expect("opaque bytes are a valid header value");
+        assert_eq!(extract(&[offer]).await, Err(StatusCode::BAD_REQUEST));
+    }
+
     /// Serves the GraphQL WebSocket route and returns its address.
     async fn serve_graphql_ws_route() -> SocketAddr {
         let schema = schema_builder::<NoopStorage, NoopSubscriber>().finish();
@@ -496,5 +528,41 @@ mod tests {
             .expect("server replies in time")
             .expect("connection is open")
             .expect("reply is a valid message")
+    }
+
+    /// A request offering one `Sec-WebSocket-Protocol` header per given value.
+    fn parts(offers: &[HeaderValue]) -> Parts {
+        let (mut parts, ()) = Request::new(()).into_parts();
+        parts.headers.extend(
+            offers
+                .iter()
+                .cloned()
+                .map(|offer| (SEC_WEBSOCKET_PROTOCOL, offer)),
+        );
+        parts
+    }
+
+    /// The protocol extracted for the given offers, checking that the request is left intact
+    /// for WebSocketUpgrade.
+    async fn extract(offers: &[HeaderValue]) -> Result<GraphQLProtocol, StatusCode> {
+        let mut parts = parts(offers);
+        let original = parts.headers.clone();
+        let protocol = DeflateGraphQLProtocol::from_request_parts(&mut parts, &())
+            .await
+            .map(|protocol| protocol.0);
+        assert_eq!(parts.headers, original);
+        protocol
+    }
+
+    /// The protocol async-graphql itself extracts for the given offers.
+    async fn extract_standard(offers: &[HeaderValue]) -> Result<GraphQLProtocol, StatusCode> {
+        GraphQLProtocol::from_request_parts(&mut parts(offers), &()).await
+    }
+
+    /// The protocol whose message format deflate uses.
+    async fn graphql_transport_ws() -> Result<GraphQLProtocol, StatusCode> {
+        let protocol = extract_standard(&[HeaderValue::from_static("graphql-transport-ws")]).await;
+        assert!(protocol.is_ok());
+        protocol
     }
 }
