@@ -29,7 +29,7 @@ on:
         type: string
         description: >-
           Indexer image registry. Leave empty for Docker Hub (release tags only);
-          per-commit main builds (<version>-<sha8>) are on ghcr.io/midnight-ntwrk.
+          per-commit main builds (<version>-<sha8>) are on ghcr.io/midnightntwrk.
         required: false
         default: ""
 
