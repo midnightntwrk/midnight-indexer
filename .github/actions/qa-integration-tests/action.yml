@@ -3,10 +3,9 @@ description: >-
   Run the QA smoke and integration suites against a target environment, standing
   a local docker-compose stack up first when the target is `undeployed`.
 
-  A composite rather than a reusable workflow so build-indexer-images can run it
-  in the same job that derives the tags, instead of chaining a second workflow
-  off workflow_run (zizmor: dangerous-triggers, high). Callers that want their
-  own workflow run wrap this in qa-integration-tests-base-workflow.yml.
+  build-indexer-images runs this composite in the job that derives the tags.
+  Callers that want their own workflow run wrap it in
+  qa-integration-tests-base-workflow.yml.
 
 inputs:
   target_env:
@@ -50,10 +49,8 @@ inputs:
 runs:
   using: composite
   steps:
-    # A composite has no job-level `env:`, so the block the base workflow used to
-    # set once is repeated on the steps that read it. Deliberate: writing it to
-    # $GITHUB_ENV instead would put action inputs on the environment-file path
-    # and buy a zizmor `github-env` suppression for the privilege.
+    # A composite has no job-level `env:`, so each step that reads these
+    # variables sets them.
     - name: Setup Node.js v22.x
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:

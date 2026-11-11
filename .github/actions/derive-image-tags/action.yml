@@ -1,10 +1,8 @@
 name: Derive image tags
 description: >-
   Resolve the indexer, node and node-toolkit image tags for the checked-out
-  commit. Single source of truth: build-indexer-images pushes
-  <cargo-version>-<sha8> for main and <semver> for a v* tag, and every consumer
-  has to agree with it. Derived in three places once, which agreed only by
-  convention.
+  commit. The indexer tag matches what build-indexer-images pushes:
+  <cargo-version>-<sha8> for main and <semver> for a v* tag.
 
 inputs:
   indexer_tag:

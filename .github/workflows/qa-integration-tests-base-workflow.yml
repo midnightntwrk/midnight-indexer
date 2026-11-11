@@ -88,9 +88,8 @@ concurrency:
   group: ${{github.workflow}}-${{github.head_ref || github.run_id}}
   cancel-in-progress: true
 
-# A thin wrapper around .github/actions/qa-integration-tests. The steps live in
-# a composite so build-indexer-images can run the same suite in the job that
-# derives the tags, instead of chaining a second workflow off workflow_run.
+# A thin wrapper around .github/actions/qa-integration-tests, which
+# build-indexer-images also runs in the job that derives the tags.
 jobs:
   basic-integration-tests:
     name: Execute basic integration tests

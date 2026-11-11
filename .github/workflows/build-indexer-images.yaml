@@ -426,24 +426,18 @@ jobs:
 
   qa-undeployed:
     name: QA smoke + integration (undeployed)
-    # needs build-and-push, NOT merge-manifests: this runner is amd64 and the
-    # <tag>-amd64 images already exist by then, so the suite runs concurrently
-    # with the manifest merge rather than after it. docker-compose-validation
-    # deliberately stays on merge-manifests, so the merged multi-arch manifest
-    # still has a consumer that exercises it.
+    # This runner is amd64 and tests the <tag>-amd64 images, which exist once
+    # build-and-push finishes, so the suite runs alongside merge-manifests.
+    # docker-compose-validation exercises the merged multi-arch manifest.
     #
-    # This does NOT overlap the arm64 builds: `needs` cannot name one leg
-    # of a matrix, so it waits on all ten. Overlapping them means splitting
-    # build-and-push into per-arch jobs - a bigger change to the release path,
-    # not attempted here.
+    # `needs` cannot name one leg of a matrix, so this job also waits for the
+    # arm64 builds.
     needs: build-and-push
     # Tag builds have their own release verification flow.
     if: github.ref_type != 'tag'
     runs-on: ubuntu-latest
-    # No continue-on-error: a QA failure reds this run, as it used to red the
-    # separate workflow_run-triggered one. Nothing waits on this job - the
-    # images are already pushed and merge-manifests runs alongside - so red
-    # costs a signal, not a release.
+    # A QA failure fails this run. No job needs this one and the images are
+    # already pushed, so a failure does not block publishing.
     # Measured 2-6 min on main; the cap stops a hang holding the repo-wide
     # concurrency group (and every later main push) for the 6h default.
     timeout-minutes: 30
