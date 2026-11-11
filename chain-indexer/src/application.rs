@@ -63,7 +63,8 @@ pub struct Config {
     /// effect: the pass gets `gc_bound` times `gc_interval` at the tip, or times
     /// `gc_catch_up_interval` while catching up. Set to "0s" to disable garbage collection — but
     /// note that is not safe during a long re-index, since retention-window unpersists keep
-    /// producing garbage that then never gets reclaimed.
+    /// producing garbage that then never gets reclaimed. The ledger state accrued in memory is
+    /// cleared before each pass, so without gc it keeps growing.
     #[serde(with = "humantime_serde")]
     pub gc_bound: Duration,
 
@@ -300,6 +301,7 @@ pub async fn run(
                 .await?;
 
                 ledger_state = next_ledger_state;
+                let ledger_state_key = new_ledger_state_key.clone();
 
                 // Keep the newest ledger_state_retention keys persisted and unpersist the
                 // oldest beyond the window, each with the version it was persisted under
@@ -326,6 +328,11 @@ pub async fn run(
                     gc_catch_up_interval
                 };
                 if let Some(budget) = gc_budget(gc_bound, gc_interval, blocks_since_gc) {
+                    // Clear the ledger state accrued since the last pass, which also shrinks the
+                    // gc roots. Like the pass, it walks many nodes, so it runs via `block_in_place`.
+                    ledger_state = task::block_in_place(|| ledger_state.reload(&ledger_state_key))
+                        .context("reload ledger state")?;
+
                     // A pass is synchronous. Its ledger DB calls already hand off this runtime
                     // worker via `block_in_place`, but the CPU-bound marking between them does
                     // not, so run the whole pass via `block_in_place` to keep other tasks on this
@@ -747,8 +754,8 @@ where
 
     // Persist ledger state.
     let (new_ledger_state, ledger_state_key) =
-        ledger_state.0.persist().context("persist ledger state")?;
-    ledger_state = new_ledger_state.into();
+        ledger_state.persist().context("persist ledger state")?;
+    ledger_state = new_ledger_state;
 
     // Determine system parameters change if any.
     let system_parameters_change = determine_system_parameters_change(&block, storage, node)

@@ -17,13 +17,13 @@ use crate::domain::{
     extrinsic::{Applied, Phase, divergence},
     node,
 };
-use derive_more::derive::{Deref, From};
+use derive_more::derive::Deref;
 use fastrace::trace;
 use indexer_common::domain::{
     ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, BlockHash, LedgerVersion,
     NetworkId, ProtocolVersion, SerializedContractAddress, SerializedLedgerStateKey,
     TransactionHash, TransactionResult,
-    ledger::{self, LedgerParameters, RootCountRepair},
+    ledger::{self, ContractZswapIndices, LedgerParameters, RootCountRepair},
 };
 use log::{debug, warn};
 use std::{
@@ -85,8 +85,8 @@ pub(crate) fn should_bump_first_regular_tblock(
 }
 
 /// New type for ledger state from indexer_common.
-#[derive(Debug, Clone, From, Deref)]
-pub struct LedgerState(pub indexer_common::domain::ledger::LedgerState);
+#[derive(Debug, Deref)]
+pub struct LedgerState(#[deref] ledger::LedgerState, ContractZswapIndices);
 
 impl DerefMut for LedgerState {
     fn deref_mut(&mut self) -> &mut Self::Target {
@@ -98,7 +98,7 @@ impl LedgerState {
     pub fn new(network_id: NetworkId, ledger_version: LedgerVersion) -> Result<Self, Error> {
         indexer_common::domain::ledger::LedgerState::new(network_id, ledger_version)
             .map_err(Error::Create)
-            .map(Into::into)
+            .map(Self::from)
     }
 
     pub fn from_genesis(
@@ -107,7 +107,7 @@ impl LedgerState {
     ) -> Result<Self, Error> {
         indexer_common::domain::ledger::LedgerState::from_genesis(raw, ledger_version)
             .map_err(Error::Create)
-            .map(Into::into)
+            .map(Self::from)
     }
 
     pub fn load(
@@ -116,14 +116,55 @@ impl LedgerState {
     ) -> Result<Self, Error> {
         indexer_common::domain::ledger::LedgerState::load(key, ledger_version)
             .map_err(Error::Load)
-            .map(Into::into)
+            .map(Self::from)
+    }
+
+    // Wraps a ledger state with empty contract zswap indices, which read the whole commitment tree on
+    // first use. Private, so code outside this module cannot rebuild the wrapper around the state.
+    fn from(ledger_state: ledger::LedgerState) -> Self {
+        Self(ledger_state, ContractZswapIndices::default())
+    }
+
+    /// Clears the ledger state accrued in memory and loads it lazily again from `key`, its
+    /// persisted key.
+    ///
+    /// # Errors
+    /// Returns [Error::Load] if the state cannot be reloaded, e.g. mid-block or for an unknown `key`.
+    pub fn reload(self, key: &SerializedLedgerStateKey) -> Result<Self, Error> {
+        let Self(ledger_state, contract_zswap_indices) = self;
+
+        // Reloading leaves the commitment tree as it is, so its contract zswap indices still hold.
+        ledger_state
+            .reload(key)
+            .map_err(Error::Load)
+            .map(|ledger_state| Self(ledger_state, contract_zswap_indices))
     }
 
     pub fn translate(self, ledger_version: LedgerVersion) -> Result<Self, Error> {
-        self.0
+        let Self(ledger_state, contract_zswap_indices) = self;
+
+        // Translating to the same ledger version leaves the commitment tree as it is, so its contract
+        // zswap indices still hold. Another version starts new ones.
+        let contract_zswap_indices = if ledger_state.ledger_version() == ledger_version {
+            contract_zswap_indices
+        } else {
+            ContractZswapIndices::default()
+        };
+
+        ledger_state
             .translate(ledger_version)
             .map_err(Error::Translate)
-            .map(Into::into)
+            .map(|ledger_state| Self(ledger_state, contract_zswap_indices))
+    }
+
+    /// Persists the ledger state and returns it with its key.
+    ///
+    /// # Errors
+    /// Returns an error if the ledger state cannot be persisted.
+    pub fn persist(self) -> Result<(Self, SerializedLedgerStateKey), ledger::Error> {
+        let Self(ledger_state, contract_zswap_indices) = self;
+        let (ledger_state, key) = ledger_state.persist()?;
+        Ok((Self(ledger_state, contract_zswap_indices), key))
     }
 
     /// Unpersist a previously-persisted ledger state by its serialized key.
@@ -530,7 +571,8 @@ impl LedgerState {
         // `capture_contract_state_keys`.
         for contract_action in transaction.contract_actions.iter_mut() {
             let zswap_state_key = self
-                .contract_zswap_state_key(&contract_action.address)
+                .0
+                .contract_zswap_state_key(&contract_action.address, &mut self.1)
                 .map_err(|error| Error::GetContractZswapStateKey(transaction.hash, error))?;
             contract_action.zswap_state_key = Some(zswap_state_key);
         }
@@ -1507,7 +1549,7 @@ mod contract_state_translation_tests {
             }
             CommonLedgerState::V9 { .. } => unreachable!("constructed as V8"),
         }
-        LedgerState(state)
+        LedgerState::from(state)
     }
 
     fn v8_key(

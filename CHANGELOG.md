@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.4.200-rc.1] - 2026-11-11
+
+### 🐛 Bug Fixes
+
+- *(indexer-common)* Stop leaking Sp cache entry per persisted state (#1736)
+- *(chain-indexer)* Reload ledger state before each gc pass (#1739)
+- *(chain-indexer)* Keep contract zswap indices across reload (#1749)
+
+### ⚡ Performance
+
+- *(indexer-common)* Batch ledger DB writes per storage engine (#1740)
+- *(indexer-common)* Index contract zswap entries instead of scan (#1741)
+
 ## [4.4.101] - 2026-11-05
 
 ### 🚀 Features
