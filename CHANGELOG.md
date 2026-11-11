@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.4.101] - 2026-11-05
+
+### 🚀 Features
+
+- *(deps)* Bump node to 2.1.101
+
+## [4.4.100] - 2026-11-03
+
+### 🚀 Features
+
+- *(deps)* Bump node 2.1.100 to final
+
+## [4.4.100-rc.1] - 2026-11-02
+
+### 🚀 Features
+
+- Support node 2.1.100-rc.2 with ledger 8.1.3
+  - Replaces node 1.0.300 with 1.0.400 and drops node 2.1.0-rc.4
+- Support node 2.1.100-rc.3 with ledger 9.1.0.1-rc.2
+- Support node 2.1.100-rc.4
+
+### 🐛 Bug Fixes
+
+- Extract only unshielded contract balances
+- Decode SPO registrations robustly
+- Attribute only verified SPO identities
+
 ## [4.4.0] - 2026-11-10
 
 ### 🐛 Bug Fixes
