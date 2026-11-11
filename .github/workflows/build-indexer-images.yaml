@@ -432,7 +432,7 @@ jobs:
     # deliberately stays on merge-manifests, so the merged multi-arch manifest
     # still has a consumer that exercises it.
     #
-    # This does NOT overlap the arm64 QEMU builds: `needs` cannot name one leg
+    # This does NOT overlap the arm64 builds: `needs` cannot name one leg
     # of a matrix, so it waits on all ten. Overlapping them means splitting
     # build-and-push into per-arch jobs - a bigger change to the release path,
     # not attempted here.
