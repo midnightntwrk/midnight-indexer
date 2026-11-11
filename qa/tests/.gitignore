@@ -18,7 +18,6 @@ coverage/output/latest-run.json
 
 # Report files
 reports/
-xray_id.txt
 .tmp/
 
 data/static/*/blocks.jsonc

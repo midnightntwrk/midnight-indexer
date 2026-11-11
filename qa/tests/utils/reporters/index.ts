@@ -14,4 +14,3 @@
 // limitations under the License.
 
 export { default as CustomJUnitReporter } from './custom-junit/custom-junit-reporter';
-export { default as XRayJsonReporter } from './custom-xray-json/xray-json-reporter';
