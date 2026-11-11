@@ -418,7 +418,7 @@ There are a number of deployed environments that are used for testing components
 - preprod
 - mainnet
 
-Endpoints are derived automatically from the `TARGET_ENV` name (e.g. `qanet.midnight.network`), so you do **not** need to configure URLs manually. (`testnet` is a Cardano network type, not a `TARGET_ENV` value.)
+Endpoints are derived automatically from the `TARGET_ENV` name (e.g. `qanet.shielded.tools`), so you do **not** need to configure URLs manually. (`testnet` is a Cardano network type, not a `TARGET_ENV` value.)
 
 When running **E2E tests** against deployed environments,
 the test harness auto-starts the toolkit fetch cache (Postgres) container locally (see “Toolkit
@@ -514,3 +514,42 @@ TARGET_ENV=preprod INDEXER_API_VERSION=v3 bun run test:integration
 - **Dynamic Data Fetching**: Use the block scraper to fetch recent block data to execute the test against (potentially) different test data every run
 
 - **Log file per test**: Right now the test execution is per test file, having log files per test will allow concurrent test execution.
+
+### Private devnet and qanet CI
+
+The integration, block-subscription and ledger-event base workflows select
+`arc-midnightntwrk` for devnet/qanet. These jobs only run through schedules on `main` or manual dispatch in
+`midnightntwrk/midnight-indexer`. The runner-group allowlist restricts the
+job-defining workflows to `main`; pre-merge validation requires a temporary
+allowlist entry for the exact reviewed base-workflow SHA. A temporary validation
+branch must pin its thin callers explicitly to that SHA; relative calls may
+remain queued under a SHA-only runner-group policy. Set the repository variable
+`INDEXER_ARC_VALIDATION_SHA` to the reviewed caller commit, with QA code identical
+to the PR. Remove the variable and temporary group entries after testing.
+This also prevents a branch caller from executing unreviewed checkout code
+through an allowlisted reusable workflow.
+Private-network integration jobs check out the triggering commit, ignoring the optional
+`ref` input. Other environments retain GitHub-hosted runners.
+
+Activation requires the `midnightntwrk` GitHub App credentials in Secrets Manager
+at `ops/global/actions-runner-controller-midnightntwrk`, a healthy ARC listener,
+and an organization runner group allowing this public repository. Restrict that
+group to these reusable workflows at `refs/heads/main`:
+
+- `.github/workflows/qa-integration-tests-base-workflow.yml`
+- `.github/workflows/qa-test-block-subscription-base-workflow.yml`
+- `.github/workflows/qa-test-ledger-events-base-workflow.yml`
+
+Use fully qualified workflow paths beginning with
+`midnightntwrk/midnight-indexer/` in the runner-group allowlist. Before enabling
+schedules, validate HTTPS and GraphQL WebSocket access to
+`indexer.devnet.shielded.tools` and `indexer.qanet.shielded.tools` from an ARC job,
+and run each QA suite manually. Full integration also starts Toolkit containers
+and uses ledger/ZK caches: verify Docker bind mounts, image pulls, memory and
+ephemeral disk consumption against the runner limits. Passing the lighter
+subscription suites does not validate full-integration capacity.
+Node-dependent tests also need the corresponding
+`rpc.<environment>.shielded.tools` endpoint. A green workflow that skipped the
+private jobs is not acceptance evidence.
+
+See https://github.com/shieldedtech/shielded-iac/issues/2801.

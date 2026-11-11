@@ -26,7 +26,14 @@ permissions:
 jobs:
   test:
     name: Test - ledger-events
-    runs-on: ubuntu-latest
+    # Restrict both the reusable workflow and the checked-out caller commit.
+    if: >-
+      ${{ !(inputs.target_env == 'devnet' || inputs.target_env == 'qanet') ||
+          (github.repository == 'midnightntwrk/midnight-indexer' &&
+           (github.ref == 'refs/heads/main' ||
+            (github.event_name == 'workflow_dispatch' && github.sha == vars.INDEXER_ARC_VALIDATION_SHA)) &&
+           (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')) }}
+    runs-on: ${{ (inputs.target_env == 'devnet' || inputs.target_env == 'qanet') && 'arc-midnightntwrk' || 'ubuntu-latest' }}
     container:
       image: node:${{ inputs.node_version }}
       options: --user root

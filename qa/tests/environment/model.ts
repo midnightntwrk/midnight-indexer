@@ -56,7 +56,7 @@ export enum IndexerInstance {
  * - When `rawInstance` is unset/empty, the host is returned unchanged so the
  *   public URL keeps pointing at whichever instance is currently primary.
  * - `blue`/`green` (case-insensitive) rewrite the leading `indexer` label to
- *   `indexer-blue`/`indexer-green` (e.g. `indexer-green.qanet.midnight.network`).
+ *   `indexer-blue`/`indexer-green` (e.g. `indexer-green.qanet.shielded.tools`).
  * - Any other value fails fast, mirroring the `TARGET_ENV` validation style.
  * - The undeployed/localhost environment has no blue/green split, so the
  *   override is ignored there (with a warning) rather than corrupting the host.
@@ -113,8 +113,8 @@ const hostEntries: HostEntry[] = [
     indexerHost: 'localhost:8088',
     nodeHost: 'localhost:9944',
   },
-  { env: EnvironmentName.QANET, domain: 'qanet.midnight.network' },
-  { env: EnvironmentName.DEVNET, domain: 'devnet.midnight.network' },
+  { env: EnvironmentName.QANET, domain: 'qanet.shielded.tools' },
+  { env: EnvironmentName.DEVNET, domain: 'devnet.shielded.tools' },
   { env: EnvironmentName.PREVIEW, domain: 'preview.midnight.network' },
   { env: EnvironmentName.PREPROD, domain: 'preprod.midnight.network' },
   {

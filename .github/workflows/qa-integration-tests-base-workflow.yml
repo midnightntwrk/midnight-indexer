@@ -118,11 +118,18 @@ jobs:
       XRAY_PROJECT_KEY: "PM"
       XRAY_TEST_PLAN_KEY: "PM-19197"
       XRAY_REPORT_TESTS_MISSING_METADATA: "false"
-    runs-on: ubuntu-latest
+    # Restrict both the reusable workflow and the checked-out caller commit.
+    if: >-
+      ${{ !(inputs.target_env == 'devnet' || inputs.target_env == 'qanet') ||
+          (github.repository == 'midnightntwrk/midnight-indexer' &&
+           (github.ref == 'refs/heads/main' ||
+            (github.event_name == 'workflow_dispatch' && github.sha == vars.INDEXER_ARC_VALIDATION_SHA)) &&
+           (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')) }}
+    runs-on: ${{ (inputs.target_env == 'devnet' || inputs.target_env == 'qanet') && 'arc-midnightntwrk' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v 7.0.1
         with:
-          ref: ${{ inputs.ref || github.sha }}
+          ref: ${{ (inputs.target_env == 'devnet' || inputs.target_env == 'qanet') && github.sha || inputs.ref || github.sha }}
 
       - name: Setup Node.js v22.x
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
