@@ -9,9 +9,11 @@
 // the toolkit's built-in contract-simple. `increment` is `callContract()`'s
 // default. Both are kept so either call key works.
 //
-// Compile with compactc 0.31.1, which emits checkRuntimeVersion('0.16.0') to
-// match the @midnight-ntwrk/compact-runtime 0.16.0 that midnight-js 4.1.1 pins.
-// A 0.30.0 build emits 0.15.0 and will not load.
+// Compile with compactc 0.36.0, which emits checkRuntimeVersion('0.21.0') to
+// match the @midnight-ntwrk/compact-runtime 0.21.0 that midnight-js 5.0.0
+// pins. An older build (0.31.1 emits 0.16.0) will not load.
+//
+//   compact compile +0.36.0 contracts/counter/counter.compact contracts/counter/managed
 
 pragma language_version >= 0.23;
 

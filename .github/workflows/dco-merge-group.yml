@@ -1,0 +1,28 @@
+name: DCO
+
+# This workflow reports a passing "DCO" check on merge-group commits.
+#
+# The DCO app reports only on pull_request events. Without this check, the
+# merge queue waits for the required "DCO" check until it times out, then
+# dequeues the group.
+#
+# A pull request enters the queue only after its own DCO check passes, and
+# the merge group contains those same commits. Re-validating sign-off here
+# would fail, because GitHub generates the queue's squash commit and its
+# message may lack Signed-off-by.
+
+on:
+  merge_group:
+
+# no top level default permissions for security reasons
+permissions: {}
+
+jobs:
+  dco:
+    # Must match the required status check context string exactly.
+    name: DCO
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Report success
+        run: echo "DCO already validated on the pull request."

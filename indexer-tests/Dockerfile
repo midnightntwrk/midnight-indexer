@@ -36,6 +36,10 @@ RUN cargo auditable build -p indexer-tests --locked --profile $PROFILE && \
     mv "./target/${PROFILE/dev/debug}/indexer-tests" /runtime/usr/local/bin
 
 FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2 AS runtime
+# The base image predates the trixie-security zlib1g fix for CVE-2026-85091 and CVE-2026-76844.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends zlib1g=1:1.3.dfsg+really1.3.1-1+deb13u1 && \
+    rm -rf /var/lib/apt/lists/*
 RUN useradd -u 10001 -d /nonexistent -s /usr/sbin/nologin -M -c "" appuser && \
     passwd -l appuser && \
     mkdir /var/run/indexer-tests && \
