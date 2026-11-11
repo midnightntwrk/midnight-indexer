@@ -225,26 +225,9 @@ mod tests {
 
     #[tokio::test]
     async fn accepts_deflate_without_a_plain_protocol_offer() {
-        let (mut parts, _) = Request::builder()
-            .header(SEC_WEBSOCKET_PROTOCOL, GRAPHQL_TRANSPORT_WS_DEFLATE)
-            .body(())
-            .unwrap()
-            .into_parts();
-        let original = parts.headers.clone();
-
-        let actual = DeflateGraphQLProtocol::from_request_parts(&mut parts, &())
-            .await
-            .expect("a proxy may forward only the negotiated deflate protocol");
-        assert_eq!(parts.headers, original);
-
-        parts.headers.insert(
-            SEC_WEBSOCKET_PROTOCOL,
-            "graphql-transport-ws".parse().unwrap(),
-        );
-        let expected = GraphQLProtocol::from_request_parts(&mut parts, &())
-            .await
-            .unwrap();
-        assert_eq!(actual.0, expected);
+        // A proxy may forward only the negotiated deflate protocol.
+        let actual = extract(&[HeaderValue::from_static(GRAPHQL_TRANSPORT_WS_DEFLATE)]).await;
+        assert_eq!(actual, graphql_transport_ws().await);
     }
 
     #[tokio::test]
@@ -254,50 +237,19 @@ mod tests {
             "graphql-transport-ws, graphql-transport-ws+deflate",
             "graphql-ws, graphql-transport-ws+deflate",
         ] {
-            let (mut parts, _) = Request::builder()
-                .header(SEC_WEBSOCKET_PROTOCOL, offer)
-                .body(())
-                .unwrap()
-                .into_parts();
-            let original = parts.headers.clone();
-            let actual = DeflateGraphQLProtocol::from_request_parts(&mut parts, &())
-                .await
-                .unwrap();
-            assert_eq!(parts.headers, original);
-
-            parts.headers.insert(
-                SEC_WEBSOCKET_PROTOCOL,
-                "graphql-transport-ws".parse().unwrap(),
-            );
-            let expected = GraphQLProtocol::from_request_parts(&mut parts, &())
-                .await
-                .unwrap();
-            assert_eq!(actual.0, expected, "offer: {offer}");
+            let actual = extract(&[HeaderValue::from_static(offer)]).await;
+            assert_eq!(actual, graphql_transport_ws().await, "offer: {offer}");
         }
     }
 
     #[tokio::test]
     async fn accepts_deflate_in_a_repeated_protocol_header() {
-        let (mut parts, _) = Request::builder()
-            .header(SEC_WEBSOCKET_PROTOCOL, "graphql-ws")
-            .header(SEC_WEBSOCKET_PROTOCOL, GRAPHQL_TRANSPORT_WS_DEFLATE)
-            .body(())
-            .unwrap()
-            .into_parts();
-        let original = parts.headers.clone();
-        let actual = DeflateGraphQLProtocol::from_request_parts(&mut parts, &())
-            .await
-            .unwrap();
-        assert_eq!(parts.headers, original);
-
-        parts.headers.insert(
-            SEC_WEBSOCKET_PROTOCOL,
-            "graphql-transport-ws".parse().unwrap(),
-        );
-        let expected = GraphQLProtocol::from_request_parts(&mut parts, &())
-            .await
-            .unwrap();
-        assert_eq!(actual.0, expected);
+        let actual = extract(&[
+            HeaderValue::from_static("graphql-ws"),
+            HeaderValue::from_static(GRAPHQL_TRANSPORT_WS_DEFLATE),
+        ])
+        .await;
+        assert_eq!(actual, graphql_transport_ws().await);
     }
 
     #[tokio::test]
@@ -308,16 +260,12 @@ mod tests {
             Some("graphql-ws"),
             Some("unknown"),
         ] {
-            let mut request = Request::builder();
-            if let Some(offer) = offer {
-                request = request.header(SEC_WEBSOCKET_PROTOCOL, offer);
-            }
-            let (mut parts, _) = request.body(()).unwrap().into_parts();
-            let original = parts.headers.clone();
-            let expected = GraphQLProtocol::from_request_parts(&mut parts, &()).await;
-            let actual = DeflateGraphQLProtocol::from_request_parts(&mut parts, &()).await;
-            assert_eq!(actual.map(|protocol| protocol.0), expected);
-            assert_eq!(parts.headers, original);
+            let offers = offer
+                .map(HeaderValue::from_static)
+                .into_iter()
+                .collect::<Vec<_>>();
+            let actual = extract(&offers).await;
+            assert_eq!(actual, extract_standard(&offers).await, "offer: {offer:?}");
         }
     }
 
