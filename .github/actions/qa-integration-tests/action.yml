@@ -83,7 +83,7 @@ runs:
       run: |
         docker compose --profile cloud pull
         # Used by qa/scripts/startup-localenv-with-data.sh for volume setup.
-        docker pull alpine
+        docker pull "$(. ./qa/scripts/_lib.sh && printf '%s' "$ALPINE_IMAGE")"
         # Used by the toolkit wrapper for test data generation; the registry is
         # hardcoded there (qa/tests/utils/toolkit/toolkit-wrapper.ts) and this
         # pull must match it. The tag default mirrors
