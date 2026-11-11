@@ -203,7 +203,7 @@ mod tests {
         time::Duration,
     };
     use tokio::{
-        io::{AsyncRead, AsyncWrite},
+        io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader},
         net::{TcpListener, TcpStream},
         time::timeout,
     };
@@ -214,11 +214,14 @@ mod tests {
             Message::{Binary, Text},
             client::IntoClientRequest,
             handshake::client::Response,
+            protocol::Role,
         },
     };
 
     // How long a test waits for the server, so that a silent server fails the test at once.
     const REPLY_TIMEOUT: Duration = Duration::from_secs(10);
+    // The sample nonce of RFC 6455; any base64-encoded 16 bytes would do.
+    const SEC_WEBSOCKET_KEY: &str = "dGhlIHNhbXBsZSBub25jZQ==";
 
     #[tokio::test]
     async fn accepts_deflate_without_a_plain_protocol_offer() {
@@ -498,6 +501,89 @@ mod tests {
         }
     }
 
+    /// Whatever else is offered, deflate is selected and speaks `graphql-transport-ws`.
+    #[tokio::test]
+    async fn deflate_offers_select_deflate_and_the_modern_protocol() {
+        let address = serve_graphql_ws_route().await;
+
+        for offer in [
+            "graphql-transport-ws+deflate",
+            "graphql-transport-ws+deflate, graphql-transport-ws",
+            "graphql-transport-ws, graphql-transport-ws+deflate",
+            "graphql-ws, graphql-transport-ws+deflate",
+            "unknown, graphql-transport-ws+deflate",
+        ] {
+            let (mut socket, response) = connect(address, Some(offer))
+                .await
+                .unwrap_or_else(|error| panic!("offer {offer} is upgraded: {error}"));
+            assert_eq!(
+                response.headers().get(SEC_WEBSOCKET_PROTOCOL),
+                Some(&HeaderValue::from_static(GRAPHQL_TRANSPORT_WS_DEFLATE)),
+                "offer: {offer}"
+            );
+            assert_speaks_graphql_transport_ws(&mut socket).await;
+        }
+    }
+
+    /// The same for offers the client used by the other tests cannot send: deflate in a header
+    /// of its own, and next to bytes that are not valid UTF-8.
+    #[tokio::test]
+    async fn deflate_in_separate_or_opaque_protocol_headers_is_selected() {
+        let address = serve_graphql_ws_route().await;
+
+        let offers: [&[&[u8]]; 3] = [
+            &[b"graphql-ws", b"graphql-transport-ws+deflate"],
+            &[b"graphql-transport-ws+deflate, \xff"],
+            &[b"graphql-ws", b"graphql-transport-ws+deflate, \xff"],
+        ];
+        for offer in offers {
+            let mut socket = connect_raw_selecting_deflate(address, offer).await;
+            assert_speaks_graphql_transport_ws(&mut socket).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn standard_offers_keep_their_protocol() {
+        let address = serve_graphql_ws_route().await;
+
+        for offer in ["graphql-transport-ws", "graphql-ws"] {
+            let (_, response) = connect(address, Some(offer))
+                .await
+                .unwrap_or_else(|error| panic!("offer {offer} is upgraded: {error}"));
+            assert_eq!(
+                response.headers().get(SEC_WEBSOCKET_PROTOCOL),
+                Some(&HeaderValue::from_static(offer))
+            );
+        }
+    }
+
+    /// Near misses of the deflate identifier are not deflate, and an offer without any known
+    /// protocol is still a bad request.
+    #[tokio::test]
+    async fn offers_without_a_known_protocol_are_rejected() {
+        let address = serve_graphql_ws_route().await;
+
+        for offer in [
+            None,
+            Some("unknown"),
+            Some("graphql-transport-ws+deflate2"),
+            Some("graphql-transport-ws+"),
+            Some("GRAPHQL-TRANSPORT-WS+DEFLATE"),
+        ] {
+            let error = connect(address, offer)
+                .await
+                .expect_err("offer without a known protocol is rejected");
+            let tungstenite::Error::Http(response) = error else {
+                panic!("offer {offer:?}: expected an HTTP error, got {error}");
+            };
+            assert_eq!(
+                response.status(),
+                StatusCode::BAD_REQUEST,
+                "offer: {offer:?}"
+            );
+        }
+    }
+
     /// Serves the GraphQL WebSocket route and returns its address.
     async fn serve_graphql_ws_route() -> SocketAddr {
         let schema = schema_builder::<NoopStorage, NoopSubscriber>().finish();
@@ -579,5 +665,93 @@ mod tests {
         let protocol = extract_standard(&[HeaderValue::from_static("graphql-transport-ws")]).await;
         assert!(protocol.is_ok());
         protocol
+    }
+
+    /// Upgrades by hand, sending one `Sec-WebSocket-Protocol` header per given value, and checks
+    /// that deflate is selected.
+    async fn connect_raw_selecting_deflate(
+        address: SocketAddr,
+        offers: &[&[u8]],
+    ) -> WebSocketStream<BufReader<TcpStream>> {
+        let head = format!(
+            "GET /graphql/ws HTTP/1.1\r\n\
+             Host: {address}\r\n\
+             Connection: Upgrade\r\n\
+             Upgrade: websocket\r\n\
+             Sec-WebSocket-Version: 13\r\n\
+             Sec-WebSocket-Key: {SEC_WEBSOCKET_KEY}\r\n"
+        );
+        let request = std::iter::once(head.as_bytes())
+            .chain(
+                offers
+                    .iter()
+                    .flat_map(|offer| [b"Sec-WebSocket-Protocol: ".as_slice(), offer, b"\r\n"]),
+            )
+            .chain(std::iter::once(b"\r\n".as_slice()))
+            .collect::<Vec<_>>()
+            .concat();
+
+        let mut stream = TcpStream::connect(address)
+            .await
+            .expect("server accepts connections");
+        stream
+            .write_all(&request)
+            .await
+            .expect("request can be sent");
+
+        let mut reader = BufReader::new(stream);
+        let mut head = vec![];
+        timeout(REPLY_TIMEOUT, async {
+            while !head.ends_with(b"\r\n\r\n") {
+                let read = reader
+                    .read_until(b'\n', &mut head)
+                    .await
+                    .expect("response head can be read");
+                assert_ne!(read, 0, "connection closed before the response head ended");
+            }
+        })
+        .await
+        .expect("server answers the handshake in time");
+        let head = String::from_utf8(head)
+            .expect("response head is UTF-8")
+            .to_ascii_lowercase();
+        assert!(head.starts_with("http/1.1 101"), "{head}");
+        assert!(
+            head.contains(&format!(
+                "sec-websocket-protocol: {GRAPHQL_TRANSPORT_WS_DEFLATE}\r\n"
+            )),
+            "{head}"
+        );
+
+        WebSocketStream::from_raw_socket(reader, Role::Client, None).await
+    }
+
+    /// Runs a query the `graphql-transport-ws` way. The legacy `graphql-ws` format starts
+    /// operations with `start` and answers with `data`, so it never produces the `next` asserted
+    /// here.
+    async fn assert_speaks_graphql_transport_ws<S>(socket: &mut WebSocketStream<S>)
+    where
+        S: AsyncRead + AsyncWrite + Unpin,
+    {
+        socket
+            .send(Text(r#"{"type":"connection_init"}"#.into()))
+            .await
+            .expect("connection_init can be sent");
+        let ack = next_message(socket).await;
+        assert_eq!(ack, Text(r#"{"type":"connection_ack"}"#.into()));
+
+        let subscribe = serde_json::json!({
+            "id": "1",
+            "type": "subscribe",
+            "payload": { "query": "{ __typename }" },
+        });
+        socket
+            .send(Text(subscribe.to_string().into()))
+            .await
+            .expect("subscribe can be sent");
+        let next = next_message(socket).await;
+        let next = next.into_text().expect("short reply is a text frame");
+        let next = serde_json::from_str::<serde_json::Value>(&next).expect("reply is JSON");
+        assert_eq!(next["type"], "next", "{next}");
     }
 }

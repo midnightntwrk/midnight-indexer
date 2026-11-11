@@ -57,7 +57,7 @@ uuid               = { workspace = true, features = [ "v7" ] }
 tempfile               = { workspace = true }
 testcontainers         = { workspace = true }
 testcontainers-modules = { workspace = true, features = [ "postgres" ] }
-tokio                  = { workspace = true, features = [ "net" ] }
+tokio                  = { workspace = true, features = [ "io-util", "net" ] }
 tokio-tungstenite      = { workspace = true }
 
 [features]
