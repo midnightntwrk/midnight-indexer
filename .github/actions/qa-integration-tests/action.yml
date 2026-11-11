@@ -90,11 +90,11 @@ runs:
         # Used by the toolkit wrapper for test data generation; the registry is
         # hardcoded there (qa/tests/utils/toolkit/toolkit-wrapper.ts) and this
         # pull must match it. The tag default mirrors
-        # startup-localenv-with-data.sh. Docker Hub's
-        # midnightntwrk/midnight-node-toolkit cannot be used here: it only
-        # carries the toolkit's own release tags and latest-main, not the
+        # startup-localenv-with-data.sh, which pairs the toolkit with the node.
+        # Docker Hub's midnightntwrk/midnight-node-toolkit cannot be used here:
+        # it only carries the toolkit's own release tags and latest-main, not the
         # node-paired tags this action passes.
-        docker pull "ghcr.io/midnight-ntwrk/midnight-node-toolkit:${NODE_TOOLKIT_TAG:-latest-main}"
+        docker pull "ghcr.io/midnight-ntwrk/midnight-node-toolkit:${NODE_TOOLKIT_TAG:-$NODE_TAG}"
 
     - name: Startup local environment
       if: inputs.target_env == 'undeployed'
