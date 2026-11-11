@@ -29,6 +29,9 @@ mod wallet;
 #[cfg(test)]
 mod nullifier_prefix;
 
+#[cfg(all(test, feature = "standalone"))]
+mod transaction_identifier;
+
 use crate::domain;
 use chacha20poly1305::ChaCha20Poly1305;
 use sqlx::QueryBuilder;
