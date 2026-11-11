@@ -447,7 +447,8 @@ where
 /// In addition to the standard GraphQL WebSocket subprotocols this handler offers the opt-in
 /// [`ws_deflate::GRAPHQL_TRANSPORT_WS_DEFLATE`] subprotocol: clients selecting it exchange
 /// zlib-compressed payloads as binary frames (see [`ws_deflate`] for the wire format), all other
-/// clients are byte-for-byte unaffected.
+/// clients never receive compressed frames. The message format always follows the subprotocol
+/// selected here, not the order of the client's offer.
 #[allow(clippy::type_complexity)]
 async fn graphql_ws<S, B>(
     Extension(schema): Extension<Schema<Query<S>, Mutation<S>, Subscription<S, B>>>,

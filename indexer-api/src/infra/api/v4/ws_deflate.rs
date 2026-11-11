@@ -25,7 +25,11 @@
 //!
 //! Clients may offer `graphql-transport-ws+deflate` alone or alongside the standard protocols.
 //! The deflate variant uses the `graphql-transport-ws` message format. Clients that do not offer
-//! the deflate variant are byte-for-byte unaffected.
+//! the deflate variant never receive compressed frames.
+//!
+//! The server selects the first protocol it supports among those offered, in the order
+//! `graphql-transport-ws+deflate`, `graphql-transport-ws`, `graphql-ws`, whatever the order of the
+//! client's offer, and speaks the message format of the protocol it selected.
 //!
 //! Compression uses a fresh context per message, so there is no per-connection compressor state
 //! and no shared-window memory cost per connection.
