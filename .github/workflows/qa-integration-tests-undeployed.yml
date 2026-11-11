@@ -20,6 +20,11 @@ on:
         description: Indexer tag
         required: false
         default: latest
+      node_toolkit_tag:
+        type: string
+        description: Node toolkit tag (leave empty to pair with the node tag)
+        required: false
+        default: ""
       image_registry:
         type: string
         description: >-
@@ -37,6 +42,7 @@ jobs:
       ref: main
       node_tag: ${{ inputs.node_tag }}
       indexer_tag: ${{ inputs.indexer_tag }}
+      node_toolkit_tag: ${{ inputs.node_toolkit_tag }}
       image_registry: ${{ inputs.image_registry }}
     secrets:
       MIDNIGHTCI_PACKAGES_READ: ${{ secrets.MIDNIGHTCI_PACKAGES_READ }}
