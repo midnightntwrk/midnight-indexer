@@ -53,13 +53,14 @@ impl<S: Send + Sync> FromRequestParts<S> for DeflateGraphQLProtocol {
     type Rejection = StatusCode;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        // Read the offers exactly like WebSocketUpgrade does, so that both agree on whether
+        // deflate is offered, even next to values that are not valid UTF-8.
         let deflate = parts
             .headers
             .get_all(SEC_WEBSOCKET_PROTOCOL)
             .iter()
-            .filter_map(|value| value.to_str().ok())
-            .flat_map(|value| value.split(','))
-            .any(|protocol| protocol.trim() == GRAPHQL_TRANSPORT_WS_DEFLATE);
+            .flat_map(|value| value.as_bytes().split(|&byte| byte == b','))
+            .any(|protocol| protocol.trim_ascii() == GRAPHQL_TRANSPORT_WS_DEFLATE.as_bytes());
 
         if !deflate {
             return GraphQLProtocol::from_request_parts(parts, state)
@@ -481,11 +482,20 @@ mod tests {
         }
     }
 
+    /// WebSocketUpgrade selects deflate even when it is offered next to opaque bytes, so the
+    /// message format must follow.
     #[tokio::test]
-    async fn rejects_a_non_utf8_protocol_header() {
-        let offer = HeaderValue::from_bytes(b"graphql-transport-ws+deflate, \xff")
+    async fn accepts_deflate_next_to_a_non_utf8_protocol() {
+        let opaque = HeaderValue::from_bytes(b"graphql-transport-ws+deflate, \xff")
             .expect("opaque bytes are a valid header value");
-        assert_eq!(extract(&[offer]).await, Err(StatusCode::BAD_REQUEST));
+        let offers: [&[HeaderValue]; 2] = [
+            std::slice::from_ref(&opaque),
+            &[HeaderValue::from_static("graphql-ws"), opaque.clone()],
+        ];
+        for offer in offers {
+            let actual = extract(offer).await;
+            assert_eq!(actual, graphql_transport_ws().await, "offer: {offer:?}");
+        }
     }
 
     /// Serves the GraphQL WebSocket route and returns its address.
