@@ -185,8 +185,34 @@ fn inflate_capped(payload: &[u8]) -> Result<String, InflateError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::http::Request;
+    use crate::{
+        domain::storage::NoopStorage,
+        infra::api::v4::{graphql_ws, schema_builder},
+    };
+    use axum::{Extension, Router, http::Request, routing::get};
     use futures::{SinkExt, StreamExt, stream};
+    use indexer_common::domain::NoopSubscriber;
+    use std::{
+        net::{Ipv4Addr, SocketAddr},
+        time::Duration,
+    };
+    use tokio::{
+        io::{AsyncRead, AsyncWrite},
+        net::{TcpListener, TcpStream},
+        time::timeout,
+    };
+    use tokio_tungstenite::{
+        MaybeTlsStream, WebSocketStream, connect_async,
+        tungstenite::{
+            self,
+            Message::{Binary, Text},
+            client::IntoClientRequest,
+            handshake::client::Response,
+        },
+    };
+
+    // How long a test waits for the server, so that a silent server fails the test at once.
+    const REPLY_TIMEOUT: Duration = Duration::from_secs(10);
 
     #[tokio::test]
     async fn accepts_deflate_without_a_plain_protocol_offer() {
@@ -368,5 +394,107 @@ mod tests {
 
         let second = socket.next().await.unwrap().unwrap();
         assert!(matches!(second, Message::Text(text) if text.as_str() == "plain"));
+    }
+
+    /// A proxy may forward only the subprotocol the server selected, so a handshake offering
+    /// nothing but the deflate variant must be upgraded and must speak compressed
+    /// `graphql-transport-ws`.
+    #[tokio::test]
+    async fn deflate_only_offer_is_upgraded_and_compressed() {
+        let address = serve_graphql_ws_route().await;
+        let (mut socket, response) = connect(address, Some(GRAPHQL_TRANSPORT_WS_DEFLATE))
+            .await
+            .expect("deflate-only offer is upgraded");
+        assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+        assert_eq!(
+            response.headers().get(SEC_WEBSOCKET_PROTOCOL),
+            Some(&HeaderValue::from_static(GRAPHQL_TRANSPORT_WS_DEFLATE))
+        );
+
+        // Client-to-server: a compressed binary frame is inflated and understood as
+        // `graphql-transport-ws`; the short acknowledgement stays an uncompressed text frame.
+        let mut encoder = ZlibEncoder::new(vec![], Compression::default());
+        encoder
+            .write_all(br#"{"type":"connection_init"}"#)
+            .expect("payload can be compressed");
+        let connection_init = encoder.finish().expect("payload can be compressed");
+        socket
+            .send(Binary(connection_init.into()))
+            .await
+            .expect("connection_init can be sent");
+        let ack = next_message(&mut socket).await;
+        assert_eq!(ack, Text(r#"{"type":"connection_ack"}"#.into()));
+
+        // Server-to-client: a response above the compression threshold arrives as a compressed
+        // binary frame.
+        let subscribe = serde_json::json!({
+            "id": "1",
+            "type": "subscribe",
+            "payload": { "query": "{ __schema { types { name } } }" },
+        });
+        socket
+            .send(Text(subscribe.to_string().into()))
+            .await
+            .expect("subscribe can be sent");
+        let next = next_message(&mut socket).await;
+        let Binary(compressed) = next else {
+            panic!("expected a compressed binary frame, got {next:?}");
+        };
+        let mut inflated = String::new();
+        ZlibDecoder::new(compressed.as_ref())
+            .read_to_string(&mut inflated)
+            .expect("frame is zlib-compressed UTF-8");
+        let next =
+            serde_json::from_str::<serde_json::Value>(&inflated).expect("inflated frame is JSON");
+        assert_eq!(next["type"], "next");
+        assert_eq!(next["id"], "1");
+        assert!(next["payload"]["data"]["__schema"]["types"].is_array());
+    }
+
+    /// Serves the GraphQL WebSocket route and returns its address.
+    async fn serve_graphql_ws_route() -> SocketAddr {
+        let schema = schema_builder::<NoopStorage, NoopSubscriber>().finish();
+        let app = Router::new()
+            .route(
+                "/graphql/ws",
+                get(graphql_ws::<NoopStorage, NoopSubscriber>),
+            )
+            .layer(Extension(schema));
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .expect("listener can be bound");
+        let address = listener.local_addr().expect("listener has a local address");
+        tokio::spawn(async move { axum::serve(listener, app).await });
+        address
+    }
+
+    /// Opens a WebSocket, offering the given `Sec-WebSocket-Protocol` if any.
+    async fn connect(
+        address: SocketAddr,
+        offer: Option<&'static str>,
+    ) -> Result<(WebSocketStream<MaybeTlsStream<TcpStream>>, Response), tungstenite::Error> {
+        let mut request = format!("ws://{address}/graphql/ws")
+            .into_client_request()
+            .expect("request is valid");
+        if let Some(offer) = offer {
+            request
+                .headers_mut()
+                .insert(SEC_WEBSOCKET_PROTOCOL, HeaderValue::from_static(offer));
+        }
+        timeout(REPLY_TIMEOUT, connect_async(request))
+            .await
+            .expect("server answers the handshake in time")
+    }
+
+    /// The next message from the server.
+    async fn next_message<S>(socket: &mut WebSocketStream<S>) -> tungstenite::Message
+    where
+        S: AsyncRead + AsyncWrite + Unpin,
+    {
+        timeout(REPLY_TIMEOUT, socket.next())
+            .await
+            .expect("server replies in time")
+            .expect("connection is open")
+            .expect("reply is a valid message")
     }
 }
