@@ -79,8 +79,7 @@ mod tests {
 
     #[test]
     fn test_debug_and_display_redacted() {
-        // Built, not spelled out, and not bound to a name gitleaks keys on:
-        // a 64-hex literal next to `secret` reads as a committed credential.
+        // Gitleaks and opengrep report a 64-hex literal as a committed credential.
         let raw = "0123456789abcdef".repeat(4);
         let session_id = SessionId::from(raw.as_str());
 
