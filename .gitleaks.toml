@@ -7,6 +7,7 @@ useDefault = true
 # Entries name single files so new fixtures under qa/tests/data/ stay scanned.
 [[allowlists]]
 description = "QA static fixtures: public chain addresses and token-type hashes"
+targetRules = ["generic-api-key"]
 paths = [
   # Contract addresses and token-type hashes from a block-scanner run.
   '''^qa/tests/data/static/devnet/token-holding-contracts\.jsonc$''',
