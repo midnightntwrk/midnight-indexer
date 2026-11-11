@@ -33,7 +33,7 @@
 use async_graphql_axum::GraphQLProtocol;
 use axum::{
     extract::{FromRequestParts, ws::Message},
-    http::{HeaderValue, StatusCode, header::SEC_WEBSOCKET_PROTOCOL, request::Parts},
+    http::{HeaderValue, Request, StatusCode, header::SEC_WEBSOCKET_PROTOCOL, request::Parts},
 };
 use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 use futures::{Sink, Stream};
@@ -53,7 +53,6 @@ impl<S: Send + Sync> FromRequestParts<S> for DeflateGraphQLProtocol {
     type Rejection = StatusCode;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let mut graphql_parts = parts.clone();
         let deflate = parts
             .headers
             .get_all(SEC_WEBSOCKET_PROTOCOL)
@@ -62,14 +61,20 @@ impl<S: Send + Sync> FromRequestParts<S> for DeflateGraphQLProtocol {
             .flat_map(|value| value.split(','))
             .any(|protocol| protocol.trim() == GRAPHQL_TRANSPORT_WS_DEFLATE);
 
-        if deflate {
-            // async-graphql only knows the standard protocols. Keep the original request
-            // intact so WebSocketUpgrade still negotiates the deflate wire format.
-            graphql_parts.headers.insert(
-                SEC_WEBSOCKET_PROTOCOL,
-                HeaderValue::from_static("graphql-transport-ws"),
-            );
+        if !deflate {
+            return GraphQLProtocol::from_request_parts(parts, state)
+                .await
+                .map(Self);
         }
+
+        // async-graphql only knows the standard protocols, so ask it for the one whose message
+        // format deflate uses. A stand-in request keeps the original intact, so WebSocketUpgrade
+        // still negotiates the deflate wire format.
+        let (mut graphql_parts, ()) = Request::new(()).into_parts();
+        graphql_parts.headers.insert(
+            SEC_WEBSOCKET_PROTOCOL,
+            HeaderValue::from_static("graphql-transport-ws"),
+        );
 
         GraphQLProtocol::from_request_parts(&mut graphql_parts, state)
             .await
@@ -189,7 +194,7 @@ mod tests {
         domain::storage::NoopStorage,
         infra::api::v4::{graphql_ws, schema_builder},
     };
-    use axum::{Extension, Router, http::Request, routing::get};
+    use axum::{Extension, Router, routing::get};
     use futures::{SinkExt, StreamExt, stream};
     use indexer_common::domain::NoopSubscriber;
     use std::{
