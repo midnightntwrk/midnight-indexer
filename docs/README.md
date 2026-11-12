@@ -8,6 +8,9 @@ Maintainer and contributor guides. For local setup see the top-level
 - [Architecture](./architecture.md) - the data flow, NATS's role, and run modes.
 - [Testing & node consistency](./testing.md) - the runtime root-match guard and the
   test layers.
+- [Running against a forked network](./running-against-a-fork.md) - index a
+  local fork of Preview or another real network, built with midnight-node's
+  local-environment.
 
 ## Releasing & version upgrades
 

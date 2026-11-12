@@ -65,6 +65,7 @@ indexer in step with the node and ledger:
 * [Architecture](docs/architecture.md) - data flow, NATS's role, and run modes.
 * [Creating a release](docs/releasing.md) - versioning, changelog, tagging, image publish.
 * [Testing & node consistency](docs/testing.md) - the runtime root-match guard and the test layers.
+* [Running against a forked network](docs/running-against-a-fork.md) - index a local fork of a real network (`just fork-up`).
 * [Upgrading the node version](docs/updating-node-version.md) - `NODE_VERSIONS`, metadata, runtime modules.
 * [Upgrading the ledger](docs/upgrading-ledger.md) - `v8`/`v9` coexistence and the node-matched pins.
 
