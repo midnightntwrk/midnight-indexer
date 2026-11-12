@@ -60,7 +60,7 @@ export const NIGHT_TOKEN_TYPE = '0'.repeat(64);
  */
 const PROGRESS_TIMEOUT = 400_000;
 
-/** Identifies a shared test, so a suite can attach its Xray key to the right one. */
+/** Identifies a shared test, so a suite can attach its test key to the right one. */
 export type UnshieldedTransferTestId =
   | 'blockQueryByHash'
   | 'transactionQueryByHash'
@@ -118,7 +118,7 @@ export interface UnshieldedTokenUnderTest {
    * indexer routes a transfer between several subscribed recipients.
    */
   extraDestinationSeeds?: string[];
-  /** Xray test keys by test id. Omitted by suites with no Xray coverage. */
+  /** Test-management keys by test id. Optional. */
   testKeys?: Partial<Record<UnshieldedTransferTestId, string>>;
   /**
    * Runs once the wallets are subscribed and before the transfer is submitted —
@@ -217,7 +217,7 @@ export function setupUnshieldedTransferScenario(
 }
 
 /**
- * Starts a shared test: attaches its labels and its suite's Xray key, then skips it
+ * Starts a shared test: attaches its labels and its suite's test key, then skips it
  * when the environment could not be prepared.
  */
 function startTest(

@@ -13,8 +13,8 @@
 
 use crate::{
     domain::{
-        LedgerStateCacheError,
         bridge::TreasuryReason,
+        spo::normalize_hex,
         storage::{Storage, bridge::BridgeEventFilter},
     },
     infra::api::{
@@ -121,22 +121,28 @@ where
     ) -> ApiResult<MerkleTreeCollapsedUpdate> {
         let storage = cx.get_storage::<S>();
 
-        let (protocol_version, _) = storage
+        // Bound concurrent ledger-DB work (issue #595): hold a permit across reading the highest
+        // ledger state and the Merkle-tree walk, so unauthenticated queries cannot exhaust the
+        // blocking pool that block_in_place hands the worker's core to, and wedge the runtime. The
+        // wait for a permit is unbounded, so a key read before the wait may be garbage collected
+        // by the time the ledger state is loaded.
+        let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
+
+        let (height, protocol_version, key) = storage
             .get_highest_ledger_state()
             .await
             .map_err_into_server_error(|| "get highest ledger state")?
             .some_or_server_error(|| "no ledger state available")?;
 
-        // Bound concurrent ledger-DB work (issue #595): hold a permit across the Merkle-tree walk
-        // so unauthenticated queries cannot exhaust the blocking pool that block_in_place hands the
-        // worker's core to, and wedge the runtime.
-        let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
-
         cx.get_ledger_state_cache()
-            .make_zswap_collapsed_update(start_index, end_index, storage, protocol_version)
+            .at_least(height, &key, protocol_version)
             .await
+            .map(|(ledger_state, protocol_version)| {
+                ledger_state.make_zswap_collapsed_update(start_index, end_index, protocol_version)
+            })
+            .map_err_into_server_error(|| "load ledger state")?
             .map_err(|error| match error {
-                error @ LedgerStateCacheError::Ledger(ledger::Error::InvalidUpdate(_)) => {
+                error @ ledger::Error::InvalidUpdate(_) => {
                     ApiError::client("invalid start_index and/or end_index", error)
                 }
 
@@ -396,22 +402,32 @@ where
     ) -> ApiResult<MerkleTreeCollapsedUpdate> {
         let storage = cx.get_storage::<S>();
 
-        let (protocol_version, _) = storage
+        // Bound concurrent ledger-DB work (issue #595): hold a permit across reading the highest
+        // ledger state and the Merkle-tree walk, so unauthenticated queries cannot exhaust the
+        // blocking pool that block_in_place hands the worker's core to, and wedge the runtime. The
+        // wait for a permit is unbounded, so a key read before the wait may be garbage collected
+        // by the time the ledger state is loaded.
+        let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
+
+        let (height, protocol_version, key) = storage
             .get_highest_ledger_state()
             .await
             .map_err_into_server_error(|| "get highest ledger state")?
             .some_or_server_error(|| "no ledger state available")?;
 
-        // Bound concurrent ledger-DB work (issue #595): hold a permit across the Merkle-tree walk
-        // so unauthenticated queries cannot exhaust the blocking pool that block_in_place hands the
-        // worker's core to, and wedge the runtime.
-        let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
-
         cx.get_ledger_state_cache()
-            .dust_commitments_collapsed_update(start_index, end_index, storage, protocol_version)
+            .at_least(height, &key, protocol_version)
             .await
+            .map(|(ledger_state, protocol_version)| {
+                ledger_state.dust_commitments_collapsed_update(
+                    start_index,
+                    end_index,
+                    protocol_version,
+                )
+            })
+            .map_err_into_server_error(|| "load ledger state")?
             .map_err(|error| match error {
-                error @ LedgerStateCacheError::Ledger(ledger::Error::InvalidUpdate(_)) => {
+                error @ ledger::Error::InvalidUpdate(_) => {
                     ApiError::client("invalid start_index and/or end_index", error)
                 }
 
@@ -431,22 +447,32 @@ where
     ) -> ApiResult<MerkleTreeCollapsedUpdate> {
         let storage = cx.get_storage::<S>();
 
-        let (protocol_version, _) = storage
+        // Bound concurrent ledger-DB work (issue #595): hold a permit across reading the highest
+        // ledger state and the Merkle-tree walk, so unauthenticated queries cannot exhaust the
+        // blocking pool that block_in_place hands the worker's core to, and wedge the runtime. The
+        // wait for a permit is unbounded, so a key read before the wait may be garbage collected
+        // by the time the ledger state is loaded.
+        let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
+
+        let (height, protocol_version, key) = storage
             .get_highest_ledger_state()
             .await
             .map_err_into_server_error(|| "get highest ledger state")?
             .some_or_server_error(|| "no ledger state available")?;
 
-        // Bound concurrent ledger-DB work (issue #595): hold a permit across the Merkle-tree walk
-        // so unauthenticated queries cannot exhaust the blocking pool that block_in_place hands the
-        // worker's core to, and wedge the runtime.
-        let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
-
         cx.get_ledger_state_cache()
-            .dust_generations_collapsed_update(start_index, end_index, storage, protocol_version)
+            .at_least(height, &key, protocol_version)
             .await
+            .map(|(ledger_state, protocol_version)| {
+                ledger_state.dust_generations_collapsed_update(
+                    start_index,
+                    end_index,
+                    protocol_version,
+                )
+            })
+            .map_err_into_server_error(|| "load ledger state")?
             .map_err(|error| match error {
-                error @ LedgerStateCacheError::Ledger(ledger::Error::InvalidUpdate(_)) => {
+                error @ ledger::Error::InvalidUpdate(_) => {
                     ApiError::client("invalid start_index and/or end_index", error)
                 }
 
@@ -542,13 +568,18 @@ where
     }
 
     /// Get SPO identity by pool ID.
+    ///
+    /// `poolIdHex` is case-insensitive hex with an optional `0x`/`0X` prefix; invalid hex
+    /// matches nothing.
     #[trace]
     async fn spo_identity_by_pool_id(
         &self,
         cx: &Context<'_>,
         pool_id_hex: String,
     ) -> ApiResult<Option<SpoIdentity>> {
-        let pool_id = normalize_hex(&pool_id_hex);
+        let Some(pool_id) = normalize_hex(&pool_id_hex) else {
+            return Ok(None);
+        };
         let storage = cx.get_storage::<S>();
 
         let identity = storage
@@ -573,13 +604,18 @@ where
     }
 
     /// Get pool metadata by pool ID.
+    ///
+    /// `poolIdHex` is case-insensitive hex with an optional `0x`/`0X` prefix; invalid hex
+    /// matches nothing.
     #[trace]
     async fn pool_metadata(
         &self,
         cx: &Context<'_>,
         pool_id_hex: String,
     ) -> ApiResult<Option<PoolMetadata>> {
-        let pool_id = normalize_hex(&pool_id_hex);
+        let Some(pool_id) = normalize_hex(&pool_id_hex) else {
+            return Ok(None);
+        };
         let storage = cx.get_storage::<S>();
 
         let metadata = storage
@@ -613,13 +649,18 @@ where
     }
 
     /// Get SPO with metadata by pool ID.
+    ///
+    /// `poolIdHex` is case-insensitive hex with an optional `0x`/`0X` prefix; invalid hex
+    /// matches nothing.
     #[trace]
     async fn spo_by_pool_id(
         &self,
         cx: &Context<'_>,
         pool_id_hex: String,
     ) -> ApiResult<Option<Spo>> {
-        let pool_id = normalize_hex(&pool_id_hex);
+        let Some(pool_id) = normalize_hex(&pool_id_hex) else {
+            return Ok(None);
+        };
         let storage = cx.get_storage::<S>();
 
         let spo = storage
@@ -660,13 +701,18 @@ where
     }
 
     /// Get composite SPO data (identity + metadata + performance).
+    ///
+    /// `poolIdHex` is case-insensitive hex with an optional `0x`/`0X` prefix; invalid hex
+    /// matches nothing.
     #[trace]
     async fn spo_composite_by_pool_id(
         &self,
         cx: &Context<'_>,
         pool_id_hex: String,
     ) -> ApiResult<Option<SpoComposite>> {
-        let pool_id = normalize_hex(&pool_id_hex);
+        let Some(pool_id) = normalize_hex(&pool_id_hex) else {
+            return Ok(None);
+        };
         let storage = cx.get_storage::<S>();
 
         let composite = storage
@@ -718,6 +764,9 @@ where
     }
 
     /// Get SPO performance by SPO key.
+    ///
+    /// `spoSkHex` is case-insensitive hex with an optional `0x`/`0X` prefix; invalid hex
+    /// returns an empty list.
     #[trace]
     async fn spo_performance_by_spo_sk(
         &self,
@@ -726,7 +775,9 @@ where
         limit: Option<i32>,
         offset: Option<i32>,
     ) -> ApiResult<Vec<EpochPerf>> {
-        let spo_sk = normalize_hex(&spo_sk_hex);
+        let Some(spo_sk) = normalize_hex(&spo_sk_hex) else {
+            return Ok(vec![]);
+        };
         let storage = cx.get_storage::<S>();
         let limit = limit.unwrap_or(100).clamp(1, 500) as i64;
         let offset = offset.unwrap_or(0).max(0) as i64;
@@ -964,6 +1015,12 @@ where
             .await
             .map_err_into_server_error(|| "get bridge balance")?;
 
+        // Bound concurrent ledger-DB work (issue #595): acquire after the bridge balance SQL above,
+        // so the permit does not cover that Postgres round-trip, but before reading the highest
+        // ledger state. The wait for a permit is unbounded, so a key read before the wait may be
+        // garbage collected by the time the ledger state is loaded.
+        let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
+
         // Override `balance` with the authoritative remaining-claimable from the ledger's
         // `bridge_receiving` map (net of fees, zero once fully claimed). `deposited - claimed` over
         // events would instead carry the bridge fee as a residual.
@@ -972,10 +1029,7 @@ where
             .await
             .map_err_into_server_error(|| "get highest ledger state")?
         {
-            Some((protocol_version, ledger_state_key)) => {
-                // Bound concurrent ledger-DB work (issue #595): acquire after the SQL above, so
-                // the permit covers the ledger walk and not a Postgres round-trip.
-                let _ledger_permit = cx.get_ledger_query_limiter().acquire().await;
+            Some((_, protocol_version, ledger_state_key)) => {
                 ledger::LedgerState::load(&ledger_state_key, protocol_version.ledger_version())
                     .map_err_into_server_error(|| "load ledger state")?
                     .bridge_receiving(address)
@@ -1113,16 +1167,6 @@ fn validate_epoch_span(from_epoch: i64, to_epoch: i64) -> ApiResult<()> {
         })
 }
 
-/// Normalize hex string by stripping 0x prefix and lowercasing.
-fn normalize_hex(input: &str) -> String {
-    let s = input
-        .strip_prefix("0x")
-        .unwrap_or(input)
-        .strip_prefix("0X")
-        .unwrap_or(input);
-    s.to_ascii_lowercase()
-}
-
 /// The ledger version the chain is currently on.
 ///
 /// The DUST queries used to hardcode `LedgerVersion::LATEST`, which picks the
@@ -1135,7 +1179,7 @@ async fn current_ledger_version<S: Storage>(storage: &S) -> ApiResult<LedgerVers
         .get_highest_ledger_state()
         .await
         .map_err_into_server_error(|| "get highest ledger state")?
-        .map(|(protocol_version, _)| protocol_version.ledger_version())
+        .map(|(_, protocol_version, _)| protocol_version.ledger_version())
         .unwrap_or(LedgerVersion::LATEST);
 
     Ok(ledger_version)

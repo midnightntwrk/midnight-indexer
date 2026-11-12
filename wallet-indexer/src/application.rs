@@ -70,7 +70,7 @@ pub async fn run(
         let max_transaction_id = max_transaction_id.clone();
 
         async move {
-            let block_indexed_stream = subscriber.subscribe::<BlockIndexed>();
+            let block_indexed_stream = subscriber.subscribe::<BlockIndexed>().await;
 
             block_indexed_stream
                 .try_for_each(|block_indexed| {

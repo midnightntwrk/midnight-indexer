@@ -7,38 +7,38 @@ How to move the indexer to a new `midnight-ledger` release.
 The indexer supports **two ledger majors at once**, so it can index chains that
 straddle a protocol upgrade:
 
-| Ledger | Protocol versions | Source |
-| ------ | ----------------- | ----------------------------------- |
-| v8     | `0.22`, `1.0`     | crates.io                           |
-| v9     | `2.0`             | git tags (RCs not yet on crates.io) |
+| Ledger | Protocol versions | Source    |
+| ------ | ----------------- | --------- |
+| v8     | `0.22`, `1.0`     | crates.io |
+| v9     | `2.0`             | crates.io |
 
 The mapping is `ProtocolVersion::ledger_version` in
 `indexer-common/src/domain/protocol_version.rs`. Both stacks come in side by
-side via suffixed aliases in `[workspace.dependencies]` - `midnight-ledger_v8`
-(registry `"8"`) and `midnight-ledger_v9` (git).
+side via suffixed aliases in `[workspace.dependencies]` - e.g.
+`midnight-ledger_v8` (`midnight-ledger`) and `midnight-ledger_v9`
+(`midnight-ledger-v9`). Crates that changed major between the two
+(`coin-structure`, `onchain-runtime`, `onchain-state`, `storage`,
+`transient-crypto`, `zswap`) get one alias per major; `base-crypto`,
+`serialize` and `storage-core` are shared.
 
 ## How the versions are pinned
 
-RCs are **not on crates.io**, so v9 is wired through `[patch.crates-io]` in the
-root `Cargo.toml`, each crate pinned to a git tag in
-[`midnightntwrk/midnight-ledger`](https://github.com/midnightntwrk/midnight-ledger).
-Two patch shapes, and the difference matters:
+Every ledger crate in `[workspace.dependencies]` carries an `=` pin to the
+version the matching
+[`midnightntwrk/midnight-node`](https://github.com/midnightntwrk/midnight-node)
+release resolves in its `Cargo.lock`. The one git dependency is
+`v8-to-v9-state-translation` in `indexer-common/Cargo.toml`, pinned to the same
+[`midnightntwrk/midnight-ledger`](https://github.com/midnightntwrk/midnight-ledger)
+tag as the node. The fork-boundary block compares the arena root the indexer
+derives against the node's, so any drift from the node breaks that block.
 
-- **No `package`/`version`** (e.g. `midnight-base-crypto`, `midnight-serialize`,
-  `midnight-zkir`) - replaces the registry crate *outright*; for crates shared
-  within their own major, or v9-only ones.
-- **With `package` + `version`** (e.g. `midnight-coin-structure_v3`,
-  `midnight-onchain-runtime_v4`) - patches *only that major*, leaving v8's
-  registry version intact. This is what lets the two coexist.
-
-The comment block above `[patch.crates-io]` is the source of truth - read it
-first.
+The comment block above the ledger aliases in the root `Cargo.toml` is the
+source of truth - read it first.
 
 ## Steps
 
-1. **Update the pins.** Bump each git `tag` in `[patch.crates-io]` to the new
-   release set; if a major's number changed, bump its `[workspace.dependencies]`
-   alias `version` too.
+1. **Update the pins.** Set each ledger alias's `=` version, and the
+   `v8-to-v9-state-translation` tag, to what the matching node release uses.
 
 2. **Update the lockfile** for *only* those crates - never a bare `cargo
    update`:
@@ -46,6 +46,11 @@ first.
    ```bash
    cargo update -p midnight-ledger-v9 -p midnight-zswap ...
    ```
+
+   Then compare every `midnight-*` and `v8-to-v9-state-translation` entry
+   against the node's `Cargo.lock`. Crates the workspace depends on only
+   transitively (e.g. `midnight-ledger-static`, `midnight-zkir`) are pinned by
+   the lockfile alone.
 
 3. **Build both features** (either can break alone):
 
@@ -94,7 +99,7 @@ first.
 When a chain needs a third concurrent ledger:
 
 1. Add suffixed aliases (`midnight-ledger_v10`, ...) in
-   `[workspace.dependencies]`, plus `[patch.crates-io]` tags if needed.
+   `[workspace.dependencies]`.
 2. Extend `LedgerVersion` and the `ProtocolVersion -> LedgerVersion` mapping in
    `protocol_version.rs`.
 3. Add per-major match arms wherever ledger types are dispatched in
@@ -104,7 +109,7 @@ When a chain needs a third concurrent ledger:
 
 - [Upgrading the node version](./updating-node-version.md) - usually the same
   PR, since a protocol bump moves both.
-- [Re-indexing from genesis](./re-indexing.md) - this guide assumes both stores
+- [Reindexing from genesis](./reindexing.md) - this guide assumes both stores
   survive the upgrade, which is the normal case; that one covers the changes
   where they cannot.
 - [Creating a release](./releasing.md)

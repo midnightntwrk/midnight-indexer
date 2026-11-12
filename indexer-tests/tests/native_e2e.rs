@@ -37,6 +37,11 @@ use walkdir::WalkDir;
 
 const API_READY_TIMEOUT: Duration = Duration::from_secs(30);
 
+// The `NODE_IMAGE` environment variable overrides the default.
+static NODE_IMAGE: LazyLock<String> = LazyLock::new(|| {
+    env::var("NODE_IMAGE").unwrap_or_else(|_| "midnightntwrk/midnight-node".to_owned())
+});
+
 static LATEST_NODE_VERSION: LazyLock<String> = LazyLock::new(|| {
     let node_versions_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../NODE_VERSIONS");
     let node_versions = fs::read_to_string(&node_versions_path).unwrap_or_else(|error| {
@@ -54,7 +59,7 @@ static LATEST_NODE_VERSION: LazyLock<String> = LazyLock::new(|| {
 
 static WS_DIR: LazyLock<String> = LazyLock::new(|| format!("{}/..", env!("CARGO_MANIFEST_DIR")));
 static TARGET_DIR: LazyLock<String> = LazyLock::new(|| {
-    env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| format!("{}/target", &*WS_DIR))
+    env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| format!("{}/target", *WS_DIR))
 });
 
 /// Setup for e2e testing using workspace executables built by cargo. Sets up the Indexer with the
@@ -214,15 +219,14 @@ async fn start_node() -> anyhow::Result<NodeHandle> {
         .display()
         .to_string();
 
-    let node_container =
-        GenericImage::new("midnightntwrk/midnight-node", LATEST_NODE_VERSION.trim())
-            .with_wait_for(WaitFor::message_on_stderr("9944"))
-            .with_mount(Mount::bind_mount(node_path, "/node"))
-            .with_env_var("SHOW_CONFIG", "false")
-            .with_env_var("CFG_PRESET", "dev")
-            .start()
-            .await
-            .context("start node container")?;
+    let node_container = GenericImage::new(NODE_IMAGE.as_str(), LATEST_NODE_VERSION.trim())
+        .with_wait_for(WaitFor::message_on_stderr("9944"))
+        .with_mount(Mount::bind_mount(node_path, "/node"))
+        .with_env_var("SHOW_CONFIG", "false")
+        .with_env_var("CFG_PRESET", "dev")
+        .start()
+        .await
+        .context("start node container")?;
 
     let node_port = node_container
         .get_host_port_ipv4(9944)
@@ -302,14 +306,14 @@ fn start_chain_indexer(
     nats_url: &str,
     node_url: &str,
 ) -> anyhow::Result<Child> {
-    Command::new(format!("{}/debug/chain-indexer", &*TARGET_DIR))
+    Command::new(format!("{}/debug/chain-indexer", *TARGET_DIR))
         .env(
             "RUST_LOG",
             "chain_indexer=info,fastrace_opentelemetry=off,error",
         )
         .env(
             "CONFIG_FILE",
-            format!("{}/chain-indexer/config.yaml", &*WS_DIR),
+            format!("{}/chain-indexer/config.yaml", *WS_DIR),
         )
         .env("APP__INFRA__NODE__URL", node_url)
         .env("APP__INFRA__PUB_SUB__URL", nats_url)
@@ -321,14 +325,14 @@ fn start_chain_indexer(
 
 #[cfg(feature = "cloud")]
 async fn start_wallet_indexer(postgres_port: u16, nats_url: &str) -> anyhow::Result<Child> {
-    Command::new(format!("{}/debug/wallet-indexer", &*TARGET_DIR))
+    Command::new(format!("{}/debug/wallet-indexer", *TARGET_DIR))
         .env(
             "RUST_LOG",
             "wallet_indexer=debug,fastrace_opentelemetry=off,error",
         )
         .env(
             "CONFIG_FILE",
-            format!("{}/wallet-indexer/config.yaml", &*WS_DIR),
+            format!("{}/wallet-indexer/config.yaml", *WS_DIR),
         )
         .env("APP__INFRA__PUB_SUB__URL", nats_url)
         .env("APP__INFRA__STORAGE__PORT", postgres_port.to_string())
@@ -341,14 +345,14 @@ async fn start_wallet_indexer(postgres_port: u16, nats_url: &str) -> anyhow::Res
 async fn start_indexer_api(postgres_port: u16, nats_url: &str) -> anyhow::Result<(Child, u16)> {
     let api_port = find_free_port()?;
 
-    Command::new(format!("{}/debug/indexer-api", &*TARGET_DIR))
+    Command::new(format!("{}/debug/indexer-api", *TARGET_DIR))
         .env(
             "RUST_LOG",
             "indexer_api=info,fastrace_opentelemetry=off,error",
         )
         .env(
             "CONFIG_FILE",
-            format!("{}/indexer-api/config.yaml", &*WS_DIR),
+            format!("{}/indexer-api/config.yaml", *WS_DIR),
         )
         .env("APP__INFRA__API__PORT", api_port.to_string())
         .env("APP__INFRA__API__MAX_COMPLEXITY", "600")
@@ -371,14 +375,14 @@ fn start_indexer_standalone(node_url: &str) -> anyhow::Result<(Child, u16, TempD
         .display()
         .to_string();
 
-    Command::new(format!("{}/debug/indexer-standalone", &*TARGET_DIR))
+    Command::new(format!("{}/debug/indexer-standalone", *TARGET_DIR))
         .env(
             "RUST_LOG",
             "indexer_standalone=info,chain_indexer=info,indexer_api=info,wallet_indexer=debug,fastrace_opentelemetry=off,error",
         )
         .env(
             "CONFIG_FILE",
-            format!("{}/indexer-standalone/config.yaml", &*WS_DIR),
+            format!("{}/indexer-standalone/config.yaml", *WS_DIR),
         )
         .env("APP__INFRA__API__PORT", api_port.to_string())
         .env("APP__INFRA__API__MAX_COMPLEXITY", "600")
