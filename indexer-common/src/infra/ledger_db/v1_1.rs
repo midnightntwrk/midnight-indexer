@@ -75,6 +75,14 @@ impl LedgerDb {
     pub fn new(pool: crate::infra::pool::sqlite::SqlitePool) -> Self {
         Self { pool }
     }
+
+    async fn begin_write(&self, msg: &'static str) -> SqlxTransaction {
+        #[cfg(feature = "cloud")]
+        let tx = crate::infra::pool::postgres::begin_write(&self.pool).await;
+        #[cfg(feature = "standalone")]
+        let tx = self.pool.begin().await;
+        tx.unwrap_or_panic(msg)
+    }
 }
 
 impl DB for LedgerDb {
@@ -107,11 +115,7 @@ impl DB for LedgerDb {
     fn insert_node(&mut self, key: ArenaHash<Self::Hasher>, object: OnDiskObject<Self::Hasher>) {
         block_in_place(|| {
             Handle::current().block_on(async {
-                let mut tx = self
-                    .pool
-                    .begin()
-                    .await
-                    .unwrap_or_panic("begin transaction for insert node");
+                let mut tx = self.begin_write("begin transaction for insert node").await;
 
                 let mut ser_object = Vec::with_capacity(object.serialized_size());
                 Serializable::serialize(&object, &mut ser_object)
@@ -147,11 +151,7 @@ impl DB for LedgerDb {
     fn delete_node(&mut self, key: &ArenaHash<Self::Hasher>) {
         block_in_place(|| {
             Handle::current().block_on(async {
-                let mut tx = self
-                    .pool
-                    .begin()
-                    .await
-                    .unwrap_or_panic("begin transaction for delete node");
+                let mut tx = self.begin_write("begin transaction for delete node").await;
 
                 delete_node(&mut tx, key).await;
 
@@ -168,11 +168,7 @@ impl DB for LedgerDb {
     {
         block_in_place(|| {
             Handle::current().block_on(async {
-                let mut tx = self
-                    .pool
-                    .begin()
-                    .await
-                    .unwrap_or_panic("begin transaction for batch update");
+                let mut tx = self.begin_write("begin transaction for batch update").await;
 
                 // Consecutive inserts and consecutive deletes are each sent in batches. Flushing one
                 // buffer before the other grows keeps the updates in their original order.
@@ -334,10 +330,8 @@ impl DB for LedgerDb {
         block_in_place(|| {
             Handle::current().block_on(async {
                 let mut tx = self
-                    .pool
-                    .begin()
-                    .await
-                    .unwrap_or_panic("begin transaction for set root count");
+                    .begin_write("begin transaction for set root count")
+                    .await;
 
                 set_root_count(&mut tx, key, count).await;
 
