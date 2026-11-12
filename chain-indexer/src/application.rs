@@ -59,10 +59,12 @@ pub struct Config {
     pub caught_up_max_distance: u32,
     pub caught_up_leeway: u32,
 
-    /// Time budget for one storage-core gc-v1 mark-and-sweep pass, per block covered by that pass.
-    /// The pass gets `gc_bound * gc_interval`. Set to "0s" to disable garbage collection — but note
-    /// that is not safe during a long re-index, since retention-window unpersists keep producing
-    /// garbage that then never gets reclaimed.
+    /// Time budget for one storage-core gc-v1 mark-and-sweep pass, per block of the interval in
+    /// effect: the pass gets `gc_bound` times `gc_interval` at the tip, or times
+    /// `gc_catch_up_interval` while catching up. Set to "0s" to disable garbage collection — but
+    /// note that is not safe during a long reindex, since retention-window unpersists keep
+    /// producing garbage that then never gets reclaimed. The ledger state accrued in memory is
+    /// cleared before each pass, so without gc it keeps growing.
     #[serde(with = "humantime_serde")]
     pub gc_bound: Duration,
 
@@ -73,6 +75,16 @@ pub struct Config {
     /// per-block passes.
     pub gc_interval: NonZeroU32,
 
+    /// `gc_interval` while not caught up. A completed pass marks the whole live set and scans the
+    /// whole ledger DB, so its cost grows with the arena rather than with the garbage since the
+    /// last pass: fewer, longer passes sync much faster and still keep the arena bounded. The
+    /// longer pauses only matter at the tip, where `gc_interval` applies. Meant to be at least
+    /// `gc_interval`; a smaller value runs gc more often while catching up, not less. A pass holds
+    /// the ledger arena's lock throughout, so in standalone, indexer-api's ledger reads wait for
+    /// up to a whole pass while catching up.
+    #[serde(default = "gc_catch_up_interval_default")]
+    pub gc_catch_up_interval: NonZeroU32,
+
     /// Sample the arena size metrics every N blocks, or never if `0`. Each sample counts the rows in
     /// `ledger_db_nodes`, which is a full scan proportional to the size of the arena, so this is
     /// deliberately opt-in and deliberately not tied to the gc interval.
@@ -82,6 +94,10 @@ pub struct Config {
     /// is unpersisted. Must comfortably exceed indexer-api's block-hash snapshot reads, e.g.
     /// the dust generations subscription's max_snapshot_age, or those reads hit culled state.
     pub ledger_state_retention: NonZeroUsize,
+}
+
+fn gc_catch_up_interval_default() -> NonZeroU32 {
+    NonZeroU32::new(500).expect("500 is not zero")
 }
 
 pub async fn run(
@@ -98,6 +114,7 @@ pub async fn run(
         caught_up_leeway,
         gc_bound,
         gc_interval,
+        gc_catch_up_interval,
         arena_metrics_interval,
         ledger_state_retention,
     } = config;
@@ -126,7 +143,7 @@ pub async fn run(
     // Refuse to resume a database written before contract states were referenced by ledger-arena
     // key. Those rows carried the state as a blob in columns that no longer exist, and the blobs
     // cannot be recreated: their arena nodes were garbage collected and nothing can replay the
-    // chain for them. Failing here turns "you must re-index" into an actionable message instead of
+    // chain for them. Failing here turns "you must reindex" into an actionable message instead of
     // contract states silently reading back empty.
     if storage
         .contract_actions_without_state_keys_exist()
@@ -136,7 +153,7 @@ pub async fn run(
         bail!(
             "found contract actions with no contract state key; they were indexed by a version \
              that stored contract states as blobs, which cannot be converted. Wipe both the \
-             indexer database and the ledger DB and re-index from genesis; see docs/re-indexing.md"
+             indexer database and the ledger DB and reindex from genesis; see docs/reindexing.md"
         );
     }
 
@@ -284,6 +301,7 @@ pub async fn run(
                 .await?;
 
                 ledger_state = next_ledger_state;
+                let ledger_state_key = new_ledger_state_key.clone();
 
                 // Keep the newest ledger_state_retention keys persisted and unpersist the
                 // oldest beyond the window, each with the version it was persisted under
@@ -304,9 +322,23 @@ pub async fn run(
 
                 // Run a time-bounded mark-and-sweep pass every gc_interval blocks, with the budget
                 // for all of them; skip when disabled.
-                if !gc_bound.is_zero() && blocks_since_gc >= gc_interval.get() {
+                let gc_interval = if caught_up {
+                    gc_interval
+                } else {
+                    gc_catch_up_interval
+                };
+                if let Some(budget) = gc_budget(gc_bound, gc_interval, blocks_since_gc) {
+                    // Clear the ledger state accrued since the last pass, which also shrinks the
+                    // gc roots. Like the pass, it walks many nodes, so it runs via `block_in_place`.
+                    ledger_state = task::block_in_place(|| ledger_state.reload(&ledger_state_key))
+                        .context("reload ledger state")?;
+
+                    // A pass is synchronous. Its ledger DB calls already hand off this runtime
+                    // worker via `block_in_place`, but the CPU-bound marking between them does
+                    // not, so run the whole pass via `block_in_place` to keep other tasks on this
+                    // worker, e.g. indexer-api's in standalone, from stalling behind it.
                     let started = Instant::now();
-                    let nodes_culled = LedgerState::gc(gc_bound * blocks_since_gc);
+                    let nodes_culled = task::block_in_place(|| LedgerState::gc(budget));
                     let elapsed = started.elapsed();
                     blocks_since_gc = 0;
 
@@ -364,6 +396,23 @@ pub async fn run(
             Ok(())
         }
     }
+}
+
+/// The budget for a gc pass if one is due after `blocks_since_gc` blocks, `None` if not or if gc is
+/// disabled. The budget covers `gc_interval` blocks rather than `blocks_since_gc`: the two only
+/// differ right after catching up, when `blocks_since_gc` can be close to `gc_catch_up_interval`,
+/// and that first pass at the tip must not get the long catch-up budget.
+///
+/// - `gc_bound`: Time budget per block of `gc_interval`; zero disables gc.
+/// - `gc_interval`: Blocks between passes currently in effect, for the tip or for catching up.
+/// - `blocks_since_gc`: Blocks indexed since the last pass.
+fn gc_budget(
+    gc_bound: Duration,
+    gc_interval: NonZeroU32,
+    blocks_since_gc: u32,
+) -> Option<Duration> {
+    (!gc_bound.is_zero() && blocks_since_gc >= gc_interval.get())
+        .then(|| gc_bound.saturating_mul(gc_interval.get()))
 }
 
 /// An infinite stream of node blocks, neither with duplicates, nor with gaps or otherwise
@@ -493,6 +542,8 @@ where
     let (mut block, transactions) = block.try_into().context("convert node block into domain")?;
 
     let ledger_version = block.protocol_version.ledger_version();
+    // Whether this block translates the ledger state, taken before the state is replaced.
+    let translated = block.height != 0 && ledger_state.ledger_version() != ledger_version;
     ledger_state = if block.height == 0 {
         // The genesis block establishes the chain's ledger version. The inherited
         // bootstrap state was created at OLDEST and is replaced by the genesis state below, so
@@ -637,7 +688,7 @@ where
     //
     // Ordering arena-flush before SQL-commit means a crash between them can never leave a key in
     // SQL without its node; the benign inverse — a rooted node with no row referencing it — is
-    // possible and permanent. Re-indexing a block yields the *same* content-addressed key and a
+    // possible and permanent. Reindexing a block yields the *same* content-addressed key and a
     // second `persist()`, taking the root count from 1 to 2. That is semantically free because
     // these roots are never unpersisted, so the write path needs no dedup logic. Note this is the
     // exact inverse of the ledger-state retention invariant above, where a double persist *would*
@@ -647,6 +698,35 @@ where
         .context("capture contract state keys")?;
     metrics.record_uncaptured_contract_states(uncaptured);
     let transactions = transactions;
+
+    // At a hard fork, capture the translated state key of every contract without an action in this
+    // block, immediately after the contract state keys above.
+    let contract_state_translations = if translated {
+        let latest_actions = storage
+            .get_latest_contract_actions()
+            .await
+            .context("get latest contract actions")?;
+        let contracts_in_block = transactions
+            .iter()
+            .filter_map(|transaction| match transaction {
+                Transaction::Regular(transaction) => Some(&transaction.contract_actions),
+                _ => None,
+            })
+            .flatten()
+            .map(|action| action.address.clone())
+            .collect::<HashSet<_>>();
+        let contract_state_translations = ledger_state
+            .contract_state_translations(latest_actions, &contracts_in_block)
+            .context("record contract state translations at fork block")?;
+        info!(
+            count = contract_state_translations.len(),
+            height = block.height;
+            "recorded contract state translations at fork block"
+        );
+        contract_state_translations
+    } else {
+        vec![]
+    };
 
     // Determine whether caught up, also allowing to fall back a little in that state.
     // Use saturating subtraction to handle the case where streams are temporarily out of order.
@@ -674,8 +754,8 @@ where
 
     // Persist ledger state.
     let (new_ledger_state, ledger_state_key) =
-        ledger_state.0.persist().context("persist ledger state")?;
-    ledger_state = new_ledger_state.into();
+        ledger_state.persist().context("persist ledger state")?;
+    ledger_state = new_ledger_state;
 
     // Determine system parameters change if any.
     let system_parameters_change = determine_system_parameters_change(&block, storage, node)
@@ -690,6 +770,7 @@ where
             &block.dust_registration_events,
             &ledger_state_key,
             system_parameters_change.as_ref(),
+            &contract_state_translations,
         )
         .await
         .context("save block")?;
@@ -700,6 +781,7 @@ where
             height: block.height,
             max_transaction_id,
             caught_up: *caught_up,
+            protocol_version: block.protocol_version.into(),
         })
         .await
         .context("publish BlockIndexed event")?;
@@ -834,7 +916,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{
-        application::node_blocks,
+        application::{gc_budget, gc_catch_up_interval_default, node_blocks},
         domain::{
             BlockRef, SystemParametersChange,
             node::{self, Node},
@@ -851,9 +933,42 @@ mod tests {
     };
     use std::{
         convert::Infallible,
+        num::NonZeroU32,
         sync::{Arc, LazyLock, Mutex},
+        time::Duration,
     };
     use thiserror::Error;
+
+    #[test]
+    fn test_gc_budget() {
+        let bound = Duration::from_millis(200);
+        let interval = NonZeroU32::new(25).unwrap();
+
+        assert_eq!(gc_budget(bound, interval, 24), None);
+        assert_eq!(gc_budget(bound, interval, 25), Some(Duration::from_secs(5)));
+
+        // Right after catching up, blocks_since_gc can be far beyond the tip interval: the pass is
+        // due, but its budget must still cover only the tip interval.
+        assert_eq!(
+            gc_budget(bound, interval, 499),
+            Some(Duration::from_secs(5))
+        );
+
+        // While catching up, a pass covers the whole catch-up interval: with the default config
+        // (gc_bound 200ms, gc_catch_up_interval 500) that is a budget of up to 100s.
+        let catch_up_interval = gc_catch_up_interval_default();
+        assert_eq!(gc_budget(bound, catch_up_interval, 499), None);
+        assert_eq!(
+            gc_budget(bound, catch_up_interval, 500),
+            Some(Duration::from_secs(100))
+        );
+
+        assert_eq!(gc_budget(Duration::ZERO, interval, 25), None);
+        assert_eq!(
+            gc_budget(Duration::MAX, NonZeroU32::MAX, u32::MAX),
+            Some(Duration::MAX)
+        );
+    }
 
     #[tokio::test]
     async fn test_blocks() -> Result<(), BoxError> {

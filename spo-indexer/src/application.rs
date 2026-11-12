@@ -14,7 +14,7 @@
 use crate::{
     domain::{
         CandidateRegistration, Epoch, PoolMetadata, SPO, SPOEpochPerformance, SPOHistory,
-        SPOStatus, Validator, ValidatorMembership,
+        SPORegistrationResponse, SPOStatus, Validator, ValidatorMembership,
         storage::{SqlxTransaction, Storage},
     },
     infra::spo_client::{SLOT_DURATION, SPOClient},
@@ -182,12 +182,7 @@ async fn process_next_epoch(
     let raw_spos = client.get_spo_registrations(epoch.epoch_no).await?;
     let membership = committee_to_membership(client, &committee);
 
-    let entries = raw_spos
-        .candidate_registrations
-        .values()
-        .flatten()
-        .map(|reg| (get_cardano_id(&reg.mainchain_pub_key), reg))
-        .collect::<Vec<_>>();
+    let entries = attributable_registrations(&raw_spos);
 
     let mut blocks_produced: HashMap<String, u32> = HashMap::new();
     let mut val_to_registration: HashMap<String, CandidateRegistration> = HashMap::new();
@@ -414,9 +409,15 @@ async fn save_spo_identity(
     cardano_id: String,
     tx: &mut SqlxTransaction,
 ) -> anyhow::Result<()> {
+    // A registration without an aura key cannot produce blocks, and storing it with a NULL
+    // aura key would block every later aura-less identity via the uniqueness check.
+    let Some(aura) = &raw_spo.keys.aura else {
+        return Ok(());
+    };
+
     // Normalize all hex-like identifiers to avoid mixed representations.
     let spo_sk = remove_hex_prefix(&raw_spo.sidechain_pub_key).to_owned();
-    let aura_pk = remove_hex_prefix(&raw_spo.keys.aura).to_owned();
+    let aura_pk = remove_hex_prefix(aura).to_owned();
     let main_pk = remove_hex_prefix(&raw_spo.mainchain_pub_key).to_owned();
 
     let spo = SPO {
@@ -427,6 +428,15 @@ async fn save_spo_identity(
         mainchain_pubkey: main_pk,
     };
 
+    let removed = storage.remove_unverified_spos(&spo, tx).await?;
+    if !removed.is_empty() {
+        warn!(
+            spo_sk = spo.spo_sk,
+            pool_id = spo.pool_id,
+            removed:? = removed;
+            "removed unverified SPO identities conflicting with a verified registration"
+        );
+    }
     storage.save_spo(&spo, tx).await?;
     Ok(())
 }
@@ -500,6 +510,19 @@ fn elapsed_ms(t: Instant) -> u64 {
     t.elapsed().as_millis() as u64
 }
 
+/// Registrations that provably belong to the pool they name, keyed by that pool's Cardano ID.
+fn attributable_registrations(
+    response: &SPORegistrationResponse,
+) -> Vec<(String, &CandidateRegistration)> {
+    response
+        .candidate_registrations
+        .values()
+        .flatten()
+        .filter(|reg| reg.is_attributable())
+        .map(|reg| (get_cardano_id(&reg.mainchain_pub_key), reg))
+        .collect()
+}
+
 fn get_cardano_id(mainchain_pk: &str) -> String {
     let mainchain_pk = hex_to_bytes(mainchain_pk);
     let hash = Blake2b::<U28>::digest(&mainchain_pk);
@@ -510,8 +533,9 @@ fn get_cardano_id(mainchain_pk: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{get_cardano_id, is_transient_epoch_error};
-    use crate::infra::spo_client::SPOClientError;
+    use super::{attributable_registrations, get_cardano_id, is_transient_epoch_error};
+    use crate::{domain::SPORegistrationResponse, infra::spo_client::SPOClientError};
+    use serde_json::{Value, json};
     use std::io;
     use subxt::error::{ExtrinsicError, OnlineClientAtBlockError};
     use subxt::rpcs::client::reconnecting_rpc_client::{Error as ReconnectingError, RpcError};
@@ -591,6 +615,57 @@ mod tests {
             let error = error.context("processing epoch");
             assert!(!is_transient_epoch_error(error.as_ref()), "{error:#}");
         }
+    }
+
+    fn registration(sidechain_pub_key: &str, is_valid: bool, invalid_reasons: Value) -> Value {
+        json!({
+            "sidechainPubKey": sidechain_pub_key,
+            "sidechainAccountId": "account",
+            "mainchainPubKey": "0x02",
+            "crossChainPubKey": "0x03",
+            "keys": { "gran": "0x04", "aura": "0x05" },
+            "sidechainSignature": "0x06",
+            "mainchainSignature": "0x07",
+            "crossChainSignature": "0x08",
+            "utxo": {
+                "utxoId": "utxo#0",
+                "epochNumber": 1,
+                "blockNumber": 2,
+                "slotNumber": 3,
+                "txIndexWithinBlock": 0
+            },
+            "isValid": is_valid,
+            "invalidReasons": invalid_reasons
+        })
+    }
+
+    #[test]
+    fn test_attributable_registrations() {
+        let response = serde_json::from_value::<SPORegistrationResponse>(json!({
+            "dParameter": { "numPermissionedCandidates": 0, "numRegisteredCandidates": 4 },
+            "permissionedCandidates": [],
+            "candidateRegistrations": {
+                "0x02": [
+                    registration("0x10", true, Value::Null),
+                    registration("0x11", false, json!({ "StakeError": "UnknownStake" })),
+                    registration(
+                        "0x12",
+                        false,
+                        json!({ "InvalidRegistrationData": "InvalidMainchainSignature" }),
+                    ),
+                    registration("0x13", false, json!("InvalidAccountKeys")),
+                ]
+            }
+        }))
+        .expect("response can be deserialized");
+
+        let mut sidechain_keys = attributable_registrations(&response)
+            .into_iter()
+            .map(|(_, reg)| reg.sidechain_pub_key.as_str())
+            .collect::<Vec<_>>();
+        sidechain_keys.sort_unstable();
+
+        assert_eq!(sidechain_keys, ["0x10", "0x11"]);
     }
 
     #[test]

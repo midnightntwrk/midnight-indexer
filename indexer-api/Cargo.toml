@@ -40,7 +40,7 @@ log                = { workspace = true, features = [ "kv" ] }
 metrics            = { workspace = true }
 moka               = { workspace = true }
 parking_lot        = { workspace = true }
-secrecy            = { workspace = true }
+secrecy            = { workspace = true, features = [ "serde" ] }
 serde              = { workspace = true, features = [ "derive" ] }
 serde_json         = { workspace = true }
 sqlx               = { workspace = true, features = [ "time" ] }
@@ -52,6 +52,14 @@ tower              = { workspace = true }
 tower-http         = { workspace = true, features = [ "compression-br", "compression-gzip", "compression-zstd", "cors", "limit" ] }
 trait-variant      = { workspace = true }
 uuid               = { workspace = true, features = [ "v7" ] }
+
+[dev-dependencies]
+midnight-storage-core_v1 = { workspace = true }
+tempfile                = { workspace = true }
+testcontainers          = { workspace = true }
+testcontainers-modules  = { workspace = true, features = [ "postgres" ] }
+tokio                   = { workspace = true, features = [ "io-util", "net" ] }
+tokio-tungstenite       = { workspace = true }
 
 [features]
 cloud      = [ "indexer-common/cloud" ]

@@ -12,17 +12,18 @@
 // limitations under the License.
 
 use crate::domain::{
-    BlockRef, ContractAction, RegularTransaction, SystemTransaction, Transaction,
+    BlockRef, ContractAction, ContractStateTranslation, LatestContractAction, RegularTransaction,
+    SystemTransaction, Transaction,
     extrinsic::{Applied, Phase, divergence},
     node,
 };
-use derive_more::derive::{Deref, From};
+use derive_more::derive::Deref;
 use fastrace::trace;
 use indexer_common::domain::{
     ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, BlockHash, LedgerVersion,
     NetworkId, ProtocolVersion, SerializedContractAddress, SerializedLedgerStateKey,
     TransactionHash, TransactionResult,
-    ledger::{self, LedgerParameters, RootCountRepair},
+    ledger::{self, ContractZswapIndices, LedgerParameters, RootCountRepair},
 };
 use log::{debug, warn};
 use std::{
@@ -84,8 +85,8 @@ pub(crate) fn should_bump_first_regular_tblock(
 }
 
 /// New type for ledger state from indexer_common.
-#[derive(Debug, Clone, From, Deref)]
-pub struct LedgerState(pub indexer_common::domain::ledger::LedgerState);
+#[derive(Debug, Deref)]
+pub struct LedgerState(#[deref] ledger::LedgerState, ContractZswapIndices);
 
 impl DerefMut for LedgerState {
     fn deref_mut(&mut self) -> &mut Self::Target {
@@ -97,7 +98,7 @@ impl LedgerState {
     pub fn new(network_id: NetworkId, ledger_version: LedgerVersion) -> Result<Self, Error> {
         indexer_common::domain::ledger::LedgerState::new(network_id, ledger_version)
             .map_err(Error::Create)
-            .map(Into::into)
+            .map(Self::from)
     }
 
     pub fn from_genesis(
@@ -106,7 +107,7 @@ impl LedgerState {
     ) -> Result<Self, Error> {
         indexer_common::domain::ledger::LedgerState::from_genesis(raw, ledger_version)
             .map_err(Error::Create)
-            .map(Into::into)
+            .map(Self::from)
     }
 
     pub fn load(
@@ -115,14 +116,55 @@ impl LedgerState {
     ) -> Result<Self, Error> {
         indexer_common::domain::ledger::LedgerState::load(key, ledger_version)
             .map_err(Error::Load)
-            .map(Into::into)
+            .map(Self::from)
+    }
+
+    // Wraps a ledger state with empty contract zswap indices, which read the whole commitment tree on
+    // first use. Private, so code outside this module cannot rebuild the wrapper around the state.
+    fn from(ledger_state: ledger::LedgerState) -> Self {
+        Self(ledger_state, ContractZswapIndices::default())
+    }
+
+    /// Clears the ledger state accrued in memory and loads it lazily again from `key`, its
+    /// persisted key.
+    ///
+    /// # Errors
+    /// Returns [Error::Load] if the state cannot be reloaded, e.g. mid-block or for an unknown `key`.
+    pub fn reload(self, key: &SerializedLedgerStateKey) -> Result<Self, Error> {
+        let Self(ledger_state, contract_zswap_indices) = self;
+
+        // Reloading leaves the commitment tree as it is, so its contract zswap indices still hold.
+        ledger_state
+            .reload(key)
+            .map_err(Error::Load)
+            .map(|ledger_state| Self(ledger_state, contract_zswap_indices))
     }
 
     pub fn translate(self, ledger_version: LedgerVersion) -> Result<Self, Error> {
-        self.0
+        let Self(ledger_state, contract_zswap_indices) = self;
+
+        // Translating to the same ledger version leaves the commitment tree as it is, so its contract
+        // zswap indices still hold. Another version starts new ones.
+        let contract_zswap_indices = if ledger_state.ledger_version() == ledger_version {
+            contract_zswap_indices
+        } else {
+            ContractZswapIndices::default()
+        };
+
+        ledger_state
             .translate(ledger_version)
             .map_err(Error::Translate)
-            .map(Into::into)
+            .map(|ledger_state| Self(ledger_state, contract_zswap_indices))
+    }
+
+    /// Persists the ledger state and returns it with its key.
+    ///
+    /// # Errors
+    /// Returns an error if the ledger state cannot be persisted.
+    pub fn persist(self) -> Result<(Self, SerializedLedgerStateKey), ledger::Error> {
+        let Self(ledger_state, contract_zswap_indices) = self;
+        let (ledger_state, key) = ledger_state.persist()?;
+        Ok((Self(ledger_state, contract_zswap_indices), key))
     }
 
     /// Unpersist a previously-persisted ledger state by its serialized key.
@@ -327,17 +369,7 @@ impl LedgerState {
                         // the ~860 KB deserialize per action the indexing path used to do with one
                         // read per address off a pointer that is already in hand.
                         let captured_state = match contract_state {
-                            Some((key, contract_state)) => {
-                                let balances = contract_state.balances().map_err(|error| {
-                                    Error::GetContractBalances(
-                                        transaction.hash,
-                                        contract_action.address.clone(),
-                                        error,
-                                    )
-                                })?;
-
-                                (Some(key), balances)
-                            }
+                            Some((key, contract_state)) => (Some(key), contract_state.balances()),
 
                             None => (None, vec![]),
                         };
@@ -355,6 +387,42 @@ impl LedgerState {
         }
 
         Ok(captured.values().filter(|(key, _)| key.is_none()).count())
+    }
+
+    /// The translations for the given latest actions whose state key is missing or not in this
+    /// state's encoding, excluding `contracts_in_block`. Call after `translate` and
+    /// `capture_contract_state_keys`. A contract absent from this state is an error.
+    #[trace]
+    pub(crate) fn contract_state_translations(
+        &self,
+        latest_actions: Vec<(u64, LatestContractAction)>,
+        contracts_in_block: &HashSet<SerializedContractAddress>,
+    ) -> Result<Vec<(u64, ContractStateTranslation)>, Error> {
+        latest_actions
+            .into_iter()
+            .filter(|(_, action)| !contracts_in_block.contains(&action.address))
+            .map(|(id, action)| {
+                if let Some(key) = &action.state_key
+                    && self
+                        .0
+                        .contract_state_key_in_current_encoding(key)
+                        .map_err(|error| {
+                            Error::ContractStateKeyEncoding(action.address.clone(), error)
+                        })?
+                {
+                    return Ok(None);
+                }
+
+                let (state_key, _) = self
+                    .0
+                    .contract_state(&action.address)
+                    .map_err(|error| Error::GetContractStateAtFork(action.address.clone(), error))?
+                    .ok_or_else(|| Error::ContractStateMissingAtFork(action.address.clone()))?;
+
+                Ok(Some((id, ContractStateTranslation(state_key))))
+            })
+            .filter_map(Result::transpose)
+            .collect()
     }
 
     // Converts a regular transaction that failed at dispatch into a domain regular transaction
@@ -503,7 +571,8 @@ impl LedgerState {
         // `capture_contract_state_keys`.
         for contract_action in transaction.contract_actions.iter_mut() {
             let zswap_state_key = self
-                .contract_zswap_state_key(&contract_action.address)
+                .0
+                .contract_zswap_state_key(&contract_action.address, &mut self.1)
                 .map_err(|error| Error::GetContractZswapStateKey(transaction.hash, error))?;
             contract_action.zswap_state_key = Some(zswap_state_key);
         }
@@ -573,6 +642,21 @@ pub enum Error {
         #[source] indexer_common::domain::ledger::Error,
     ),
 
+    #[error("cannot read the encoding of the contract state key of contract {0}")]
+    ContractStateKeyEncoding(
+        SerializedContractAddress,
+        #[source] indexer_common::domain::ledger::Error,
+    ),
+
+    #[error("cannot get the contract state of contract {0} at the fork block")]
+    GetContractStateAtFork(
+        SerializedContractAddress,
+        #[source] indexer_common::domain::ledger::Error,
+    ),
+
+    #[error("contract {0} has actions but is not in the ledger state at the fork block")]
+    ContractStateMissingAtFork(SerializedContractAddress),
+
     #[error("cannot capture contract zswap state key for transaction {0}")]
     GetContractZswapStateKey(
         TransactionHash,
@@ -590,13 +674,6 @@ pub enum Error {
         "transaction {0} is missing a result for logical segment {1} required by a contract action"
     )]
     MissingContractActionSegmentResult(TransactionHash, u16),
-
-    #[error("cannot get contract balances for transaction {0} and contract address {1}")]
-    GetContractBalances(
-        TransactionHash,
-        SerializedContractAddress,
-        #[source] indexer_common::domain::ledger::Error,
-    ),
 }
 
 /// The ledger result of an applied regular transaction must be how it was applied on chain; a
@@ -1433,5 +1510,168 @@ mod apply_transactions_tblock_tests {
                 .map(Err)
                 .ok_or_else(|| format!("unexpected error: {error:#}").into()),
         }
+    }
+}
+
+#[cfg(test)]
+mod contract_state_translation_tests {
+    use super::*;
+    use indexer_common::{
+        domain::{
+            SerializedContractAddress, SerializedContractStateKey,
+            ledger::{LedgerState as CommonLedgerState, SerializableExt},
+        },
+        error::BoxError,
+        testing::init_ledger_db,
+    };
+    use midnight_coin_structure_v2::contract::ContractAddress as ContractAddressV8;
+    use midnight_onchain_runtime_v3::state::ContractState as ContractStateV3;
+    use midnight_serialize_v1::Deserializable;
+
+    fn address(byte: u8) -> (ContractAddressV8, SerializedContractAddress) {
+        let address = ContractAddressV8::deserialize(&mut [byte; 32].as_slice(), 0)
+            .expect("32 bytes are a contract address");
+        let serialized = address.serialize().expect("address serializes");
+        (address, serialized)
+    }
+
+    /// A V8 ledger state holding the given contracts.
+    fn v8_state_with(addresses: &[ContractAddressV8]) -> LedgerState {
+        let mut state = CommonLedgerState::new("undeployed".try_into().unwrap(), LedgerVersion::V8)
+            .expect("ledger state can be constructed");
+        match &mut state {
+            CommonLedgerState::V8 { ledger_state, .. } => {
+                for address in addresses {
+                    ledger_state.contract = ledger_state
+                        .contract
+                        .insert(*address, ContractStateV3::default());
+                }
+            }
+            CommonLedgerState::V9 { .. } => unreachable!("constructed as V8"),
+        }
+        LedgerState::from(state)
+    }
+
+    fn v8_key(
+        state: &LedgerState,
+        address: &SerializedContractAddress,
+    ) -> SerializedContractStateKey {
+        state
+            .contract_state(address)
+            .expect("contract state can be read")
+            .expect("the contract is in the state")
+            .0
+    }
+
+    /// One translation per contract not in the new encoding, excluding contracts in the block.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn records_one_translation_per_contract_not_in_the_current_encoding()
+    -> Result<(), BoxError> {
+        let _ledger_db = init_ledger_db().await?;
+        let (a, a_serialized) = address(1);
+        let (b, b_serialized) = address(2);
+        let (_, c_serialized) = address(3);
+
+        let v8 = v8_state_with(&[a, b]);
+        let a_v8_key = v8_key(&v8, &a_serialized);
+        let b_v8_key = v8_key(&v8, &b_serialized);
+        let v9 = v8.translate(LedgerVersion::V9)?;
+        // C's latest key is already in the new encoding; C need not be in the state.
+        let c_current_key = v8_key(&v9, &b_serialized);
+
+        let latest = vec![
+            (
+                1,
+                LatestContractAction {
+                    address: a_serialized.clone(),
+                    state_key: Some(a_v8_key),
+                },
+            ),
+            (
+                2,
+                LatestContractAction {
+                    address: b_serialized.clone(),
+                    state_key: Some(b_v8_key),
+                },
+            ),
+            (
+                3,
+                LatestContractAction {
+                    address: c_serialized,
+                    state_key: Some(c_current_key),
+                },
+            ),
+        ];
+        let in_block = HashSet::from([b_serialized.clone()]);
+
+        let translations = v9.contract_state_translations(latest, &in_block)?;
+
+        assert_eq!(
+            translations.len(),
+            1,
+            "A only: B is in the block, C is current"
+        );
+        assert_eq!(translations[0].0, 1);
+        assert_eq!(translations[0].1.0, v8_key(&v9, &a_serialized));
+        assert!(
+            v9.contract_state_key_in_current_encoding(&translations[0].1.0)?,
+            "the translation is in the ledger-9 encoding"
+        );
+
+        Ok(())
+    }
+
+    /// A latest action without a key gets a translation.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_latest_action_without_a_key_gets_a_translation() -> Result<(), BoxError> {
+        let _ledger_db = init_ledger_db().await?;
+        let (a, a_serialized) = address(4);
+        let v9 = v8_state_with(&[a]).translate(LedgerVersion::V9)?;
+
+        let translations = v9.contract_state_translations(
+            vec![(
+                7,
+                LatestContractAction {
+                    address: a_serialized.clone(),
+                    state_key: None,
+                },
+            )],
+            &HashSet::new(),
+        )?;
+
+        assert_eq!(translations.len(), 1);
+        assert_eq!(translations[0].0, 7);
+        assert_eq!(translations[0].1.0, v8_key(&v9, &a_serialized));
+
+        Ok(())
+    }
+
+    /// A contract absent from the ledger state is an error.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_contract_missing_from_the_ledger_state_is_an_error() -> Result<(), BoxError> {
+        let _ledger_db = init_ledger_db().await?;
+        let (a, a_serialized) = address(5);
+        let (_, d_serialized) = address(6);
+        let v8 = v8_state_with(&[a]);
+        let a_v8_key = v8_key(&v8, &a_serialized);
+        let v9 = v8.translate(LedgerVersion::V9)?;
+
+        let result = v9.contract_state_translations(
+            vec![(
+                9,
+                LatestContractAction {
+                    address: d_serialized.clone(),
+                    state_key: Some(a_v8_key),
+                },
+            )],
+            &HashSet::new(),
+        );
+
+        assert!(
+            matches!(&result, Err(Error::ContractStateMissingAtFork(address)) if *address == d_serialized),
+            "{result:?}"
+        );
+
+        Ok(())
     }
 }

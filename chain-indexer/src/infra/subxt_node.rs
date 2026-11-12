@@ -70,8 +70,8 @@ pub(crate) struct ContentSource {
     pub(crate) extrinsic_bodies: Vec<Vec<u8>>,
 }
 
-const AURA_ENGINE_ID: ConsensusEngineId = [b'a', b'u', b'r', b'a'];
-const BABE_ENGINE_ID: ConsensusEngineId = [b'B', b'A', b'B', b'E'];
+const AURA_ENGINE_ID: ConsensusEngineId = *b"aura";
+const BABE_ENGINE_ID: ConsensusEngineId = *b"BABE";
 
 /// Name of the node runtime API reporting the active block-production engine, declared in
 /// `midnight-primitives-consensus-engine` and implemented alongside the pallet driving the

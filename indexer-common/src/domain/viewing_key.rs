@@ -11,14 +11,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{ByteArray, ByteArrayLenError, ByteVec, ViewingKeyHash};
+use crate::domain::{ByteArrayLenError, ByteVec, ViewingKeyHash};
 use chacha20poly1305::{
     AeadCore, ChaCha20Poly1305,
     aead::{Aead, OsRng, Payload},
 };
-use derive_more::From;
+use derive_more::{Debug, Display};
+use secrecy::{ExposeSecret, SecretBox, zeroize::Zeroizing};
 use sha2::{Digest, Sha256};
-use std::fmt::{self, Debug, Display};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -26,14 +26,22 @@ pub const VIEWING_KEY_LEN: usize = 32;
 
 /// A secret key that is encrypted at rest.
 /// Attention: Do not accidentally leak the secret!
-#[derive(Clone, Copy, PartialEq, Eq, Hash, From)]
-#[from(forward)]
-pub struct ViewingKey(ByteArray<VIEWING_KEY_LEN>);
+///
+/// Held in a [SecretBox], which zeroizes the bytes on drop.
+#[derive(Debug, Display)]
+#[debug("ViewingKey(REDACTED)")]
+#[display("REDACTED")]
+pub struct ViewingKey(SecretBox<[u8; VIEWING_KEY_LEN]>);
 
 impl ViewingKey {
+    /// Create a viewing key by writing its bytes in place, so they are never copied.
+    pub(crate) fn init_with_mut(ctr: impl FnOnce(&mut [u8; VIEWING_KEY_LEN])) -> Self {
+        Self(SecretBox::init_with_mut(ctr))
+    }
+
     /// Expose the sercret.
-    pub fn expose_secret(&self) -> ByteArray<VIEWING_KEY_LEN> {
-        self.0
+    pub fn expose_secret(&self) -> &[u8; VIEWING_KEY_LEN] {
+        self.0.expose_secret()
     }
 
     /// Try to decrypt the given bytes as viewing key using ChaCha20Poly1305 AEAD with the given
@@ -52,9 +60,12 @@ impl ViewingKey {
             msg: ciphertext,
             aad: wallet_id.as_bytes(),
         };
-        let bytes = cipher.decrypt(nonce.into(), payload)?.try_into()?;
+        let bytes = Zeroizing::new(cipher.decrypt(nonce.into(), payload)?);
+        let viewing_key = (bytes.len() == VIEWING_KEY_LEN)
+            .then(|| Self::init_with_mut(|viewing_key| viewing_key.copy_from_slice(&bytes)))
+            .ok_or(ByteArrayLenError(VIEWING_KEY_LEN, bytes.len()))?;
 
-        Ok(Self(bytes))
+        Ok(viewing_key)
     }
 
     /// Encrypt this viewing key using ChaCha20Poly1305 AEAD.
@@ -66,7 +77,7 @@ impl ViewingKey {
         let nonce = ChaCha20Poly1305::generate_nonce(&mut OsRng);
 
         let payload = Payload {
-            msg: &self.0.0,
+            msg: self.expose_secret(),
             aad: id.as_bytes(),
         };
         let mut ciphertext = cipher.encrypt(&nonce, payload)?;
@@ -80,24 +91,22 @@ impl ViewingKey {
     /// Return the viewing key hash (Sha256) for deduplication.
     pub fn hash(&self) -> ViewingKeyHash {
         let mut hasher = Sha256::new();
-        hasher.update(self.0);
+        hasher.update(self.expose_secret());
         let hash = hasher.finalize();
 
         <[u8; 32]>::from(hash).into()
     }
 }
 
-impl Debug for ViewingKey {
-    /// Attention: Do not leak the secret!
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "ViewingKey(REDACTED)")
+impl From<[u8; VIEWING_KEY_LEN]> for ViewingKey {
+    fn from(bytes: [u8; VIEWING_KEY_LEN]) -> Self {
+        Self(SecretBox::new(Box::new(bytes)))
     }
 }
 
-impl Display for ViewingKey {
-    /// Attention: Do not leak the secret!
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "REDACTED")
+impl Clone for ViewingKey {
+    fn clone(&self) -> Self {
+        Self::init_with_mut(|viewing_key| viewing_key.copy_from_slice(self.expose_secret()))
     }
 }
 
@@ -108,4 +117,16 @@ pub enum DecryptViewingKeyError {
 
     #[error("cannot convert into viewing key")]
     ByteArrayLen(#[from] ByteArrayLenError),
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::domain::ViewingKey;
+
+    #[test]
+    fn test_clone() {
+        let viewing_key = ViewingKey::from([1; 32]);
+        let clone = viewing_key.clone();
+        assert_eq!(clone.expose_secret(), viewing_key.expose_secret());
+    }
 }

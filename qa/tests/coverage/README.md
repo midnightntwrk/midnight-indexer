@@ -1,6 +1,6 @@
 # QA API Feature Coverage
 
-This folder contains an Xray-independent API feature coverage toolchain for `qa/tests`.
+This folder contains an API feature coverage toolchain for `qa/tests`.
 
 The goal is to measure GraphQL API feature coverage against the live schema surface:
 - root fields in `Query`, `Mutation`, and `Subscription`

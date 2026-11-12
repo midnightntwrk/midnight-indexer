@@ -41,13 +41,15 @@ readonly node_dir="$(pwd)/.node/$node_version"
 #   ledger | node/toolkit line          | compactc    | compact-runtime
 #   -------|-----------------------------|-------------|----------------
 #   v8     | 1.x                         | 0.30.0      | 0.15.0
-#   v9     | 2.1.0-beta.1+               | 0.33.0-rc.2 | 0.18.0-rc.1
+#   v9     | 2.1.0-beta.1 to 2.1.0       | 0.33.0-rc.2 | 0.18.0-rc.1
+#   v9     | 2.1.100+                    | 0.35.0      | 0.20.0
 #
 # The default follows node_version per the table above; set COMPACTC_VERSION
 # to override it. Ledger tokens token-issuer mints go to whichever wallet its
 # mintUnshielded call names as recipient.
 case "$node_version" in
-    2.1.*) default_compactc_version="0.33.0-rc.2" ;;
+    2.1.0*) default_compactc_version="0.33.0-rc.2" ;;
+    2.1.*) default_compactc_version="0.35.0" ;;
     *) default_compactc_version="0.30.0" ;;
 esac
 readonly compactc_version="${COMPACTC_VERSION:-$default_compactc_version}"
