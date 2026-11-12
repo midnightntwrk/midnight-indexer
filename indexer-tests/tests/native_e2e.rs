@@ -39,7 +39,7 @@ const API_READY_TIMEOUT: Duration = Duration::from_secs(30);
 
 // The `NODE_IMAGE` environment variable overrides the default.
 static NODE_IMAGE: LazyLock<String> = LazyLock::new(|| {
-    env::var("NODE_IMAGE").unwrap_or_else(|_| "midnightntwrk/midnight-node".to_owned())
+    env::var("NODE_IMAGE").unwrap_or_else(|_| "ghcr.io/midnightntwrk/midnight-node".to_owned())
 });
 
 static LATEST_NODE_VERSION: LazyLock<String> = LazyLock::new(|| {
