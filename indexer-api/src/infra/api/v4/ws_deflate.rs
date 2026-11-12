@@ -25,7 +25,11 @@
 //!
 //! Clients may offer `graphql-transport-ws+deflate` alone or alongside the standard protocols.
 //! The deflate variant uses the `graphql-transport-ws` message format. Clients that do not offer
-//! the deflate variant are byte-for-byte unaffected.
+//! the deflate variant never receive compressed frames.
+//!
+//! The server selects the first protocol it supports among those offered, in the order
+//! `graphql-transport-ws+deflate`, `graphql-transport-ws`, `graphql-ws`, whatever the order of the
+//! client's offer, and speaks the message format of the protocol it selected.
 //!
 //! Compression uses a fresh context per message, so there is no per-connection compressor state
 //! and no shared-window memory cost per connection.
@@ -46,35 +50,52 @@ use std::{
 /// The subprotocol identifier for compressed `graphql-transport-ws` messages.
 pub const GRAPHQL_TRANSPORT_WS_DEFLATE: &str = "graphql-transport-ws+deflate";
 
-/// GraphQL protocol extraction for the optional deflate subprotocol.
+/// The standard subprotocol whose message format the deflate variant uses.
+const GRAPHQL_TRANSPORT_WS: &str = "graphql-transport-ws";
+
+/// GraphQL protocol extraction that agrees with the subprotocol [`WebSocketUpgrade`] selects.
+///
+/// [`WebSocketUpgrade::protocols`] prefers `graphql-transport-ws+deflate`, then
+/// `graphql-transport-ws`, then `graphql-ws`, whatever the order of the client's offer.
+/// async-graphql instead takes the first protocol the client lists, so on its own it would speak
+/// `graphql-ws` to a client that was told `graphql-transport-ws` was selected.
+///
+/// [`WebSocketUpgrade`]: axum::extract::ws::WebSocketUpgrade
+/// [`WebSocketUpgrade::protocols`]: axum::extract::ws::WebSocketUpgrade::protocols
 pub(super) struct DeflateGraphQLProtocol(pub GraphQLProtocol);
 
 impl<S: Send + Sync> FromRequestParts<S> for DeflateGraphQLProtocol {
     type Rejection = StatusCode;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        // Read the offers exactly like WebSocketUpgrade does, so that both agree on whether
-        // deflate is offered, even next to values that are not valid UTF-8.
-        let deflate = parts
+        // Read the offers exactly like axum::extract::ws::WebSocketUpgrade does, so that both
+        // agree on what is offered, even next to values that are not valid UTF-8.
+        let graphql_transport_ws_offered = parts
             .headers
             .get_all(SEC_WEBSOCKET_PROTOCOL)
             .iter()
             .flat_map(|value| value.as_bytes().split(|&byte| byte == b','))
-            .any(|protocol| protocol.trim_ascii() == GRAPHQL_TRANSPORT_WS_DEFLATE.as_bytes());
+            .map(<[u8]>::trim_ascii)
+            .any(|offer| {
+                [GRAPHQL_TRANSPORT_WS_DEFLATE, GRAPHQL_TRANSPORT_WS]
+                    .iter()
+                    .any(|protocol| offer == protocol.as_bytes())
+            });
 
-        if !deflate {
+        if !graphql_transport_ws_offered {
             return GraphQLProtocol::from_request_parts(parts, state)
                 .await
                 .map(Self);
         }
 
-        // async-graphql only knows the standard protocols, so ask it for the one whose message
-        // format deflate uses. A stand-in request keeps the original intact, so WebSocketUpgrade
-        // still negotiates the deflate wire format.
+        // WebSocketUpgrade selects deflate or `graphql-transport-ws`, which share a message
+        // format. async-graphql does not know deflate and may prefer `graphql-ws`, so ask it
+        // about a stand-in request offering just that format. The original stays intact for
+        // WebSocketUpgrade to negotiate the wire format.
         let (mut graphql_parts, ()) = Request::new(()).into_parts();
         graphql_parts.headers.insert(
             SEC_WEBSOCKET_PROTOCOL,
-            HeaderValue::from_static("graphql-transport-ws"),
+            HeaderValue::from_static(GRAPHQL_TRANSPORT_WS),
         );
 
         GraphQLProtocol::from_request_parts(&mut graphql_parts, state)
@@ -250,6 +271,24 @@ mod tests {
         ])
         .await;
         assert_eq!(actual, graphql_transport_ws().await);
+    }
+
+    /// WebSocketUpgrade prefers `graphql-transport-ws` over `graphql-ws` whatever the order of
+    /// the offer, so the message format must not follow the order of the offer either.
+    #[tokio::test]
+    async fn standard_offers_use_the_modern_graphql_protocol_in_any_order() {
+        let offers: [&[HeaderValue]; 3] = [
+            &[HeaderValue::from_static("graphql-ws, graphql-transport-ws")],
+            &[HeaderValue::from_static("graphql-transport-ws, graphql-ws")],
+            &[
+                HeaderValue::from_static("graphql-ws"),
+                HeaderValue::from_static("graphql-transport-ws"),
+            ],
+        ];
+        for offer in offers {
+            let actual = extract(offer).await;
+            assert_eq!(actual, graphql_transport_ws().await, "offer: {offer:?}");
+        }
     }
 
     #[tokio::test]
@@ -502,6 +541,28 @@ mod tests {
                 response.headers().get(SEC_WEBSOCKET_PROTOCOL),
                 Some(&HeaderValue::from_static(offer))
             );
+        }
+    }
+
+    /// A client offering both standard protocols is told `graphql-transport-ws` is selected,
+    /// even when it lists the legacy `graphql-ws` first, so that is what must be spoken.
+    #[tokio::test]
+    async fn combined_standard_offers_select_and_speak_the_modern_protocol() {
+        let address = serve_graphql_ws_route().await;
+
+        for offer in [
+            "graphql-ws, graphql-transport-ws",
+            "graphql-transport-ws, graphql-ws",
+        ] {
+            let (mut socket, response) = connect(address, Some(offer))
+                .await
+                .unwrap_or_else(|error| panic!("offer {offer} is upgraded: {error}"));
+            assert_eq!(
+                response.headers().get(SEC_WEBSOCKET_PROTOCOL),
+                Some(&HeaderValue::from_static("graphql-transport-ws")),
+                "offer: {offer}"
+            );
+            assert_speaks_graphql_transport_ws(&mut socket).await;
         }
     }
 
