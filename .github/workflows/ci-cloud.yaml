@@ -120,7 +120,7 @@ jobs:
     permissions:
       contents: read
     env:
-      NODE_IMAGE: midnightntwrk/midnight-node
+      NODE_IMAGE: ghcr.io/midnightntwrk/midnight-node
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

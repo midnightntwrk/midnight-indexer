@@ -464,7 +464,7 @@ class ToolkitWrapper {
     log.debug(`Toolkit ZK cache       : ${zkCacheDir}`);
 
     this.container = new GenericContainer(
-      `ghcr.io/midnight-ntwrk/midnight-node-toolkit:${this.config.nodeToolkitTag}`,
+      `ghcr.io/midnightntwrk/midnight-node-toolkit:${this.config.nodeToolkitTag}`,
     )
       .withName(this.config.containerName)
       .withNetworkMode('host')

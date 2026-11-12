@@ -11,6 +11,10 @@ inputs:
   target_env:
     description: Midnight target environment (undeployed/devnet/qanet/preview/preprod)
     required: true
+  node_image:
+    description: Node image repository (undeployed only)
+    required: false
+    default: ghcr.io/midnightntwrk/midnight-node
   node_tag:
     description: Node image tag (undeployed only)
     required: false
@@ -76,6 +80,7 @@ runs:
       if: inputs.target_env == 'undeployed'
       shell: bash
       env:
+        NODE_IMAGE: ${{ inputs.node_image }}
         NODE_TAG: ${{ inputs.node_tag }}
         INDEXER_TAG: ${{ inputs.indexer_tag }}
         NODE_TOOLKIT_TAG: ${{ inputs.node_toolkit_tag }}
@@ -91,12 +96,13 @@ runs:
         # Docker Hub's midnightntwrk/midnight-node-toolkit cannot be used here:
         # it only carries the toolkit's own release tags and latest-main, not the
         # node-paired tags this action passes.
-        docker pull "ghcr.io/midnight-ntwrk/midnight-node-toolkit:${NODE_TOOLKIT_TAG:-$NODE_TAG}"
+        docker pull "ghcr.io/midnightntwrk/midnight-node-toolkit:${NODE_TOOLKIT_TAG:-$NODE_TAG}"
 
     - name: Startup local environment
       if: inputs.target_env == 'undeployed'
       shell: bash
       env:
+        NODE_IMAGE: ${{ inputs.node_image }}
         NODE_TAG: ${{ inputs.node_tag }}
         INDEXER_TAG: ${{ inputs.indexer_tag }}
         NODE_TOOLKIT_TAG: ${{ inputs.node_toolkit_tag }}
@@ -116,6 +122,7 @@ runs:
         export APP__INFRA__PUB_SUB__PASSWORD="${APP__INFRA__PUB_SUB__PASSWORD:-$(openssl rand -hex 32)}"
 
         . ./.envrc
+        echo "NODE_IMAGE: $NODE_IMAGE"
         echo "NODE_TAG: $NODE_TAG"
         echo "INDEXER_TAG: $INDEXER_TAG"
         bash ./qa/scripts/startup-localenv-with-data.sh
