@@ -7,10 +7,10 @@ How to move the indexer to a new `midnight-ledger` release.
 The indexer supports **two ledger majors at once**, so it can index chains that
 straddle a protocol upgrade:
 
-| Ledger | Protocol versions | Source    |
-| ------ | ----------------- | --------- |
-| v8     | `0.22`, `1.0`     | crates.io |
-| v9     | `2.0`             | crates.io |
+| Ledger | Protocol versions | Source                                    |
+| ------ | ----------------- | ----------------------------------------- |
+| v8     | `0.22`, `1.0`     | crates.io                                 |
+| v9     | `2.0`, `2.1`      | crates.io, plus git tags the node patches |
 
 The mapping is `ProtocolVersion::ledger_version` in
 `indexer-common/src/domain/protocol_version.rs`. Both stacks come in side by
@@ -26,19 +26,23 @@ side via suffixed aliases in `[workspace.dependencies]` - e.g.
 Every ledger crate in `[workspace.dependencies]` carries an `=` pin to the
 version the matching
 [`midnightntwrk/midnight-node`](https://github.com/midnightntwrk/midnight-node)
-release resolves in its `Cargo.lock`. The one git dependency is
-`v8-to-v9-state-translation` in `indexer-common/Cargo.toml`, pinned to the same
+release resolves in its `Cargo.lock`. `v8-to-v9-state-translation` in
+`indexer-common/Cargo.toml` is a git dependency, pinned to the same
 [`midnightntwrk/midnight-ledger`](https://github.com/midnightntwrk/midnight-ledger)
-tag as the node. The fork-boundary block compares the arena root the indexer
-derives against the node's, so any drift from the node breaks that block.
+tag as the node. When the node patches a ledger crate that is not yet on
+crates.io to a git tag, the root `Cargo.toml` carries the same entry under
+`[patch.crates-io]`. The fork-boundary block compares the arena root the
+indexer derives against the node's, so any drift from the node breaks that
+block.
 
 The comment block above the ledger aliases in the root `Cargo.toml` is the
 source of truth - read it first.
 
 ## Steps
 
-1. **Update the pins.** Set each ledger alias's `=` version, and the
-   `v8-to-v9-state-translation` tag, to what the matching node release uses.
+1. **Update the pins.** Set each ledger alias's `=` version, the
+   `v8-to-v9-state-translation` tag and the `[patch.crates-io]` entries to what
+   the matching node release uses. Remove a patch entry once the node drops it.
 
 2. **Update the lockfile** for *only* those crates - never a bare `cargo
    update`:
