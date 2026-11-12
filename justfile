@@ -5,6 +5,7 @@ feature := "cloud"
 packages := "indexer-common chain-indexer wallet-indexer indexer-api spo-indexer indexer-standalone indexer-tests"
 rust_version := `grep channel rust-toolchain.toml | sed -r 's/channel = "(.*)"/\1/'`
 latest_node_version := `tail -n 1 NODE_VERSIONS`
+node_image := "ghcr.io/midnightntwrk/midnight-node"
 cargo_auditable_version := `grep -E '^\s+CARGO_AUDITABLE_VERSION:' .github/workflows/build-indexer-images.yaml | sed -E 's/#.*//; s/^[^:]*:[[:space:]]*//; s/[[:space:]]+$//' | tr -d \"\'`
 cargo_chef_version := `grep -E '^\s+CARGO_CHEF_VERSION:' .github/workflows/build-indexer-images.yaml | sed -E 's/#.*//; s/^[^:]*:[[:space:]]*//; s/[[:space:]]+$//' | tr -d \"\'`
 
@@ -157,4 +158,4 @@ run-node node_version=latest_node_version:
         -e CFG_PRESET=dev \
         -e SIDECHAIN_BLOCK_BENEFICIARY="04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e" \
         -v $node_dir:/node \
-        midnightntwrk/midnight-node:{{node_version}}
+        {{node_image}}:{{node_version}}
