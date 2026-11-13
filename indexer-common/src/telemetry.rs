@@ -338,4 +338,55 @@ mod tests {
             "tokio_tungstenite_ext::compat"
         ));
     }
+
+    // `init_metrics` installs the global recorder, which can be done once per process, so this is
+    // the only test calling it.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn test_init_metrics_publishes_allocator_stats() {
+        use crate::telemetry::{MetricsConfig, allocator_metrics::STATS, init_metrics};
+        use std::{
+            net::{Ipv4Addr, TcpListener},
+            time::Duration,
+        };
+        use tokio::time::{sleep, timeout};
+
+        let port = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .and_then(|listener| listener.local_addr())
+            .expect("free port can be found")
+            .port();
+
+        init_metrics(MetricsConfig {
+            enabled: true,
+            address: Ipv4Addr::LOCALHOST.into(),
+            port,
+        });
+
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .expect("HTTP client can be built");
+        let url = format!("http://{}:{port}/metrics", Ipv4Addr::LOCALHOST);
+        // Complete once the scrape has every series and the refresh task has set `allocated`.
+        let complete = |body: &str| {
+            let series = |stat: &str| format!("indexer_memory_allocator_bytes{{stat=\"{stat}\"}} ");
+            STATS.iter().all(|stat| body.contains(&series(stat)))
+                && !body.contains(&format!("{}0\n", series("allocated")))
+        };
+        let scrape = async {
+            loop {
+                if let Ok(response) = client.get(&url).send().await
+                    && let Ok(body) = response.text().await
+                    && complete(&body)
+                {
+                    break;
+                }
+                sleep(Duration::from_millis(50)).await;
+            }
+        };
+
+        timeout(Duration::from_secs(10), scrape)
+            .await
+            .expect("allocator stats are served by the Prometheus endpoint");
+    }
 }
