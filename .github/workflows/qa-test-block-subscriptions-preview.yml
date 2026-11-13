@@ -13,7 +13,6 @@ permissions:
 jobs:
   test-block-subscriptions:
     name: Test Block Subscriptions
-    uses: ./.github/workflows/qa-test-block-subscription-base-workflow.yml
+    uses: midnightntwrk/midnight-indexer/.github/workflows/qa-preview-subscriptions.yml@683f17767ff0f056ca2344a10dd0e381941fdfef
     with:
-      target_env: preview
-      indexer_api_version: v3
+      suite: block-subscriptions
