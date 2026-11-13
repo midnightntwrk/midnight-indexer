@@ -84,7 +84,8 @@ tokio-stream                 = { workspace = true, features = [ "sync" ] }
 trait-variant                = { workspace = true }
 uuid                         = { workspace = true }
 
-# Linux builds use jemalloc as the global allocator, as the node does; see `src/lib.rs`.
+# Linux executables use jemalloc as the global allocator, as the node does. Each declares it in its
+# `main.rs` with the `Jemalloc` re-exported from `src/lib.rs`.
 [target.'cfg(target_os = "linux")'.dependencies]
 tikv-jemalloc-ctl = { workspace = true }
 tikv-jemallocator = { workspace = true }
