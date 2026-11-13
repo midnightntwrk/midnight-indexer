@@ -25,9 +25,7 @@ pub mod telemetry;
 pub mod testing;
 pub mod version;
 
-// jemalloc backs every Linux executable in the workspace: it is what the allocator metrics in
-// `telemetry` read from and what heap profiling (docs/heap-profiling.md) needs. Declared here
-// rather than per binary so there is a single allocator and a single profiling feature.
+// The allocator the telemetry metrics and heap profiling rely on. Binaries install it themselves,
+// since a library-level global allocator would clash with test binaries that bring their own.
 #[cfg(target_os = "linux")]
-#[global_allocator]
-static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+pub use tikv_jemallocator::Jemalloc;

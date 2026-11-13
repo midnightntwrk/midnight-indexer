@@ -1,10 +1,10 @@
 # Memory: allocator metrics and heap profiling
 
-On Linux every indexer executable uses jemalloc as its global allocator (declared once in
-`indexer-common/src/lib.rs`, as the node does in its binary). This guide covers the two ways to
-look into its memory use: the allocator metrics that every build exports, and heap profiles from
-a build with the `jemalloc-profiling` feature. Other platforms keep the system allocator and
-export no allocator metrics.
+On Linux every indexer executable uses jemalloc as its global allocator (declared in each binary's
+`main.rs` from the `Jemalloc` that `indexer-common` re-exports, as the node does in its binary).
+This guide covers the two ways to look into its memory use: the allocator metrics that every build
+exports, and heap profiles from a build with the `jemalloc-profiling` feature. Other platforms keep
+the system allocator and export no allocator metrics.
 
 ## Allocator metrics
 

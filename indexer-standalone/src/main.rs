@@ -11,6 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(all(target_os = "linux", feature = "standalone"))]
+#[global_allocator]
+static ALLOC: indexer_common::Jemalloc = indexer_common::Jemalloc;
+
 #[cfg(feature = "standalone")]
 mod config;
 
