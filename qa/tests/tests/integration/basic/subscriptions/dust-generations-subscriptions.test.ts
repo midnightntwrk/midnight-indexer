@@ -80,6 +80,31 @@ async function fetchDustAddress(rewardAddress: string): Promise<string> {
 }
 
 /**
+ * Resolves a dust address whose wallet has owned dtime updates in the current dust epoch.
+ *
+ * Prefers the direct `with-dtime-updates` dust address fixture. Falls back to the dust address
+ * registered for the `registered-with-dust-and-spent` Cardano reward address on environments
+ * that do not provide one.
+ *
+ * @returns the dust address, or an `Error` describing why neither fixture is available. A
+ *          fallback reward address that the indexer cannot resolve fails the test instead.
+ */
+async function resolveDustAddressWithDtimeUpdates(): Promise<string | Error> {
+  try {
+    return dataProvider.getDustAddress('with-dtime-updates');
+  } catch (dustFixtureError) {
+    log.debug(`No direct dust address fixture: ${(dustFixtureError as Error).message}`);
+  }
+  let rewardAddress: string;
+  try {
+    rewardAddress = dataProvider.getCardanoRewardAddress('registered-with-dust-and-spent');
+  } catch (error) {
+    return error as Error;
+  }
+  return fetchDustAddress(rewardAddress);
+}
+
+/**
  * Fetches the block the subscription snapshot is pinned to.
  */
 async function fetchBlock(offset?: { height: number }): Promise<{
@@ -649,7 +674,8 @@ describe.skipIf(skipNight)('dust generations subscription', () => {
     /**
      * A zero cutoff replays the wallet's full owned dtime history before the tree events.
      *
-     * @given a wallet with spent backing NIGHT UTXOs (registered-with-dust-and-spent)
+     * @given a wallet with spent backing NIGHT UTXOs in the current dust epoch
+     *        (with-dtime-updates dust address, else registered-with-dust-and-spent)
      * @when a dustGenerations subscription is opened with dtimeCutoffHeight 0
      * @then at least one DustGenerationDtimeUpdateItem is delivered
      * @and every dtime update precedes the first DustGenerationsItem in the stream
@@ -660,16 +686,11 @@ describe.skipIf(skipNight)('dust generations subscription', () => {
       ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations'] };
       if (!blockHashSurfacePresent) return ctx.skip(true, SURFACE_ABSENT_REASON);
 
-      let rewardAddress: string;
-      try {
-        rewardAddress = dataProvider.getCardanoRewardAddress('registered-with-dust-and-spent');
-      } catch (error) {
-        log.warn(error);
-        ctx.skip?.(true, (error as Error).message);
-        return;
+      const dustAddress = await resolveDustAddressWithDtimeUpdates();
+      if (dustAddress instanceof Error) {
+        log.warn(dustAddress);
+        return ctx.skip(true, dustAddress.message);
       }
-
-      const dustAddress = await fetchDustAddress(rewardAddress);
       const block = await fetchBlock();
 
       const events = await collectDustGenerations(indexerWsClient, {
@@ -702,7 +723,8 @@ describe.skipIf(skipNight)('dust generations subscription', () => {
     /**
      * A cutoff at the snapshot block suppresses the dtime delta entirely.
      *
-     * @given a wallet with spent backing NIGHT UTXOs (registered-with-dust-and-spent)
+     * @given a wallet with spent backing NIGHT UTXOs in the current dust epoch
+     *        (with-dtime-updates dust address, else registered-with-dust-and-spent)
      * @when a dustGenerations subscription is opened with the dtimeCutoffHeight equal to
      *       the snapshot block's height
      * @then no DustGenerationDtimeUpdateItem is delivered, while the generation snapshot
@@ -714,16 +736,11 @@ describe.skipIf(skipNight)('dust generations subscription', () => {
       ctx.task!.meta.custom = { labels: ['Subscription', 'Dust', 'Generations'] };
       if (!blockHashSurfacePresent) return ctx.skip(true, SURFACE_ABSENT_REASON);
 
-      let rewardAddress: string;
-      try {
-        rewardAddress = dataProvider.getCardanoRewardAddress('registered-with-dust-and-spent');
-      } catch (error) {
-        log.warn(error);
-        ctx.skip?.(true, (error as Error).message);
-        return;
+      const dustAddress = await resolveDustAddressWithDtimeUpdates();
+      if (dustAddress instanceof Error) {
+        log.warn(dustAddress);
+        return ctx.skip(true, dustAddress.message);
       }
-
-      const dustAddress = await fetchDustAddress(rewardAddress);
       const block = await fetchBlock();
 
       const events = await collectDustGenerations(indexerWsClient, {

@@ -19,7 +19,14 @@ import { randomBytes } from 'node:crypto';
 import '@utils/logging/test-logging-hooks';
 import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
 
-describe('key material derivation validation', () => {
+// This suite exists to check the toolkit's own key derivation (`show-address`,
+// `show-viewing-key`), so it has nothing to exercise without a toolkit
+// container. Under TX_BACKEND=moth no container is started anywhere in the
+// e2e run — addresses and viewing keys are derived in-process — so the suite
+// skips rather than failing to pull an image it was never meant to need.
+const isMoth = env.getTxBackend() === 'moth';
+
+describe.skipIf(isMoth)('key material derivation validation', () => {
   let toolkit: ToolkitWrapper;
   const seed = randomBytes(32).toString('hex');
 

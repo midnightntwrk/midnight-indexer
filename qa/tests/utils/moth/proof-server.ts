@@ -30,7 +30,9 @@ import { createServer } from 'net';
 import fs from 'fs';
 import path from 'path';
 import { promisify } from 'util';
+import type { LedgerVersion } from '@shieldedtech/moth-wallet';
 import log from '@utils/logging/logger';
+import { loadLedger } from './ledger';
 
 const execFileAsync = promisify(execFile);
 
@@ -58,20 +60,22 @@ const ZK_PARAMS_DIR = path.resolve('.tmp/proof-server-zk-params');
 const READY_POLL_INTERVAL_MS = 1_000;
 
 /**
- * Ledger train this test suite's wallet stack is built against.
+ * Proof server image per ledger train.
  *
- * It is NOT guessed from NODE_TAG: nothing in this repo maps a node tag to a
- * ledger version, and a guess that is wrong fails deep inside proving. It is
- * read from the one thing we do control — the `@midnight-ntwrk/ledger-v8`
- * override pinned in `package.json`, which is also what keeps a single physical
- * ledger copy in `node_modules`. If the target node runs a different ledger
- * train, that override has to move too, and `PROOF_SERVER_TAG` is the escape
- * hatch in the meantime.
+ * The train is NOT guessed from NODE_TAG: nothing in this repo maps a node tag
+ * to a ledger version, and a guess that is wrong fails deep inside proving. It
+ * is read from the chain itself — the protocol version the indexer reports —
+ * through `loadLedger()`, the same detection that picks moth's ledger WASM, so
+ * the wallet and the prover cannot disagree. `PROOF_SERVER_TAG` overrides the
+ * tag for a train whose proof server moved (release candidates on ledger 9).
  */
-const DEFAULT_PROOF_SERVER_TAG = '8.1.0';
+const PROOF_SERVER_TAG_BY_LEDGER: Record<LedgerVersion, string> = {
+  v8: '8.1.0',
+  v9: '9.0.0',
+};
 
-const proofServerTag = (): string =>
-  process.env.PROOF_SERVER_TAG?.trim() || DEFAULT_PROOF_SERVER_TAG;
+const proofServerTag = async (): Promise<string> =>
+  process.env.PROOF_SERVER_TAG?.trim() || PROOF_SERVER_TAG_BY_LEDGER[await loadLedger()];
 
 // LOGGING. Global setup and every test worker are separate processes, and each
 // one calls ensureProofServer(), so anything printed here is printed once per
@@ -125,7 +129,7 @@ export async function stopProofServer(): Promise<void> {
 }
 
 async function bootstrap(): Promise<string> {
-  const tag = proofServerTag();
+  const tag = await proofServerTag();
   let existing = await inspectContainer();
   // A container under our name that runs another tag is a leftover from an
   // earlier run with a different PROOF_SERVER_TAG (teardown never stops a
@@ -134,7 +138,7 @@ async function bootstrap(): Promise<string> {
   if (existing && existing.image !== `${IMAGE_REPO}:${tag}`) {
     console.log(
       `[SETUP] Replacing ${CONTAINER_NAME} (${existing.image ?? 'unknown image'}) ` +
-        `with ${IMAGE_REPO}:${tag} to honour PROOF_SERVER_TAG.`,
+        `with ${IMAGE_REPO}:${tag} to match the ledger train (or PROOF_SERVER_TAG).`,
     );
     await execFileAsync('docker', ['rm', '-f', CONTAINER_NAME]);
     existing = null;
@@ -216,7 +220,7 @@ export async function describeProofServer(url: string): Promise<string> {
   const info = await inspectContainer();
   const local = info?.port !== undefined && url.includes(`:${info.port}`);
   const where = local ? `container ${CONTAINER_NAME}` : 'external';
-  const expected = proofServerTag();
+  const expected = await proofServerTag();
 
   let note = '';
   if (version && majorOf(version) !== majorOf(expected)) {
@@ -251,10 +255,13 @@ const majorOf = (version: string): string => version.split('.')[0] ?? version;
  * proving, with a stack trace that reads like a wallet bug. Say it plainly.
  */
 export function proofServerMismatchHint(): string {
+  const tags = Object.entries(PROOF_SERVER_TAG_BY_LEDGER)
+    .map(([ledger, tag]) => `${ledger}: ${tag}`)
+    .join(', ');
   return (
-    `The proof server must match the node's ledger train (currently ${proofServerTag()}). ` +
-    'If the target environment runs a different ledger version, set PROOF_SERVER_TAG ' +
-    '(and the @midnight-ntwrk/ledger-v8 override in package.json) to that train.'
+    'The proof server must match the ledger train the node runs. The tag follows the ledger ' +
+    `the indexer reports (${tags}); set PROOF_SERVER_TAG if the target chain runs a different ` +
+    'release of that train.'
   );
 }
 

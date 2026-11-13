@@ -199,6 +199,14 @@ describe.sequential('contract actions', () => {
     let subscriptionSetupError: unknown;
 
     beforeAll(async () => {
+      // A failed deploy has already failed its own hook. Without this guard the
+      // hooks below look up an undefined hash on the indexer, which retries for
+      // a minute before reporting the same failure less clearly.
+      if (!contractDeployResult?.['contract-address-untagged']) {
+        throw new Error(
+          'The counter deploy did not succeed (see the deploy hook), so there is nothing to call.',
+        );
+      }
       // Subscribe without an offset only once the deploy is below the indexer's tip, so the
       // deploy is history the subscription must not replay. The subscription must exist before
       // the call, but only the no-offset test depends on it: a setup failure fails that test.
@@ -377,6 +385,11 @@ describe.sequential('contract actions', () => {
 
   describe('a transaction to update the counter smart contract', () => {
     beforeAll(async () => {
+      if (!contractCallTransactionHash) {
+        throw new Error(
+          'The counter call did not succeed (see the call hook), so there is nothing to update.',
+        );
+      }
       // Allow call to finalize before running maintenance (update)
       await getTransactionByHashWithRetry(contractCallTransactionHash);
       await new Promise((resolve) => setTimeout(resolve, 30000));

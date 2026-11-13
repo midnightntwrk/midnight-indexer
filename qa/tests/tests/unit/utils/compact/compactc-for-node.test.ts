@@ -31,7 +31,7 @@ vi.mock('@utils/logging/logger', () => ({
 // Importing the module resolves the default pin for the node under test; the
 // tests below call the reader directly, so any node line will do here.
 vi.mock('../../../../environment/model', () => ({
-  env: { getNodeVersion: () => '1.0.300' },
+  env: { getNodeVersion: () => '1.0.300', getTxBackend: () => 'toolkit' },
 }));
 
 const REPO_ROOT = path.resolve(__dirname, '../../../../../..');

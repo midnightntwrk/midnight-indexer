@@ -28,6 +28,7 @@ import {
   showPrivateWalletStateViaMoth,
   showPublicWalletStateViaMoth,
 } from '../moth/moth-backend';
+import { mothHandlesContracts } from '../moth/ledger';
 import {
   callCircuitViaMoth,
   closeMothContractContexts,
@@ -511,6 +512,27 @@ class ToolkitWrapper {
       delayMs: 2_000,
       retryLabel: 'start toolkit container',
     });
+  }
+
+  /**
+   * Whether contract actions go through moth on this run: TX_BACKEND=moth on a
+   * ledger-9 chain. moth's contract path is midnight-js 5, whose current era is
+   * ledger 9 (`utils/moth/ledger.ts` has the reasoning), so on a ledger-8 chain
+   * the toolkit builds them. The moth suites never start the container (it
+   * would idle for the whole run on ledger 9), so it is started here on first
+   * use instead.
+   */
+  private async mothBuildsContracts(): Promise<boolean> {
+    if (env.getTxBackend() !== 'moth') return false;
+    if (await mothHandlesContracts()) return true;
+    if (!this.startedContainer) {
+      log.info(
+        'moth cannot build contract transactions on a ledger-8 chain; ' +
+          'starting the toolkit container for them',
+      );
+      await this.start();
+    }
+    return false;
   }
 
   async stop() {
@@ -1019,10 +1041,10 @@ class ToolkitWrapper {
       );
     }
 
-    // When TX_BACKEND=moth, call the circuit through midnight-js. `callKey` is
-    // the circuit name either way — the committed counter contract exposes
-    // `increment`, which is this method's default.
-    if (env.getTxBackend() === 'moth') {
+    // When moth builds contract actions, call the circuit through midnight-js.
+    // `callKey` is the circuit name either way — the committed counter contract
+    // exposes `increment`, which is this method's default.
+    if (await this.mothBuildsContracts()) {
       const seed = fundingSeed ?? DEFAULT_FUNDING_SEED;
       const txHash = await callCircuitViaMoth(
         seed,
@@ -1099,7 +1121,7 @@ class ToolkitWrapper {
     // `newAuthoritySeed` is not used on this path: midnight-js takes a signing
     // key rather than a seed, and no assertion reads who holds the authority
     // afterwards — only that the update is indexed.
-    if (env.getTxBackend() === 'moth') {
+    if (await this.mothBuildsContracts()) {
       const seed = fundingSeed ?? DEFAULT_FUNDING_SEED;
       const txHash = await updateContractViaMoth(
         seed,
@@ -1166,7 +1188,7 @@ class ToolkitWrapper {
     // the counter committed under qa/tests/contracts, not the toolkit's
     // built-in contract-simple, so the address is the only thing the
     // assertions carry over — which is all they use.
-    if (env.getTxBackend() === 'moth') {
+    if (await this.mothBuildsContracts()) {
       const seed = fundingSeed ?? DEFAULT_FUNDING_SEED;
       const { contractAddress } = await deployContractViaMoth(seed);
       const { txHash, blockHash } = await getContractDeploymentHashes(contractAddress);
