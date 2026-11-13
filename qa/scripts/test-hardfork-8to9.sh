@@ -345,8 +345,9 @@ sleep 6
 # --- Step 8: assert the crossing ---
 echo ""
 echo ">>> Step 8: Asserting the indexer crossed the boundary..."
-# A failed crossing bails in chain-indexer with one of these (application.rs):
-#   "translate ledger state" | "ledger state root mismatch ..." | "zswap state root mismatch ..."
+# A failed crossing bails in chain-indexer with one of these (application.rs); older images may
+# also report "zswap state root mismatch ...":
+#   "translate ledger state" | "ledger state root mismatch ..."
 if compose --profile cloud logs chain-indexer 2>&1 \
      | grep -Eiq "ledger state root mismatch|zswap state root mismatch|translate ledger state"; then
   echo "ERROR: chain-indexer reported a boundary failure. Offending log lines:" >&2

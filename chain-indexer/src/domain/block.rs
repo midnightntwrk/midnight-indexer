@@ -13,7 +13,7 @@
 
 use crate::domain::DustRegistrationEvent;
 use indexer_common::domain::{
-    BlockAuthor, BlockHash, ByteVec, ProtocolVersion, SerializedDustCommitmentMerkleTreeRoot,
+    BlockAuthor, BlockHash, ProtocolVersion, SerializedDustCommitmentMerkleTreeRoot,
     SerializedDustGenerationMerkleTreeRoot, SerializedLedgerParameters,
     SerializedZswapMerkleTreeRoot, bridge::BridgeEvent,
 };
@@ -28,9 +28,6 @@ pub struct Block {
     pub parent_hash: BlockHash,
     pub author: Option<BlockAuthor>,
     pub timestamp: u64,
-    pub zswap_merkle_tree_root: SerializedZswapMerkleTreeRoot,
-    // TODO: Remove Option once support for Node < 0.22 is dropped!
-    pub ledger_state_root: Option<ByteVec>,
     pub dust_registration_events: Vec<DustRegistrationEvent>,
     /// c2m-bridge events (5 variants, see indexer-common::domain::bridge), decoded from
     /// the node 2.0+ runtime (`infra/subxt_node/runtimes/v2_0_0.rs`); always empty for earlier
@@ -38,6 +35,7 @@ pub struct Block {
     pub bridge_events: Vec<BridgeEvent>,
 
     // These fields are set after applying all transactions of this block to the ledger state.
+    pub zswap_merkle_tree_root: SerializedZswapMerkleTreeRoot,
     pub ledger_parameters: SerializedLedgerParameters,
     pub zswap_end_index: u64,
     pub dust_commitment_end_index: u64,
