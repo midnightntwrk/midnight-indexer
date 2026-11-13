@@ -289,6 +289,7 @@ pub async fn init_ledger_db() -> Result<impl Sized, BoxError> {
             .join("ledger-db.sqlite")
             .display()
             .to_string(),
+        create_if_missing: true,
     })
     .await?;
 
