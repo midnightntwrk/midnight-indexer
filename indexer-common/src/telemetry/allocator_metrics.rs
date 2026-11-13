@@ -15,36 +15,49 @@
 
 use metrics::{Gauge, Unit, describe_gauge, gauge};
 use std::time::Duration;
-use tikv_jemalloc_ctl::{epoch, epoch_mib, stats};
+use tikv_jemalloc_ctl::{Error, epoch, epoch_mib, stats};
 
 /// How often the allocator statistics are refreshed.
 pub const DEFAULT_INTERVAL: Duration = Duration::from_secs(5);
 
-/// The published jemalloc `stats.*` names, the values of the gauge's `stat` label.
-pub const STATS: [&str; 6] = [
-    "allocated",
-    "active",
-    "metadata",
-    "resident",
-    "mapped",
-    "retained",
-];
+/// One published jemalloc statistic.
+struct Stat {
+    gauge: Gauge,
+    read: Box<dyn Fn() -> Result<usize, Error> + Send>,
+}
+
+/// Defines [STATS] and `stats` from one list of jemalloc `stats.*` names. Label and reader
+/// of each statistic come from the same identifier, so a series cannot be published under another
+/// statistic's name.
+macro_rules! define_stats {
+    ($($name:ident),+ $(,)?) => {
+        /// The published jemalloc `stats.*` names, the values of the gauge's `stat` label.
+        pub const STATS: &[&str] = &[$(stringify!($name)),+];
+
+        /// Looks up the statistics and registers their gauges, in the order of [STATS].
+        fn stats() -> Result<[Stat; STATS.len()], Error> {
+            Ok([$({
+                let mib = stats::$name::mib()?;
+                Stat {
+                    gauge: gauge!("indexer_memory_allocator_bytes", "stat" => stringify!($name)),
+                    read: Box::new(move || mib.read()),
+                }
+            }),+])
+        }
+    };
+}
+
+define_stats![allocated, active, metadata, resident, mapped, retained];
 
 /// Handles to jemalloc's statistics and the gauges they are published to.
 pub struct AllocatorMetrics {
     epoch: epoch_mib,
-    allocated: stats::allocated_mib,
-    active: stats::active_mib,
-    metadata: stats::metadata_mib,
-    resident: stats::resident_mib,
-    mapped: stats::mapped_mib,
-    retained: stats::retained_mib,
-    gauges: [Gauge; 6],
+    stats: [Stat; STATS.len()],
 }
 
 impl AllocatorMetrics {
     /// Looks up jemalloc's statistics and registers the gauge with the global recorder.
-    pub fn new() -> Result<Self, tikv_jemalloc_ctl::Error> {
+    pub fn new() -> Result<Self, Error> {
         describe_gauge!(
             "indexer_memory_allocator_bytes",
             Unit::Bytes,
@@ -53,35 +66,22 @@ impl AllocatorMetrics {
 
         Ok(Self {
             epoch: epoch::mib()?,
-            allocated: stats::allocated::mib()?,
-            active: stats::active::mib()?,
-            metadata: stats::metadata::mib()?,
-            resident: stats::resident::mib()?,
-            mapped: stats::mapped::mib()?,
-            retained: stats::retained::mib()?,
-            gauges: STATS.map(|stat| gauge!("indexer_memory_allocator_bytes", "stat" => stat)),
+            stats: stats()?,
         })
     }
 
     /// Reads the current statistics, in the order of [STATS].
-    fn read(&self) -> Result<[usize; 6], tikv_jemalloc_ctl::Error> {
+    fn read(&self) -> Result<Vec<usize>, Error> {
         // jemalloc caches its statistics until the epoch is advanced.
         self.epoch.advance()?;
-        Ok([
-            self.allocated.read()?,
-            self.active.read()?,
-            self.metadata.read()?,
-            self.resident.read()?,
-            self.mapped.read()?,
-            self.retained.read()?,
-        ])
+        self.stats.iter().map(|stat| (stat.read)()).collect()
     }
 
-    fn update(&self) -> Result<(), tikv_jemalloc_ctl::Error> {
+    fn update(&self) -> Result<(), Error> {
         self.read()?
             .into_iter()
-            .zip(&self.gauges)
-            .for_each(|(value, gauge)| gauge.set(value as f64));
+            .zip(&self.stats)
+            .for_each(|(value, stat)| stat.gauge.set(value as f64));
         Ok(())
     }
 
@@ -116,18 +116,26 @@ impl AllocatorMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     #[test]
     fn test_read_every_stat() {
         let metrics = AllocatorMetrics::new().unwrap();
         // Keep a live allocation around so `allocated` cannot be zero.
         let live = vec![0u8; 1 << 20];
-        let [allocated, active, _, resident, mapped, _] = metrics.read().unwrap();
+        let values = STATS
+            .iter()
+            .copied()
+            .zip(metrics.read().unwrap())
+            .collect::<HashMap<_, _>>();
 
-        assert!(allocated >= live.len());
-        assert!(active >= allocated);
-        assert!(resident >= active);
-        assert!(mapped >= active);
+        assert_eq!(values.len(), STATS.len());
+        assert!(values["allocated"] >= live.len());
+        assert!(values["active"] >= values["allocated"]);
+        assert!(values["resident"] >= values["active"]);
+        assert!(values["mapped"] >= values["active"]);
+        assert!(values.contains_key("metadata"));
+        assert!(values.contains_key("retained"));
         metrics.update().unwrap();
     }
 }
