@@ -109,3 +109,16 @@ jeprof --svg --base=early.heap ./target/release/chain-indexer late.heap > growth
 ```
 
 Pass the binary that wrote the dumps. A binary from another build resolves the addresses wrongly.
+
+### Cautions
+
+- The published Docker images are built without `jemalloc-profiling`, so they cannot write heap
+  dumps. With `prof` options in `MALLOC_CONF` they print `<jemalloc>: Invalid conf pair` to
+  stderr and run as usual. To profile, build the binary yourself as described above. Treat that
+  build as a diagnostic one: run it to reproduce the problem, then go back to the standard image.
+- Every Linux build reads `MALLOC_CONF`, with or without the profiling feature. It changes how
+  the allocator behaves for the whole process, so set it deliberately, like any other deployment
+  setting.
+- Keep heap dumps internal. A dump is a small text file with the sampled call stacks as
+  addresses and the process's memory map, which includes the file paths and load addresses of
+  the binary and its libraries. It holds no heap contents.
