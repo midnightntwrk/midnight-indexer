@@ -116,7 +116,14 @@ impl AllocatorMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{collections::HashMap, hint::black_box};
+    use metrics_exporter_prometheus::PrometheusBuilder;
+    use std::{
+        collections::{BTreeMap, HashMap},
+        hint::black_box,
+    };
+    use tokio::time::{sleep, timeout};
+
+    const MIB: usize = 1 << 20;
 
     #[test]
     fn test_read_every_stat() {
@@ -138,5 +145,83 @@ mod tests {
         assert!(values.contains_key("metadata"));
         assert!(values.contains_key("retained"));
         metrics.update().unwrap();
+    }
+
+    #[test]
+    fn test_publish_every_stat() {
+        let recorder = PrometheusBuilder::new().build_recorder();
+        let handle = recorder.handle();
+        let metrics = metrics::with_local_recorder(&recorder, AllocatorMetrics::new).unwrap();
+        let live = black_box(vec![0u8; MIB]);
+
+        metrics.update().unwrap();
+        let rendered = handle.render();
+        let values = published(&rendered);
+
+        assert!(rendered.contains("# TYPE indexer_memory_allocator_bytes gauge"));
+        assert_eq!(
+            values.keys().map(String::as_str).collect::<Vec<_>>(),
+            [
+                "active",
+                "allocated",
+                "mapped",
+                "metadata",
+                "resident",
+                "retained"
+            ]
+        );
+        // Each value is published under its own name: the relations between the statistics hold
+        // for the published series as well.
+        assert!(values["allocated"] >= live.len() as f64);
+        assert!(values["active"] >= values["allocated"]);
+        assert!(values["resident"] >= values["active"]);
+        assert!(values["mapped"] >= values["active"]);
+    }
+
+    #[tokio::test]
+    async fn test_run_refreshes_published_stats() {
+        let recorder = PrometheusBuilder::new().build_recorder();
+        let handle = recorder.handle();
+        let metrics = metrics::with_local_recorder(&recorder, AllocatorMetrics::new).unwrap();
+        let allocated = || {
+            published(&handle.render())
+                .get("allocated")
+                .copied()
+                .unwrap_or_default()
+        };
+        let allocated_reaches = async |bytes: f64| {
+            let reached = async {
+                while allocated() < bytes {
+                    sleep(Duration::from_millis(5)).await;
+                }
+            };
+            timeout(Duration::from_secs(10), reached).await
+        };
+
+        let run = tokio::spawn(metrics.run(Duration::from_millis(10)));
+
+        // The first refresh publishes the current statistics.
+        allocated_reaches(1.0).await.expect("stats are published");
+
+        // A later refresh publishes a new allocation. Half of it is asked for, as other tests in
+        // the same process may free memory meanwhile.
+        let before = allocated();
+        let live = black_box(vec![0u8; 64 * MIB]);
+        allocated_reaches(before + (live.len() / 2) as f64)
+            .await
+            .expect("stats are refreshed");
+
+        run.abort();
+    }
+
+    /// The values of the `indexer_memory_allocator_bytes` series in a rendered Prometheus scrape,
+    /// by `stat` label.
+    fn published(rendered: &str) -> BTreeMap<String, f64> {
+        rendered
+            .lines()
+            .filter_map(|line| line.strip_prefix("indexer_memory_allocator_bytes{stat=\""))
+            .filter_map(|line| line.split_once("\"} "))
+            .map(|(stat, value)| (stat.to_owned(), value.parse().unwrap()))
+            .collect()
     }
 }
