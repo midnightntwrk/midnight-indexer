@@ -26,4 +26,7 @@ Maintainer and contributor guides. For local setup see the top-level
 
 - [Indexer API guide (v4)](./api/v4/api-documentation.md) - the indexer's
   GraphQL queries, mutations, and subscriptions.
+- [Telemetry](./telemetry.md) - logging, tracing and metrics, and how to turn tracing on.
+- [Memory: allocator metrics and heap profiling](./heap-profiling.md) - reading the jemalloc
+  metrics and taking heap profiles.
 - [actionlint guide](./actionlint-guide.md)
