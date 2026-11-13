@@ -86,11 +86,28 @@ impl AllocatorMetrics {
     }
 
     /// Refreshes the gauges every `interval`.
+    ///
+    /// While the statistics cannot be read the gauges keep their last values. The first failure
+    /// is logged as a warning, repeated ones at debug level, and the recovery at info level.
     pub async fn run(self, interval: Duration) {
+        let mut failing = false;
+
         loop {
-            if let Err(error) = self.update() {
-                log::debug!(error:%; "cannot read allocator statistics");
+            match self.update() {
+                Ok(()) if failing => {
+                    log::info!("reading allocator statistics again, gauges are current");
+                    failing = false;
+                }
+                Ok(()) => {}
+                Err(error) if failing => {
+                    log::debug!(error:%; "cannot read allocator statistics");
+                }
+                Err(error) => {
+                    log::warn!(error:%; "cannot read allocator statistics, gauges are stale");
+                    failing = true;
+                }
             }
+
             tokio::time::sleep(interval).await;
         }
     }
