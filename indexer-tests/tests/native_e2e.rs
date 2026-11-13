@@ -37,6 +37,10 @@ use walkdir::WalkDir;
 
 const API_READY_TIMEOUT: Duration = Duration::from_secs(30);
 
+#[path = "support/contract_event_sidecar.rs"]
+#[cfg(any(feature = "cloud", feature = "standalone"))]
+mod contract_event_sidecar;
+
 // The `NODE_IMAGE` environment variable overrides the default.
 static NODE_IMAGE: LazyLock<String> = LazyLock::new(|| {
     env::var("NODE_IMAGE").unwrap_or_else(|_| "ghcr.io/midnightntwrk/midnight-node".to_owned())
@@ -112,6 +116,11 @@ async fn main() -> anyhow::Result<()> {
     )
     .await;
 
+    let result = match result {
+        Ok(()) => contract_event_sidecar::cloud(postgres_port).await,
+        Err(error) => Err(error),
+    };
+
     // Terminate Indexer components using SIGTERM and wait which is imporant for coverage data to be
     // written and to avoid zombie processes.
     let _ = signal::kill(Pid::from_raw(indexer_api.id() as i32), Signal::SIGTERM);
@@ -136,7 +145,7 @@ async fn main() -> anyhow::Result<()> {
     println!("Node started");
 
     // Start Indexer.
-    let (mut indexer_standalone, api_port, _temp_dir) =
+    let (mut indexer_standalone, api_port, temp_dir) =
         start_indexer_standalone(&node_handle.node_url).context("start indexer_standalone")?;
     println!("Indexer started");
 
@@ -152,6 +161,11 @@ async fn main() -> anyhow::Result<()> {
         false,
     )
     .await;
+
+    let result = match result {
+        Ok(()) => contract_event_sidecar::standalone(&temp_dir.path().join("indexer.sqlite")).await,
+        Err(error) => Err(error),
+    };
 
     // Terminate Indexer using SIGTERM and wait which is imporant for coverage data to be written
     // and to avoid zombie processes.

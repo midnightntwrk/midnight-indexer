@@ -1,0 +1,35 @@
+// This file is part of midnight-indexer.
+// Copyright (C) Midnight Foundation
+// SPDX-License-Identifier: Apache-2.0
+
+pragma language_version >= 0.25.0;
+import CompactStandardLibrary;
+
+// Recognisable log payloads, not token transfers. The E2E tests compare every
+// decoded field with these values, independently of the query response.
+export ledger round: Counter;
+
+constructor() {
+  round.increment(1);
+}
+
+export circuit emit_all(): [] {
+  const a = pad(32, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+  const b = pad(32, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+  const c = pad(32, "cccccccccccccccccccccccccccccccc");
+  const d = pad(32, "dddddddddddddddddddddddddddddddd");
+  const user = left<ZswapCoinPublicKey, ContractAddress>(ZswapCoinPublicKey { bytes: a });
+  const contract_recipient = right<ZswapCoinPublicKey, ContractAddress>(ContractAddress { bytes: c });
+  emit(ShieldedSpend { nullifier: a });
+  emit(ShieldedReceive { commitment: b, ciphertext: some<Bytes<512>>(pad(512, "ciphertext")), contractAddress: some<Bytes<32>>(c) });
+  emit(ShieldedMint { commitment: b, domainSep: d, amount: some<Uint<128>>(123) });
+  emit(ShieldedBurn { nullifier: a, amount: some<Uint<128>>(456) });
+  emit(UnshieldedSpend { sender: user, domainSep: d, tokenType: b, amount: 789 });
+  emit(UnshieldedReceive { recipient: contract_recipient, domainSep: d, tokenType: b, amount: 987 });
+  emit(UnshieldedMint { domainSep: d, tokenType: b, amount: 654 });
+  emit(UnshieldedBurn { sender: contract_recipient, tokenType: b, amount: 321 });
+  emit(Paused {});
+  emit(Unpaused {});
+  emit(Misc { name: a, payload: pad(256, "indexer event fixture") });
+  round.increment(1);
+}
