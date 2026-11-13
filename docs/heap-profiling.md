@@ -30,9 +30,14 @@ How to read them when memory grows:
 - `allocated` is flat and `resident` grows: the memory is fragmented, or jemalloc has not
   returned freed pages to the OS yet. A heap profile won't show anything, so look at allocator
   tuning instead.
-- Process RSS grows but `resident` does not: the memory is outside jemalloc, for example
-  SQLite's page cache in standalone mode, or memory-mapped files (`RssFile` in
+- Process RSS grows but `resident` does not: the memory is outside jemalloc, so it was mapped
+  directly and not allocated with `malloc`. Examples are thread stacks (`thread_stack_size` per
+  thread, as far as they have been touched) and memory-mapped files (`RssFile` in
   `/proc/<pid>/status`).
+
+The indexer's jemalloc also replaces the C `malloc`, so memory allocated by C code linked into
+the process is counted in these statistics and sampled by heap profiles. That includes SQLite's
+page cache in standalone mode: when it grows, `allocated` grows.
 
 ## Heap profiles
 
