@@ -112,6 +112,13 @@ jobs:
           rustup override set ${{needs.changes.outputs.toolchain}}
           just feature=standalone lint
 
+      # No other job builds the heap profiling feature. This is the feature selection from
+      # docs/heap-profiling.md, so that build keeps working.
+      - name: just lint (jemalloc-profiling)
+        run: |
+          cargo clippy -p indexer-standalone --no-deps \
+            --features standalone,indexer-common/jemalloc-profiling -- -D warnings
+
   test:
     runs-on: ubuntu-latest-8-core-x64
     needs: [changes]
