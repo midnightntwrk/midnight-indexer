@@ -38,6 +38,34 @@ export const SHIELDED_TRANSACTION_SUBSCRIPTION_BY_SESSION_ID = `subscription Wal
     }
 }`;
 
+// Same subscription with the optional `index` argument, selecting the two keys the
+// server pages relevant transactions by (midnight-indexer#1681): the transaction ID,
+// which is the paging cursor, and the zswap indices, which `index` filters on
+// (`zswapStartIndex >= index`). Pass `{ INDEX }` as extra variables.
+export const SHIELDED_TRANSACTION_SUBSCRIPTION_BY_SESSION_ID_AND_INDEX = `subscription WalletSyncEventSubscriptionFromIndex ($SESSION_ID: String, $INDEX: Int){
+    shieldedTransactions (sessionId: $SESSION_ID, index: $INDEX) {
+        ... on RelevantTransaction {
+            __typename
+            transaction {
+                id
+                hash
+                zswapStartIndex
+                zswapEndIndex
+            }
+            zswapCollapsedUpdate {
+                startIndex
+                endIndex
+            }
+        }
+        ... on ShieldedTransactionsProgress {
+            __typename
+            highestZswapEndIndex
+            highestCheckedZswapEndIndex
+            highestRelevantZswapEndIndex
+        }
+    }
+}`;
+
 const UNSHIELDED_TX_SUBSCRIPTION_FRAGMENT = `    ... on UnshieldedTransaction {
         __typename
         transaction{

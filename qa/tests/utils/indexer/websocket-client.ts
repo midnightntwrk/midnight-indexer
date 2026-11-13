@@ -838,6 +838,8 @@ export class IndexerWsClient {
    * @param handlers - Object containing callback functions for handling subscription events
    * @param sessionId - The session ID obtained from openWalletSession
    * @param queryOverride - Optional custom GraphQL query. If provided, caller is responsible for it to match the sessionId
+   * @param extraVariables - Optional further variables for `queryOverride`, e.g. `{ INDEX: 5 }` for
+   *   a document that declares `$INDEX`. Merged over `SESSION_ID`.
    *
    * @returns A function that can be called to unsubscribe from the events
    */
@@ -845,6 +847,7 @@ export class IndexerWsClient {
     handlers: SubscriptionHandlers<ShieldedTxSubscriptionResponse>,
     sessionId: string,
     queryOverride?: string,
+    extraVariables?: Record<string, unknown>,
   ): () => void {
     const id = this.getNextId();
 
@@ -852,6 +855,7 @@ export class IndexerWsClient {
     const query = queryOverride ?? SHIELDED_TRANSACTION_SUBSCRIPTION_BY_SESSION_ID;
     const variables = {
       SESSION_ID: sessionId,
+      ...extraVariables,
     };
 
     log.debug(`Shielded transaction subscription query:\n${query}`);
