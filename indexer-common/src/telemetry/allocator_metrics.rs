@@ -116,13 +116,14 @@ impl AllocatorMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
+    use std::{collections::HashMap, hint::black_box};
 
     #[test]
     fn test_read_every_stat() {
         let metrics = AllocatorMetrics::new().unwrap();
-        // Keep a live allocation around so `allocated` cannot be zero.
-        let live = vec![0u8; 1 << 20];
+        // Keep a live allocation around so `allocated` cannot be zero. `black_box` stops an
+        // optimised build from removing the allocation, as only its length is read.
+        let live = black_box(vec![0u8; 1 << 20]);
         let values = STATS
             .iter()
             .copied()
