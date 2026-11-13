@@ -493,7 +493,7 @@ TARGET_ENV=preprod INDEXER_API_VERSION=v3 bun run test:integration
 
 - **Smart Cache Management**: E2E tests include toolkit cache warmup; integration and smoke tests start immediately
 
-- **Custom Reporters**: JUnit-compatible output for CI integration and XRay custom test reporting
+- **Custom Reporters**: JUnit-compatible output for CI integration
 
 - **Improved Logging**: Configurable logging for debugging and test traceability
 

@@ -37,6 +37,11 @@ use walkdir::WalkDir;
 
 const API_READY_TIMEOUT: Duration = Duration::from_secs(30);
 
+// The `NODE_IMAGE` environment variable overrides the default.
+static NODE_IMAGE: LazyLock<String> = LazyLock::new(|| {
+    env::var("NODE_IMAGE").unwrap_or_else(|_| "ghcr.io/midnightntwrk/midnight-node".to_owned())
+});
+
 static LATEST_NODE_VERSION: LazyLock<String> = LazyLock::new(|| {
     let node_versions_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../NODE_VERSIONS");
     let node_versions = fs::read_to_string(&node_versions_path).unwrap_or_else(|error| {
@@ -214,15 +219,14 @@ async fn start_node() -> anyhow::Result<NodeHandle> {
         .display()
         .to_string();
 
-    let node_container =
-        GenericImage::new("midnightntwrk/midnight-node", LATEST_NODE_VERSION.trim())
-            .with_wait_for(WaitFor::message_on_stderr("9944"))
-            .with_mount(Mount::bind_mount(node_path, "/node"))
-            .with_env_var("SHOW_CONFIG", "false")
-            .with_env_var("CFG_PRESET", "dev")
-            .start()
-            .await
-            .context("start node container")?;
+    let node_container = GenericImage::new(NODE_IMAGE.as_str(), LATEST_NODE_VERSION.trim())
+        .with_wait_for(WaitFor::message_on_stderr("9944"))
+        .with_mount(Mount::bind_mount(node_path, "/node"))
+        .with_env_var("SHOW_CONFIG", "false")
+        .with_env_var("CFG_PRESET", "dev")
+        .start()
+        .await
+        .context("start node container")?;
 
     let node_port = node_container
         .get_host_port_ipv4(9944)

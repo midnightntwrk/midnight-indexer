@@ -176,14 +176,15 @@ class TestDataProvider {
    * where the shared funding wallet takes ~46. Otherwise this is
    * `getFundingSeed()`.
    *
-   * Only transfer callers use this. Suites that still build through the
-   * toolkit (contract actions, the toolkit suites) or that rely on the shared
-   * funding wallet's history (integration subscriptions) keep calling
-   * `getFundingSeed()`, so selecting moth does not change their wallet. The
-   * light seed is handed to the test rather than swapped inside the backend
-   * because tests derive the sender's address and viewing key from the seed
-   * they are handed — the generator and the assertions must be looking at the
-   * same wallet.
+   * Transfer callers and the wallet-state suites (dust balance, show wallet
+   * queries) use this, so under moth they all read the one wallet global
+   * setup warmed. Suites that build through the toolkit (contract actions)
+   * or that rely on the shared funding wallet's history (integration
+   * subscriptions) keep calling `getFundingSeed()`, so selecting moth does
+   * not change their wallet. The light seed is handed to the test rather
+   * than swapped inside the backend because tests derive the sender's
+   * address and viewing key from the seed they are handed — the generator
+   * and the assertions must be looking at the same wallet.
    * @returns The transfer funding seed as a string.
    */
   getTransferFundingSeed() {

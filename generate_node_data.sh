@@ -25,7 +25,8 @@ readonly node_version="$1"
 # A node release names the toolkit release it ships with, and the two carry
 # independent version numbers: node-1.0.2 ships toolkit-1.0.0.
 readonly toolkit_version="${2:-$node_version}"
-readonly toolkit_image="midnightntwrk/midnight-node-toolkit:$toolkit_version"
+readonly node_image="ghcr.io/midnightntwrk/midnight-node:$node_version"
+readonly toolkit_image="ghcr.io/midnightntwrk/midnight-node-toolkit:$toolkit_version"
 readonly rng_seed="0000000000000000000000000000000000000000000000000000000000000037"
 readonly node_dir="$(pwd)/.node/$node_version"
 
@@ -41,13 +42,15 @@ readonly node_dir="$(pwd)/.node/$node_version"
 #   ledger | node/toolkit line          | compactc    | compact-runtime
 #   -------|-----------------------------|-------------|----------------
 #   v8     | 1.x                         | 0.30.0      | 0.15.0
-#   v9     | 2.1.0-beta.1+               | 0.33.0-rc.2 | 0.18.0-rc.1
+#   v9     | 2.1.0-beta.1 to 2.1.0       | 0.33.0-rc.2 | 0.18.0-rc.1
+#   v9     | 2.1.100+                    | 0.35.0      | 0.20.0
 #
 # The default follows node_version per the table above; set COMPACTC_VERSION
 # to override it. Ledger tokens token-issuer mints go to whichever wallet its
 # mintUnshielded call names as recipient.
 case "$node_version" in
-    2.1.*) default_compactc_version="0.33.0-rc.2" ;;
+    2.1.0*) default_compactc_version="0.33.0-rc.2" ;;
+    2.1.*) default_compactc_version="0.35.0" ;;
     *) default_compactc_version="0.30.0" ;;
 esac
 readonly compactc_version="${COMPACTC_VERSION:-$default_compactc_version}"
@@ -190,7 +193,7 @@ docker run \
     -e SIDECHAIN_BLOCK_BENEFICIARY="04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e" \
     -e THRESHOLD=0 \
     -v $node_dir:/node \
-    midnightntwrk/midnight-node:$node_version
+    $node_image
 
 # Wait for node to be ready.
 echo "Waiting for node to be ready..."

@@ -11,10 +11,14 @@
 
 set -euo pipefail
 
+# shellcheck source=qa/scripts/_lib.sh
+. "$(dirname "$0")/_lib.sh"
+
 FROM_NODE_TAG="${FROM_NODE_TAG:?FROM_NODE_TAG is required (e.g. 0.21.0)}"
 TO_NODE_TAG="${TO_NODE_TAG:?TO_NODE_TAG is required (e.g. 0.22.2)}"
 INDEXER_TAG="${INDEXER_TAG:?INDEXER_TAG is required}"
 NODE_TOOLKIT_TAG="${NODE_TOOLKIT_TAG:-latest-main}"
+TOOLKIT_IMAGE="ghcr.io/midnightntwrk/midnight-node-toolkit:${NODE_TOOLKIT_TAG}"
 export IMAGE_REGISTRY="${IMAGE_REGISTRY:-midnightntwrk}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -73,7 +77,7 @@ docker volume rm "$DOCKER_VOLUME_NAME" 2>/dev/null || true
 
 # Clean data dirs
 if [ -d "target/data/postgres" ] || [ -d "target/data/nats" ]; then
-    docker run --rm -v "$(pwd):/project" alpine sh -c "rm -rf /project/target/data/postgres /project/target/data/nats"
+    docker run --rm -v "$(pwd):/project" "$ALPINE_IMAGE" sh -c "rm -rf /project/target/data/postgres /project/target/data/nats"
 fi
 mkdir -p target/data/postgres target/data/nats target/debug
 
@@ -126,7 +130,7 @@ NETWORK_NAME="${DOCKER_PROJECT_NAME}_default"
 docker run --rm \
   --network "${NETWORK_NAME}" \
   -v "${TMPDIR}/runtime.wasm:/wasm/runtime.wasm" \
-  "midnightntwrk/midnight-node-toolkit:${NODE_TOOLKIT_TAG}" \
+  "${TOOLKIT_IMAGE}" \
   runtime-upgrade \
   --wasm-file /wasm/runtime.wasm \
   --rpc-url ws://node:9944 \

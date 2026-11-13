@@ -9,11 +9,22 @@ on:
       - main
       - feat/*
       - release/*
+  merge_group:
+  # Runs on main populate the Rust cache that pull requests restore from.
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - qa/**
   workflow_dispatch:
 
 concurrency:
   group: ${{github.workflow}}-${{github.head_ref || github.run_id}}
   cancel-in-progress: true
+
+env:
+  # Line tables keep backtraces readable while shrinking the cached target directory.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:
   # Detects whether the PR touches anything outside `qa/**`. Subsequent jobs
@@ -52,7 +63,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           components: rustfmt
           toolchain: ${{needs.changes.outputs.toolchain}}
@@ -61,9 +72,6 @@ jobs:
         uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
         with:
           tool: just
-
-      - name: Setup Rust cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: just fmt-check
         run: |
@@ -78,7 +86,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: ${{needs.changes.outputs.toolchain}}
           components: clippy
@@ -90,6 +98,11 @@ jobs:
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # The default key is the job id, which ci-standalone shares.
+          key: cloud
+          # PR caches are visible only to their own PR, so only main saves.
+          save-if: ${{github.ref == 'refs/heads/main'}}
 
       - name: Init Env Vars
         uses: ./.github/actions/init-env
@@ -104,6 +117,10 @@ jobs:
     needs: [changes]
     if: ${{!cancelled() && needs.changes.outputs.non_qa != 'false'}}
     timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      NODE_IMAGE: ghcr.io/midnightntwrk/midnight-node
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -111,13 +128,13 @@ jobs:
       - name: Pre-pull Docker images
         run: |
           NODE_VERSION=$(tail -n 1 NODE_VERSIONS)
-          echo "Pre-pulling midnight-node:$NODE_VERSION..."
-          docker pull "midnightntwrk/midnight-node:$NODE_VERSION" || \
-          docker pull "midnightntwrk/midnight-node:$NODE_VERSION" || \
-          docker pull "midnightntwrk/midnight-node:$NODE_VERSION"
+          echo "Pre-pulling $NODE_IMAGE:$NODE_VERSION..."
+          docker pull "$NODE_IMAGE:$NODE_VERSION" || \
+          docker pull "$NODE_IMAGE:$NODE_VERSION" || \
+          docker pull "$NODE_IMAGE:$NODE_VERSION"
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           toolchain: ${{needs.changes.outputs.toolchain}}
 
@@ -133,6 +150,11 @@ jobs:
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # The default key is the job id, which ci-standalone shares.
+          key: cloud
+          # PR caches are visible only to their own PR, so only main saves.
+          save-if: ${{github.ref == 'refs/heads/main'}}
 
       - name: Init Env Vars
         uses: ./.github/actions/init-env
@@ -151,7 +173,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
         with:
           components: rust-docs
           toolchain: ${{needs.changes.outputs.toolchain}}
@@ -163,6 +185,11 @@ jobs:
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # The default key is the job id, which ci-standalone shares.
+          key: cloud
+          # PR caches are visible only to their own PR, so only main saves.
+          save-if: ${{github.ref == 'refs/heads/main'}}
 
       - name: just doc
         run: |
