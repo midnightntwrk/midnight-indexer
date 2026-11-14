@@ -41,7 +41,7 @@ export enum CardanoNetworkType {
  * Selectable indexer deployment instance.
  *
  * Each deployed environment runs two indexer instances behind the public
- * `indexer.<env>.midnight.network` URL (blue/green). A new indexer version is
+ * `indexer.<env>.<domain>` URL (blue/green). A new indexer version is
  * rolled out to the secondary instance first, so QA can target it explicitly
  * before it is promoted to primary.
  */
@@ -56,7 +56,7 @@ export enum IndexerInstance {
  * - When `rawInstance` is unset/empty, the host is returned unchanged so the
  *   public URL keeps pointing at whichever instance is currently primary.
  * - `blue`/`green` (case-insensitive) rewrite the leading `indexer` label to
- *   `indexer-blue`/`indexer-green` (e.g. `indexer-green.qanet.midnight.network`).
+ *   `indexer-blue`/`indexer-green` (e.g. `indexer-green.qanet.shielded.tools`).
  * - Any other value fails fast, mirroring the `TARGET_ENV` validation style.
  * - The undeployed/localhost environment has no blue/green split, so the
  *   override is ignored there (with a warning) rather than corrupting the host.
@@ -113,15 +113,11 @@ const hostEntries: HostEntry[] = [
     indexerHost: 'localhost:8088',
     nodeHost: 'localhost:9944',
   },
-  { env: EnvironmentName.QANET, domain: 'qanet.midnight.network' },
-  { env: EnvironmentName.DEVNET, domain: 'devnet.midnight.network' },
+  { env: EnvironmentName.QANET, domain: 'qanet.shielded.tools' },
+  { env: EnvironmentName.DEVNET, domain: 'devnet.shielded.tools' },
   { env: EnvironmentName.PREVIEW, domain: 'preview.midnight.network' },
   { env: EnvironmentName.PREPROD, domain: 'preprod.midnight.network' },
-  {
-    env: EnvironmentName.STAGENET,
-    indexerHost: 'indexer.stagenet.shielded.tools',
-    nodeHost: 'rpc.stagenet.shielded.tools',
-  },
+  { env: EnvironmentName.STAGENET, domain: 'stagenet.shielded.tools' },
   { env: EnvironmentName.MAINNET, domain: 'mainnet.midnight.network' },
 ];
 

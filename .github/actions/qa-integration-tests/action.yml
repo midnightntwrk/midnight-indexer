@@ -9,7 +9,7 @@ description: >-
 
 inputs:
   target_env:
-    description: Midnight target environment (undeployed/devnet/qanet/preview/preprod)
+    description: Midnight target environment (undeployed/preview/preprod)
     required: true
   node_image:
     description: Node image repository (undeployed only)

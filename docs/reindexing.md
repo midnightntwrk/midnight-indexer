@@ -136,7 +136,7 @@ ledger DB grows without bound.
 ### cloud — sync a new instance and cut over (preferred)
 
 Every deployed environment runs two indexer instances behind
-`indexer.<env>.midnight.network`, and new versions go to the secondary first (see
+`indexer.<env>.<domain>`, and new versions go to the secondary first (see
 `qa/tests/environment/model.ts`). Use that: the reindex happens on the secondary
 while the primary keeps serving, so the downtime is zero and the rollback is
 "don't promote".
@@ -225,9 +225,9 @@ files first if the data matters.
 
   ```bash
   Q='{"query":"query{ contractAction(address:\"<hex address>\"){ address state zswapState } }"}'
-  curl -s -X POST https://indexer.<env>.midnight.network/api/v4/graphql \
+  curl -s -X POST https://indexer.<env>.<domain>/api/v4/graphql \
       -H 'Content-Type: application/json' -d "$Q" > primary.json
-  curl -s -X POST https://indexer-<colour>.<env>.midnight.network/api/v4/graphql \
+  curl -s -X POST https://indexer-<colour>.<env>.<domain>/api/v4/graphql \
       -H 'Content-Type: application/json' -d "$Q" > secondary.json
   diff primary.json secondary.json && echo "identical"
   ```

@@ -4,10 +4,10 @@ on:
   workflow_call:
     inputs:
       target_env:
-        description: 'Midnight target environment (devnet/qanet/preview/preprod)'
+        description: 'Midnight target environment (preview/preprod)'
         required: true
         type: string
-        default: qanet
+        default: preview
       node_version:
         description: 'Node.js version to use'
         required: false

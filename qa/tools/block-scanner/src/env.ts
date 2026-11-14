@@ -15,10 +15,10 @@
 
 const INDEXER_BASE_URL: Record<string, string> = {
   undeployed: "localhost:8088",
-  devnet: "indexer.devnet.midnight.network",
+  devnet: "indexer.devnet.shielded.tools",
   preview: "indexer.preview.midnight.network",
   preprod: "indexer.preprod.midnight.network",
-  qanet: "indexer.qanet.midnight.network",
+  qanet: "indexer.qanet.shielded.tools",
   stagenet: "indexer.stagenet.shielded.tools",
   mainnet: "indexer.mainnet.midnight.network",
 };

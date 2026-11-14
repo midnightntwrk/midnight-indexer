@@ -7,8 +7,9 @@ permissions:
   # run creation with startup_failure.
   packages: read
 
+# No schedule and no manual dispatch: this workflow has no trigger of its own.
 on:
-  workflow_dispatch:
+  workflow_call:
 
 jobs:
   test:

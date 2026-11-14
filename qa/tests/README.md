@@ -224,19 +224,19 @@ This controls the version segment in the API endpoint paths (e.g. `/api/v3/graph
 
 #### Indexer Blue/Green Instance
 
-The blue/green environments run two indexer instances behind the public `indexer.<env>.midnight.network` URL. In normal conditions that URL points at whichever instance is currently primary; a new indexer version is rolled out to the secondary instance first, so QA can validate it before it is promoted. To target a specific instance, set the `INDEXER_INSTANCE` environment variable:
+The blue/green environments run two indexer instances behind the public `indexer.<env>.<domain>` URL. In normal conditions that URL points at whichever instance is currently primary; a new indexer version is rolled out to the secondary instance first, so QA can validate it before it is promoted. To target a specific instance, set the `INDEXER_INSTANCE` environment variable:
 
 ```bash
 # Target the blue instance
-INDEXER_INSTANCE=blue TARGET_ENV=qanet bun run test:smoke
+INDEXER_INSTANCE=blue TARGET_ENV=preview bun run test:smoke
 
 # Target the green instance
-INDEXER_INSTANCE=green TARGET_ENV=qanet bun run test:smoke
+INDEXER_INSTANCE=green TARGET_ENV=preview bun run test:smoke
 ```
 
-This rewrites the indexer host to `indexer-blue.<env>.midnight.network` / `indexer-green.<env>.midnight.network` for both the HTTP and WebSocket clients. If not set, the clients use the primary `indexer.<env>.midnight.network` URL. The value is case-insensitive and accepts only `blue` or `green`; any other value fails fast.
+This rewrites the indexer host to `indexer-blue.<env>.<domain>` / `indexer-green.<env>.<domain>` for both the HTTP and WebSocket clients. If not set, the clients use the primary `indexer.<env>.<domain>` URL. The value is case-insensitive and accepts only `blue` or `green`; any other value fails fast.
 
-**Supported environments:** `INDEXER_INSTANCE` is only meaningful on the blue/green environments — `qanet`, `preview`, and `preprod`. It is ignored on `undeployed` (localhost has no blue/green split) and has no usable target on `devnet` (single instance) — see the preflight behaviour below.
+**Supported environments:** `INDEXER_INSTANCE` is only meaningful on the blue/green environments — `preview` and `preprod`. It is ignored on `undeployed` (localhost has no blue/green split) and has no usable target on `devnet` (single instance) — see the preflight behaviour below.
 
 When `INDEXER_INSTANCE` is set, a preflight check hits the resolved host's `/ready` endpoint before any tests run and fails fast with a clear message if the target isn't usable:
 
@@ -418,7 +418,7 @@ There are a number of deployed environments that are used for testing components
 - preprod
 - mainnet
 
-Endpoints are derived automatically from the `TARGET_ENV` name (e.g. `qanet.midnight.network`), so you do **not** need to configure URLs manually. (`testnet` is a Cardano network type, not a `TARGET_ENV` value.)
+Endpoints are derived automatically from the `TARGET_ENV` name (e.g. `preview.midnight.network`), so you do **not** need to configure URLs manually. (`testnet` is a Cardano network type, not a `TARGET_ENV` value.)
 
 When running **E2E tests** against deployed environments,
 the test harness auto-starts the toolkit fetch cache (Postgres) container locally (see “Toolkit
@@ -449,7 +449,7 @@ TARGET_ENV=preprod INDEXER_API_VERSION=v3 bun run test:integration
 | `INDEXER_API_VERSION` | No                                | `v4`                   | GraphQL API version segment, e.g. `v3` → `/api/v3/graphql`.                                            |
 | `VITEST_MAX_WORKERS`  | No                                | all available CPUs     | Cap the Vitest worker pool. Accepts a positive integer (`1`, `2`, …) or a percentage (`"50%"`).       |
 | `MN_FETCH_CACHE`      | No (managed by harness)           | auto                   | Postgres-backed toolkit fetch cache. The `toolkit-postgres` container is started automatically.       |
-| `INDEXER_INSTANCE`    | No                                | (primary)              | Blue/green indexer instance to target: `blue` / `green`. Unset → primary (bare `indexer.<env>`). Only meaningful on `qanet`/`preview`/`preprod`; ignored for `undeployed`. A `/ready` preflight fails fast if the colour isn't routed. |
+| `INDEXER_INSTANCE`    | No                                | (primary)              | Blue/green indexer instance to target: `blue` / `green`. Unset → primary (bare `indexer.<env>`). Only meaningful on `preview`/`preprod`; ignored for `undeployed`. A `/ready` preflight fails fast if the colour isn't routed. |
 
 **Sync test project only** (`bun run test:sync`, see [tests/sync/README.md](tests/sync/README.md)):
 

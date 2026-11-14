@@ -1,10 +1,8 @@
 name: Indexer QA Block Streaming Test (Devnet)
 
+# No schedule and no manual dispatch: this workflow has no trigger of its own.
 on:
-  workflow_dispatch:
-  schedule:
-    # Every 30 minutes on workdays (Mon-Fri), covering UK and US working hours (07:00-21:00 UTC)
-    - cron: '*/30 7-21 * * 1-5'
+  workflow_call:
 
 # no top level default permissions for security reasons
 permissions:
