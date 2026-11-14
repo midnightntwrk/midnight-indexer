@@ -23,7 +23,7 @@ import { NodeRpcClient } from '@utils/node/rpc-client';
 const execFileAsync = promisify(execFile);
 
 const CONTAINER_NAME = 'toolkit-postgres';
-const POSTGRES_IMAGE = 'postgres:16';
+const POSTGRES_IMAGE = 'postgres:17.12-alpine';
 const POSTGRES_USER = 'toolkit';
 const POSTGRES_PASSWORD = 'toolkit';
 const POSTGRES_DB = 'toolkit';
