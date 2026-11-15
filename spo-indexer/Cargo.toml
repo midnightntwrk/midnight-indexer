@@ -35,6 +35,11 @@ tokio           = { workspace = true, features = [ "macros", "rt-multi-thread", 
 trait-variant   = { workspace = true }
 reqwest         = { workspace = true, features = [ "json", "rustls" ] }
 
+[dev-dependencies]
+tempfile               = { workspace = true }
+testcontainers         = { workspace = true }
+testcontainers-modules = { workspace = true, features = [ "postgres" ] }
+
 [features]
 cloud      = [ "indexer-common/cloud", "sqlx/postgres" ]
 standalone = [ "indexer-common/standalone", "sqlx/sqlite" ]

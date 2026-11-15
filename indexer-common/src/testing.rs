@@ -90,6 +90,15 @@ use {
 /// Network ID of every transaction this module builds.
 pub const NETWORK_ID: &str = "undeployed";
 
+/// Reference time of ledger tests, in seconds, and the dust `ctime` of their transactions. Any
+/// value of at least 1 works, so that `NOW - 1` does not underflow.
+pub const NOW: u64 = 1_800_000_000;
+
+/// Converts `seconds` to the milliseconds ledger block timestamps use.
+pub const fn millis(seconds: u64) -> u64 {
+    seconds * 1_000
+}
+
 /// A reason the ledger rejects a transaction as malformed.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Malformed {

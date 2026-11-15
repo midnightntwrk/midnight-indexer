@@ -66,7 +66,7 @@ indexer in step with the node and ledger:
 * [Creating a release](docs/releasing.md) - versioning, changelog, tagging, image publish.
 * [Testing & node consistency](docs/testing.md) - the runtime root-match guard and the test layers.
 * [Upgrading the node version](docs/updating-node-version.md) - `NODE_VERSIONS`, metadata, runtime modules.
-* [Upgrading the ledger](docs/upgrading-ledger.md) - `v8`/`v9` coexistence and the `[patch.crates-io]` pins.
+* [Upgrading the ledger](docs/upgrading-ledger.md) - `v8`/`v9` coexistence and the node-matched pins.
 
 ## Support and Communication
 

@@ -14,18 +14,38 @@
 // limitations under the License.
 
 import log from '@utils/logging/logger';
-import { env } from 'environment/model';
+import { env, EnvironmentName } from 'environment/model';
 import type { TestContext } from 'vitest';
+import { z } from 'zod';
 import '@utils/logging/test-logging-hooks';
 import {
+  ContractActionStateAtSchema,
   ContractBalanceSchema,
   ContractDeployActionSchema,
   ContractCallActionSchema,
+  ContractStateAtSchema,
   ContractUpdateActionSchema,
 } from '@utils/indexer/graphql/schema';
-import dataProvider, { type TokenHoldingContractInfo } from '@utils/testdata-provider';
+import type { BlockReference, ContractActionStateAt } from '@utils/indexer/graphql/schema';
+import { GET_CONTRACT_ACTION_STATE_AT } from '@utils/indexer/graphql/contract-queries';
+import { GET_CONTRACT_STATE_AT } from '@utils/indexer/graphql/contract-type-queries';
+import { GET_TRANSACTION_CONTRACT_ACTIONS_STATE_AT } from '@utils/indexer/graphql/transaction-queries';
+import dataProvider, {
+  type LedgerHardForkInfo,
+  type TokenHoldingContractInfo,
+} from '@utils/testdata-provider';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
+import { NodeRpcClient } from '@utils/node/rpc-client';
 import { contractEventsSurfacePresent } from '@utils/indexer/contract-events-support';
+import {
+  CONTRACT_STATE_V6_TAG,
+  CONTRACT_STATE_V8_TAG,
+  contractStateTag,
+  currentStateAt,
+  expectAnchorConfirmedByNode,
+  forkBlock,
+  ownBlock,
+} from 'tests/shared/contract-state-utils';
 
 /** Introspect the field names on a GraphQL type (null when the type is absent). */
 async function introspectFieldNames(typeName: string): Promise<string[] | null> {
@@ -663,4 +683,380 @@ describe('contract queries', () => {
       }
     });
   });
+
+  describe('the block a contract state is anchored at', () => {
+    const fork = dataProvider.getLedgerHardFork();
+    const nodeClient = new NodeRpcClient();
+    // Up to 3 query attempts plus 6 node requests of up to 10 s each, so a slow node fails an
+    // assertion rather than the test timeout.
+    const NODE_CHECKED_TEST_MS = 120_000;
+    let knownContract: string | null = null;
+
+    beforeAll(() => {
+      try {
+        knownContract = dataProvider.getKnownContractAddress();
+      } catch (error) {
+        log.warn(error);
+      }
+    });
+
+    /**
+     * Runs `query` for the known contract's current state and checks it against the node, which
+     * the indexer under test cannot influence: the state must be the node's at the indexer tip
+     * read just before the query, so a state the node has since replaced fails (#1605: the
+     * pre-fork encoding served after a fork), and the node must confirm its stateAt. On a chain
+     * that declares its hard fork, stateAt must also be the block the fixture predicts. A query
+     * that saw a block past that tip raced a new write to the contract and is repeated.
+     */
+    async function expectCurrentStateConfirmedByNode(
+      query: () => Promise<{
+        state: string;
+        stateAt: BlockReference;
+        latest: ContractActionStateAt;
+      }>,
+    ) {
+      for (let attempt = 1; ; attempt++) {
+        const tip = await indexerHttpClient.getLatestBlock();
+        expect(tip).toBeSuccess();
+        const { height: tipHeight, hash: tipHash } = tip.data!.block;
+        const { state, stateAt, latest } = await query();
+        if (Math.max(stateAt.height, latest.transaction.block.height) > tipHeight) {
+          expect(attempt, 'contract written during every query attempt').toBeLessThan(3);
+          continue;
+        }
+        expect(state, `state vs the node's at the indexer tip ${tipHeight}`).toBe(
+          await nodeClient.getContractState(knownContract!, tipHash),
+        );
+        await expectAnchorConfirmedByNode(nodeClient, knownContract!, state, stateAt, latest);
+        if (fork) expect(stateAt).toEqual(currentStateAt(latest, fork));
+        return;
+      }
+    }
+
+    /**
+     * The latest contract action's state is anchored at the block it was last written: the
+     * action's own block, or the hard fork block if the chain crossed one after the action.
+     *
+     * @given a contract known to exist on the chain
+     * @when its latest contract action is queried by address without an offset
+     * @then its state is the node's state at the indexer tip and at the block stateAt names
+     * @and stateAt names the action's own block, or a later block on a newer protocol version
+     *      where the node's state changed: the fork block on a chain that crossed one after it
+     */
+    test(
+      'should anchor the latest contract action state at the block it was last written',
+      async (ctx: TestContext) => {
+        ctx.task!.meta.custom = { labels: ['Query', 'ContractAction', 'StateAt'] };
+        if (!knownContract) return ctx.skip(true, 'no known contract fixture on this env');
+
+        await expectCurrentStateConfirmedByNode(async () => {
+          const response = await indexerHttpClient.getContractAction(
+            knownContract!,
+            undefined,
+            GET_CONTRACT_ACTION_STATE_AT,
+          );
+          expect(response).toBeSuccess();
+          const action = ContractActionStateAtSchema.parse(response.data?.contractAction);
+          expect(action.address).toBe(knownContract);
+          return { state: action.state, stateAt: action.stateAt, latest: action };
+        });
+      },
+      NODE_CHECKED_TEST_MS,
+    );
+
+    /**
+     * A contract's current state is anchored where its latest action's state is.
+     *
+     * @given a contract known to exist on the chain
+     * @when the contract is queried by address without an offset
+     * @then its state is the node's state at the indexer tip and at the block stateAt names
+     * @and stateAt names the block of its latest action, or a later block on a newer protocol
+     *      version where the node's state changed: the fork block on a chain that crossed one
+     */
+    test(
+      'should anchor the contract state at the block of its latest action',
+      async (ctx: TestContext) => {
+        ctx.task!.meta.custom = { labels: ['Query', 'Contract', 'StateAt'] };
+        if (!knownContract) return ctx.skip(true, 'no known contract fixture on this env');
+
+        await expectCurrentStateConfirmedByNode(async () => {
+          const response = await indexerHttpClient.getContract(
+            knownContract!,
+            { actionsLimit: 1 },
+            GET_CONTRACT_STATE_AT,
+          );
+          expect(response).toBeSuccess();
+          const contract = ContractStateAtSchema.parse(response.data?.contract);
+          expect(contract.actions).toHaveLength(1);
+          return { state: contract.state, stateAt: contract.stateAt, latest: contract.actions[0] };
+        });
+      },
+      NODE_CHECKED_TEST_MS,
+    );
+
+    /**
+     * Recorded contract actions keep the state written by their own transaction, so each is
+     * anchored at its own block, whether listed under the contract or under its transaction.
+     *
+     * @given a contract known to exist on the chain
+     * @when its recent actions are listed through Contract.actions
+     * @and the transactions of those actions are queried by hash for their contract actions
+     * @then every listed contract action's stateAt names the block of its own transaction
+     */
+    test('should anchor every recorded contract action at its own block', async (ctx: TestContext) => {
+      ctx.task!.meta.custom = { labels: ['Query', 'Contract', 'Transaction', 'StateAt'] };
+      if (!knownContract) return ctx.skip(true, 'no known contract fixture on this env');
+
+      const contractResponse = await indexerHttpClient.getContract(
+        knownContract,
+        { actionsLimit: 3 },
+        GET_CONTRACT_STATE_AT,
+      );
+      expect(contractResponse).toBeSuccess();
+      const { actions } = ContractStateAtSchema.parse(contractResponse.data?.contract);
+      expect(actions.length).toBeGreaterThan(0);
+
+      const txResponses = await Promise.all(
+        actions.map((action) =>
+          indexerHttpClient.getTransactionByOffset(
+            { hash: action.transaction.hash },
+            GET_TRANSACTION_CONTRACT_ACTIONS_STATE_AT,
+          ),
+        ),
+      );
+      for (const [i, action] of actions.entries()) {
+        expect(action.stateAt, `Contract.actions item ${action.transaction.hash}`).toEqual(
+          ownBlock(action),
+        );
+
+        const txResponse = txResponses[i];
+        expect(txResponse).toBeSuccess();
+        const txActions = z
+          .array(ContractActionStateAtSchema)
+          .parse(txResponse.data?.transactions.flatMap((tx) => tx.contractActions));
+        expect(txActions.length).toBeGreaterThan(0);
+        for (const txAction of txActions) {
+          expect(
+            txAction.stateAt,
+            `Transaction.contractActions item ${txAction.transaction.hash}`,
+          ).toEqual(ownBlock(txAction));
+        }
+      }
+    });
+  });
 });
+
+// Expected states come from the node and blocks from the fork fixture, never from the indexer
+// under test: a contract untouched since the fork must serve the node's translated state.
+describe.runIf(env.getCurrentEnvironmentName() === EnvironmentName.DEVNET)(
+  'contract queries across a ledger hard fork',
+  () => {
+    const nodeClient = new NodeRpcClient();
+    let fork: LedgerHardForkInfo;
+    let address: string;
+    let actions: LedgerHardForkInfo['untouched-contracts'][number]['contract-actions'];
+
+    beforeAll(() => {
+      const declared = dataProvider.getLedgerHardFork();
+      if (!declared) throw new Error('devnet must declare the hard fork it crossed');
+      fork = declared;
+      ({ 'contract-address': address, 'contract-actions': actions } =
+        fork['untouched-contracts'][0]);
+    });
+
+    /** The node's state of the contract as of the given height, checked for its encoding. */
+    async function nodeStateAt(height: number, tag: string): Promise<string> {
+      const blockHash = await nodeClient.getBlockHash(height);
+      expect(blockHash, `node block hash at height ${height}`).not.toBeNull();
+      const state = await nodeClient.getContractState(address, blockHash!);
+      expect(contractStateTag(state), `node state tag at height ${height}`).toBe(tag);
+      return state;
+    }
+
+    describe('a contract untouched since the fork queried without an offset', () => {
+      /**
+       * The latest contract action of a contract untouched since the fork serves the state the
+       * node serves: the pre-fork state translated to the post-fork encoding.
+       *
+       * @given a contract deployed and last called before the fork (latest action at 124,423)
+       * @when its latest contract action is queried by address without an offset
+       * @then its state starts with midnight:contract-state[v8] and matches the node's state
+       */
+      test('should serve the contract action state in the post-fork encoding of the node', async (ctx: TestContext) => {
+        ctx.task!.meta.custom = { labels: ['Query', 'ContractAction', 'HardFork'] };
+
+        const nodeState = await nodeClient.getContractState(address);
+        const response = await indexerHttpClient.getContractAction(address);
+
+        expect(response).toBeSuccess();
+        const state = response.data!.contractAction!.state;
+        expect(contractStateTag(nodeState), 'node state tag').toBe(CONTRACT_STATE_V8_TAG);
+        expect(contractStateTag(state)).toBe(CONTRACT_STATE_V8_TAG);
+        expect(state).toBe(nodeState);
+      });
+
+      /**
+       * The contract of a contract untouched since the fork serves the state the node serves.
+       *
+       * @given a contract deployed and last called before the fork
+       * @when the contract is queried by address without an offset
+       * @then its state starts with midnight:contract-state[v8] and matches the node's state
+       */
+      test('should serve the contract state in the post-fork encoding of the node', async (ctx: TestContext) => {
+        ctx.task!.meta.custom = { labels: ['Query', 'Contract', 'HardFork'] };
+
+        const nodeState = await nodeClient.getContractState(address);
+        const response = await indexerHttpClient.getContract(address);
+
+        expect(response).toBeSuccess();
+        const state = response.data!.contract!.state;
+        expect(contractStateTag(nodeState), 'node state tag').toBe(CONTRACT_STATE_V8_TAG);
+        expect(contractStateTag(state)).toBe(CONTRACT_STATE_V8_TAG);
+        expect(state).toBe(nodeState);
+      });
+
+      /**
+       * The translated state is anchored at the fork block, while the contract action keeps the
+       * transaction that last wrote the contract.
+       *
+       * @given a contract deployed and last called before the fork
+       * @when its latest contract action and the contract are queried by address without an offset
+       * @then both stateAt name the fork block (169,496, protocol version 2001000)
+       * @and the contract action keeps its original transaction, from block 124,423
+       */
+      test('should anchor the translated state at the fork block', async (ctx: TestContext) => {
+        ctx.task!.meta.custom = { labels: ['Query', 'ContractAction', 'Contract', 'HardFork'] };
+        const latest = actions.at(-1)!;
+
+        const [actionResponse, contractResponse] = await Promise.all([
+          indexerHttpClient.getContractAction(address, undefined, GET_CONTRACT_ACTION_STATE_AT),
+          indexerHttpClient.getContract(address, {}, GET_CONTRACT_STATE_AT),
+        ]);
+
+        expect(actionResponse).toBeSuccess();
+        const action = ContractActionStateAtSchema.parse(actionResponse.data?.contractAction);
+        expect(action.stateAt).toEqual(forkBlock(fork));
+        expect(action.transaction.hash).toBe(latest['transaction-hash']);
+        expect(action.transaction.block.height).toBe(latest['block-height']);
+        expect(contractResponse).toBeSuccess();
+        expect(ContractStateAtSchema.parse(contractResponse.data?.contract).stateAt).toEqual(
+          forkBlock(fork),
+        );
+      });
+    });
+
+    describe('a contract untouched since the fork queried as of the blocks around it', () => {
+      /**
+       * As-of views serve the encoding of the queried block: the pre-fork encoding the block
+       * before the fork, the post-fork encoding from the fork block on.
+       *
+       * @given a contract deployed and last called before the fork
+       * @when the contract is queried as of the block before the fork and as of the fork block
+       * @then the states match the node's at those blocks: [v6] at 169,495, [v8] at 169,496
+       */
+      test('should serve the state in the encoding of the queried block', async (ctx: TestContext) => {
+        ctx.task!.meta.custom = { labels: ['Query', 'Contract', 'ByHeight', 'HardFork'] };
+        const forkHeight = fork['fork-block'].height;
+
+        for (const [height, tag] of [
+          [forkHeight - 1, CONTRACT_STATE_V6_TAG],
+          [forkHeight, CONTRACT_STATE_V8_TAG],
+        ] as const) {
+          const nodeState = await nodeStateAt(height, tag);
+          const response = await indexerHttpClient.getContract(address, { offset: { height } });
+
+          expect(response).toBeSuccess();
+          const state = response.data!.contract!.state;
+          expect(contractStateTag(state), `state tag as of height ${height}`).toBe(tag);
+          expect(state, `state as of height ${height}`).toBe(nodeState);
+        }
+      });
+
+      /**
+       * As-of views anchor the state at the latest action before the fork and at the fork block
+       * from it on.
+       *
+       * @given a contract deployed and last called before the fork
+       * @when the contract is queried as of the block before the fork and as of the fork block
+       * @then stateAt names the latest action's block (124,423) at 169,495 and the fork block at 169,496
+       */
+      test('should anchor the state at the latest action before the fork and at the fork block after', async (ctx: TestContext) => {
+        ctx.task!.meta.custom = {
+          labels: ['Query', 'Contract', 'ByHeight', 'StateAt', 'HardFork'],
+        };
+        const forkHeight = fork['fork-block'].height;
+        const latest = actions.at(-1)!;
+
+        const [before, at] = await Promise.all(
+          [forkHeight - 1, forkHeight].map((height) =>
+            indexerHttpClient.getContract(address, { offset: { height } }, GET_CONTRACT_STATE_AT),
+          ),
+        );
+
+        expect(before).toBeSuccess();
+        expect(ContractStateAtSchema.parse(before.data?.contract).stateAt).toMatchObject({
+          height: latest['block-height'],
+          hash: latest['block-hash'],
+        });
+        expect(at).toBeSuccess();
+        expect(ContractStateAtSchema.parse(at.data?.contract).stateAt).toEqual(forkBlock(fork));
+      });
+    });
+
+    describe('the recorded contract actions of a contract untouched since the fork', () => {
+      /**
+       * Records keep the state their own transaction wrote, in the pre-fork encoding.
+       *
+       * @given a contract with three actions before the fork (deploy, then two calls)
+       * @when each action is read through its transaction and through a block-offset query
+       * @then every state starts with midnight:contract-state[v6]
+       */
+      test('should keep every recorded contract action in the pre-fork encoding', async (ctx: TestContext) => {
+        ctx.task!.meta.custom = { labels: ['Query', 'ContractAction', 'Transaction', 'HardFork'] };
+
+        for (const recorded of actions) {
+          const txResponse = await indexerHttpClient.getTransactionByOffset({
+            hash: recorded['transaction-hash'],
+          });
+          const byBlock = await indexerHttpClient.getContractAction(address, {
+            blockOffset: { height: recorded['block-height'] },
+          });
+
+          expect(txResponse).toBeSuccess();
+          const txAction = txResponse
+            .data!.transactions.flatMap((tx) => tx.contractActions ?? [])
+            .find((action) => action.address === address);
+          expect(txAction, `contract action in tx ${recorded['transaction-hash']}`).toBeDefined();
+          expect(contractStateTag(txAction!.state)).toBe(CONTRACT_STATE_V6_TAG);
+          expect(byBlock).toBeSuccess();
+          expect(contractStateTag(byBlock.data!.contractAction!.state)).toBe(CONTRACT_STATE_V6_TAG);
+        }
+      });
+
+      /**
+       * Contract.actions lists the recorded actions, newest first, each anchored at its own block.
+       *
+       * @given a contract with three actions before the fork and none since
+       * @when the contract's actions are listed through Contract.actions
+       * @then exactly those three actions are listed, newest first, each in the [v6] encoding
+       * @and each stateAt names the block of the action's own transaction
+       */
+      test('should list the recorded actions anchored at their own blocks', async (ctx: TestContext) => {
+        ctx.task!.meta.custom = { labels: ['Query', 'Contract', 'StateAt', 'HardFork'] };
+
+        const response = await indexerHttpClient.getContract(address, {}, GET_CONTRACT_STATE_AT);
+
+        expect(response).toBeSuccess();
+        const listed = ContractStateAtSchema.parse(response.data?.contract).actions;
+        expect(
+          listed.map((action) => action.transaction.hash),
+          'contract touched since the fork? update ledger-hard-fork.jsonc',
+        ).toEqual(actions.map((action) => action['transaction-hash']).reverse());
+        for (const action of listed) {
+          expect(contractStateTag(action.state)).toBe(CONTRACT_STATE_V6_TAG);
+          expect(action.stateAt).toEqual(ownBlock(action));
+        }
+      });
+    });
+  },
+);

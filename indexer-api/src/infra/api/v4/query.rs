@@ -14,6 +14,7 @@
 use crate::{
     domain::{
         bridge::TreasuryReason,
+        spo::normalize_hex,
         storage::{Storage, bridge::BridgeEventFilter},
     },
     infra::api::{
@@ -567,13 +568,18 @@ where
     }
 
     /// Get SPO identity by pool ID.
+    ///
+    /// `poolIdHex` is case-insensitive hex with an optional `0x`/`0X` prefix; invalid hex
+    /// matches nothing.
     #[trace]
     async fn spo_identity_by_pool_id(
         &self,
         cx: &Context<'_>,
         pool_id_hex: String,
     ) -> ApiResult<Option<SpoIdentity>> {
-        let pool_id = normalize_hex(&pool_id_hex);
+        let Some(pool_id) = normalize_hex(&pool_id_hex) else {
+            return Ok(None);
+        };
         let storage = cx.get_storage::<S>();
 
         let identity = storage
@@ -598,13 +604,18 @@ where
     }
 
     /// Get pool metadata by pool ID.
+    ///
+    /// `poolIdHex` is case-insensitive hex with an optional `0x`/`0X` prefix; invalid hex
+    /// matches nothing.
     #[trace]
     async fn pool_metadata(
         &self,
         cx: &Context<'_>,
         pool_id_hex: String,
     ) -> ApiResult<Option<PoolMetadata>> {
-        let pool_id = normalize_hex(&pool_id_hex);
+        let Some(pool_id) = normalize_hex(&pool_id_hex) else {
+            return Ok(None);
+        };
         let storage = cx.get_storage::<S>();
 
         let metadata = storage
@@ -638,13 +649,18 @@ where
     }
 
     /// Get SPO with metadata by pool ID.
+    ///
+    /// `poolIdHex` is case-insensitive hex with an optional `0x`/`0X` prefix; invalid hex
+    /// matches nothing.
     #[trace]
     async fn spo_by_pool_id(
         &self,
         cx: &Context<'_>,
         pool_id_hex: String,
     ) -> ApiResult<Option<Spo>> {
-        let pool_id = normalize_hex(&pool_id_hex);
+        let Some(pool_id) = normalize_hex(&pool_id_hex) else {
+            return Ok(None);
+        };
         let storage = cx.get_storage::<S>();
 
         let spo = storage
@@ -685,13 +701,18 @@ where
     }
 
     /// Get composite SPO data (identity + metadata + performance).
+    ///
+    /// `poolIdHex` is case-insensitive hex with an optional `0x`/`0X` prefix; invalid hex
+    /// matches nothing.
     #[trace]
     async fn spo_composite_by_pool_id(
         &self,
         cx: &Context<'_>,
         pool_id_hex: String,
     ) -> ApiResult<Option<SpoComposite>> {
-        let pool_id = normalize_hex(&pool_id_hex);
+        let Some(pool_id) = normalize_hex(&pool_id_hex) else {
+            return Ok(None);
+        };
         let storage = cx.get_storage::<S>();
 
         let composite = storage
@@ -743,6 +764,9 @@ where
     }
 
     /// Get SPO performance by SPO key.
+    ///
+    /// `spoSkHex` is case-insensitive hex with an optional `0x`/`0X` prefix; invalid hex
+    /// returns an empty list.
     #[trace]
     async fn spo_performance_by_spo_sk(
         &self,
@@ -751,7 +775,9 @@ where
         limit: Option<i32>,
         offset: Option<i32>,
     ) -> ApiResult<Vec<EpochPerf>> {
-        let spo_sk = normalize_hex(&spo_sk_hex);
+        let Some(spo_sk) = normalize_hex(&spo_sk_hex) else {
+            return Ok(vec![]);
+        };
         let storage = cx.get_storage::<S>();
         let limit = limit.unwrap_or(100).clamp(1, 500) as i64;
         let offset = offset.unwrap_or(0).max(0) as i64;
@@ -1139,16 +1165,6 @@ fn validate_epoch_span(from_epoch: i64, to_epoch: i64) -> ApiResult<()> {
         .some_or_client_error(|| {
             format!("epoch range too large: span {span} exceeds the maximum of {MAX_EPOCH_SPAN}")
         })
-}
-
-/// Normalize hex string by stripping 0x prefix and lowercasing.
-fn normalize_hex(input: &str) -> String {
-    let s = input
-        .strip_prefix("0x")
-        .unwrap_or(input)
-        .strip_prefix("0X")
-        .unwrap_or(input);
-    s.to_ascii_lowercase()
 }
 
 /// The ledger version the chain is currently on.

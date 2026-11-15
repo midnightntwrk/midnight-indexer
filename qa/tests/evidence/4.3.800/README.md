@@ -1,12 +1,12 @@
-# Indexer QA Test Execution and Report Summary — 4.3.800-rc.2
+# Indexer QA Test Execution and Report Summary — 4.3.800
 
 ## Overview
 
 | Field | Value |
 |---|---|
-| Date | 16 October 2026 |
+| Date | 27 October 2026 |
 | QA Contact | Oleksandr Romanov (oleksandr.romanov@shielded.io) |
-| Indexer version | 4.3.800-rc.2 |
+| Indexer version | 4.3.800 |
 | Toolkit version | 1.0.400 |
 | Node version | 1.0.400 |
 | QA Sign-off | ✅ |
@@ -26,18 +26,17 @@
 
 | Suite | Passed | Failed | Skipped | Todo | Total |
 |---|---:|---:|---:|---:|---:|
-| smoke | 18 | 0 | 12 | 0 | 30 |
-| integration | 189 | 1 | 93 | 20 | 303 |
+| smoke | 18 | 0 | 1 | 0 | 19 |
+| integration | 195 | 1 | 1 | 0 | 197 |
 | e2e | 53 | 0 | 11 | 1 | 65 |
-| **Total** | **260** | **1** | **116** | **21** | **398** |
+| **Total** | **266** | **1** | **13** | **1** | **281** |
 
 All undeployed suites passed. On qanet, the smoke and e2e suites passed.
-The skipped and todo entries are cases the suites skip on purpose under certain conditions. They are not errors.
 
 One integration test failed on qanet (`contract-queries.test.ts`,
 `unshieldedBalances` for a contract known to hold tokens). The qanet indexer
 was not re-synced from genesis, so the fix was not applied there.
-**Retested successfully on preview** against indexer 4.3.800-rc.2 synced
+**Retested successfully on preview** against indexer 4.3.800 synced
 from block 0. Details: [indexer-test-report.md](./qanet/indexer-test-report.md)
 
 ## Test Report Details
@@ -48,8 +47,8 @@ and e2e) that it was built from.
 
 ## Test Execution Guide
 
-These steps start from scratch and pin the test code to commit `5e64bcab`
-(`release/4.3` HEAD on 16 October 2026), so a rerun uses the same tests. `release/4.3` moves over time, so always
+These steps start from scratch and pin the test code to commit `348e55d3`
+(the `v4.3.800` release tag on `release/4.3`), so a rerun uses the same tests. `release/4.3` moves over time, so always
 check out the commit ID, not the branch.
 
 The **undeployed** run is the one anyone can reproduce: it starts a fresh
@@ -62,13 +61,13 @@ state.
 Requirements: git, Docker, Node.js v22+ and Bun v1.3.x (not the snap build).
 
 Run these from the folder you want to work in. They create a
-`midnight-indexer-4.3.800-rc.2-b2bf8fd4` folder there.
+`midnight-indexer-4.3.800` folder there.
 
 ```bash
-# Get the exact test code this run used (release/4.3 commit 5e64bcab)
-git clone https://github.com/midnightntwrk/midnight-indexer midnight-indexer-4.3.800-rc.2-b2bf8fd4
-cd midnight-indexer-4.3.800-rc.2-b2bf8fd4
-git checkout --detach 5e64bcab66a451396b97c096ab71ddd84ae3784b
+# Get the exact test code this run used (release/4.3 tag v4.3.800, commit 348e55d3)
+git clone https://github.com/midnightntwrk/midnight-indexer midnight-indexer-4.3.800
+cd midnight-indexer-4.3.800
+git checkout --detach 348e55d3
 cd qa/tests
 bun install --frozen-lockfile
 export XRAY_COMPONENT=indexer
@@ -80,7 +79,7 @@ export APP__INFRA__PUB_SUB__PASSWORD=indexer
 export APP__INFRA__LEDGER_STATE_STORAGE__PASSWORD=indexer
 export APP__INFRA__SECRET=303132333435363738393031323334353637383930313233343536373839303132
 export TARGET_ENV=undeployed
-export INDEXER_TAG=4.3.800-rc.2-b2bf8fd4
+export INDEXER_TAG=4.3.800
 export IMAGE_REGISTRY=ghcr.io/midnightntwrk
 export NODE_TAG=1.0.400
 export NODE_TOOLKIT_TAG=1.0.400

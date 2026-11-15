@@ -10,6 +10,7 @@ on:
     branches:
       - main
       - release/*
+  merge_group:
   workflow_dispatch: {}   # so you can still run it manually
   schedule:
     - cron: '0 0 * * *'   # run daily at midnight UTC
@@ -29,6 +30,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  #v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Scan code
-        uses: midnightntwrk/upload-sarif-github-action@37e5a0a03dc65fdbbab4cdc8ba264328c15e9657
+        uses: midnightntwrk/upload-sarif-github-action@6e93ae0ea1494d29b521a2c8bbfa068375bf7a26 # v1.0.5
