@@ -2836,6 +2836,8 @@ mod tests {
         unimplemented!("apply genesis + deploy + call; assert invariants 1 and 2 per doc comment");
     }
 
+    #[cfg(feature = "cloud")]
+    use crate::testing::POSTGRES_IMAGE_TAG;
     use crate::{
         domain::{
             AddressOrContract, LedgerEventAttributes, LedgerVersion,
@@ -2873,7 +2875,7 @@ mod tests {
                 .with_db_name("indexer")
                 .with_user("indexer")
                 .with_password(env!("APP__INFRA__STORAGE__PASSWORD"))
-                .with_tag("17.1-alpine")
+                .with_tag(POSTGRES_IMAGE_TAG)
                 .start()
                 .await
                 .context("start Postgres container")?;
@@ -3065,7 +3067,7 @@ mod tests {
                 .with_db_name("indexer")
                 .with_user("indexer")
                 .with_password(env!("APP__INFRA__STORAGE__PASSWORD"))
-                .with_tag("17.1-alpine")
+                .with_tag(POSTGRES_IMAGE_TAG)
                 .start()
                 .await
                 .context("start Postgres container")?;
@@ -3205,7 +3207,7 @@ mod tests {
                 .with_db_name("indexer")
                 .with_user("indexer")
                 .with_password(env!("APP__INFRA__STORAGE__PASSWORD"))
-                .with_tag("17.1-alpine")
+                .with_tag(POSTGRES_IMAGE_TAG)
                 .start()
                 .await
                 .context("start Postgres container")?;
@@ -3809,7 +3811,7 @@ mod tests {
             .with_db_name("indexer")
             .with_user("indexer")
             .with_password(env!("APP__INFRA__STORAGE__PASSWORD"))
-            .with_tag("17.1-alpine")
+            .with_tag(POSTGRES_IMAGE_TAG)
             .start()
             .await
             .context("start Postgres container")?;
