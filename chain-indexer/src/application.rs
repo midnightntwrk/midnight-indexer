@@ -17,7 +17,8 @@ mod startup;
 use crate::{
     application::{metrics::Metrics, startup::Build},
     domain::{
-        Block, BlockRef, LedgerState, SystemParametersChange, Transaction,
+        Block, BlockRef, DParameter, LedgerState, SystemParametersChange, TermsAndConditions,
+        Transaction,
         node::{self, Node},
         should_bump_first_regular_tblock,
         storage::Storage,
@@ -166,6 +167,26 @@ pub async fn run(
         );
     }
 
+    // Read the stored system parameters once; from here on they are kept in step in memory.
+    let (d_parameter, terms_and_conditions) = tokio::try_join!(
+        async {
+            storage
+                .get_latest_d_parameter()
+                .await
+                .context("get latest D-parameter")
+        },
+        async {
+            storage
+                .get_latest_terms_and_conditions()
+                .await
+                .context("get latest terms and conditions")
+        },
+    )?;
+    let mut stored_system_parameters = SystemParameters {
+        d_parameter,
+        terms_and_conditions,
+    };
+
     // Initialize metrics, only if published.
     let metrics = if metrics {
         let transaction_count = storage
@@ -299,6 +320,7 @@ pub async fn run(
                     &mut caught_up,
                     &mut parent_block_timestamp,
                     &mut storage,
+                    &mut stored_system_parameters,
                     &publisher,
                     metrics.as_ref(),
                     &node,
@@ -487,6 +509,7 @@ async fn get_and_index_block<E, N>(
     caught_up: &mut bool,
     parent_block_timestamp: &mut u64,
     storage: &mut impl Storage,
+    stored_system_parameters: &mut SystemParameters,
     publisher: &impl Publisher,
     metrics: Option<&Metrics>,
     node: &N,
@@ -507,6 +530,7 @@ where
         caught_up,
         parent_block_timestamp,
         storage,
+        stored_system_parameters,
         publisher,
         metrics,
         node,
@@ -542,6 +566,7 @@ async fn index_block<N>(
     caught_up: &mut bool,
     parent_block_timestamp: &mut u64,
     storage: &mut impl Storage,
+    stored_system_parameters: &mut SystemParameters,
     publisher: &impl Publisher,
     metrics: Option<&Metrics>,
     node: &N,
@@ -760,9 +785,10 @@ where
     ledger_state = new_ledger_state;
 
     // Determine system parameters change if any.
-    let system_parameters_change = determine_system_parameters_change(&block, storage, node)
-        .await
-        .context("determine system parameters change")?;
+    let system_parameters_change =
+        determine_system_parameters_change(&block, stored_system_parameters, node)
+            .await
+            .context("determine system parameters change")?;
 
     // Save the block with its related data and system parameters atomically.
     let max_transaction_id = storage
@@ -776,6 +802,11 @@ where
         )
         .await
         .context("save block")?;
+
+    // Keep the stored system parameters in step with the change just saved.
+    if let Some(change) = system_parameters_change {
+        stored_system_parameters.apply(change);
+    }
 
     // Publish BlockIndexed.
     publisher
@@ -839,11 +870,32 @@ where
     Ok((ledger_state, ledger_state_key))
 }
 
+/// The latest stored system parameters, read once at startup and then kept in step with the
+/// changes saved. The chain indexer is their only writer.
+#[derive(Debug)]
+#[cfg_attr(test, derive(Clone))]
+struct SystemParameters {
+    d_parameter: Option<DParameter>,
+    terms_and_conditions: Option<TermsAndConditions>,
+}
+
+impl SystemParameters {
+    /// Record a change once it is saved.
+    fn apply(&mut self, change: SystemParametersChange) {
+        if let Some(d_parameter) = change.d_parameter {
+            self.d_parameter = Some(d_parameter);
+        }
+        if let Some(terms_and_conditions) = change.terms_and_conditions {
+            self.terms_and_conditions = Some(terms_and_conditions);
+        }
+    }
+}
+
 /// Fetch system parameters from the node and determine if they changed.
 #[trace]
 async fn determine_system_parameters_change<N>(
     block: &Block,
-    storage: &mut impl Storage,
+    stored: &SystemParameters,
     node: &N,
 ) -> anyhow::Result<Option<SystemParametersChange>>
 where
@@ -860,15 +912,10 @@ where
         .await
         .map_err(|error| anyhow::anyhow!("fetch system parameters: {error}"))?;
 
-    // Get the latest stored parameters.
-    let stored_d_param = storage
-        .get_latest_d_parameter()
-        .await
-        .context("get latest D-parameter")?;
-    let stored_tc = storage
-        .get_latest_terms_and_conditions()
-        .await
-        .context("get latest terms and conditions")?;
+    let SystemParameters {
+        d_parameter: stored_d_param,
+        terms_and_conditions: stored_tc,
+    } = stored;
 
     // Determine what has changed.
     let d_param_changed = current.d_parameter.as_ref().is_some_and(|current_d| {
@@ -920,7 +967,10 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{
-        application::{gc_budget, gc_catch_up_interval_default, index_block, node_blocks},
+        application::{
+            SystemParameters, determine_system_parameters_change, gc_budget,
+            gc_catch_up_interval_default, index_block, node_blocks,
+        },
         domain::{
             Block, BlockRef, ContractStateTranslation, DParameter, DustRegistrationEvent,
             LatestContractAction, LedgerState, SystemParametersChange, TermsAndConditions,
@@ -949,6 +999,146 @@ mod tests {
         time::{Duration, SystemTime},
     };
     use thiserror::Error;
+
+    #[test]
+    fn system_parameters_follow_saved_changes() {
+        let d_parameter = |n| DParameter {
+            num_permissioned_candidates: n,
+            num_registered_candidates: n,
+        };
+        let terms_and_conditions = TermsAndConditions {
+            hash: Default::default(),
+            url: "https://example.com/terms".to_string(),
+        };
+        let change = |d_parameter, terms_and_conditions| SystemParametersChange {
+            block_height: 1,
+            block_hash: Default::default(),
+            timestamp: 0,
+            d_parameter,
+            terms_and_conditions,
+        };
+        let mut stored = SystemParameters {
+            d_parameter: None,
+            terms_and_conditions: None,
+        };
+
+        stored.apply(change(
+            Some(d_parameter(1)),
+            Some(terms_and_conditions.clone()),
+        ));
+        assert_eq!(stored.d_parameter, Some(d_parameter(1)));
+        assert_eq!(
+            stored.terms_and_conditions,
+            Some(terms_and_conditions.clone())
+        );
+
+        // A change carries only what changed; the rest stays as stored.
+        stored.apply(change(Some(d_parameter(2)), None));
+        assert_eq!(stored.d_parameter, Some(d_parameter(2)));
+        assert_eq!(stored.terms_and_conditions, Some(terms_and_conditions));
+    }
+
+    // A change is recorded once: it is compared with the stored parameters, which follow each
+    // change saved, and only what changed is recorded.
+    #[tokio::test]
+    async fn system_parameters_change_is_recorded_once() -> anyhow::Result<()> {
+        let (block, _) = <(Block, Vec<_>)>::from(BLOCK_1.to_owned());
+        let d_parameter = |n| DParameter {
+            num_permissioned_candidates: n,
+            num_registered_candidates: n,
+        };
+        let terms_and_conditions = |url: &str| TermsAndConditions {
+            hash: Default::default(),
+            url: url.to_owned(),
+        };
+        let mut stored = SystemParameters {
+            d_parameter: None,
+            terms_and_conditions: None,
+        };
+
+        // What each block records, given what the node reports, saving and applying any change.
+        let mut record = async |d_parameter, terms_and_conditions| {
+            let node = SystemParameters {
+                d_parameter,
+                terms_and_conditions,
+            };
+            let change = determine_system_parameters_change(&block, &stored, &node).await?;
+            let recorded = change.as_ref().map(|change| {
+                (
+                    change.d_parameter.clone(),
+                    change.terms_and_conditions.clone(),
+                )
+            });
+            if let Some(change) = change {
+                stored.apply(change);
+            }
+            anyhow::Ok(recorded)
+        };
+
+        let (d1, d2) = (d_parameter(1), d_parameter(2));
+        let (tc1, tc2) = (terms_and_conditions("a"), terms_and_conditions("b"));
+        assert_eq!(
+            record(Some(d1.clone()), Some(tc1.clone())).await?,
+            Some((Some(d1.clone()), Some(tc1.clone()))),
+            "first values"
+        );
+        assert_eq!(
+            record(Some(d1), Some(tc1.clone())).await?,
+            None,
+            "unchanged"
+        );
+        assert_eq!(
+            record(Some(d2.clone()), Some(tc1)).await?,
+            Some((Some(d2.clone()), None)),
+            "only the D-parameter changed"
+        );
+        assert_eq!(record(Some(d2), None).await?, None, "T&C removed");
+        assert_eq!(
+            record(None, Some(tc2.clone())).await?,
+            Some((None, Some(tc2))),
+            "only the T&C changed"
+        );
+
+        Ok(())
+    }
+
+    /// A node reporting these system parameters for every block.
+    impl Node for SystemParameters {
+        type Error = Infallible;
+
+        async fn highest_blocks(
+            &self,
+        ) -> Result<impl Stream<Item = Result<BlockRef, Self::Error>>, Self::Error> {
+            Ok(stream::empty())
+        }
+
+        fn finalized_blocks(
+            &mut self,
+            _highest_block: Option<BlockRef>,
+        ) -> impl Stream<Item = Result<node::Block, Self::Error>> {
+            stream::empty()
+        }
+
+        async fn fetch_system_parameters(
+            &self,
+            block_hash: BlockHash,
+            block_height: u64,
+            timestamp: u64,
+            _node_version: NodeVersion,
+        ) -> Result<SystemParametersChange, Self::Error> {
+            Ok(SystemParametersChange {
+                block_height,
+                block_hash,
+                timestamp,
+                d_parameter: self.d_parameter.clone(),
+                terms_and_conditions: self.terms_and_conditions.clone(),
+            })
+        }
+
+        async fn fetch_genesis_ledger_state(&self) -> Result<ByteVec, Self::Error> {
+            Ok(Default::default())
+        }
+    }
 
     #[test]
     fn test_gc_budget() {
@@ -1052,6 +1242,10 @@ mod tests {
                 &mut false,
                 &mut 0,
                 storage,
+                &mut SystemParameters {
+                    d_parameter: None,
+                    terms_and_conditions: None,
+                },
                 &NoopPublisher,
                 None,
                 &node,
