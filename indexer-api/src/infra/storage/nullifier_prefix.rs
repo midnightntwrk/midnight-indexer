@@ -78,6 +78,7 @@ async fn storage() -> (impl Sized, Storage) {
         max_connections: 2,
         idle_timeout: Duration::from_secs(60),
         max_lifetime: Duration::from_secs(300),
+        test_before_acquire: true,
     })
     .await
     .expect("create pool");
