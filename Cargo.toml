@@ -10,6 +10,15 @@ members = [
     "spo-indexer",
 ]
 
+# The v9 contract fixture contains valid persisted nodes deeper than the
+# serializer's debug-only limit of 50. Exercise the release limit (250) in
+# development/E2E builds too, retaining the other crates' debug checks.
+[profile.dev.package.midnight-serialize]
+debug-assertions = false
+
+[profile.test.package.midnight-serialize]
+debug-assertions = false
+
 [workspace.package]
 version       = "4.4.0-rc.5"
 edition       = "2024"

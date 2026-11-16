@@ -4,10 +4,14 @@ set -euxo pipefail
 
 # Cleanup function to ensure node container and scratch build dir are removed.
 token_issuer_build_dir=""
+fixture_build_dir=""
 cleanup() {
     docker rm -f node >/dev/null 2>&1 || true
     # `[ -n ... ] && rm` as the trap's last command would make a successful run
     # exit 1 whenever the build dir was never set.
+    if [ -n "$fixture_build_dir" ]; then
+        rm -rf "$fixture_build_dir"
+    fi
     if [ -n "$token_issuer_build_dir" ]; then
         rm -rf "$token_issuer_build_dir"
     fi
@@ -155,23 +159,35 @@ ensure_compactc() {
     rm -rf "$tmp_zip_dir"
 }
 
-# Set up fresh node data directory.
-if [ -d $node_dir ]; then
-    rm -r $node_dir;
+# Reset chain data while preserving this node version's checked-in runtime
+# metadata, which cargo build needs independently of the generated chain.
+if [ -d "$node_dir/chain" ]; then
+    rm -r "$node_dir/chain"
 fi
-mkdir -p $node_dir
+mkdir -p "$node_dir"
 
 # Compile token-issuer on the host: toolkit-js's own config.ts imports
 # @midnight-ntwrk/compact-js/effect, which only resolves under /toolkit-js
 # inside the toolkit image, so the compiled contract and its config.ts are
 # seeded into the toolkit_out volume and dual-mounted there for that step.
-if ! command -v compact >/dev/null 2>&1; then
-    echo "Error: the 'compact' CLI is required to build contracts/token-issuer (see https://docs.midnight.network for install instructions)" >&2
-    exit 1
+# COMPACTC_PATH permits an explicitly provisioned compiler (for example in CI)
+# without installing it into the user's Compact CLI cache.
+compile_contract() {
+    if [ -n "${COMPACTC_PATH:-}" ]; then
+        "$COMPACTC_PATH" "$1" "$2"
+    else
+        compact compile "+$compactc_version" "$1" "$2"
+    fi
+}
+if [ -z "${COMPACTC_PATH:-}" ]; then
+    if ! command -v compact >/dev/null 2>&1; then
+        echo "Error: install compact or set COMPACTC_PATH to compactc $compactc_version" >&2
+        exit 1
+    fi
+    ensure_compactc "$compactc_version"
 fi
-ensure_compactc "$compactc_version"
 token_issuer_build_dir="$(mktemp -d)"
-compact compile "+$compactc_version" "$token_issuer_dir/token-issuer.compact" "$token_issuer_build_dir/out"
+compile_contract "$token_issuer_dir/token-issuer.compact" "$token_issuer_build_dir/out"
 
 docker run \
     --rm \
@@ -182,6 +198,15 @@ docker run \
     $toolkit_image \
     -c 'rm -rf /out/out /out/token-issuer.config.ts && cp -r /src/out /out/out && cp /src/token-issuer.config.ts /out/token-issuer.config.ts'
 rm -rf "$token_issuer_build_dir"
+
+# Build all v9 fixture contracts before starting block production. Proving-key
+# generation must not consume the finite block window collected by native E2E.
+if [[ "$node_version" == 2.1.* ]]; then
+    fixture_build_dir="$(mktemp -d)"
+    mkdir -p "$fixture_build_dir/e2e-emit" "$fixture_build_dir/e2e-zswap"
+    compile_contract "$(pwd)/indexer-tests/emit-contract/emitcounter.compact" "$fixture_build_dir/e2e-emit/out"
+    compile_contract "$(pwd)/indexer-tests/query-swap/zswap-holder.compact" "$fixture_build_dir/e2e-zswap/out"
+fi
 
 # Start the node container.
 docker run \
@@ -409,13 +434,60 @@ docker run \
     generate-txs --src-file /out/token_issuer_mint.mn \
     send
 
+# Generate the local event and contract-zswap fixtures using the same compiler,
+# funding wallet and released toolkit as token-issuer on the current v9/2.1 line.
+# Keep v8 fixture generation usable for the older supported node line.
+if [[ "$node_version" == 2.1.* ]]; then
+    generate_contract_fixture() {
+        local name="$1" config="$2" circuit="$3"
+        shift 3
+        local root="/out/$name" mount="/toolkit-js/fixtures/$name"
+        docker run --rm -v toolkit_out:/out \
+            -v "$fixture_build_dir/$name/out":/src/out:ro -v "$config":/src/config.ts:ro \
+            --entrypoint sh "$toolkit_image" \
+            -c "rm -rf '$root'; mkdir -p '$root'; cp -r /src/out '$root/out'; cp /src/config.ts '$root/config.ts'"
+        docker run --rm --network host -v toolkit_out:/out -v toolkit_out:/toolkit-js/fixtures \
+            "$toolkit_image" generate-intent deploy --toolkit-js-path /toolkit-js \
+            --config "$mount/config.ts" --coin-public aa0d72bb77ea46f986a800c66d75c4e428a95bd7e1244f1ed059374e6266eb98 \
+            --network undeployed --output-intent "$root/deploy.intent" \
+            --output-private-state "$root/deploy.private" --output-zswap-state "$root/deploy.zswap"
+        docker run --rm --network host -v toolkit_out:/out "$toolkit_image" \
+            generate-txs contract-custom --compiled-contract-dir "$root/out" \
+            --intent-file "$root/deploy.intent" --dest-file "$root/deploy.mn"
+        docker run --rm --network host -v toolkit_out:/out "$toolkit_image" \
+            generate-txs --src-file "$root/deploy.mn" send
+        local address
+        address=$(docker run --rm -v toolkit_out:/out "$toolkit_image" \
+            contract-address --src-file "$root/deploy.mn")
+        docker run --rm --network host -v toolkit_out:/out "$toolkit_image" \
+            contract-state --contract-address "$address" --dest-file "$root/state.bin"
+        docker run --rm --network host -v toolkit_out:/out -v toolkit_out:/toolkit-js/fixtures \
+            "$toolkit_image" generate-intent circuit --toolkit-js-path /toolkit-js \
+            --config "$mount/config.ts" --contract-address "$address" \
+            --coin-public aa0d72bb77ea46f986a800c66d75c4e428a95bd7e1244f1ed059374e6266eb98 \
+            --input-onchain-state "$root/state.bin" --input-private-state "$root/deploy.private" \
+            --output-intent "$root/call.intent" --output-private-state "$root/call.private" \
+            --output-zswap-state "$root/call.zswap" "$circuit" "$@"
+        docker run --rm --network host -v toolkit_out:/out "$toolkit_image" \
+            generate-txs contract-custom --compiled-contract-dir "$root/out" \
+            --intent-file "$root/call.intent" --zswap-state-file "$root/call.zswap" \
+            --dest-file "$root/call.mn"
+        docker run --rm --network host -v toolkit_out:/out "$toolkit_image" \
+            generate-txs --src-file "$root/call.mn" send
+    }
+    generate_contract_fixture e2e-emit \
+        "$(pwd)/indexer-tests/emit-contract/contract.config.ts" emit_all
+    generate_contract_fixture e2e-zswap \
+        "$(pwd)/indexer-tests/query-swap/contract.config.ts" selfMint 1000
+fi
+
 # Wait for enough blocks to be finalized so that the pre-populated chain data
-# contains sufficient blocks for e2e tests (MAX_HEIGHT = 40 in e2e.rs). Every
+# contains sufficient blocks for e2e tests (MAX_HEIGHT = 80 in e2e.rs). Every
 # transaction above must land at or below MAX_HEIGHT, or the e2e subscriptions
 # return events the collected blocks lack.
-readonly min_finalized_height=40
+readonly min_finalized_height=80
 echo "Waiting for finalized height >= $min_finalized_height..."
-timeout=360
+timeout=600
 start_time=$(date +%s)
 while true; do
     sleep 6
