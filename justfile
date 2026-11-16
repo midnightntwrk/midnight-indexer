@@ -87,6 +87,7 @@ build-docker-image package profile="dev":
         --build-arg "PROFILE={{profile}}" \
         --build-arg "CARGO_AUDITABLE_VERSION={{cargo_auditable_version}}" \
         --build-arg "CARGO_CHEF_VERSION={{cargo_chef_version}}" \
+        --build-arg "MIDNIGHT_INDEXER_GIT_SHA=${tag}" \
         -t midnightntwrk/{{package}}:${tag} \
         -t midnightntwrk/{{package}}:latest \
         -f {{package}}/Dockerfile \
