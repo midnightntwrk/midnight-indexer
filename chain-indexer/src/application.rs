@@ -12,9 +12,10 @@
 // limitations under the License.
 
 mod metrics;
+mod startup;
 
 use crate::{
-    application::metrics::Metrics,
+    application::{metrics::Metrics, startup::Build},
     domain::{
         Block, BlockRef, LedgerState, SystemParametersChange, Transaction,
         node::{self, Node},
@@ -32,6 +33,7 @@ use indexer_common::{
         SerializedLedgerStateKey, UnshieldedUtxoIndexed,
     },
     infra::ledger_db,
+    startup::{sequential, task},
 };
 use log::{debug, info, warn};
 use parking_lot::RwLock;
@@ -233,6 +235,13 @@ pub async fn run(
         None => LedgerState::new(network_id.clone(), LedgerVersion::OLDEST)
             .context("create ledger state")?,
     };
+
+    // Startup tasks, once the ledger state is known to load, as they may read the ledger DB.
+    let plan = sequential([task(Build::current(highest_block_height))]);
+    startup::run(&storage, &storage, &plan)
+        .await
+        .map_err(anyhow::Error::from_boxed)
+        .context("run startup tasks")?;
 
     let highest_block_on_node = Arc::new(RwLock::new(None));
 

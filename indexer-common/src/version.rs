@@ -42,6 +42,12 @@ pub fn handle_version_flag(bin_name: &str, version: &str) {
     }
 }
 
+/// The git commit the binary was built from, if known at build time. Changes not committed are not
+/// marked: a build from a changed tree reports the commit it started from.
+pub fn git_sha() -> Option<&'static str> {
+    GIT_SHA
+}
+
 /// One-liner wrapper around [`handle_version_flag`] that fills in the
 /// caller's `CARGO_BIN_NAME` and `CARGO_PKG_VERSION` at compile time.
 #[macro_export]
