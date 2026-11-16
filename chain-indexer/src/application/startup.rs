@@ -162,11 +162,10 @@ mod storage_tests {
             ..Build::current(Some(9))
         };
         run(&storage, &storage, &sequential([task(other)])).await?;
-        let entries = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM journal WHERE id = 'indexer/build'",
-        )
-        .fetch_one(&*pool)
-        .await?;
+        let entries =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM journal WHERE id = 'indexer/build'")
+                .fetch_one(&*pool)
+                .await?;
         assert_eq!(entries, 2, "one entry per build");
 
         Ok(())

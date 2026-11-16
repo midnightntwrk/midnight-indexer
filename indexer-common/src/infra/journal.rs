@@ -100,8 +100,13 @@ async fn assert_latest_entry_per_task(pool: &Pool) -> Result<(), BoxError> {
     // Times are stored as given, in Unix milliseconds.
     let (started_at, ended_at) = (1_000, 2_500);
     let at = |millis| SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(millis);
-    pool.append("test/c", entry(1, json!(null)), at(started_at), at(ended_at))
-        .await?;
+    pool.append(
+        "test/c",
+        entry(1, json!(null)),
+        at(started_at),
+        at(ended_at),
+    )
+    .await?;
     let times = sqlx::query_as::<_, (i64, i64)>(
         "SELECT started_at, ended_at FROM journal WHERE id = 'test/c'",
     )

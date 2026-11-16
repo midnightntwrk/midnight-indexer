@@ -542,7 +542,12 @@ mod tests {
             state: Value::from(5),
         };
         journal
-            .append("test/migrating", entry, SystemTime::now(), SystemTime::now())
+            .append(
+                "test/migrating",
+                entry,
+                SystemTime::now(),
+                SystemTime::now(),
+            )
             .await?;
 
         run(&context, &journal, &task(Migrating)).await?;
@@ -618,7 +623,11 @@ mod tests {
     struct Waiting<const N: u8>;
 
     impl<const N: u8> Task<Concurrent> for Waiting<N> {
-        const ID: &'static str = if N == 0 { "test/waiting/0" } else { "test/waiting/1" };
+        const ID: &'static str = if N == 0 {
+            "test/waiting/0"
+        } else {
+            "test/waiting/1"
+        };
         type State = ();
 
         fn run<'a>(
@@ -715,8 +724,15 @@ mod tests {
     fn unix_millis_counts_from_the_epoch() {
         use std::time::{Duration, UNIX_EPOCH};
 
-        assert_eq!(unix_millis(UNIX_EPOCH + Duration::from_millis(1_234)), 1_234);
-        assert_eq!(unix_millis(UNIX_EPOCH - Duration::from_millis(1)), 0, "before the epoch");
+        assert_eq!(
+            unix_millis(UNIX_EPOCH + Duration::from_millis(1_234)),
+            1_234
+        );
+        assert_eq!(
+            unix_millis(UNIX_EPOCH - Duration::from_millis(1)),
+            0,
+            "before the epoch"
+        );
     }
 
     #[tokio::test]
