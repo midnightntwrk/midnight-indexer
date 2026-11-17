@@ -26,6 +26,7 @@ use crate::{
     },
     infra::subxt_node::{ContentSource, OnlineClientAtBlock, SubxtNodeError},
 };
+use futures::future::try_join;
 use indexer_common::domain::{ByteVec, NodeVersion, TransactionHash, bridge::BridgeEvent};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -79,37 +80,41 @@ pub async fn make_block_details(
 
     // Enactment block: decode this block's raw extrinsic bytes against the parent (old-runtime)
     // client. Raw event bytes are metadata-independent, so they are fetched from this block and
-    // re-decoded against the same client.
-    let (client, extrinsics) = match content {
-        Some(ContentSource {
-            client,
-            extrinsic_bodies,
-        }) => (Some(client), extrinsic_bodies),
-        None => {
-            let extrinsics = block
-                .extrinsics()
-                .fetch()
-                .await
-                .map_err(|error| SubxtNodeError::FetchExtrinsics(error.into()))?
-                .iter()
-                .map(|extrinsic| {
-                    extrinsic
-                        .map(|extrinsic| extrinsic.bytes().to_vec())
-                        .map_err(|error| SubxtNodeError::GetNextExtrinsic(error.into()))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            (None, extrinsics)
+    // re-decoded against the same client. Extrinsics and events are independent requests, so
+    // fetch them concurrently.
+    let fetch_extrinsics = async {
+        match content {
+            Some(ContentSource {
+                client,
+                extrinsic_bodies,
+            }) => Ok((Some(client), extrinsic_bodies)),
+            None => {
+                let extrinsics = block
+                    .extrinsics()
+                    .fetch()
+                    .await
+                    .map_err(|error| SubxtNodeError::FetchExtrinsics(error.into()))?
+                    .iter()
+                    .map(|extrinsic| {
+                        extrinsic
+                            .map(|extrinsic| extrinsic.bytes().to_vec())
+                            .map_err(|error| SubxtNodeError::GetNextExtrinsic(error.into()))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok((None, extrinsics))
+            }
         }
     };
+    let fetch_events = async {
+        block
+            .events()
+            .fetch()
+            .await
+            .map(|events| events.bytes().to_vec())
+            .map_err(|error| SubxtNodeError::FetchEvents(error.into()))
+    };
+    let ((client, extrinsics), events) = try_join(fetch_extrinsics, fetch_events).await?;
     let client = client.as_ref().unwrap_or(block);
-
-    let events = block
-        .events()
-        .fetch()
-        .await
-        .map_err(|error| SubxtNodeError::FetchEvents(error.into()))?
-        .bytes()
-        .to_vec();
 
     decode_block_details(
         authorities,
@@ -204,31 +209,6 @@ pub fn decode_slot(slot: &[u8], node_version: NodeVersion) -> Result<u64, SubxtN
         NodeVersion::V1_0 => v1_0_300::decode_slot(slot),
         NodeVersion::V2_0 => v2_0_0::decode_slot(slot),
         NodeVersion::V2_1 => v2_1_100::decode_slot(slot),
-    }
-}
-
-pub async fn get_zswap_merkle_tree_root(
-    node_version: NodeVersion,
-    block: &OnlineClientAtBlock,
-) -> Result<Vec<u8>, SubxtNodeError> {
-    match node_version {
-        NodeVersion::V0_22 => v0_22_0::get_zswap_merkle_tree_root(block).await,
-        NodeVersion::V1_0 => v1_0_300::get_zswap_merkle_tree_root(block).await,
-        NodeVersion::V2_0 => v2_0_0::get_zswap_merkle_tree_root(block).await,
-        NodeVersion::V2_1 => v2_1_100::get_zswap_merkle_tree_root(block).await,
-    }
-}
-
-/// Get the pure ledger state root (without StorableLedgerState wrapping) at the given block.
-pub async fn get_ledger_state_root(
-    node_version: NodeVersion,
-    block: &OnlineClientAtBlock,
-) -> Result<Option<Vec<u8>>, SubxtNodeError> {
-    match node_version {
-        NodeVersion::V0_22 => v0_22_0::get_ledger_state_root(block).await,
-        NodeVersion::V1_0 => v1_0_300::get_ledger_state_root(block).await,
-        NodeVersion::V2_0 => v2_0_0::get_ledger_state_root(block).await,
-        NodeVersion::V2_1 => v2_1_100::get_ledger_state_root(block).await,
     }
 }
 
@@ -429,8 +409,11 @@ mod tests {
     };
     use parity_scale_codec::{Compact, Encode};
     use serde::Deserialize;
-    use std::{fs, path::Path};
-    use subxt::{Metadata, client::OfflineClient, config::substrate::SpecVersionForRange};
+    use std::{fmt::Debug, fs, path::Path};
+    use subxt::{
+        Metadata, client::OfflineClient, config::substrate::SpecVersionForRange,
+        ext::scale_decode::DecodeAsType, storage::Address, utils::Yes,
+    };
 
     /// A recorded block: raw extrinsics and `System.Events` bytes, as served by the node's RPC.
     #[derive(Deserialize)]
@@ -919,6 +902,102 @@ mod tests {
         ("2.1.0-rc.4", 2_001_000),
         ("2.1.101", 2_001_100),
     ];
+
+    /// `STATE_KEY_STORAGE_KEY` against the statically typed `Midnight::StateKey` address of every
+    /// generated runtime. The value is a `Vec<u8>`, or in 0.22.0 a `BoundedVec<u8>` around one, as
+    /// the conversions check at compile time, and it decodes from the SCALE-encoded `Vec<u8>` that
+    /// `fetch_state_key` reads.
+    #[test]
+    fn state_key_storage_key_matches_typed_runtime_apis() {
+        use crate::infra::subxt_node::STATE_KEY_STORAGE_KEY;
+
+        let state_key = vec![1_u8, 2, 3];
+        assert_typed_storage_address_matches(
+            runtime_0_22_0::storage().midnight().state_key(),
+            &STATE_KEY_STORAGE_KEY,
+            &state_key,
+            |value| value.0,
+            "0.22.0",
+            22_000,
+        );
+        assert_typed_storage_address_matches(
+            runtime_1_0_300::storage().midnight().state_key(),
+            &STATE_KEY_STORAGE_KEY,
+            &state_key,
+            |value| value,
+            "1.0.400",
+            1_000_300,
+        );
+        assert_typed_storage_address_matches(
+            runtime_2_0_0::storage().midnight().state_key(),
+            &STATE_KEY_STORAGE_KEY,
+            &state_key,
+            |value| value,
+            "2.0.0-rc.4",
+            2_000_000,
+        );
+        assert_typed_storage_address_matches(
+            runtime_2_1_100::storage().midnight().state_key(),
+            &STATE_KEY_STORAGE_KEY,
+            &state_key,
+            |value| value,
+            "2.1.101",
+            2_001_100,
+        );
+    }
+
+    /// Check a storage key read raw against a runtime's statically typed plain storage address:
+    /// the address validates against the runtime's metadata (so the codegen matches), it is a
+    /// plain value, its key is `storage_key`, and `value` SCALE-encoded decodes as the address's
+    /// value type and converts back to `value`.
+    fn assert_typed_storage_address_matches<
+        A: Address<KeyParts = (), IsPlain = Yes>,
+        V: Encode + PartialEq + Debug,
+    >(
+        address: A,
+        storage_key: &[u8],
+        value: &V,
+        into_value: fn(A::Value) -> V,
+        metadata_dir: &str,
+        spec_version: u32,
+    ) {
+        let pallet_name = address.pallet_name().to_owned();
+        let entry_name = address.entry_name().to_owned();
+        let context = format!("{metadata_dir}: {pallet_name}::{entry_name}");
+
+        let metadata = metadata(metadata_dir);
+        let value_ty = metadata
+            .pallet_by_name(&pallet_name)
+            .and_then(|pallet| pallet.storage())
+            .and_then(|storage| storage.entry_by_name(&entry_name))
+            .unwrap_or_else(|| panic!("{context}: no such storage entry"))
+            .value_ty();
+
+        let decoded =
+            A::Value::decode_as_type(&mut value.encode().as_slice(), value_ty, metadata.types())
+                .unwrap_or_else(|error| panic!("{context}: {error}"));
+        assert_eq!(&into_value(decoded), value, "{context}");
+
+        let config = SubstrateConfig::builder()
+            .set_metadata_for_spec_versions([(spec_version, metadata.into())])
+            .set_spec_version_for_block_ranges([SpecVersionForRange {
+                block_range: 0..u64::MAX,
+                spec_version,
+                transaction_version: 1,
+            }])
+            .build();
+        let client = OfflineClient::new_with_config(config)
+            .at_block(0_u64)
+            .unwrap();
+        let storage = client.storage();
+        let entry = storage
+            .entry(address)
+            .unwrap_or_else(|error| panic!("{context}: {error}"));
+
+        assert!(entry.is_plain(), "{context}");
+        assert_eq!(entry.key_prefix(), storage_key, "{context}");
+        assert_eq!(entry.fetch_key(()).unwrap(), storage_key, "{context}");
+    }
 
     #[tokio::test]
     async fn failed_midnight_extrinsic_keeps_its_place() {

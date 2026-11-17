@@ -15,6 +15,7 @@ mod contract_state;
 mod contract_zswap_state;
 mod ledger_state;
 mod secret_key;
+mod state_key;
 mod state_translation_v8_to_v9;
 mod transaction;
 mod zswap_state;
