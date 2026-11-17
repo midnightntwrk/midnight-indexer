@@ -1078,6 +1078,35 @@ mod tests {
         assert_mismatch(index(block_1, ledger_state, &mut storage).await);
         assert_eq!(storage.saved_blocks, 1);
 
+        // Genesis, node key equal to the genesis state plus block 0: pre-block-0 path, the guard
+        // passes. A non-zero timestamp makes applying block 0 change the key, so the node key
+        // cannot also match the genesis state and select the post-block-0 path.
+        let block_0 = node::Block {
+            timestamp: 1_000,
+            ..BLOCK_0.to_owned()
+        };
+        let mut expected_ledger_state = LedgerState::from_genesis(&node.0, LedgerVersion::V8)?;
+        expected_ledger_state.apply_transactions(
+            [],
+            BlockRef {
+                hash: block_0.hash,
+                height: block_0.height,
+            },
+            block_0.parent_hash,
+            block_0.timestamp,
+            block_0.timestamp,
+            false,
+        )?;
+        let expected_state_key = expected_ledger_state.node_state_key()?;
+        assert_ne!(expected_state_key, genesis_state_key);
+        let block_0 = node::Block {
+            state_key: expected_state_key.clone(),
+            ..block_0
+        };
+        let (ledger_state, _) = index(block_0, fresh_ledger_state()?, &mut storage).await?;
+        assert_eq!(storage.saved_blocks, 2);
+        assert_eq!(ledger_state.node_state_key()?, expected_state_key);
+
         Ok(())
     }
 
