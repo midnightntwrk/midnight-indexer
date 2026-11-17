@@ -380,6 +380,10 @@ impl LedgerState {
         }
     }
 
+    /// The tagged arena key of the bare ledger state. Production code validates against
+    /// [Self::node_state_key] instead; this is kept for tests pinning golden ledger state roots,
+    /// e.g. across the v8 -> v9 translation.
+    #[cfg(test)]
     pub fn root(&self) -> Result<ByteVec, Error> {
         match self {
             Self::V8 { ledger_state, .. } => default_storage::<v1_1::LedgerDb>()
