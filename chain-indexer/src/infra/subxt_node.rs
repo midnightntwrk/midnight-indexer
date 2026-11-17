@@ -25,7 +25,7 @@ use crate::{
 use async_stream::try_stream;
 use const_hex::FromHexError;
 use fastrace::trace;
-use futures::{Stream, StreamExt, TryStreamExt, stream};
+use futures::{Stream, StreamExt, TryStreamExt, future::try_join, stream};
 use http::{
     HeaderMap,
     header::{InvalidHeaderValue, USER_AGENT},
@@ -261,47 +261,58 @@ impl SubxtNode {
             .transpose()?
             .flatten();
 
-        let state_key = self.fetch_state_key(block.block_hash()).await?;
+        // The state key and the block details are independent requests, so fetch them
+        // concurrently.
+        let fetch_block_details = async {
+            // At a runtime-upgrade enactment block the block reports the next runtime, so subxt
+            // binds it to the next runtime's metadata even though its extrinsics and events were
+            // produced by the previous runtime. Decode the content against the parent block's
+            // client (which carries the previous runtime's metadata), fed this block's raw,
+            // metadata-independent bytes. Away from enactment blocks the two runtimes are equal and
+            // no parent client is needed.
+            let content_source = if content_node_version != state_node_version {
+                let parent = block
+                    .online_client()
+                    .at_block(header.parent_hash)
+                    .await
+                    .map_err(|error| {
+                        SubxtNodeError::GetOnlineClientAt(header.parent_hash, error.into())
+                    })?;
+                let extrinsic_bodies = self
+                    .rpc_client
+                    .chain_get_block(Some(block.block_hash()))
+                    .await
+                    .map_err(SubxtNodeError::FetchBlockBody)?
+                    .ok_or(SubxtNodeError::BlockBodyNotFound)?
+                    .block
+                    .extrinsics
+                    .into_iter()
+                    .map(|bytes| bytes.0)
+                    .collect::<Vec<_>>();
+                Some(ContentSource {
+                    client: parent,
+                    extrinsic_bodies,
+                })
+            } else {
+                None
+            };
 
-        // At a runtime-upgrade enactment block the block reports the next runtime, so subxt binds
-        // it to the next runtime's metadata even though its extrinsics and events were produced by
-        // the previous runtime. Decode the content against the parent block's client (which carries
-        // the previous runtime's metadata), fed this block's raw, metadata-independent bytes. Away
-        // from enactment blocks the two runtimes are equal and no parent client is needed.
-        let content_source = if content_node_version != state_node_version {
-            let parent = block
-                .online_client()
-                .at_block(header.parent_hash)
+            runtimes::make_block_details(authorities, content_node_version, &block, content_source)
                 .await
-                .map_err(|error| {
-                    SubxtNodeError::GetOnlineClientAt(header.parent_hash, error.into())
-                })?;
-            let extrinsic_bodies = self
-                .rpc_client
-                .chain_get_block(Some(block.block_hash()))
-                .await
-                .map_err(SubxtNodeError::FetchBlockBody)?
-                .ok_or(SubxtNodeError::BlockBodyNotFound)?
-                .block
-                .extrinsics
-                .into_iter()
-                .map(|bytes| bytes.0)
-                .collect::<Vec<_>>();
-            Some(ContentSource {
-                client: parent,
-                extrinsic_bodies,
-            })
-        } else {
-            None
         };
-
-        let BlockDetails {
-            timestamp,
-            transactions,
-            mut dust_registration_events,
-            bridge_events,
-        } = runtimes::make_block_details(authorities, content_node_version, &block, content_source)
-            .await?;
+        let (
+            state_key,
+            BlockDetails {
+                timestamp,
+                transactions,
+                mut dust_registration_events,
+                bridge_events,
+            },
+        ) = try_join(
+            self.fetch_state_key(block.block_hash()),
+            fetch_block_details,
+        )
+        .await?;
 
         // At genesis, Substrate does not emit events (Parity PR #5463). Fetch cNight
         // registrations from pallet storage instead.

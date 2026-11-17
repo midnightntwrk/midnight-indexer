@@ -26,6 +26,7 @@ use crate::{
     },
     infra::subxt_node::{ContentSource, OnlineClientAtBlock, SubxtNodeError},
 };
+use futures::future::try_join;
 use indexer_common::domain::{ByteVec, NodeVersion, TransactionHash, bridge::BridgeEvent};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -79,37 +80,41 @@ pub async fn make_block_details(
 
     // Enactment block: decode this block's raw extrinsic bytes against the parent (old-runtime)
     // client. Raw event bytes are metadata-independent, so they are fetched from this block and
-    // re-decoded against the same client.
-    let (client, extrinsics) = match content {
-        Some(ContentSource {
-            client,
-            extrinsic_bodies,
-        }) => (Some(client), extrinsic_bodies),
-        None => {
-            let extrinsics = block
-                .extrinsics()
-                .fetch()
-                .await
-                .map_err(|error| SubxtNodeError::FetchExtrinsics(error.into()))?
-                .iter()
-                .map(|extrinsic| {
-                    extrinsic
-                        .map(|extrinsic| extrinsic.bytes().to_vec())
-                        .map_err(|error| SubxtNodeError::GetNextExtrinsic(error.into()))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            (None, extrinsics)
+    // re-decoded against the same client. Extrinsics and events are independent requests, so
+    // fetch them concurrently.
+    let fetch_extrinsics = async {
+        match content {
+            Some(ContentSource {
+                client,
+                extrinsic_bodies,
+            }) => Ok((Some(client), extrinsic_bodies)),
+            None => {
+                let extrinsics = block
+                    .extrinsics()
+                    .fetch()
+                    .await
+                    .map_err(|error| SubxtNodeError::FetchExtrinsics(error.into()))?
+                    .iter()
+                    .map(|extrinsic| {
+                        extrinsic
+                            .map(|extrinsic| extrinsic.bytes().to_vec())
+                            .map_err(|error| SubxtNodeError::GetNextExtrinsic(error.into()))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok((None, extrinsics))
+            }
         }
     };
+    let fetch_events = async {
+        block
+            .events()
+            .fetch()
+            .await
+            .map(|events| events.bytes().to_vec())
+            .map_err(|error| SubxtNodeError::FetchEvents(error.into()))
+    };
+    let ((client, extrinsics), events) = try_join(fetch_extrinsics, fetch_events).await?;
     let client = client.as_ref().unwrap_or(block);
-
-    let events = block
-        .events()
-        .fetch()
-        .await
-        .map_err(|error| SubxtNodeError::FetchEvents(error.into()))?
-        .bytes()
-        .to_vec();
 
     decode_block_details(
         authorities,
