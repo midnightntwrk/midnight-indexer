@@ -360,6 +360,72 @@ impl DB for LedgerDb {
         })
     }
 
+    /// The root counts of `keys` in one query, or one per chunk of binds on SQLite, rather than one
+    /// per key. Every key is in the result, with 0 for a key that is not a root.
+    fn batch_get_root_counts<I>(&self, keys: I) -> HashMap<ArenaHash<Self::Hasher>, u32>
+    where
+        I: Iterator<Item = ArenaHash<Self::Hasher>>,
+    {
+        let keys = keys.collect::<Vec<_>>();
+        if keys.is_empty() {
+            return HashMap::new();
+        }
+
+        block_in_place(|| {
+            Handle::current().block_on(async {
+                #[cfg(feature = "standalone")]
+                let rows = {
+                    let mut rows = vec![];
+                    for chunk in keys.chunks(BATCH_DELETE_SIZE) {
+                        let mut query = QueryBuilder::new(indoc! {"
+                            SELECT key, count
+                            FROM ledger_db_roots
+                            WHERE key IN (
+                        "});
+                        let mut bindings = query.separated(", ");
+                        for key in chunk {
+                            bindings.push_bind(key.0.as_slice());
+                        }
+                        query.push(")");
+                        rows.extend(
+                            query
+                                .build_query_as::<(Vec<u8>, i64)>()
+                                .fetch_all(&*self.pool)
+                                .await
+                                .unwrap_or_panic("cannot batch get root counts"),
+                        );
+                    }
+                    rows
+                };
+
+                #[cfg(feature = "cloud")]
+                let rows = {
+                    let query = indoc! {"
+                        SELECT key, count
+                        FROM ledger_db_roots
+                        WHERE key = ANY($1::bytea[])
+                    "};
+
+                    sqlx::query_as::<_, (Vec<u8>, i64)>(query)
+                        .bind(keys.iter().map(|key| key.0.as_slice()).collect::<Vec<_>>())
+                        .fetch_all(&*self.pool)
+                        .await
+                        .unwrap_or_panic("cannot batch get root counts")
+                };
+
+                let counts = rows.into_iter().collect::<HashMap<_, _>>();
+                keys.into_iter()
+                    .map(|key| {
+                        let count = counts
+                            .get(key.0.as_slice())
+                            .map_or(0, |count| *count as u32);
+                        (key, count)
+                    })
+                    .collect()
+            })
+        })
+    }
+
     fn set_root_count(&mut self, key: ArenaHash<Self::Hasher>, count: u32) {
         block_in_place(|| {
             Handle::current().block_on(async {
@@ -856,6 +922,36 @@ fn assert_scan_keys_pages_like_scan(storage: &Storage<LedgerDb>, db: &mut Ledger
     assert_eq!(keys, scanned);
 }
 
+// `batch_get_root_counts` reads the stored count of every key, in chunks on SQLite, and 0 for keys
+// that are not roots, as `get_root_count` does. Shared by both suites, like
+// `assert_get_root_count_reads_stored_count`.
+#[cfg(test)]
+fn assert_batch_get_root_counts_reads_every_key(db: &mut LedgerDb) {
+    // Enough keys to span several SQLite statements; every third one is not a root.
+    #[cfg(feature = "standalone")]
+    const KEYS: usize = 2 * SQLITE_MAX_BINDS + 1;
+    #[cfg(feature = "cloud")]
+    const KEYS: usize = 1_000;
+
+    let key = |i: usize| {
+        let mut bytes = [0; 32];
+        bytes[..8].copy_from_slice(&(i as u64).to_le_bytes());
+        arena_hash(bytes)
+    };
+    let count = |i: usize| {
+        if i.is_multiple_of(3) {
+            0
+        } else {
+            (i % 7 + 1) as u32
+        }
+    };
+    db.batch_update((0..KEYS).map(|i| (key(i), SetRootCount(count(i)))));
+
+    let counts = db.batch_get_root_counts((0..KEYS).map(key));
+    assert_eq!(counts.len(), KEYS);
+    assert!((0..KEYS).all(|i| counts.get(&key(i)) == Some(&count(i))));
+}
+
 // `batch_update` inserts in chunks, storing every node as given, and accepts a key inserted twice
 // in one batch. Shared by both suites, like `assert_get_root_count_reads_stored_count`.
 #[cfg(test)]
@@ -1041,7 +1137,8 @@ fn assert_get_root_count_reads_stored_count(db: &mut LedgerDb) {
 #[cfg(all(test, feature = "standalone"))]
 pub(crate) mod sqlite_tests {
     use super::{
-        SQLITE_MAX_BINDS, assert_batch_update_deletes_in_chunks_and_keeps_update_order,
+        SQLITE_MAX_BINDS, assert_batch_get_root_counts_reads_every_key,
+        assert_batch_update_deletes_in_chunks_and_keeps_update_order,
         assert_batch_update_inserts_in_chunks, assert_batch_update_sets_root_counts,
         assert_get_root_count_reads_stored_count, assert_scan_keys_pages_like_scan,
     };
@@ -1111,6 +1208,15 @@ pub(crate) mod sqlite_tests {
         let storage = Storage::new(16, LedgerDb::new(pool.clone()));
         let mut db = LedgerDb::new(pool);
         assert_batch_update_deletes_in_chunks_and_keeps_update_order(&storage, &mut db);
+        Ok(())
+    }
+
+    // See `assert_batch_get_root_counts_reads_every_key`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn batch_get_root_counts_reads_every_key() -> Result<(), Box<dyn StdError>> {
+        let pool = setup_pool().await?;
+        let mut db = LedgerDb::new(pool);
+        assert_batch_get_root_counts_reads_every_key(&mut db);
         Ok(())
     }
 
@@ -1282,7 +1388,8 @@ pub(crate) mod sqlite_tests {
 #[cfg(all(test, feature = "cloud"))]
 mod postgres_tests {
     use super::{
-        BATCH_BYTES, BATCH_ROWS, assert_batch_update_deletes_in_chunks_and_keeps_update_order,
+        BATCH_BYTES, BATCH_ROWS, assert_batch_get_root_counts_reads_every_key,
+        assert_batch_update_deletes_in_chunks_and_keeps_update_order,
         assert_batch_update_inserts_in_chunks, assert_batch_update_sets_root_counts,
         assert_get_root_count_reads_stored_count, assert_scan_keys_pages_like_scan, insert_chunks,
     };
@@ -1415,6 +1522,15 @@ mod postgres_tests {
         let storage = Storage::new(16, LedgerDb::new(pool.clone()));
         let mut db = LedgerDb::new(pool);
         assert_batch_update_deletes_in_chunks_and_keeps_update_order(&storage, &mut db);
+        Ok(())
+    }
+
+    // See `assert_batch_get_root_counts_reads_every_key`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn batch_get_root_counts_reads_every_key() -> Result<(), Box<dyn StdError>> {
+        let (_container, pool) = setup_pool().await?;
+        let mut db = LedgerDb::new(pool);
+        assert_batch_get_root_counts_reads_every_key(&mut db);
         Ok(())
     }
 
