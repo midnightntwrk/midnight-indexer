@@ -116,8 +116,8 @@ pub enum Error {
         "refusing to migrate: this database stores contract states as blobs, which \
          011_contract_state_keys.sql drops without converting them; the blobs cannot be \
          recreated. Sync a new indexer from genesis and cut over, or - for a single instance - \
-         wipe both the indexer database and the ledger DB and re-index from genesis. See \
-         docs/re-indexing.md"
+         wipe both the indexer database and the ledger DB and reindex from genesis. See \
+         docs/reindexing.md"
     )]
     UnconvertibleContractStates,
 }
@@ -147,6 +147,36 @@ mod tests {
         .await?;
         assert!(columns.contains(&"state_key".to_string()));
         assert!(!columns.contains(&"state".to_string()));
+
+        Ok(())
+    }
+
+    /// The fork translations table and its index exist after migrating.
+    #[tokio::test]
+    async fn test_contract_action_translations_table_exists() -> Result<(), Box<dyn StdError>> {
+        let temp_dir = tempfile::tempdir().context("create tempdir")?;
+        let pool = new_pool(&temp_dir).await?;
+
+        run(&pool).await.context("run migrations")?;
+
+        let columns = sqlx::query_scalar::<_, String>(
+            "SELECT name FROM pragma_table_info('contract_action_translations')",
+        )
+        .fetch_all(&*pool)
+        .await?;
+        assert_eq!(columns, ["contract_action_id", "block_id", "state_key"]);
+
+        let indexes = sqlx::query_scalar::<_, String>(
+            "SELECT name FROM pragma_index_list('contract_action_translations')",
+        )
+        .fetch_all(&*pool)
+        .await?;
+        assert!(
+            indexes
+                .iter()
+                .any(|name| name == "contract_action_translations_block_id_idx"),
+            "{indexes:?}"
+        );
 
         Ok(())
     }

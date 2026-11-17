@@ -272,6 +272,17 @@ export class Environment {
     return `${this.getIndexerHttpBaseURL()}/api/${apiVersion}/graphql`;
   }
 
+  /**
+   * The same GraphQL endpoint as {@link getIndexerGraphqlHttpURL} over
+   * WebSocket. midnight-js's public-data provider takes both, and they must
+   * name the same deployment or a contract's state and its subscription come
+   * from different chains.
+   */
+  getIndexerGraphqlWsURL(): string {
+    const apiVersion = process.env.INDEXER_API_VERSION?.trim() || 'v4';
+    return `${this.getIndexerWebsocketBaseURL()}/api/${apiVersion}/graphql`;
+  }
+
   getCurrentEnvironmentName(): EnvironmentName {
     return this.envName;
   }

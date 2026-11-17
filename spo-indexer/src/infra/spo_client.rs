@@ -300,8 +300,14 @@ impl SPOClient {
                     mainchain_pub_key: remove_hex_prefix(&reg.mainchain_pub_key).to_owned(),
                     cross_chain_pub_key: remove_hex_prefix(&reg.cross_chain_pub_key).to_owned(),
                     keys: CandidateKeys {
-                        aura: remove_hex_prefix(&reg.keys.aura).to_owned(),
-                        gran: remove_hex_prefix(&reg.keys.gran).to_owned(),
+                        aura: reg
+                            .keys
+                            .aura
+                            .map(|aura| remove_hex_prefix(&aura).to_owned()),
+                        gran: reg
+                            .keys
+                            .gran
+                            .map(|gran| remove_hex_prefix(&gran).to_owned()),
                     },
                     sidechain_signature: remove_hex_prefix(&reg.sidechain_signature).to_owned(),
                     mainchain_signature: remove_hex_prefix(&reg.mainchain_signature).to_owned(),

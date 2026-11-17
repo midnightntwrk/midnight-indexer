@@ -12,21 +12,11 @@
 // limitations under the License.
 
 use crate::domain::{UnshieldedAddress, bridge::BridgeEvent};
-use derive_more::derive::From;
+use derive_more::derive::{Display, From};
 use futures::{Stream, stream};
 use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, error::Error as StdError, fmt::Debug};
 use uuid::Uuid;
-
-macro_rules! message {
-    ($name:ident) => {
-        impl Message for $name {
-            const TOPIC: Topic = Topic(stringify!($name));
-        }
-
-        impl sealed::Sealed for $name {}
-    };
-}
 
 /// A pub-sub message. Restricted to implementations in this module.
 pub trait Message
@@ -36,8 +26,42 @@ where
     const TOPIC: Topic;
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct Topic(pub &'static str);
+// Declares `Topic` over the given message types and implements `Message` for each, pairing every
+// type with its same-named variant.
+macro_rules! topics {
+    ($($name:ident),+ $(,)?) => {
+        /// The channel a [Message] travels on, one variant per implementation.
+        #[derive(Debug, Display, Clone, Copy, PartialEq, Eq)]
+        pub enum Topic {
+            $($name),+
+        }
+
+        impl Topic {
+            /// Every topic in declaration order. No variant carries an explicit discriminant, so
+            /// `topic as usize` indexes this slice.
+            #[cfg(any(test, feature = "standalone"))]
+            pub(crate) const VARIANTS: &'static [Topic] = &[$(Topic::$name),+];
+        }
+
+        $(
+            // Binds the message type to the topic it travels on.
+            impl Message for $name {
+                const TOPIC: Topic = Topic::$name;
+            }
+
+            // Satisfies the supertrait bound on `Message`.
+            impl sealed::Sealed for $name {}
+        )+
+    };
+}
+
+// The complete set of pub-sub message types.
+topics!(
+    BlockIndexed,
+    WalletIndexed,
+    UnshieldedUtxoIndexed,
+    BridgeEventIndexed,
+);
 
 /// Message/event signaling that a block has been indexed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, From)]
@@ -45,15 +69,17 @@ pub struct BlockIndexed {
     pub height: u64,
     pub max_transaction_id: Option<u64>,
     pub caught_up: bool,
+    /// The block's protocol version as the raw `spec_version`, so an unknown version still
+    /// deserializes. `0` when the publisher predates the field.
+    #[serde(default)]
+    pub protocol_version: u32,
 }
-message!(BlockIndexed);
 
 /// Message/event signaling that a wallet has been indexed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, From)]
 pub struct WalletIndexed {
     pub wallet_id: Uuid,
 }
-message!(WalletIndexed);
 
 /// Emitted when a transaction affecting unshielded UTXOs for a concrete address
 /// has been stored in the DB.
@@ -61,7 +87,6 @@ message!(WalletIndexed);
 pub struct UnshieldedUtxoIndexed {
     pub address: UnshieldedAddress,
 }
-message!(UnshieldedUtxoIndexed);
 
 /// Emitted when a c2m-bridge event (any of the 5 variants) is indexed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -69,7 +94,6 @@ pub struct BridgeEventIndexed {
     pub block_height: u64,
     pub event: BridgeEvent,
 }
-message!(BridgeEventIndexed);
 
 /// A pub-sub publisher.
 #[trait_variant::make(Send)]
@@ -92,13 +116,18 @@ pub trait Subscriber
 where
     Self: Clone + Send + Sync + 'static,
 {
-    /// Conversion errors into the message type of the [Subscriber::subscribe] method.
+    /// Errors of the [Subscriber::subscribe] stream: conversion errors into the message type, and a
+    /// subscription that cannot be established.
     type Error: StdError + Send + Sync + 'static;
 
     /// Subscribe to the messages of the given type. Implementations must return an infinite stream
     /// that can handle any underlying errors transparently, i.e. without leaking into the
-    /// `Self::Error` type which is reserved for conversion errors.
-    fn subscribe<T>(&self) -> impl Stream<Item = Result<T, Self::Error>> + Send
+    /// `Self::Error` type, which is reserved for conversion errors and for a subscription that
+    /// cannot be established.
+    ///
+    /// The stream delivers every message published after the returned future resolves. If the
+    /// subscription cannot be established, the stream's first item is an error.
+    async fn subscribe<T>(&self) -> impl Stream<Item = Result<T, Self::Error>> + Send
     where
         T: Message;
 }
@@ -110,7 +139,7 @@ pub struct NoopSubscriber;
 impl Subscriber for NoopSubscriber {
     type Error = Infallible;
 
-    fn subscribe<T>(&self) -> impl Stream<Item = Result<T, Self::Error>> + Send
+    async fn subscribe<T>(&self) -> impl Stream<Item = Result<T, Self::Error>> + Send
     where
         T: Message,
     {
@@ -118,6 +147,58 @@ impl Subscriber for NoopSubscriber {
     }
 }
 
+// Private, so only this module can name `Sealed` and thus satisfy the supertrait bound on
+// `Message`.
 mod sealed {
     pub trait Sealed {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every topic renders as its own name. The match is exhaustive, so a new topic must be added
+    /// here too.
+    #[test]
+    fn test_topic_display() {
+        use Topic::*;
+        for topic in Topic::VARIANTS {
+            let name = match topic {
+                BlockIndexed => "BlockIndexed",
+                WalletIndexed => "WalletIndexed",
+                UnshieldedUtxoIndexed => "UnshieldedUtxoIndexed",
+                BridgeEventIndexed => "BridgeEventIndexed",
+            };
+
+            assert_eq!(topic.to_string(), name);
+        }
+    }
+
+    /// Each topic's discriminant is its own position in `VARIANTS`. Giving a variant an explicit
+    /// discriminant breaks this, and with it every lookup keyed on `topic as usize`.
+    #[test]
+    fn test_variants_are_indexed_by_discriminant() {
+        for &topic in Topic::VARIANTS {
+            assert_eq!(Topic::VARIANTS[topic as usize], topic);
+        }
+    }
+
+    /// A message from a publisher that predates `protocol_version` still deserializes.
+    #[test]
+    fn block_indexed_without_protocol_version_deserializes() {
+        let message = serde_json::from_str::<BlockIndexed>(
+            r#"{"height":42,"max_transaction_id":7,"caught_up":true}"#,
+        )
+        .expect("deserialize BlockIndexed without protocol_version");
+
+        assert_eq!(
+            message,
+            BlockIndexed {
+                height: 42,
+                max_transaction_id: Some(7),
+                caught_up: true,
+                protocol_version: 0,
+            }
+        );
+    }
 }

@@ -125,29 +125,33 @@ impl ContractStateCache {
                 self.metrics.misses.increment(1);
                 let _permit = self.permit().await?;
 
-                // Loading a node that is no longer in the ledger DB panics inside storage-core
-                // rather than erroring, so establish that it is there first. Unlike a ledger state
-                // this is not expected to age out: contract state roots are never unpersisted.
-                LedgerState::contract_state_loadable(key)
-                    .map_err_into_server_error(|| format!("check contract state {key}"))?
-                    .then_some(())
-                    .some_or_server_error(|| {
-                        format!("contract state {key} is no longer in the ledger DB")
-                    })?;
+                // Enter before taking any arena lock: GC can hold it while awaiting SQLx work.
+                // Blocking runtime workers on that lock would prevent GC from making progress.
+                tokio::task::block_in_place(|| {
+                    // Loading a node that is no longer in the ledger DB panics inside storage-core
+                    // rather than erroring, so establish that it is there first. Unlike a ledger state
+                    // this is not expected to age out: contract state roots are never unpersisted.
+                    LedgerState::contract_state_loadable(key)
+                        .map_err_into_server_error(|| format!("check contract state {key}"))?
+                        .then_some(())
+                        .some_or_server_error(|| {
+                            format!("contract state {key} is no longer in the ledger DB")
+                        })?;
 
-                let started = std::time::Instant::now();
-                // Prefetch: re-serializing touches every node in the DAG, and `pre_fetch` issues
-                // one batched query per DAG level where faulting nodes in individually is one
-                // round trip per node.
-                let state = LedgerDbContractState::load_prefetched(key)
-                    .and_then(|contract_state| contract_state.serialize())
-                    .map_err_into_server_error(|| format!("load contract state {key}"))?;
-                self.metrics
-                    .load_duration
-                    .record(started.elapsed().as_secs_f64());
-                debug!(key:%, len = state.len(); "loaded contract state from the ledger arena");
+                    let started = std::time::Instant::now();
+                    // Prefetch: re-serializing touches every node in the DAG, and `pre_fetch` issues
+                    // one batched query per DAG level where faulting nodes in individually is one
+                    // round trip per node.
+                    let state = LedgerDbContractState::load_prefetched(key)
+                        .and_then(|contract_state| contract_state.serialize())
+                        .map_err_into_server_error(|| format!("load contract state {key}"))?;
+                    self.metrics
+                        .load_duration
+                        .record(started.elapsed().as_secs_f64());
+                    debug!(key:%, len = state.len(); "loaded contract state from the ledger arena");
 
-                Ok::<_, ApiError>(Arc::new(state))
+                    Ok::<_, ApiError>(Arc::new(state))
+                })
             })
             .await
             .map_err(|error| (*error).clone())
@@ -168,22 +172,24 @@ impl ContractStateCache {
                 self.metrics.misses.increment(1);
                 let _permit = self.permit().await?;
 
-                LedgerState::contract_zswap_state_loadable(key)
-                    .map_err_into_server_error(|| format!("check contract zswap state {key}"))?
-                    .then_some(())
-                    .some_or_server_error(|| {
-                        format!("contract zswap state {key} is no longer in the ledger DB")
-                    })?;
+                tokio::task::block_in_place(|| {
+                    LedgerState::contract_zswap_state_loadable(key)
+                        .map_err_into_server_error(|| format!("check contract zswap state {key}"))?
+                        .then_some(())
+                        .some_or_server_error(|| {
+                            format!("contract zswap state {key} is no longer in the ledger DB")
+                        })?;
 
-                let started = std::time::Instant::now();
-                let state = ContractZswapState::load_prefetched(key)
-                    .and_then(|zswap_state| zswap_state.serialize())
-                    .map_err_into_server_error(|| format!("load contract zswap state {key}"))?;
-                self.metrics
-                    .load_duration
-                    .record(started.elapsed().as_secs_f64());
+                    let started = std::time::Instant::now();
+                    let state = ContractZswapState::load_prefetched(key)
+                        .and_then(|zswap_state| zswap_state.serialize())
+                        .map_err_into_server_error(|| format!("load contract zswap state {key}"))?;
+                    self.metrics
+                        .load_duration
+                        .record(started.elapsed().as_secs_f64());
 
-                Ok::<_, ApiError>(Arc::new(state))
+                    Ok::<_, ApiError>(Arc::new(state))
+                })
             })
             .await
             .map_err(|error| (*error).clone())
@@ -236,7 +242,7 @@ mod tests {
 
     /// A key with an unrecognised tag must be refused while still just bytes, before anything
     /// touches the arena — `get_lazy` would hand back a lazy pointer and panic only on use.
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn unloadable_key_errors_instead_of_panicking() {
         let cache = ContractStateCache::new(config());
         let key = SerializedContractStateKey::from(b"not a contract state key".to_vec());
@@ -246,7 +252,7 @@ mod tests {
 
     /// Failed loads must not be cached: moka's `try_get_with` only stores successes, so a later
     /// attempt for the same key must run the loader again rather than returning a stale error.
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn failed_loads_are_not_cached() {
         let cache = ContractStateCache::new(config());
         let key = SerializedContractStateKey::from(b"not a contract state key".to_vec());
@@ -256,5 +262,88 @@ mod tests {
 
         cache.contract_states.run_pending_tasks().await;
         assert_eq!(cache.contract_states.entry_count(), 0);
+    }
+
+    /// A contended arena lock must not occupy every runtime worker: its holder can need async
+    /// work to finish before releasing it, as garbage collection does through the SQLx adapter.
+    #[cfg(feature = "standalone")]
+    #[test]
+    fn contended_arena_loads_leave_the_runtime_responsive() {
+        use indexer_common::{domain::SerializedZswapStateKey, infra::ledger_db};
+        use midnight_storage_core_v1::storage::default_storage;
+        use std::{sync::mpsc, thread, time::Instant};
+
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        runtime
+            .block_on(ledger_db::init(ledger_db::Config {
+                cache_max_nodes: 1_024,
+                cnn_url: directory.path().join("ledger.sqlite").display().to_string(),
+            }))
+            .unwrap();
+
+        let responsive = [false, true].map(|zswap| {
+            let cache = ContractStateCache::new(ContractStateCacheConfig {
+                max_concurrent_loads: 1,
+                ..config()
+            });
+            let permits = cache.loads.clone();
+            // Valid by-reference keys whose nodes are absent. The check must acquire the arena
+            // lock before reporting a missing node, without needing a ledger-state fixture.
+            let tag = if zswap {
+                "midnight:storage-key(zswap-ledger-state[v5]):"
+            } else {
+                "midnight:storage-key(contract-state[v6]):"
+            };
+            let key = [tag.as_bytes(), &[0], &[42; 32]].concat();
+
+            thread::scope(|scope| {
+                let (locked_tx, locked_rx) = mpsc::channel();
+                let (progress_tx, progress_rx) = mpsc::channel();
+                let holder = scope.spawn(move || {
+                    default_storage::<ledger_db::v1_1::LedgerDb>().with_backend(|_| {
+                        locked_tx.send(()).unwrap();
+                        // Release on failure too, so the regression fails instead of hanging.
+                        progress_rx.recv_timeout(Duration::from_secs(5)).is_ok()
+                    })
+                });
+                locked_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+
+                let load = runtime.spawn(async move {
+                    if zswap {
+                        cache.zswap_state(&SerializedZswapStateKey::from(key)).await
+                    } else {
+                        cache
+                            .contract_state(&SerializedContractStateKey::from(key))
+                            .await
+                    }
+                    .unwrap_err()
+                });
+                let deadline = Instant::now() + Duration::from_secs(5);
+                while permits.available_permits() != 0 {
+                    assert!(
+                        Instant::now() < deadline,
+                        "cache load did not acquire its permit"
+                    );
+                    thread::sleep(Duration::from_millis(1));
+                }
+                // The loader has acquired its permit and has no await before taking the lock.
+                // This task can run only if the loader lets Tokio replace the blocked worker.
+                let progress = runtime.spawn(async move {
+                    let _ = progress_tx.send(());
+                });
+                let responsive = holder.join().unwrap();
+                runtime.block_on(progress).unwrap();
+                let error = runtime.block_on(load).unwrap();
+                assert!(format!("{error:?}").contains("is no longer in the ledger DB"));
+                responsive
+            })
+        });
+
+        assert_eq!(responsive, [true, true], "arena loads starved the runtime");
     }
 }

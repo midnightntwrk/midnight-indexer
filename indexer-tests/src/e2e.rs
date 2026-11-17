@@ -50,7 +50,7 @@ use futures::{StreamExt, TryStreamExt, future::ok};
 use graphql_client::{GraphQLQuery, Response};
 use indexer_api::infra::api::v4::{
     AddressType, HexEncodable, HexEncoded, dust::DustAddress, encode_address,
-    unshielded::UnshieldedAddress, viewing_key::ViewingKey,
+    unshielded::UnshieldedAddress,
 };
 use indexer_common::domain::NetworkId;
 use itertools::Itertools;
@@ -61,7 +61,7 @@ use std::{future::ready, time::Duration};
 use tokio::time::sleep;
 use unshielded_transactions_subscription::UnshieldedTransactionsSubscriptionUnshieldedTransactions as UnshieldedTransactions;
 
-const MAX_HEIGHT: usize = 32;
+const MAX_HEIGHT: usize = 40;
 
 /// Run comprehensive e2e tests for the Indexer. It is expected that the Indexer is set up with all
 /// needed dependencies, e.g. a Node, and its API is exposed securely (https and wss) or insecurely
@@ -372,14 +372,14 @@ async fn test_connect_mutation(
     network_id: &NetworkId,
 ) -> anyhow::Result<HexEncoded> {
     // Valid viewing key.
-    let viewing_key = ViewingKey::from(viewing_key(network_id));
+    let viewing_key = viewing_key(network_id).to_owned();
     let variables = connect_mutation::Variables { viewing_key };
     let response = send_query::<ConnectMutation>(api_client, api_url, variables).await?;
     let session_id = response.connect;
 
     // Invalid viewing key.
     let variables = connect_mutation::Variables {
-        viewing_key: ViewingKey("invalid".to_string()),
+        viewing_key: "invalid".to_owned(),
     };
     let response = send_query::<ConnectMutation>(api_client, api_url, variables).await;
     assert!(response.is_err());
@@ -874,7 +874,8 @@ async fn test_contract_actions_subscription(
         .into_group_map();
 
     for (address, expected_contract_actions) in contract_actions_by_address {
-        // No offset.
+        // No offset: the stream starts at the latest block, past every contract action, so it
+        // replays nothing.
         let variables = contract_action_subscription::Variables {
             address: address.clone(),
             contract_action_subscription_offset: None,
@@ -883,12 +884,15 @@ async fn test_contract_actions_subscription(
             graphql_ws_client::subscribe::<ContractActionSubscription>(ws_api_url, variables)
                 .await
                 .context("subscribe to contract actions")?
-                .take(expected_contract_actions.len())
+                .take_until(sleep(Duration::from_secs(3)))
                 .map_ok(|data| data.contract_actions.to_json_value())
                 .try_collect::<Vec<_>>()
                 .await
                 .context("collect blocks from contract action subscription")?;
-        assert_eq!(contract_actions, expected_contract_actions);
+        assert!(
+            contract_actions.is_empty(),
+            "a stream without offset replays no contract action, got: {contract_actions:?}"
+        );
 
         // Genesis hash.
         let hash = indexer_data
@@ -907,7 +911,14 @@ async fn test_contract_actions_subscription(
                 .await
                 .context("subscribe to contract actions")?
                 .take(expected_contract_actions.len())
-                .map_ok(|data| data.contract_actions.to_json_value())
+                .map_ok(|data| {
+                    let action = data.contract_actions;
+                    assert_eq!(
+                        action.state_at.hash, action.transaction.block.hash,
+                        "an ordinary stream item's stateAt is its own block"
+                    );
+                    action.to_json_value()
+                })
                 .try_collect::<Vec<_>>()
                 .await
                 .context("collect blocks from contract action subscription")?;
@@ -925,7 +936,14 @@ async fn test_contract_actions_subscription(
                 .await
                 .context("subscribe to contract actions")?
                 .take(expected_contract_actions.len())
-                .map_ok(|data| data.contract_actions.to_json_value())
+                .map_ok(|data| {
+                    let action = data.contract_actions;
+                    assert_eq!(
+                        action.state_at.hash, action.transaction.block.hash,
+                        "an ordinary stream item's stateAt is its own block"
+                    );
+                    action.to_json_value()
+                })
                 .try_collect::<Vec<_>>()
                 .await
                 .context("collect blocks from contract action subscription")?;
@@ -1406,8 +1424,12 @@ mod graphql {
     use graphql_client::GraphQLQuery;
     use indexer_api::infra::api::v4::{
         CardanoRewardAddress, HexEncoded, dust::DustAddress, mutation::Unit,
-        unshielded::UnshieldedAddress, viewing_key::ViewingKey,
+        unshielded::UnshieldedAddress,
     };
+
+    // A client sends the viewing key as a plain string; the API type deliberately cannot be
+    // serialized.
+    type ViewingKey = String;
 
     #[derive(GraphQLQuery)]
     #[graphql(

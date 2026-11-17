@@ -33,6 +33,13 @@ current span as span events.
 - Logging style (kv field syntax, error chains) is documented in the module docs of
   `indexer-common/src/telemetry.rs`.
 
+## Allocator metrics and heap profiling
+
+On Linux the executables run on jemalloc, and `init_metrics` also publishes the allocator's own
+statistics as `indexer_memory_allocator_bytes{stat=...}`. Reading those series, and taking heap
+profiles from a build with the `jemalloc-profiling` feature, is covered in
+[Memory: allocator metrics and heap profiling](./heap-profiling.md).
+
 ## Turning tracing on
 
 Tracing is off by default. Config (all components share the shape):
@@ -69,6 +76,16 @@ OTLP.
 
 - Keep `fastrace_opentelemetry=off` in `RUST_LOG` (the justfile and deployments already do),
   otherwise the exporter logs its own export activity.
+- `tungstenite` and `tokio_tungstenite` never log below INFO, whatever `RUST_LOG` says: their
+  DEBUG and TRACE records contain WebSocket payloads, which carry session IDs and viewing keys.
+  `init_logging` applies this cap on top of the `RUST_LOG` filter.
+- GraphQL arguments that carry wallet secrets (`viewingKey`, `sessionId`) are marked
+  `#[graphql(secret)]`, so the `Tracing` extension records them as `"<secret>"`. Their API
+  and domain types, `ViewingKey` and `SessionId`, redact `Debug` and `Display` and hold the value
+  in a `secrecy` `SecretString` or `SecretBox`, which zeroizes it on drop. Zeroizing is
+  best-effort: copies made before the value is wrapped, such as the request body, the parsed
+  GraphQL value and decoding buffers inside dependencies, are not zeroized. Treat any new secret
+  argument the same way.
 - With `enabled: false` no reporter is installed and spans are cheap no-ops, so `#[trace]` on
   hot paths costs nothing while tracing is off.
 - `instrumentation_scope_name` / `instrumentation_scope_version` default to the crate name and

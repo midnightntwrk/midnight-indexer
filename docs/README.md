@@ -18,12 +18,15 @@ Maintainer and contributor guides. For local setup see the top-level
 - [Upgrading the node version](./updating-node-version.md) - `NODE_VERSIONS`,
   metadata, per-runtime decode modules.
 - [Upgrading the ledger](./upgrading-ledger.md) - the `v8`/`v9` coexistence and
-  the `[patch.crates-io]` git-tag pins.
-- [Re-indexing from genesis](./re-indexing.md) - which changes require it, and
+  the node-matched pins.
+- [Reindexing from genesis](./reindexing.md) - which changes require it, and
   why both stores must be wiped together.
 
 ## Other
 
 - [Indexer API guide (v4)](./api/v4/api-documentation.md) - the indexer's
   GraphQL queries, mutations, and subscriptions.
+- [Telemetry](./telemetry.md) - logging, tracing and metrics, and how to turn tracing on.
+- [Memory: allocator metrics and heap profiling](./heap-profiling.md) - reading the jemalloc
+  metrics and taking heap profiles.
 - [actionlint guide](./actionlint-guide.md)

@@ -157,11 +157,13 @@ where
         .unshielded_transactions
         .batch_size;
 
-    let utxo_indexed_events = subscriber
-        .subscribe::<UnshieldedUtxoIndexed>()
-        .try_filter(move |event| ready(event.address == address));
-
     try_stream! {
+        // Subscribe before reading existing items, so none indexed in between is missed.
+        let utxo_indexed_events = subscriber
+            .subscribe::<UnshieldedUtxoIndexed>()
+            .await
+            .try_filter(move |event| ready(event.address == address));
+
         // Stream UTXO events for existing transactions.
         debug!(address:?, transaction_id; "streaming events for existing transactions");
 

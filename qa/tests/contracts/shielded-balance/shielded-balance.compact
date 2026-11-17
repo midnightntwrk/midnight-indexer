@@ -1,0 +1,29 @@
+pragma language_version >= 0.16;
+import CompactStandardLibrary;
+
+// Puts a positive SHIELDED token entry into this contract's own balance map.
+//
+// A contract's balance map is keyed by the full token type, and the ledger adds
+// every entry of a call's `unshielded_inputs` effect to it as declared. The
+// standard library's `receiveUnshielded` always passes `left(color)`, which the
+// ledger decodes as an Unshielded token type; `right(color)` decodes as a
+// Shielded one. The transaction still has to balance that Shielded input, so the
+// same circuit mints exactly that amount of its own shielded token first. No
+// wallet coins are involved.
+
+export ledger holdCalls: Counter;
+export ledger pings: Counter;
+
+export circuit holdShielded(): [] {
+  const domainSep = pad(32, "qa:shielded-balance");
+  const color = tokenType(domainSep, kernel.self());
+  kernel.mintShielded(domainSep, 1000);
+  kernel.incUnshieldedInputs(right<Bytes<32>, Bytes<32>>(color), 1000);
+  holdCalls.increment(1);
+}
+
+// An ordinary call with no token effects, used to show indexing carries on
+// after the block that holds `holdShielded`.
+export circuit ping(): [] {
+  pings.increment(1);
+}

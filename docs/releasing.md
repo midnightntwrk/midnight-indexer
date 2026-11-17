@@ -23,7 +23,10 @@ unreleased range rather than regenerating (early entries predate the current
 git cliff --unreleased --tag vX.Y.Z --prepend CHANGELOG.md
 ```
 
-Review the prepended section before committing.
+Review the prepended section before committing. Its "🚨 Reindex required" list must
+cover every merged PR labelled `reindex` in the range. A labelled PR missing from
+the list lost its `REINDEX:` trailer in the squash merge, so add its entry by hand.
+See [Reindexing from genesis](reindexing.md#marking-a-change-that-needs-a-reindex).
 
 ## Cutting a release
 

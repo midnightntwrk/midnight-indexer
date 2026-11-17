@@ -111,7 +111,7 @@ where
         let quotas = cx.get_subscription_quotas();
         let per_connection_counter = cx.get_per_connection_counter();
 
-        let block_indexed_stream = subscriber.subscribe::<BlockIndexed>();
+        let block_indexed_stream = subscriber.subscribe::<BlockIndexed>().await;
 
         try_stream! {
             let _quota_guard = quotas

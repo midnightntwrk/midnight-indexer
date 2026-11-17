@@ -18,21 +18,23 @@ use indoc::indoc;
 impl LedgerStateStorage for Storage {
     async fn get_highest_ledger_state(
         &self,
-    ) -> Result<Option<(ProtocolVersion, SerializedLedgerStateKey)>, sqlx::Error> {
+    ) -> Result<Option<(u32, ProtocolVersion, SerializedLedgerStateKey)>, sqlx::Error> {
         let query = indoc! {"
-            SELECT protocol_version, ledger_state_key
+            SELECT height, protocol_version, ledger_state_key
             FROM blocks
             ORDER BY height DESC
             LIMIT 1
         "};
 
-        sqlx::query_as::<_, (i64, SerializedLedgerStateKey)>(query)
+        sqlx::query_as::<_, (i64, i64, SerializedLedgerStateKey)>(query)
             .fetch_optional(&*self.pool)
             .await?
-            .map(|(protocol_version, key)| {
+            .map(|(height, protocol_version, key)| {
+                let height =
+                    u32::try_from(height).map_err(|error| sqlx::Error::Decode(error.into()))?;
                 let protocol_version = ProtocolVersion::try_from(protocol_version)
                     .map_err(|error| sqlx::Error::Decode(error.into()))?;
-                Ok((protocol_version, key))
+                Ok((height, protocol_version, key))
             })
             .transpose()
     }

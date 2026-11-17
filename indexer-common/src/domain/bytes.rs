@@ -145,7 +145,7 @@ impl<'r, const N: usize> sqlx::Decode<'r, sqlx::Sqlite> for ByteArray<N> {
 
 #[derive(Debug, Error)]
 #[error("cannot create byte array of len {0} from input of len {1}")]
-pub struct ByteArrayLenError(usize, usize);
+pub struct ByteArrayLenError(pub(super) usize, pub(super) usize);
 
 fn debug<T>(bytes: &T, f: &mut fmt::Formatter<'_>) -> fmt::Result
 where

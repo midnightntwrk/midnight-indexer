@@ -1,0 +1,26 @@
+// Contracts known to hold non-zero unshielded token balances on the devnet chain.
+// Used by the unshieldedBalances regression tests (midnightntwrk/midnight-indexer#1245).
+// Picked from a full block-scanner scan to block 467,565; balances verified to match
+// on the primary indexer and devnet-blue. Snapshot date: 2026-10-19.
+[
+  {
+    // Pre-fork contract, latest action a call at block 124,448; balance 75 of the token.
+    "contract-address": "009e275c1c3c9cf679143afb20fb4287ffe9f6bb2063267f2f24ff1d83ebfc2d",
+    "token-type": "c86a483f74e46a95580726a704d1d9a1d94583f9cd43d96f664330b02cd5b541"
+  },
+  {
+    // Pre-fork contract, latest action a call at block 136,853; balance 200 of the token.
+    "contract-address": "02f22243457bd32ea1cf0a45c1a03a855b0ed5a9ec89e1eb585bc6dcb7eadb45",
+    "token-type": "c4cdba0de2ce1d27d792ade903b22bb2a269543a1517f19978ba7ea30925224d"
+  },
+  {
+    // Pre-fork contract holding NIGHT, latest action a call at block 124,514; balance 1.
+    "contract-address": "34ed17cf3332cefd8eb40ae3a91ddd534bd2ea659412e7d033e17f3d64881025",
+    "token-type": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+    // Post-fork contract, latest action a call at block 400,451; balance 225 of the token.
+    "contract-address": "09555b3982771922de4523a7ea677cc423728c416e7d9aac4c2ab1f4148e810c",
+    "token-type": "5f380d22a2b02ef1a2111480a9880773bba4b2f12fb8faaccd8cac5c507e3064"
+  }
+]

@@ -18,7 +18,7 @@ use indexer_common::domain::{ProtocolVersion, SerializedTransaction, ViewingKey,
 use sqlx::prelude::FromRow;
 
 /// Relevant data of a wallet from the perspective of the Wallet Indexer.
-#[derive(Debug, Clone, PartialEq, Eq, FromRow)]
+#[derive(Debug, Clone, FromRow)]
 pub struct Wallet {
     pub viewing_key: ViewingKey,
     pub wanted_start_index: u64,
@@ -44,6 +44,6 @@ impl Transaction {
     pub fn relevant(&self, wallet: &Wallet) -> Result<bool, ledger::Error> {
         let transaction =
             ledger::Transaction::deserialize(&self.raw, self.protocol_version.ledger_version())?;
-        Ok(transaction.relevant(wallet.viewing_key))
+        Ok(transaction.relevant(&wallet.viewing_key))
     }
 }

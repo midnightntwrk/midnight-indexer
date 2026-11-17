@@ -29,6 +29,7 @@ tokio-tungstenite = { workspace = true, features = [ "rustls-tls-webpki-roots" ]
 [dev-dependencies]
 bech32                 = { workspace = true }
 fs_extra               = { workspace = true }
+indexer-common         = { path = "../indexer-common", features = [ "testing" ] }
 nix                    = { workspace = true, features = [ "signal" ] }
 tempfile               = { workspace = true }
 testcontainers         = { workspace = true }

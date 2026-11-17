@@ -24,3 +24,12 @@ pub mod telemetry;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 pub mod version;
+
+// The allocator the telemetry metrics and heap profiling rely on. Binaries install it themselves,
+// since a library-level global allocator would clash with test binaries that bring their own.
+//
+// jemalloc is built with unprefixed `malloc`, so on Linux it also backs the system allocator of
+// anything that links this crate without that declaration: tests, benches and tools run on
+// jemalloc too, and so does an allocator that wraps `System`.
+#[cfg(target_os = "linux")]
+pub use tikv_jemallocator::Jemalloc;

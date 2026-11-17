@@ -1,0 +1,8 @@
+{
+  "version": 3,
+  "file": "index.js",
+  "sourceRoot": "../../",
+  "sources": ["counter.compact"],
+  "names": [],
+  "mappings": ";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;EAiBA;;;;;;;;;;MAMA,AAAA,SAEC;;;;;;;;;;;;;;;;;;;;;;;OAAA;MAKD,AAAA,KAEC;;;;;;;;;;;;;;;;;;;;;;;OAAA;;;;;;;;;;GACA;EAhBD;;;;;;;;;;;;;;;;;;;;;;;;;;;IAIA;;;;;;;;;yEAA6B;;;;;;;GAY5B;EAVD,AAAA,kBAEC;UADC,KAAK;IAAL;;;;;;;;;;6FAAA,KAAK;;;;wEAAA;;GACN;EAKD,AAAA,cAEC;UADC,KAAK;IAAL;;;;;;;;;;6FAAA,KAAK;;;;wEAAA;;GACN;;;;;;;;;;;;;;;;IAXD;qCAAA;;;;;;;;;;;0GAA6B;KAAA;;;;;;;;;;;;;;;;;;;;"
+}

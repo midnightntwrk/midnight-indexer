@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::{
-    domain::{Message, Subscriber, Topic},
+    domain::{Message, Subscriber},
     infra::pub_sub::in_mem::InMemPubSub,
 };
 use futures::{Stream, StreamExt};
@@ -34,29 +34,12 @@ impl InMemSubscriber {
 impl Subscriber for InMemSubscriber {
     type Error = SubscriberError;
 
-    fn subscribe<T>(&self) -> impl Stream<Item = Result<T, Self::Error>>
+    async fn subscribe<T>(&self) -> impl Stream<Item = Result<T, Self::Error>>
     where
         T: Message,
     {
-        let values = match T::TOPIC {
-            Topic("BlockIndexed") => {
-                let receiver = self.0.block_indexed_sender.subscribe();
-                BroadcastStream::new(receiver)
-            }
-
-            Topic("WalletIndexed") => {
-                let receiver = self.0.wallet_indexed_sender.subscribe();
-                BroadcastStream::new(receiver)
-            }
-
-            Topic("UnshieldedUtxoIndexed") => {
-                let receiver = self.0.unshielded_utxo_sender.subscribe();
-                BroadcastStream::new(receiver)
-            }
-
-            // This must not happen; if it happens, we forgot to add an arm for the topic above!
-            _ => panic!("unexpected topic {:?}", T::TOPIC),
-        };
+        let receiver = self.0.sender(T::TOPIC).subscribe();
+        let values = BroadcastStream::new(receiver);
 
         values.map(|value| {
             let value = value?;

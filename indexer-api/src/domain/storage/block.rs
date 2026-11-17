@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::domain::{Block, storage::NoopStorage};
+use crate::domain::{Block, BlockReference, storage::NoopStorage};
 use futures::{Stream, stream};
 use indexer_common::domain::{BlockHash, ProtocolVersion};
 use std::num::NonZeroU32;
@@ -32,6 +32,19 @@ where
 
     /// Get a block for the given block height.
     async fn get_block_by_height(&self, height: u32) -> Result<Option<Block>, sqlx::Error>;
+
+    /// Get a reference to the block at the given height.
+    async fn get_block_reference_by_height(
+        &self,
+        height: u32,
+    ) -> Result<Option<BlockReference>, sqlx::Error>;
+
+    /// Get references to the blocks of the transactions with the given IDs, each with its
+    /// transaction ID.
+    async fn get_block_references_by_transaction_ids(
+        &self,
+        ids: &[u64],
+    ) -> Result<Vec<(u64, BlockReference)>, sqlx::Error>;
 
     /// Get a stream of all blocks starting at the given height, ordered by block height.
     fn get_blocks(
@@ -56,6 +69,20 @@ impl BlockStorage for NoopStorage {
     }
 
     async fn get_block_by_height(&self, height: u32) -> Result<Option<Block>, sqlx::Error> {
+        unimplemented!()
+    }
+
+    async fn get_block_reference_by_height(
+        &self,
+        height: u32,
+    ) -> Result<Option<BlockReference>, sqlx::Error> {
+        unimplemented!()
+    }
+
+    async fn get_block_references_by_transaction_ids(
+        &self,
+        ids: &[u64],
+    ) -> Result<Vec<(u64, BlockReference)>, sqlx::Error> {
         unimplemented!()
     }
 

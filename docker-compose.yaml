@@ -196,7 +196,7 @@ services:
   postgres:
     profiles:
       - cloud
-    image: "postgres:17.1-alpine"
+    image: "postgres:17.12-alpine"
     restart: "always"
     ports:
       - "5432:5432"
@@ -235,7 +235,7 @@ services:
 
   node:
     profiles: [cloud, standalone]
-    image: "midnightntwrk/midnight-node:${NODE_TAG:-latest}"
+    image: "${NODE_IMAGE:-midnightntwrk/midnight-node}:${NODE_TAG:-latest}"
     restart: "always"
     ports:
       - "9944:9944"

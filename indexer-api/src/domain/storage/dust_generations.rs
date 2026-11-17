@@ -68,7 +68,8 @@ where
         ledger_version: LedgerVersion,
     ) -> impl Stream<Item = Result<DustGenerationDtimeUpdateEntry, sqlx::Error>> + Send;
 
-    /// Get transactions containing dust nullifiers matching a prefix.
+    /// Get transactions containing dust nullifiers matching one of the given prefixes. Empty
+    /// prefixes match nothing.
     async fn get_dust_nullifier_transactions(
         &self,
         nullifier_prefixes: &[Vec<u8>],

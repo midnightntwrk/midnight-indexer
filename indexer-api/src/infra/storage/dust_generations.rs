@@ -19,7 +19,7 @@ use crate::{
         },
         storage::dust_generations::DustGenerationsStorage,
     },
-    infra::storage::Storage,
+    infra::storage::{Storage, lookup_prefixes, prefix_range},
 };
 use async_stream::try_stream;
 use fastrace::trace;
@@ -371,42 +371,29 @@ impl DustGenerationsStorage for Storage {
         batch_size: NonZeroU32,
     ) -> impl Stream<Item = Result<DustNullifierTransaction, sqlx::Error>> + Send {
         let pool = self.pool.clone();
-        let nullifier_prefixes = nullifier_prefixes.to_vec();
+        let nullifier_prefixes = lookup_prefixes(nullifier_prefixes);
 
         try_stream! {
             for prefix in &nullifier_prefixes {
-                let mut next_prefix = prefix.clone();
-                if let Some(last) = next_prefix.last_mut() {
-                    if *last < 255 {
-                        *last += 1;
-                    } else {
-                        next_prefix.push(0);
-                    }
-                }
-
                 let mut cursor = 0i64;
 
                 loop {
-                    let query = indoc! {"
+                    let mut query = sqlx::QueryBuilder::new(indoc! {"
                         SELECT dn.id, dn.nullifier, dn.commitment, t.id, t.hash, b.height, b.hash
                         FROM dust_nullifiers dn
                         JOIN transactions t ON t.id = dn.transaction_id
                         JOIN blocks b ON b.id = dn.block_id
-                        WHERE dn.nullifier >= $1 AND dn.nullifier < $2
-                        AND b.height >= $3
-                        AND b.height <= $4
-                        AND dn.id > $5
-                        ORDER BY dn.id
-                        LIMIT $6
-                    "};
+                        WHERE
+                    "});
+                    prefix_range(&mut query, "dn.nullifier", prefix);
+                    query
+                        .push(" AND b.height >= ").push_bind(from_block.min(i64::MAX as u64) as i64)
+                        .push(" AND b.height <= ").push_bind(to_block.min(i64::MAX as u64) as i64)
+                        .push(" AND dn.id > ").push_bind(cursor)
+                        .push(" ORDER BY dn.id LIMIT ").push_bind(batch_size.get() as i64);
 
-                    let rows = sqlx::query_as::<_, (i64, ByteVec, ByteVec, i64, TransactionHash, i64, ByteVec)>(query)
-                        .bind(&prefix[..])
-                        .bind(&next_prefix[..])
-                        .bind(from_block as i64)
-                        .bind(to_block.min(i64::MAX as u64) as i64)
-                        .bind(cursor)
-                        .bind(batch_size.get() as i64)
+                    let rows = query
+                        .build_query_as::<(i64, ByteVec, ByteVec, i64, TransactionHash, i64, ByteVec)>()
                         .fetch_all(&*pool)
                         .await?;
 

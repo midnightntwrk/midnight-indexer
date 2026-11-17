@@ -37,3 +37,6 @@ standalone = [
     "spo-indexer/standalone",
     "wallet-indexer/standalone",
 ]
+
+# Local trial runs only: stop at the first divergence from the chain.
+divergence-halt = [ "chain-indexer/divergence-halt" ]

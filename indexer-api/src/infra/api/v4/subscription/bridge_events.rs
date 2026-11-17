@@ -113,6 +113,19 @@ where
         let domain_variant = variant.map(Into::into);
 
         let stream = try_stream! {
+            // Subscribe before reading existing items, so none indexed in between is missed.
+            let live = subscriber
+                .subscribe::<BridgeEventIndexed>().await
+                .try_filter(move |evt| {
+                    let recipient_match = recipient
+                        .map(|r| evt.event.recipient().map(|er| er.as_bytes() == r.as_ref()).unwrap_or(false))
+                        .unwrap_or(true);
+                    let variant_match = domain_variant
+                        .map(|v| evt.event.variant() == v)
+                        .unwrap_or(true);
+                    ready(recipient_match && variant_match)
+                });
+
             let mut last_id = from.unwrap_or(0);
 
             loop {
@@ -138,17 +151,6 @@ where
             }
 
             // Live tail.
-            let live = subscriber
-                .subscribe::<BridgeEventIndexed>()
-                .try_filter(move |evt| {
-                    let recipient_match = recipient
-                        .map(|r| evt.event.recipient().map(|er| er.as_bytes() == r.as_ref()).unwrap_or(false))
-                        .unwrap_or(true);
-                    let variant_match = domain_variant
-                        .map(|v| evt.event.variant() == v)
-                        .unwrap_or(true);
-                    ready(recipient_match && variant_match)
-                });
             let mut live = pin!(live);
             while let Some(_msg) = live.try_next().await
                 .map_err_into_server_error(|| "subscribe BridgeEventIndexed")?
@@ -186,15 +188,9 @@ where
         let subscriber = cx.get_subscriber::<B>();
 
         let stream = try_stream! {
-            // Initial snapshot.
-            let initial = storage
-                .get_bridge_pool_summary(None)
-                .await
-                .map_err_into_server_error(|| "get bridge pool summary")?;
-            yield BridgePoolUpdate { new_event: None, pool: BridgePoolSummary::from(initial) };
-
+            // Subscribe before reading existing items, so none indexed in between is missed.
             let live = subscriber
-                .subscribe::<BridgeEventIndexed>()
+                .subscribe::<BridgeEventIndexed>().await
                 .try_filter(|evt| {
                     use indexer_common::domain::bridge::BridgeEventVariant::*;
                     let interesting = matches!(
@@ -203,10 +199,24 @@ where
                     );
                     ready(interesting)
                 });
+
+            // Initial snapshot.
+            let initial = storage
+                .get_bridge_pool_summary(None)
+                .await
+                .map_err_into_server_error(|| "get bridge pool summary")?;
+            let snapshot_height = initial.last_event_block_height;
+            yield BridgePoolUpdate { new_event: None, pool: BridgePoolSummary::from(initial) };
+
             let mut live = pin!(live);
             while let Some(msg) = live.try_next().await
                 .map_err_into_server_error(|| "subscribe BridgeEventIndexed")?
             {
+                // A block commits all its events at once, so an event at or below the snapshot's
+                // last event height is already in the initial snapshot.
+                if Some(msg.block_height) <= snapshot_height {
+                    continue;
+                }
                 let pool = storage
                     .get_bridge_pool_summary(None)
                     .await
@@ -239,40 +249,13 @@ where
             .map_err_into_client_error(|| "invalid recipient address")?;
 
         let stream = try_stream! {
-            // Emit initial balance. `balance` is overridden with the authoritative claimable from
-            // the ledger's `bridge_receiving` map (see the `bridge_balance` query for rationale).
-            let mut initial = storage
-                .get_bridge_balance(address)
-                .await
-                .map_err_into_server_error(|| "get bridge balance")?;
-            // Bound concurrent ledger-DB work (issue #595): acquire a permit only around each
-            // ledger walk — never across the SQL above it, the `yield`, or the
-            // `live.try_next().await` wait below — so a long-lived subscription never pins a
-            // permit while idle.
-            initial.balance = match storage
-                .get_highest_ledger_state()
-                .await
-                .map_err_into_server_error(|| "get highest ledger state")?
-            {
-                Some((protocol_version, ledger_state_key)) => {
-                    let _ledger_permit = ledger_query_limiter.acquire().await;
-                    indexer_common::domain::ledger::LedgerState::load(
-                        &ledger_state_key,
-                        protocol_version.ledger_version(),
-                    )
-                    .map_err_into_server_error(|| "load ledger state")?
-                    .bridge_receiving(address)
-                }
-                None => 0,
-            };
-            yield BridgeBalance::from(initial);
-
-            // Re-emit on each relevant pub-sub event. Bridge pallet events cover the deposit
+            // Re-emit on each relevant pub-sub event, subscribing before reading the initial balance
+            // so none indexed in between is missed. Bridge pallet events cover the deposit
             // side; a claim is a regular `ClaimRewards` transaction that emits no pallet event,
             // so also wake on unshielded UTXO activity for the address (a claim creates
             // unshielded UTXOs for the recipient).
             let deposits = subscriber
-                .subscribe::<BridgeEventIndexed>()
+                .subscribe::<BridgeEventIndexed>().await
                 .try_filter(move |evt| {
                     let matches = evt
                         .event
@@ -283,9 +266,40 @@ where
                 })
                 .map_ok(|_| ());
             let claims = subscriber
-                .subscribe::<UnshieldedUtxoIndexed>()
+                .subscribe::<UnshieldedUtxoIndexed>().await
                 .try_filter(move |utxo| ready(utxo.address == address))
                 .map_ok(|_| ());
+
+            // Emit initial balance. `balance` is overridden with the authoritative claimable from
+            // the ledger's `bridge_receiving` map (see the `bridge_balance` query for rationale).
+            let mut initial = storage
+                .get_bridge_balance(address)
+                .await
+                .map_err_into_server_error(|| "get bridge balance")?;
+            initial.balance = {
+                // Bound ledger-DB work (issue #595). The permit ends with this block, before the
+                // `yield`. Read the highest ledger state under it: a key read before the unbounded
+                // wait could be garbage collected before loading.
+                let _ledger_permit = ledger_query_limiter.acquire().await;
+                match storage
+                    .get_highest_ledger_state()
+                    .await
+                    .map_err_into_server_error(|| "get highest ledger state")?
+                {
+                    Some((_, protocol_version, ledger_state_key)) => {
+                        indexer_common::domain::ledger::LedgerState::load(
+                            &ledger_state_key,
+                            protocol_version.ledger_version(),
+                        )
+                        .map_err_into_server_error(|| "load ledger state")?
+                        .bridge_receiving(address)
+                    }
+                    None => 0,
+                }
+            };
+            let mut last_balance = initial;
+            yield BridgeBalance::from(initial);
+
             let live = stream::select(deposits, claims);
             let mut live = pin!(live);
             while let Some(_msg) = live.try_next().await
@@ -295,22 +309,34 @@ where
                     .get_bridge_balance(address)
                     .await
                     .map_err_into_server_error(|| "get bridge balance (live)")?;
-                updated.balance = match storage
-                    .get_highest_ledger_state()
-                    .await
-                    .map_err_into_server_error(|| "get highest ledger state (live)")?
-                {
-                    Some((protocol_version, ledger_state_key)) => {
-                        let _ledger_permit = ledger_query_limiter.acquire().await;
-                        indexer_common::domain::ledger::LedgerState::load(
-                            &ledger_state_key,
-                            protocol_version.ledger_version(),
-                        )
-                        .map_err_into_server_error(|| "load ledger state (live)")?
-                        .bridge_receiving(address)
+                updated.balance = {
+                    // Bound ledger-DB work (issue #595). The permit ends with this block, so the
+                    // subscription holds none while idle. Read the highest ledger state under it:
+                    // a key read before the unbounded wait could be garbage collected before
+                    // loading.
+                    let _ledger_permit = ledger_query_limiter.acquire().await;
+                    match storage
+                        .get_highest_ledger_state()
+                        .await
+                        .map_err_into_server_error(|| "get highest ledger state (live)")?
+                    {
+                        Some((_, protocol_version, ledger_state_key)) => {
+                            indexer_common::domain::ledger::LedgerState::load(
+                                &ledger_state_key,
+                                protocol_version.ledger_version(),
+                            )
+                            .map_err_into_server_error(|| "load ledger state (live)")?
+                            .bridge_receiving(address)
+                        }
+                        None => 0,
                     }
-                    None => 0,
                 };
+                // A wake-up need not change the balance, e.g. for an event already in the initial
+                // balance or several events in one block.
+                if updated == last_balance {
+                    continue;
+                }
+                last_balance = updated;
                 yield BridgeBalance::from(updated);
             }
         };
