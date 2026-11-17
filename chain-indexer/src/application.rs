@@ -903,20 +903,32 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{
-        application::{gc_budget, gc_catch_up_interval_default, node_blocks},
+        application::{
+            gc_budget, gc_catch_up_interval_default, index_block, metrics::Metrics, node_blocks,
+        },
         domain::{
-            BlockRef, SystemParametersChange,
+            Block, BlockRef, ContractStateTranslation, DParameter, DustRegistrationEvent,
+            LatestContractAction, LedgerState, SystemParametersChange, TermsAndConditions,
+            Transaction,
             node::{self, Node},
+            storage::Storage,
         },
     };
     use futures::{Stream, StreamExt, TryStreamExt, stream};
     use indexer_common::{
-        domain::{BlockHash, ByteArray, ByteVec, NodeVersion, ProtocolVersion},
+        domain::{
+            BlockHash, ByteArray, ByteVec, LedgerVersion, Message, NetworkId, NodeVersion,
+            ProtocolVersion, Publisher, SerializedLedgerStateKey,
+        },
         error::BoxError,
+        testing::init_ledger_db,
     };
+    use parking_lot::RwLock;
     use std::{
         convert::Infallible,
-        num::NonZeroU32,
+        fs,
+        num::{NonZeroU32, NonZeroUsize},
+        path::Path,
         sync::{Arc, LazyLock, Mutex},
         time::Duration,
     };
@@ -992,6 +1004,200 @@ mod tests {
         assert_eq!(resumed_at.hash, BLOCK_1_HASH);
 
         Ok(())
+    }
+
+    /// The `StateKey` guard in `index_block`. At genesis a node key equal to the key of the genesis
+    /// state takes the post-block-0 path and the block is saved. A node key the indexer does not
+    /// reproduce, at genesis (taking the pre-block-0 path) or at a later block, halts indexing with
+    /// the "ledger state root mismatch" error before anything is saved.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_index_block_validates_state_key() -> Result<(), BoxError> {
+        let _ledger_db = init_ledger_db().await?;
+
+        let network_id = NetworkId::try_from("undeployed".to_string())?;
+        let genesis = fs::read(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../indexer-common/tests/v8_genesis_undeployed_0_22_0.raw"),
+        )?;
+        let genesis_state_key =
+            LedgerState::from_genesis(&genesis, LedgerVersion::V8)?.node_state_key()?;
+        let wrong_state_key = ByteVec::from(vec![0; genesis_state_key.as_ref().len()]);
+        let node = GenesisNode(genesis.into());
+        let mut storage = MockStorage::default();
+
+        let index = async |block: node::Block, ledger_state, storage: &mut MockStorage| {
+            index_block(
+                0,
+                0,
+                block,
+                ledger_state,
+                &network_id,
+                &Arc::new(RwLock::new(None)),
+                &mut false,
+                &mut 0,
+                storage,
+                &NoopPublisher,
+                &Metrics::new(None, 0, (0, 0, 0)),
+                &node,
+            )
+            .await
+        };
+        let fresh_ledger_state = || LedgerState::new(network_id.clone(), LedgerVersion::OLDEST);
+        let assert_mismatch = |result: anyhow::Result<_>| {
+            let Err(error) = result else {
+                panic!("state key mismatch fails indexing");
+            };
+            assert!(
+                format!("{error:#}").contains("ledger state root mismatch"),
+                "unexpected error: {error:#}"
+            );
+        };
+
+        // Genesis, node key unknown to the indexer: pre-block-0 path, then the guard bails.
+        let block_0 = node::Block {
+            state_key: wrong_state_key.clone(),
+            ..BLOCK_0.to_owned()
+        };
+        assert_mismatch(index(block_0, fresh_ledger_state()?, &mut storage).await);
+        assert_eq!(storage.saved_blocks, 0);
+
+        // Genesis, node key equal to the genesis state's: post-block-0 path, the guard passes.
+        let block_0 = node::Block {
+            state_key: genesis_state_key.clone(),
+            ..BLOCK_0.to_owned()
+        };
+        let (ledger_state, _) = index(block_0, fresh_ledger_state()?, &mut storage).await?;
+        assert_eq!(storage.saved_blocks, 1);
+        assert_eq!(ledger_state.node_state_key()?, genesis_state_key);
+
+        // A later block whose node key the indexer does not reproduce: the guard bails.
+        let block_1 = node::Block {
+            state_key: wrong_state_key,
+            ..BLOCK_1.to_owned()
+        };
+        assert_mismatch(index(block_1, ledger_state, &mut storage).await);
+        assert_eq!(storage.saved_blocks, 1);
+
+        Ok(())
+    }
+
+    /// A node serving the given genesis ledger state and no blocks.
+    #[derive(Clone)]
+    struct GenesisNode(ByteVec);
+
+    impl Node for GenesisNode {
+        type Error = Infallible;
+
+        async fn highest_blocks(
+            &self,
+        ) -> Result<impl Stream<Item = Result<BlockRef, Self::Error>>, Self::Error> {
+            Ok(stream::empty())
+        }
+
+        fn finalized_blocks(
+            &mut self,
+            _highest_block: Option<BlockRef>,
+        ) -> impl Stream<Item = Result<node::Block, Self::Error>> {
+            stream::empty()
+        }
+
+        async fn fetch_system_parameters(
+            &self,
+            block_hash: BlockHash,
+            block_height: u64,
+            timestamp: u64,
+            _node_version: NodeVersion,
+        ) -> Result<SystemParametersChange, Self::Error> {
+            Ok(SystemParametersChange {
+                block_height,
+                block_hash,
+                timestamp,
+                d_parameter: None,
+                terms_and_conditions: None,
+            })
+        }
+
+        async fn fetch_genesis_ledger_state(&self) -> Result<ByteVec, Self::Error> {
+            Ok(self.0.clone())
+        }
+    }
+
+    /// An empty storage counting saved blocks.
+    #[derive(Clone, Default)]
+    struct MockStorage {
+        saved_blocks: usize,
+    }
+
+    impl Storage for MockStorage {
+        async fn save_block(
+            &mut self,
+            _block: &Block,
+            _transactions: &[Transaction],
+            _dust_registration_events: &[DustRegistrationEvent],
+            _ledger_state_key: &SerializedLedgerStateKey,
+            _system_parameters_change: Option<&SystemParametersChange>,
+            _contract_state_translations: &[(u64, ContractStateTranslation)],
+        ) -> Result<Option<u64>, sqlx::Error> {
+            self.saved_blocks += 1;
+            Ok(None)
+        }
+
+        async fn get_latest_contract_actions(
+            &self,
+        ) -> Result<Vec<(u64, LatestContractAction)>, sqlx::Error> {
+            Ok(vec![])
+        }
+
+        async fn get_highest_block(
+            &self,
+        ) -> Result<Option<(BlockRef, ProtocolVersion, SerializedLedgerStateKey)>, sqlx::Error>
+        {
+            Ok(None)
+        }
+
+        async fn get_highest_block_timestamp(&self) -> Result<Option<u64>, sqlx::Error> {
+            Ok(None)
+        }
+
+        async fn get_newest_ledger_state_keys(
+            &self,
+            _limit: NonZeroUsize,
+        ) -> Result<Vec<(ProtocolVersion, SerializedLedgerStateKey)>, sqlx::Error> {
+            Ok(vec![])
+        }
+
+        async fn get_transaction_count(&self) -> Result<u64, sqlx::Error> {
+            Ok(0)
+        }
+
+        async fn get_contract_action_count(&self) -> Result<(u64, u64, u64), sqlx::Error> {
+            Ok((0, 0, 0))
+        }
+
+        async fn contract_actions_without_state_keys_exist(&self) -> Result<bool, sqlx::Error> {
+            Ok(false)
+        }
+
+        async fn get_latest_d_parameter(&self) -> Result<Option<DParameter>, sqlx::Error> {
+            Ok(None)
+        }
+
+        async fn get_latest_terms_and_conditions(
+            &self,
+        ) -> Result<Option<TermsAndConditions>, sqlx::Error> {
+            Ok(None)
+        }
+    }
+
+    #[derive(Clone)]
+    struct NoopPublisher;
+
+    impl Publisher for NoopPublisher {
+        type Error = Infallible;
+
+        async fn publish<T: Message + Send + Sync>(&self, _message: &T) -> Result<(), Self::Error> {
+            Ok(())
+        }
     }
 
     #[derive(Clone)]

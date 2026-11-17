@@ -86,7 +86,9 @@ const CATCH_UP_LOG_INTERVAL: u64 = 1_000;
 const FINALIZATION_SAFETY_MARGIN: u64 = 400;
 
 /// Storage key of `Midnight::StateKey`, i.e. `twox128("Midnight") ++ twox128("StateKey")`. The
-/// item is identical in every supported runtime, hence read raw.
+/// item is identical in every supported runtime, hence read raw. The tests
+/// `state_key_storage_key_matches_all_runtimes` and `state_key_storage_key_matches_typed_runtime_apis`
+/// check this against the committed metadata and each runtime's generated API.
 const STATE_KEY_STORAGE_KEY: [u8; 32] = match const_hex::const_decode_to_array(
     b"2a760f9a173a6df5cd4373ff49fa999bd3b3812d84b965be98ec477e3575379b",
 ) {
@@ -914,6 +916,11 @@ async fn block_header(
 mod tests {
     use super::*;
     use parity_scale_codec::Encode;
+    use std::{any::type_name, fmt::Debug, fs, path::Path};
+    use subxt::{
+        Metadata,
+        ext::{frame_decode::storage::encode_storage_key_prefix, scale_decode::DecodeAsType},
+    };
 
     const AUTHORITIES: [[u8; 32]; 3] = [[1; 32], [2; 32], [3; 32]];
 
@@ -924,6 +931,74 @@ mod tests {
         pre_digest.extend(authority_index.encode());
         pre_digest.extend([0xff; 8]);
         pre_digest
+    }
+
+    /// `STATE_KEY_STORAGE_KEY` is read raw rather than through each runtime's typed API, so check
+    /// it against every committed runtime metadata, with a byte vector as `fetch_state_key` expects.
+    #[test]
+    fn state_key_storage_key_matches_all_runtimes() {
+        assert_raw_storage_key_matches_all_runtimes(
+            "Midnight",
+            "StateKey",
+            &STATE_KEY_STORAGE_KEY,
+            vec![1_u8, 2, 3],
+        );
+    }
+
+    /// Check a storage key read raw, rather than through each runtime's typed API, against every
+    /// committed runtime metadata under `.node`: it is the prefix of `pallet_name::entry_name`,
+    /// the entry exists there as a plain value, and `value` round-trips through the entry's value
+    /// type, so the raw read decodes what the runtime stores.
+    fn assert_raw_storage_key_matches_all_runtimes<V: Encode + DecodeAsType + PartialEq + Debug>(
+        pallet_name: &str,
+        entry_name: &str,
+        storage_key: &[u8],
+        value: V,
+    ) {
+        let node_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../.node");
+        let metadata_paths = fs::read_dir(&node_dir)
+            .expect("read .node directory")
+            .map(|entry| {
+                entry
+                    .expect("read .node entry")
+                    .path()
+                    .join("metadata.scale")
+            })
+            .filter(|path| path.exists())
+            .collect::<Vec<_>>();
+        assert!(!metadata_paths.is_empty(), "no metadata.scale under .node");
+
+        assert_eq!(
+            encode_storage_key_prefix(pallet_name, entry_name),
+            storage_key
+        );
+
+        for path in metadata_paths {
+            let metadata = Metadata::decode_from(&fs::read(&path).expect("read metadata"))
+                .expect("decode metadata");
+            let storage = metadata
+                .pallet_by_name(pallet_name)
+                .and_then(|pallet| pallet.storage())
+                .unwrap_or_else(|| panic!("no {pallet_name} storage in {}", path.display()));
+            assert_eq!(storage.prefix(), pallet_name, "{}", path.display());
+            let entry = storage
+                .entry_by_name(entry_name)
+                .unwrap_or_else(|| panic!("no {pallet_name}::{entry_name} in {}", path.display()));
+            assert_eq!(entry.keys().len(), 0, "{} has a map", path.display());
+
+            let encoded = value.encode();
+            let mut input = encoded.as_slice();
+            let decoded = V::decode_as_type(&mut input, entry.value_ty(), metadata.types())
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "{pallet_name}::{entry_name} does not decode as {} in {}: {error}",
+                        type_name::<V>(),
+                        path.display()
+                    )
+                });
+            assert_eq!(decoded, value, "{}", path.display());
+            assert!(input.is_empty(), "{}", path.display());
+        }
     }
 
     #[test]
