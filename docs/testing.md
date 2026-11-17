@@ -49,7 +49,7 @@ suite's [runtime expectations](../qa/tests/tests/sync/README.md#runtime-expectat
 `ci-standalone.yaml`):
 
 - Starts a **real `midnightntwrk/midnight-node` container** (version = last line of
-  `NODE_VERSIONS`, currently `3.0.0-f3e7c3915ca4`) whose chain DB is **pre-seeded from fixed data in
+  `NODE_VERSIONS`, currently `3.0.0-c3a556864675`) whose chain DB is **pre-seeded from fixed data in
   `.node/<version>/`** (bind-mounted, `CFG_PRESET=dev`) so it replays a known, deterministic
   chain, plus postgres + nats via testcontainers, and runs the **actual** chain-indexer /
   wallet-indexer / indexer-api binaries (cloud) or `indexer-standalone` + SQLite (standalone).
