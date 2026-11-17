@@ -3637,12 +3637,32 @@ mod tests {
     /// The node's `pallet_midnight::StateKey` at block 0 of an undeployed chain, read from node
     /// 0.22.0 (ledger 8) and node 2.1.0-rc.4 (ledger 9), is reproduced from the genesis ledger state
     /// from system properties. This pins the mirrored node ledger wrapper byte for byte.
+    ///
+    /// Each vector has its own versioned genesis fixture, independent of `tests/genesis_state.raw`
+    /// which `just generate-txs` regenerates on node bumps.
     #[cfg(any(feature = "cloud", feature = "standalone"))]
     #[tokio::test(flavor = "multi_thread")]
     async fn node_state_key_matches_node_at_genesis() -> Result<(), BoxError> {
         let _ledger_db = init_ledger_db().await?;
 
-        for ledger_version in [LedgerVersion::V8, LedgerVersion::V9] {
+        // Every ledger version, oldest to latest. A new variant does not compile until it has a
+        // position, and once it is `LATEST` the array length no longer matches until it is listed.
+        const fn position(ledger_version: LedgerVersion) -> usize {
+            match ledger_version {
+                LedgerVersion::V8 => 0,
+                LedgerVersion::V9 => 1,
+            }
+        }
+        const LEDGER_VERSIONS: [LedgerVersion; position(LedgerVersion::LATEST) + 1] =
+            [LedgerVersion::V8, LedgerVersion::V9];
+        assert!(
+            LEDGER_VERSIONS
+                .iter()
+                .enumerate()
+                .all(|(index, ledger_version)| position(*ledger_version) == index)
+        );
+
+        for ledger_version in LEDGER_VERSIONS {
             // Exhaustive on purpose: a new ledger version does not compile here until its genesis
             // and block-0 `StateKey` from a real node are pinned, matching the node's golden test.
             let (fixture, expected) = match ledger_version {
@@ -3651,7 +3671,7 @@ mod tests {
                     "6d69646e696768743a73746f726167652d6b6579286c65646765722d73746174655b7631335d293a0094da59ebc5abee3d5abc325275ee39df52f01eed96b86ea635c4f18b31f99689",
                 ),
                 LedgerVersion::V9 => (
-                    "genesis_state.raw",
+                    "v9_genesis_undeployed_2_1_0_rc_4.raw",
                     "6d69646e696768743a73746f726167652d6b6579286c65646765722d73746174655b7631385d293a0067100cb9fcfc392a863e7b22751c6baf4602e96deef27c4e5339205586ab44c3",
                 ),
             };
