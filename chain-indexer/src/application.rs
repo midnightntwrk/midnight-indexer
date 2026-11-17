@@ -653,6 +653,9 @@ where
     // end-of-block ledger state and stays readable after the node prunes historical ledger states.
     let state_key = ledger_state.node_state_key().context("compute state key")?;
     if state_key != node_state_key {
+        // The "ledger state root mismatch" wording predates the `StateKey` comparison and is kept
+        // on purpose: QA scripts and tests (e.g. qa/scripts/test-hardfork-8to9.sh, the qa sync
+        // suite, indexer-tests/tests/hardfork_e2e.rs) match on this phrase.
         bail!(
             "ledger state root mismatch for block {} at height {}: node={}, indexer={}",
             block.hash,
