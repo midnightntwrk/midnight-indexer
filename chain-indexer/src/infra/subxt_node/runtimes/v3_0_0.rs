@@ -34,7 +34,7 @@ use runtime::runtime_types::{
     frame_system::pallet::Event::{ExtrinsicFailed, ExtrinsicSuccess},
     midnight_node_runtime::{RuntimeCall, RuntimeEvent},
     pallet_midnight::pallet::{
-        Call::{send_mn_transaction, set_tx_size_weight},
+        Call::{send_mn_transaction, set_max_transaction_nodes, set_tx_size_weight},
         Event::{TxApplied, TxPartialSuccess},
     },
     pallet_midnight_system::pallet::{
@@ -238,7 +238,8 @@ impl CallExt for runtime::Call {
             MidnightSystem(send_mn_system_transaction { midnight_system_tx }) => {
                 Some(Transaction::System(midnight_system_tx.into()))
             }
-            Midnight(set_tx_size_weight { .. })
+            Midnight(set_max_transaction_nodes { .. })
+            | Midnight(set_tx_size_weight { .. })
             | Timestamp(_)
             | CNightObservation(_)
             | System(_)
