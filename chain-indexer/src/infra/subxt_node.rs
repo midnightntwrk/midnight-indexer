@@ -97,7 +97,7 @@ const STATE_KEY_STORAGE_KEY: [u8; 32] = match const_hex::const_decode_to_array(
 /// A [Node] implementation based on subxt.
 #[derive(Clone)]
 pub struct SubxtNode {
-    rpc_client: ReconnectingRpcClient,
+    rpc_client: LegacyRpcMethods<RpcConfigFor<SubstrateConfig>>,
     online_client: OnlineClient<SubstrateConfig>,
     subscription_recovery_timeout: Duration,
 }
@@ -126,6 +126,7 @@ impl SubxtNode {
 
         let online_client =
             OnlineClient::<SubstrateConfig>::from_rpc_client(rpc_client.clone()).await?;
+        let rpc_client = LegacyRpcMethods::new(rpc_client.into());
 
         Ok(Self {
             rpc_client,
@@ -273,10 +274,8 @@ impl SubxtNode {
                 .map_err(|error| {
                     SubxtNodeError::GetOnlineClientAt(header.parent_hash, error.into())
                 })?;
-            let legacy_rpc_methods = LegacyRpcMethods::<RpcConfigFor<SubstrateConfig>>::new(
-                self.rpc_client.to_owned().into(),
-            );
-            let extrinsic_bodies = legacy_rpc_methods
+            let extrinsic_bodies = self
+                .rpc_client
                 .chain_get_block(Some(block.block_hash()))
                 .await
                 .map_err(SubxtNodeError::FetchBlockBody)?
@@ -356,11 +355,8 @@ impl SubxtNode {
     /// unlike the ledger state it refers to is not subject to the node's ledger state pruning.
     #[trace]
     async fn fetch_state_key(&self, hash: H256) -> Result<ByteVec, SubxtNodeError> {
-        let legacy_rpc_methods = LegacyRpcMethods::<RpcConfigFor<SubstrateConfig>>::new(
-            self.rpc_client.to_owned().into(),
-        );
-
-        let state_key = legacy_rpc_methods
+        let state_key = self
+            .rpc_client
             .state_get_storage(&STATE_KEY_STORAGE_KEY, Some(hash))
             .await
             .map_err(SubxtNodeError::FetchStateKey)?
@@ -576,10 +572,8 @@ impl Node for SubxtNode {
     }
 
     async fn fetch_genesis_ledger_state(&self) -> Result<ByteVec, Self::Error> {
-        let legacy_rpc_methods = LegacyRpcMethods::<RpcConfigFor<SubstrateConfig>>::new(
-            self.rpc_client.to_owned().into(),
-        );
-        let properties = legacy_rpc_methods
+        let properties = self
+            .rpc_client
             .system_properties()
             .await
             .map_err(SubxtNodeError::FetchSystemProperties)?;

@@ -40,6 +40,7 @@ use std::{
     collections::{HashSet, VecDeque},
     error::Error as StdError,
     future::ready,
+    mem,
     num::{NonZeroU32, NonZeroUsize},
     pin::pin,
     sync::Arc,
@@ -521,7 +522,7 @@ where
 async fn index_block<N>(
     caught_up_max_distance: u32,
     caught_up_leeway: u32,
-    block: node::Block,
+    mut block: node::Block,
     mut ledger_state: LedgerState,
     network_id: &NetworkId,
     highest_block_on_node: &Arc<RwLock<Option<BlockRef>>>,
@@ -535,7 +536,8 @@ async fn index_block<N>(
 where
     N: Node,
 {
-    let node_state_key = block.state_key.clone();
+    // `block.into()` drops the state key, so move it out rather than copy it.
+    let node_state_key = mem::take(&mut block.state_key);
     let (mut block, transactions) = block.into();
 
     let ledger_version = block.protocol_version.ledger_version();
