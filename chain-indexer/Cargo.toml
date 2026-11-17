@@ -43,7 +43,6 @@ trait-variant      = { workspace = true }
 clap      = { workspace = true, features = [ "derive" ] }
 const-hex = { workspace = true }
 criterion = { workspace = true }
-fake      = { workspace = true }
 fs_extra  = { workspace = true }
 indexer-common = { path = "../indexer-common", features = [ "testing" ] }
 reqwest   = { workspace = true, features = [ "json", "rustls" ] }
