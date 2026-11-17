@@ -641,9 +641,9 @@ mod tests {
 
     // gc never culls a pinned node, even one no root it marks from reaches, while it still culls
     // unpinned garbage, and pinned nodes still load. Pinning is all or nothing per root: a root
-    // reaching a missing node is left unpinned, without holding back the others. Runs storage-core's
-    // own gc, so it fails if a storage-core upgrade stops sweeping through `DB::scan`. Shared by both
-    // suites.
+    // reaching a missing node is left unpinned, without holding back the others. Runs
+    // storage-core's own gc, so it fails if a storage-core upgrade stops sweeping through
+    // `DB::scan_keys`. Shared by both suites.
     fn assert_gc_keeps_pinned_nodes(storage: &Storage<LedgerDb>, db: &mut LedgerDb) {
         use std::time::Duration;
 
@@ -672,11 +672,8 @@ mod tests {
             "pinned already"
         );
 
-        let (scanned, _) = db.scan(None, 100);
-        let scanned = scanned
-            .into_iter()
-            .map(|(key, _)| key)
-            .collect::<HashSet<_>>();
+        let (scanned, _) = db.scan_keys(None, 100);
+        let scanned = scanned.into_iter().collect::<HashSet<_>>();
         assert_eq!(
             scanned,
             HashSet::from([ledger.0.clone(), ledger.1.clone(), garbage.0.clone()])

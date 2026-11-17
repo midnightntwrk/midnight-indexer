@@ -425,10 +425,6 @@ impl DB for LedgerDb {
     /// reachable nodes, `gc()` scans the DB in batches, culls every scanned
     /// node not in the mark set, and uses the returned resume handle to pick
     /// up where a time-bounded pass left off. Not called by indexer code.
-    ///
-    /// Scans only the unpinned rows, which are all gc may cull: pinned rows are reachable from
-    /// roots that are never unpersisted. That leaves them out of every scan, which is only right
-    /// while gc's sweep is the sole caller; see the storage-core pin in the workspace manifest.
     fn scan(
         &self,
         resume_from: Option<Self::ScanResumeHandle>,
@@ -439,10 +435,9 @@ impl DB for LedgerDb {
     ) {
         block_in_place(|| {
             Handle::current().block_on(async {
-                let mut query =
-                    QueryBuilder::new("SELECT key, object FROM ledger_db_nodes WHERE NOT pinned");
+                let mut query = QueryBuilder::new("SELECT key, object FROM ledger_db_nodes");
                 if let Some(handle) = resume_from.as_ref() {
-                    query.push(" AND key > ");
+                    query.push(" WHERE key > ");
                     query.push_bind(handle.0.as_slice());
                 }
                 query.push(" ORDER BY key LIMIT ");
@@ -469,6 +464,43 @@ impl DB for LedgerDb {
                 let next_handle = batch.last().map(|(k, _)| k.clone());
 
                 (batch, next_handle)
+            })
+        })
+    }
+
+    /// The keys of the next `batch_size` unpinned nodes after `resume_from`, in key order, from
+    /// the partial index alone, without reading any object. Pinned nodes are reachable from roots
+    /// that are never unpersisted, and storage-core lets a scan leave out such nodes.
+    fn scan_keys(
+        &self,
+        resume_from: Option<Self::ScanResumeHandle>,
+        batch_size: usize,
+    ) -> (Vec<ArenaHash<Self::Hasher>>, Option<Self::ScanResumeHandle>) {
+        block_in_place(|| {
+            Handle::current().block_on(async {
+                let mut query =
+                    QueryBuilder::new("SELECT key FROM ledger_db_nodes WHERE NOT pinned");
+                if let Some(handle) = resume_from.as_ref() {
+                    query.push(" AND key > ");
+                    query.push_bind(handle.0.as_slice());
+                }
+                query.push(" ORDER BY key LIMIT ");
+                query.push_bind(batch_size as i64);
+
+                let keys = query
+                    .build_query_as::<(Vec<u8>,)>()
+                    .fetch_all(&*self.pool)
+                    .await
+                    .unwrap_or_panic("cannot scan ledger_db_nodes keys")
+                    .into_iter()
+                    .map(|(key,)| {
+                        ArenaHash::<Self::Hasher>::deserialize(&mut key.as_slice(), 0)
+                            .unwrap_or_panic("cannot deserialize key as ArenaHash")
+                    })
+                    .collect::<Vec<_>>();
+                let next_handle = keys.last().cloned();
+
+                (keys, next_handle)
             })
         })
     }
@@ -803,6 +835,27 @@ fn persist_nodes(
     nodes
 }
 
+// `scan_keys` pages through the same keys as `scan`, in the same order, resuming where it left off.
+// Shared by both suites, like `assert_get_root_count_reads_stored_count`.
+#[cfg(test)]
+fn assert_scan_keys_pages_like_scan(storage: &Storage<LedgerDb>, db: &mut LedgerDb) {
+    let nodes = persist_nodes(storage, db, 10);
+    let scanned = nodes.into_iter().map(|(key, _)| key).collect::<Vec<_>>();
+
+    let pages = std::iter::successors(Some(db.scan_keys(None, 3)), |(_, handle)| {
+        handle.clone().map(|handle| db.scan_keys(Some(handle), 3))
+    })
+    .take_while(|(keys, _)| !keys.is_empty())
+    .collect::<Vec<_>>();
+
+    assert!(pages.iter().all(|(keys, _)| keys.len() <= 3));
+    let keys = pages
+        .into_iter()
+        .flat_map(|(keys, _)| keys)
+        .collect::<Vec<_>>();
+    assert_eq!(keys, scanned);
+}
+
 // `batch_update` inserts in chunks, storing every node as given, and accepts a key inserted twice
 // in one batch. Shared by both suites, like `assert_get_root_count_reads_stored_count`.
 #[cfg(test)]
@@ -990,7 +1043,7 @@ pub(crate) mod sqlite_tests {
     use super::{
         SQLITE_MAX_BINDS, assert_batch_update_deletes_in_chunks_and_keeps_update_order,
         assert_batch_update_inserts_in_chunks, assert_batch_update_sets_root_counts,
-        assert_get_root_count_reads_stored_count,
+        assert_get_root_count_reads_stored_count, assert_scan_keys_pages_like_scan,
     };
     use crate::infra::{
         ledger_db::v1_1::LedgerDb,
@@ -1058,6 +1111,16 @@ pub(crate) mod sqlite_tests {
         let storage = Storage::new(16, LedgerDb::new(pool.clone()));
         let mut db = LedgerDb::new(pool);
         assert_batch_update_deletes_in_chunks_and_keeps_update_order(&storage, &mut db);
+        Ok(())
+    }
+
+    // See `assert_scan_keys_pages_like_scan`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn scan_keys_pages_like_scan() -> Result<(), Box<dyn StdError>> {
+        let pool = setup_pool().await?;
+        let storage = Storage::new(16, LedgerDb::new(pool.clone()));
+        let mut db = LedgerDb::new(pool);
+        assert_scan_keys_pages_like_scan(&storage, &mut db);
         Ok(())
     }
 
@@ -1221,7 +1284,7 @@ mod postgres_tests {
     use super::{
         BATCH_BYTES, BATCH_ROWS, assert_batch_update_deletes_in_chunks_and_keeps_update_order,
         assert_batch_update_inserts_in_chunks, assert_batch_update_sets_root_counts,
-        assert_get_root_count_reads_stored_count, insert_chunks,
+        assert_get_root_count_reads_stored_count, assert_scan_keys_pages_like_scan, insert_chunks,
     };
     use crate::infra::{
         ledger_db::v1_1::LedgerDb,
@@ -1352,6 +1415,16 @@ mod postgres_tests {
         let storage = Storage::new(16, LedgerDb::new(pool.clone()));
         let mut db = LedgerDb::new(pool);
         assert_batch_update_deletes_in_chunks_and_keeps_update_order(&storage, &mut db);
+        Ok(())
+    }
+
+    // See `assert_scan_keys_pages_like_scan`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn scan_keys_pages_like_scan() -> Result<(), Box<dyn StdError>> {
+        let (_container, pool) = setup_pool().await?;
+        let storage = Storage::new(16, LedgerDb::new(pool.clone()));
+        let mut db = LedgerDb::new(pool);
+        assert_scan_keys_pages_like_scan(&storage, &mut db);
         Ok(())
     }
 
