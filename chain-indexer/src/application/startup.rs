@@ -13,13 +13,113 @@
 
 //! The chain indexer's startup tasks; the plan running them is in `application`.
 
+use crate::domain::{LedgerState, storage::Storage};
 pub use indexer_common::startup::run;
 use indexer_common::{
+    domain::{
+        SerializedContractStateKey, SerializedZswapStateKey,
+        ledger::{ArenaHash, Error},
+    },
     error::BoxError,
     startup::{BoxFuture, Entry, Task, Value},
     version::git_sha,
 };
+use itertools::Itertools;
+use log::{info, warn};
 use serde::{Deserialize, Serialize};
+use std::{fmt::Display, time::Instant};
+use tokio::task::block_in_place;
+
+/// Pins the contract states and contract zswap states stored before pinning existed, and
+/// everything they reach, so gc's sweep skips them and gc no longer marks from them. Contract
+/// states written since are pinned as their block is indexed; see `LedgerState::pin_roots`.
+///
+/// Safe to run again: the walk stops at pinned nodes and root rows already flagged are not written,
+/// so a rerun after a committed pin pins nothing. The roots are pinned in one walk, written in one
+/// statement or transaction, so an interrupted pin commits nothing and a rerun starts over; only
+/// when a node is missing are roots pinned one by one, and a rerun then skips those committed.
+///
+/// A stored key that cannot be read is logged and left unpinned, the others pinned all the same,
+/// rather than failing every start: a rerun would not read it either.
+pub(super) struct PinContractStates;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(super) struct PinnedContractStates {
+    /// Nodes pinned.
+    nodes: usize,
+    /// Roots left unpinned, as a node they reach is missing; their hashes are logged. gc marks them
+    /// as before.
+    #[serde(default)]
+    failed_roots: usize,
+    /// Stored keys that cannot be read, left unpinned; they are logged. gc marks their roots as
+    /// before.
+    #[serde(default)]
+    invalid_keys: usize,
+}
+
+impl PinContractStates {
+    /// The roots the given stored keys refer to, and the number of keys that cannot be read, each
+    /// logged with why.
+    fn roots(
+        state_keys: &[SerializedContractStateKey],
+        zswap_state_keys: &[SerializedZswapStateKey],
+    ) -> (Vec<ArenaHash>, usize) {
+        let (roots, invalid_keys) = state_keys
+            .iter()
+            .map(|key| ArenaHash::try_from(key).inspect_err(|error| Self::warn_invalid(key, error)))
+            .chain(zswap_state_keys.iter().map(|key| {
+                ArenaHash::try_from(key).inspect_err(|error| Self::warn_invalid(key, error))
+            }))
+            .partition_result::<Vec<_>, Vec<_>, _, _>();
+        (roots, invalid_keys.len())
+    }
+
+    fn warn_invalid(key: impl Display, error: &Error) {
+        warn!(key:%, error:%; "stored contract state key that cannot be read left unpinned");
+    }
+}
+
+impl<S: Storage> Task<S> for PinContractStates {
+    const ID: &'static str = "ledger_db/pin_contract_states";
+    type State = PinnedContractStates;
+
+    fn run<'a>(
+        &'a self,
+        storage: &'a S,
+        _previous: Option<&'a Entry<Self::State>>,
+    ) -> BoxFuture<'a, Self::State> {
+        Box::pin(async move {
+            let (state_keys, zswap_state_keys) = storage.get_contract_state_keys().await?;
+            let (roots, invalid_keys) = Self::roots(&state_keys, &zswap_state_keys);
+
+            let roots_count = roots.len();
+            info!(roots = roots_count; "pinning the contract state history");
+            let started = Instant::now();
+            let pinned = block_in_place(|| LedgerState::pin(roots));
+            if !pinned.failed_roots.is_empty() {
+                warn!(
+                    failed_roots:? = pinned.failed_roots;
+                    "contract state roots reaching nodes missing from the ledger DB left unpinned"
+                );
+            }
+            let (nodes, failed_roots) = (pinned.nodes, pinned.failed_roots.len());
+            info!(
+                roots = roots_count,
+                nodes,
+                failed_roots,
+                invalid_keys,
+                elapsed:? = started.elapsed();
+                "pinned the contract state history"
+            );
+
+            Ok(PinnedContractStates {
+                nodes,
+                failed_roots,
+                invalid_keys,
+            })
+        })
+    }
+}
 
 /// Records the indexer build that writes the blocks after the given height, when its version or
 /// git commit differs from the last recorded: a newer entry's height ends the previous build's
@@ -90,7 +190,7 @@ impl<S: Sync> Task<S> for Build {
 
 #[cfg(test)]
 mod tests {
-    use super::Build;
+    use super::{Build, PinContractStates};
     use indexer_common::{
         error::BoxError,
         startup::{Entry, Task},
@@ -149,6 +249,34 @@ mod tests {
         assert_eq!(Task::<()>::run(&build, &(), None).await?, Some(build));
 
         Ok(())
+    }
+
+    /// Stored keys that cannot be read are counted, and leave the readable ones' roots to be
+    /// pinned all the same.
+    #[test]
+    fn pin_contract_states_keeps_the_readable_keys() {
+        use indexer_common::domain::{SerializedContractStateKey, SerializedZswapStateKey};
+
+        // A ledger-9 contract state key: its tag, then a by-reference key, a discriminant and the
+        // hash.
+        let readable = [
+            b"midnight:storage-key(contract-state[v8]):".as_slice(),
+            &[0],
+            &[7; 32],
+        ]
+        .concat();
+        let state_keys = [vec![0xff], readable].map(SerializedContractStateKey::from);
+        let zswap_state_keys = [SerializedZswapStateKey::from(vec![0xfe])];
+
+        let (roots, invalid_keys) = PinContractStates::roots(&state_keys, &zswap_state_keys);
+        assert_eq!(
+            roots
+                .iter()
+                .map(|root| root.0.as_slice())
+                .collect::<Vec<_>>(),
+            [[7; 32].as_slice()]
+        );
+        assert_eq!(invalid_keys, 2);
     }
 }
 

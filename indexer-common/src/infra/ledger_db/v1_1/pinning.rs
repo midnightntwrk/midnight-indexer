@@ -171,6 +171,13 @@ pub(crate) fn pin_queued() -> ledger::Pinned {
     pinned
 }
 
+/// Empties the queue, so the roots in it are stored unpinned, as the history written before
+/// pinning existed.
+#[cfg(test)]
+pub(crate) fn clear_queue() {
+    take_queued();
+}
+
 // The queued roots and what was pinned as written, leaving the queue empty.
 fn take_queued() -> Queue {
     std::mem::take(&mut *QUEUE.lock().expect("lock pinning queue"))

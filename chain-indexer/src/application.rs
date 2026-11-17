@@ -15,7 +15,10 @@ mod metrics;
 mod startup;
 
 use crate::{
-    application::{metrics::Metrics, startup::Build},
+    application::{
+        metrics::Metrics,
+        startup::{Build, PinContractStates},
+    },
     domain::{
         Block, BlockRef, LedgerState, SystemParametersChange, Transaction,
         node::{self, Node},
@@ -238,7 +241,11 @@ pub async fn run(
     };
 
     // Startup tasks, once the ledger state is known to load, as they may read the ledger DB.
-    let plan = sequential([task(Build::current(highest_block_height))]);
+    // The build first, so the journal entries after it were written by it.
+    let plan = sequential([
+        task(Build::current(highest_block_height)),
+        task(PinContractStates),
+    ]);
     startup::run(&storage, &storage, &plan)
         .await
         .map_err(anyhow::Error::from_boxed)
@@ -944,7 +951,8 @@ mod tests {
     use indexer_common::{
         domain::{
             BlockHash, ByteArray, ByteVec, LedgerVersion, Message, NetworkId, NodeVersion,
-            ProtocolVersion, Publisher, SerializedLedgerStateKey,
+            ProtocolVersion, Publisher, SerializedContractStateKey, SerializedLedgerStateKey,
+            SerializedZswapStateKey,
         },
         error::BoxError,
         startup::{Entry, Journal, Value},
@@ -1242,6 +1250,18 @@ mod tests {
             &self,
         ) -> Result<Option<TermsAndConditions>, sqlx::Error> {
             Ok(None)
+        }
+
+        async fn get_contract_state_keys(
+            &self,
+        ) -> Result<
+            (
+                Vec<SerializedContractStateKey>,
+                Vec<SerializedZswapStateKey>,
+            ),
+            sqlx::Error,
+        > {
+            Ok((vec![], vec![]))
         }
     }
 

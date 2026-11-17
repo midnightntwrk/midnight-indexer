@@ -91,9 +91,11 @@ use midnight_onchain_runtime_v4::{
     state::{EntryPointBuf, StateValue},
 };
 use midnight_serialize_v1::{Deserializable, tagged_deserialize};
+/// The hash a ledger DB node is stored under, such as a gc root's.
+pub use midnight_storage_core_v1::arena::ArenaHash;
 use midnight_storage_core_v1::{
     Storage,
-    arena::{ArenaHash, Sp, TypedArenaKey},
+    arena::{Sp, TypedArenaKey},
     backend::StorageBackend,
     db::DB,
     storage::default_storage,
@@ -548,7 +550,7 @@ impl LedgerState {
             .map(|wanted| raise_root_counts(&default_storage::<v1_1::LedgerDb>(), &wanted))
     }
 
-    fn arena_root_hash(
+    pub(super) fn arena_root_hash(
         key: &SerializedLedgerStateKey,
         ledger_version: LedgerVersion,
     ) -> Result<ArenaHash<<v1_1::LedgerDb as DB>::Hasher>, Error> {

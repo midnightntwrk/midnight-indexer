@@ -49,7 +49,7 @@ impl Pin for ArenaHash<<v1_1::LedgerDb as DB>::Hasher> {
     }
 }
 
-/// What pinning pinned, and the roots it left unpinned.
+/// What [LedgerState::pin] pinned, and the roots it left unpinned.
 #[derive(Debug, Default)]
 pub struct Pinned {
     /// Nodes pinned.
@@ -67,6 +67,20 @@ impl LedgerState {
     /// skips it and gc no longer marks from those roots. Call once they are flushed, i.e. after
     /// [Self::persist]. Returns the nodes pinned and the roots left unpinned.
     pub fn pin_roots() -> Pinned {
+        Self::pin_queued()
+    }
+
+    /// Pin the given already persisted roots, and everything they reach. Reads the ledger DB only,
+    /// loading nothing into the arena. Returns the nodes pinned and the roots left unpinned.
+    pub fn pin(
+        roots: impl IntoIterator<Item = ArenaHash<<v1_1::LedgerDb as DB>::Hasher>>,
+    ) -> Pinned {
+        roots.into_iter().for_each(|mut root| root.pin());
+        Self::pin_queued()
+    }
+
+    /// Pin the roots queued and not pinned as their nodes were flushed.
+    fn pin_queued() -> Pinned {
         pinning::pin_queued()
     }
 }
@@ -82,7 +96,7 @@ mod tests {
             },
         },
         error::BoxError,
-        infra::ledger_db::v1_1::pinning::pinned,
+        infra::ledger_db::v1_1::pinning::{clear_queue, pinned},
     };
     use midnight_storage_core_v1::arena::ArenaHash;
 
@@ -188,6 +202,86 @@ mod tests {
                 "{ledger_version}: contract zswap state pinned"
             );
         }
+
+        Ok(())
+    }
+
+    /// Pinning by stored keys, as the startup backfill does, pins a persisted contract state's
+    /// node, and leaves the ledger state persisted with it unpinned: only roots that are never
+    /// unpersisted get pinned. Clearing the queue of roots to pin relies on one process per test,
+    /// as nextest runs them.
+    #[cfg(any(feature = "cloud", feature = "standalone"))]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn contract_states_pin_by_key() -> Result<(), BoxError> {
+        use midnight_base_crypto_v1::hash::HashOutput;
+        use midnight_coin_structure_v2::{
+            coin::{TokenType as MidnightTokenType, UnshieldedTokenType},
+            contract::ContractAddress as ContractAddressV8,
+        };
+        use midnight_onchain_runtime_v3::state::ContractState as ContractStateV3;
+
+        let _ledger_db = init_ledger_db().await?;
+
+        let address = ContractAddressV8(HashOutput([11; 32]));
+        let mut state = LedgerState::new("undeployed".try_into()?, LedgerVersion::V8)
+            .expect("ledger state can be constructed");
+        match &mut state {
+            LedgerState::V8 { ledger_state, .. } => {
+                let mut contract_state = ContractStateV3::default();
+                contract_state.balance = contract_state.balance.insert(
+                    MidnightTokenType::Unshielded(UnshieldedTokenType(HashOutput([11; 32]))),
+                    11,
+                );
+                ledger_state.contract = ledger_state.contract.insert(address, contract_state);
+            }
+            LedgerState::V9 { .. } => unreachable!("constructed as V8"),
+        }
+
+        let (key, _) = state
+            .contract_state(&address.serialize()?)?
+            .expect("the contract is in the ledger state");
+        let zswap_key = state.contract_zswap_state_key(
+            &address.serialize()?,
+            &mut ContractZswapIndices::default(),
+        )?;
+        // Stored unpinned, as the history written before pinning existed.
+        clear_queue();
+        let (state, ledger_state_key) = state.persist()?;
+        let ledger_state_root = LedgerState::arena_root_hash(&ledger_state_key, LedgerVersion::V8)?;
+        drop(state);
+
+        let contract_root = ArenaHash::try_from(&key)?;
+        let zswap_root = ArenaHash::try_from(&zswap_key)?;
+        assert_eq!(
+            pinned(&contract_root),
+            Some(false),
+            "contract state stored unpinned"
+        );
+        assert_eq!(
+            pinned(&zswap_root),
+            Some(false),
+            "contract zswap state stored unpinned"
+        );
+        LedgerState::pin([contract_root.clone()]);
+        assert_eq!(pinned(&contract_root), Some(true), "contract state pinned");
+        assert_eq!(
+            pinned(&ledger_state_root),
+            Some(false),
+            "ledger state unpinned"
+        );
+
+        // Pinning again finds it pinned.
+        LedgerState::pin([contract_root.clone()]);
+        assert_eq!(pinned(&contract_root), Some(true));
+
+        // A contract zswap state pins by its key the same way.
+        let pinned_zswap = LedgerState::pin([zswap_root.clone()]);
+        assert!(pinned_zswap.failed_roots.is_empty());
+        assert_eq!(
+            pinned(&zswap_root),
+            Some(true),
+            "contract zswap state pinned"
+        );
 
         Ok(())
     }
