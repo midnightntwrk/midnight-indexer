@@ -181,13 +181,22 @@ mod tests {
                 .flat_map(|child| child.refs())
                 .map(|hash| hash.0.to_vec())
                 .collect::<HashSet<_>>();
-            assert_eq!(keys.iter().map(|key| key.to_vec()).collect::<HashSet<_>>(), refs);
+            assert_eq!(
+                keys.iter().map(|key| key.to_vec()).collect::<HashSet<_>>(),
+                refs
+            );
             refs_seen += refs.len();
 
             // A truncated object, or parts with a key too many, are rejected.
             assert!(split(&bytes[..bytes.len() - 1]).is_err());
             let child_keys = [parts.child_keys.as_slice(), &[0; 32]].concat();
-            assert!(join(&Parts { child_keys, ..parts }).is_err());
+            assert!(
+                join(&Parts {
+                    child_keys,
+                    ..parts
+                })
+                .is_err()
+            );
         }
         assert!(refs_seen > 0, "some objects have by-reference children");
 
