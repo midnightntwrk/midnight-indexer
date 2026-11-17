@@ -300,33 +300,32 @@ impl domain::storage::Storage for Storage {
                 sqlx::query(query)
                     .bind(outdated_ids)
                     .bind(min_last_active)
-                    .execute(&*self.pool)
+                    .execute(self.pool.writer())
                     .await
                     .map(|_| ())
                     .or_else(|error| ignore_deadlock_detected(error, || ()))?;
             }
-        }
-
-        #[cfg(feature = "standalone")]
-        {
-            for id in outdated_ids {
+            #[cfg(feature = "standalone")]
+            {
                 let query = indoc! {"
                     UPDATE wallets
                     SET session_id = NULL
-                    WHERE id = $1
-                    AND last_active < $2
+                    WHERE session_id IS NOT NULL
+                    AND last_active < $1
                 "};
 
-                // Housekeeping: if the shared writer is starved past busy_timeout, skip this
-                // wallet instead of failing the poll (which would take down the whole
-                // standalone process); the next poll retries.
+                // One checkout and UPDATE for the entire cleanup. Recheck last_active
+                // so a session refreshed since the SELECT is preserved. On contention,
+                // defer housekeeping until the next poll.
                 let result = sqlx::query(query)
-                    .bind(id)
                     .bind(min_last_active)
-                    .execute(&*self.pool)
+                    .execute(self.pool.writer())
                     .await;
                 match result {
-                    Err(error) if indexer_common::infra::pool::sqlite::is_busy_error(&error) => {
+                    Err(error)
+                        if matches!(error, sqlx::Error::PoolTimedOut)
+                            || indexer_common::infra::pool::sqlite::is_busy_error(&error) =>
+                    {
                         log::warn!("skipping wallet session cleanup, sqlite writer is busy");
                     }
                     other => {
@@ -409,7 +408,7 @@ mod tests {
             )
             VALUES (1, X'00', 0, 1000000, X'00', NULL, 0, X'00', X'00', X'00')
         "};
-        sqlx::query(query).execute(&**pool).await?;
+        sqlx::query(query).execute(pool.writer()).await?;
         Ok(1)
     }
 
@@ -427,7 +426,7 @@ mod tests {
             .bind(id)
             .bind(block_id)
             .bind(variant)
-            .execute(&**pool)
+            .execute(pool.writer())
             .await?;
         Ok(())
     }
@@ -451,7 +450,7 @@ mod tests {
             .bind(wanted_start)
             .bind(first_indexed)
             .bind(OffsetDateTime::now_utc())
-            .execute(&**pool)
+            .execute(pool.writer())
             .await?;
         Ok(())
     }
@@ -461,6 +460,62 @@ mod tests {
         migrations::sqlite::run(&pool).await?;
         let cipher = ChaCha20Poly1305::new(Key::from_slice(&[0u8; 32]));
         Ok((Storage::new(cipher, pool.clone()), pool))
+    }
+
+    #[tokio::test]
+    async fn active_wallet_ids_cleans_expired_sessions_in_one_update()
+    -> Result<(), Box<dyn StdError>> {
+        let (storage, pool) = new_storage().await?;
+        let now = OffsetDateTime::now_utc();
+        let expired = [Uuid::now_v7(), Uuid::now_v7()];
+        let active = Uuid::now_v7();
+        let disconnected = Uuid::now_v7();
+        let query = indoc! {"
+            INSERT INTO wallets (
+                id, viewing_key_hash, viewing_key, wanted_start_index,
+                first_indexed_transaction_id, last_indexed_transaction_id,
+                last_active, session_id
+            ) VALUES ($1, $1, X'00', 0, 0, 0, $2, $3)
+        "};
+        for (id, last_active, session_id) in [
+            (
+                expired[0],
+                now - std::time::Duration::from_secs(120),
+                Some(Uuid::now_v7()),
+            ),
+            (
+                expired[1],
+                now - std::time::Duration::from_secs(120),
+                Some(Uuid::now_v7()),
+            ),
+            (active, now, Some(Uuid::now_v7())),
+            (disconnected, now, None),
+        ] {
+            sqlx::query(query)
+                .bind(id)
+                .bind(last_active)
+                .bind(session_id)
+                .execute(pool.writer())
+                .await?;
+        }
+
+        assert_eq!(
+            storage
+                .active_wallet_ids(std::time::Duration::from_secs(60))
+                .await?,
+            vec![active]
+        );
+        // The in-memory pool uses one connection, so changes() observes the cleanup UPDATE.
+        let changed = sqlx::query_scalar::<_, i64>("SELECT changes()")
+            .fetch_one(pool.writer())
+            .await?;
+        assert_eq!(changed, 2);
+        let remaining =
+            sqlx::query_scalar::<_, Uuid>("SELECT id FROM wallets WHERE session_id IS NOT NULL")
+                .fetch_all(pool.writer())
+                .await?;
+        assert_eq!(remaining, vec![active]);
+        Ok(())
     }
 
     /// Half-open `[from, to)` range, DESC order, filters `variant = 'Regular'`, honours limit.

@@ -11,7 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use derive_more::Into;
 use log::debug;
 use serde::Deserialize;
 use sqlx::{
@@ -21,76 +20,103 @@ use sqlx::{
 use std::{ops::Deref, time::Duration};
 use thiserror::Error;
 
-/// New type for `sqlx::SqlitePool`, allowing for some custom extensions as well as security.
+/// SQLite pools split by role: one write connection, `max_connections` read connections.
 ///
-/// To use as `&sqlx::SqlitePool` in `Query::execute`, use its `Deref` implementation: `&*pool` or
-/// `pool.deref()`. If an owned `sqlx::SqlitePool` is needed, use `Into::into`.
-#[derive(Debug, Clone, Into)]
-pub struct SqlitePool(sqlx::SqlitePool);
+/// SQLite allows a single writer per database file and its `busy_timeout` handler polls for
+/// the lock without any queueing, so under sustained writes (chain-indexer catching up) a
+/// waiting writer can starve past any timeout and fail with `SQLITE_BUSY`. Routing all
+/// writes through a dedicated single-connection pool replaces that unfair polling with
+/// sqlx's fair FIFO pool checkout: in-process writers queue on `acquire` and the SQLite
+/// write lock itself is never contended from within the process.
+///
+/// `Deref` yields the read pool (`PRAGMA query_only=ON`, so a mis-routed write fails loudly
+/// instead of contending silently). Transactions via [SqlitePool::begin] and bare write
+/// statements via [SqlitePool::writer] use the write pool.
+#[derive(Debug, Clone)]
+pub struct SqlitePool {
+    read: sqlx::SqlitePool,
+    write: sqlx::SqlitePool,
+}
 
 impl SqlitePool {
     /// Try to create a new [SqlitePool] with the given config.
+    ///
+    /// With `max_connections <= 1` the read pool is the write pool: callers like the ledger
+    /// DB require reads to observe the writer connection's own in-progress state (see
+    /// `infra::ledger_db::init`). In-memory tests also select this mode explicitly via
+    /// `Config::default()`.
     pub async fn new(config: Config) -> Result<Self, Error> {
         let max_connections = config.max_connections;
+        let single_connection = max_connections <= 1;
         let connect_options =
             SqliteConnectOptions::try_from(config).map_err(Error::ConvertConfig)?;
-        let inner = SqlitePoolOptions::new()
-            .max_connections(max_connections)
-            .connect_with(connect_options)
+
+        // The write pool connects first: on a fresh database it creates the file and
+        // switches it to WAL before any read-only connection touches it. Keep the default
+        // 30-second checkout timeout, including for API mutations. In-process writers
+        // wait in the pool's FIFO queue; busy_timeout only handles external lock holders.
+        let write = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(connect_options.clone())
             .await?;
-        let pool = SqlitePool(inner);
+        let read = if single_connection {
+            write.clone()
+        } else {
+            SqlitePoolOptions::new()
+                .max_connections(max_connections)
+                .connect_with(connect_options.pragma("query_only", "ON"))
+                .await?
+        };
+        let pool = SqlitePool { read, write };
         debug!(pool:?; "created pool");
 
         Ok(pool)
     }
 
-    /// Begin a transaction with `BEGIN IMMEDIATE` semantics, claiming the
+    /// Begin a transaction on the write pool with `BEGIN IMMEDIATE` semantics, claiming the
     /// writer lock up front.
     ///
-    /// SQLite's default `BEGIN DEFERRED` transaction stays a reader until its
-    /// first write statement. When multiple connections run in WAL mode, a
-    /// deferred reader that later tries to upgrade to a writer (while another
-    /// connection has committed in between) gets `SQLITE_BUSY_SNAPSHOT` (517),
-    /// which is not retryable via `busy_timeout`. Every caller in this
-    /// codebase that starts a transaction does so to write, so taking the
-    /// write lock immediately is both correct and avoids the race. Shadowing
-    /// `sqlx::Pool::begin` via inherent method makes the existing
-    /// `self.pool.begin()` call sites pick up the new behavior transparently.
-    ///
-    /// `busy_timeout` bounds a single lock wait, but SQLite's busy handler is unfair polling,
-    /// not a queue: under back-to-back writers (chain-indexer catching up) a waiter can lose
-    /// every retry window and starve past the timeout. A begin failure is fatal to the whole
-    /// standalone process (components propagate it and main exits), so retry a few times
-    /// before giving up.
+    /// In-process writers queue fairly on the pool's single connection, so the lock is
+    /// uncontended here; `BEGIN IMMEDIATE` still guards against `SQLITE_BUSY_SNAPSHOT`
+    /// (517) races with writers outside the process (e.g. the sqlite3 CLI).
+    /// External lock contention is retried up to four attempts, each subject to
+    /// `busy_timeout`. Pool checkout timeouts and other errors are returned immediately.
     pub async fn begin(&self) -> Result<Transaction<'static, Sqlite>, sqlx::Error> {
         const ATTEMPTS: u32 = 4;
 
-        let mut attempt = 1;
-        loop {
-            match self.0.begin_with("BEGIN IMMEDIATE").await {
-                Err(error) if is_busy_error(&error) && attempt < ATTEMPTS => {
-                    log::warn!(attempt; "sqlite writer starved past busy_timeout, retrying begin");
-                    attempt += 1;
+        for attempt in 1..ATTEMPTS {
+            match self.write.begin_with("BEGIN IMMEDIATE").await {
+                Err(error) if is_busy_error(&error) => {
+                    log::warn!(attempt; "external sqlite writer is busy, retrying begin");
+                    tokio::time::sleep(Duration::from_millis(100)).await;
                 }
-
                 other => return other,
             }
         }
+        self.write.begin_with("BEGIN IMMEDIATE").await
+    }
+
+    /// The pool for write statements executed outside a transaction. Reads go through
+    /// `Deref`.
+    pub fn writer(&self) -> &sqlx::SqlitePool {
+        &self.write
     }
 }
 
-/// Whether the error is SQLite's `SQLITE_BUSY` family ("database is locked"), i.e. lock
-/// contention that outlasted `busy_timeout` - transient by nature and safe to retry or skip
-/// for housekeeping writes.
+/// Whether SQLite reported lock contention, including extended BUSY/LOCKED codes.
 pub fn is_busy_error(error: &sqlx::Error) -> bool {
-    matches!(error, sqlx::Error::Database(db) if db.message().contains("database is locked"))
+    error
+        .as_database_error()
+        .and_then(|error| error.code())
+        .and_then(|code| code.parse::<i32>().ok())
+        .is_some_and(|code| matches!(code & 0xff, 5 | 6))
 }
 
 impl Deref for SqlitePool {
     type Target = sqlx::SqlitePool;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.read
     }
 }
 
@@ -109,6 +135,8 @@ pub enum Error {
 pub struct Config {
     pub cnn_url: String,
 
+    /// Size of the read pool; writes always use one dedicated connection. `1` collapses
+    /// reads onto the write connection (see [SqlitePool::new]).
     #[serde(default = "default_max_connections")]
     pub max_connections: u32,
 
@@ -125,7 +153,8 @@ impl Config {
     pub fn with_url(cnn_url: impl Into<String>) -> Self {
         Self {
             cnn_url: cnn_url.into(),
-            ..Default::default()
+            max_connections: default_max_connections(),
+            synchronous_full: false,
         }
     }
 }
@@ -141,11 +170,8 @@ impl TryFrom<Config> for SqliteConnectOptions {
         // WAL lets readers run concurrent with a single writer; without it the
         // default `DELETE` journal mode serializes all access on a single file.
         // `busy_timeout` lets SQLite itself retry on lock contention instead of
-        // immediately returning `SQLITE_BUSY`. It needs to cover the worst-case
-        // writer hold time: on mainnet, chain-indexer's per-block write
-        // transaction (many inserts across several tables) can exceed a few
-        // seconds, so a short timeout causes concurrent writes (e.g. an API
-        // `disconnect_wallet` UPDATE) to spuriously fail.
+        // immediately returning `SQLITE_BUSY` when another process holds the write lock.
+        // Writers sharing this pool queue on its single write connection instead.
         //
         // `synchronous=NORMAL` fsyncs the WAL only at checkpoints: a power loss can drop the
         // last commits (never corrupt), all of which the indexer recomputes from the node -
@@ -167,11 +193,12 @@ impl TryFrom<Config> for SqliteConnectOptions {
     }
 }
 
+#[cfg(any(test, feature = "testing"))]
 impl Default for Config {
     fn default() -> Self {
         Self {
             cnn_url: "sqlite::memory:".to_string(),
-            max_connections: default_max_connections(),
+            max_connections: 1,
             synchronous_full: false,
         }
     }
@@ -180,27 +207,19 @@ impl Default for Config {
 #[cfg(test)]
 mod tests {
     use crate::infra::pool::sqlite::{Config, SqlitePool};
-    use std::{ops::Deref, path::Path};
-    use tokio::fs;
+    use std::{ops::Deref, time::Duration};
 
     #[tokio::test]
     async fn test_sqlite_pool_file_creation() {
-        let db_path = "test_indexer.sqlite";
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_path = temp_dir.path().join("test_indexer.sqlite");
+        assert!(!db_path.exists());
 
-        if Path::new(db_path).exists() {
-            fs::remove_file(db_path)
-                .await
-                .expect("Failed to remove existing test database file");
-        }
-        assert!(!Path::new(db_path).exists());
-
-        let pool = SqlitePool::new(Config::with_url(format!("sqlite://{db_path}"))).await;
+        let pool =
+            SqlitePool::new(Config::with_url(format!("sqlite://{}", db_path.display()))).await;
 
         assert!(pool.is_ok());
-        assert!(Path::new(db_path).exists());
-        fs::remove_file(db_path)
-            .await
-            .expect("Failed to remove test database file");
+        assert!(db_path.exists());
     }
 
     #[tokio::test]
@@ -219,7 +238,7 @@ mod tests {
     /// one file-backed DB, each also reading inside its transaction like wallet-indexer's
     /// read-modify-write. With DEFERRED transactions this dies with `database is locked`
     /// (SQLITE_BUSY, 5) or `SQLITE_BUSY_SNAPSHOT` (517, not retried by busy_timeout);
-    /// `BEGIN IMMEDIATE` + WAL + busy_timeout must let every writer through.
+    /// The single writer queue and `BEGIN IMMEDIATE` must let every writer through.
     #[tokio::test(flavor = "multi_thread")]
     async fn concurrent_write_transactions_never_hit_busy_errors() {
         const WRITERS: usize = 8;
@@ -236,7 +255,7 @@ mod tests {
             .expect("create pool");
 
         sqlx::query("CREATE TABLE wallet_txs (id INTEGER PRIMARY KEY, wallet INTEGER, n INTEGER)")
-            .execute(pool.deref())
+            .execute(pool.writer())
             .await
             .expect("create table");
 
@@ -278,5 +297,72 @@ mod tests {
             .await
             .expect("count rows");
         assert_eq!(rows as usize, WRITERS * WRITES_PER_WRITER);
+    }
+
+    /// A write mis-routed to the read pool must fail loudly (`query_only=ON`) instead of
+    /// silently contending with the write connection.
+    #[tokio::test]
+    async fn read_pool_rejects_writes() {
+        let temp_dir = tempfile::tempdir().expect("create tempdir");
+        let db_path = temp_dir
+            .path()
+            .join("readonly.sqlite")
+            .display()
+            .to_string();
+        let pool = SqlitePool::new(Config::with_url(format!("sqlite://{db_path}")))
+            .await
+            .expect("create pool");
+
+        sqlx::query("CREATE TABLE test (id INTEGER PRIMARY KEY)")
+            .execute(pool.writer())
+            .await
+            .expect("create table via write pool");
+
+        let result = sqlx::query("INSERT INTO test (id) VALUES (1)")
+            .execute(pool.deref())
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn begin_retries_external_lock_contention() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config = Config::with_url(format!(
+            "sqlite://{}",
+            temp_dir.path().join("external-lock.sqlite").display()
+        ));
+        let pool = SqlitePool::new(config.clone()).await.unwrap();
+        let external = SqlitePool::new(config).await.unwrap();
+        sqlx::query("PRAGMA busy_timeout = 1")
+            .execute(pool.writer())
+            .await
+            .unwrap();
+
+        let external_tx = external.begin().await.unwrap();
+        let begin = pool.begin();
+        tokio::pin!(begin);
+        // The first lock wait expires, but begin must keep retrying.
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut begin)
+                .await
+                .is_err()
+        );
+        external_tx.rollback().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), begin)
+            .await
+            .unwrap()
+            .unwrap()
+            .rollback()
+            .await
+            .unwrap();
+
+        // A lock that outlasts all attempts must still return a bounded error.
+        let external_tx = external.begin().await.unwrap();
+        let error = tokio::time::timeout(Duration::from_secs(2), pool.begin())
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert!(super::is_busy_error(&error));
+        external_tx.rollback().await.unwrap();
     }
 }
