@@ -25,7 +25,7 @@ use crate::{
             ContractState, ContractZswapState, Error, IntentV8, IntentV9, LedgerDbContractState,
             SerializableExt, TaggedSerializableExt, TransactionV8, TransactionV9, ZswapStateExt,
             contract_state::ContractStateArenaKey,
-            node_state_key::{NodeLedgerV8, NodeLedgerV9},
+            state_key::{NodeLedgerV8, NodeLedgerV9},
         },
     },
     infra::ledger_db::v1_1,
@@ -381,7 +381,7 @@ impl LedgerState {
     }
 
     /// The tagged arena key of the bare ledger state. Production code validates against
-    /// [Self::node_state_key] instead; this is kept for tests pinning golden ledger state roots,
+    /// [Self::state_key] instead; this is kept for tests pinning golden ledger state roots,
     /// e.g. across the v8 -> v9 translation.
     #[cfg(test)]
     pub fn root(&self) -> Result<ByteVec, Error> {
@@ -399,21 +399,21 @@ impl LedgerState {
         }
     }
 
-    /// The node's `pallet_midnight::StateKey` for this ledger state as committed at the end of a
-    /// block, i.e. the tagged arena key of the node's ledger wrapper with zero block fullness.
-    pub fn node_state_key(&self) -> Result<ByteVec, Error> {
+    /// The `Midnight::StateKey` the runtime commits for this ledger state at the end of a block,
+    /// i.e. the tagged arena key of the runtime's ledger wrapper with zero block fullness.
+    pub fn state_key(&self) -> Result<ByteVec, Error> {
         match self {
             Self::V8 { ledger_state, .. } => default_storage::<v1_1::LedgerDb>()
                 .alloc(NodeLedgerV8::end_of_block(ledger_state.to_owned()))
                 .as_typed_key()
                 .tagged_serialize()
-                .map_err(|error| Error::Serialize("NodeStateKeyV8", error)),
+                .map_err(|error| Error::Serialize("StateKeyV8", error)),
 
             Self::V9 { ledger_state, .. } => default_storage::<v1_1::LedgerDb>()
                 .alloc(NodeLedgerV9::end_of_block(ledger_state.to_owned()))
                 .as_typed_key()
                 .tagged_serialize()
-                .map_err(|error| Error::Serialize("NodeStateKeyV9", error)),
+                .map_err(|error| Error::Serialize("StateKeyV9", error)),
         }
     }
 
@@ -3642,7 +3642,7 @@ mod tests {
     /// which `just generate-txs` regenerates on node bumps.
     #[cfg(any(feature = "cloud", feature = "standalone"))]
     #[tokio::test(flavor = "multi_thread")]
-    async fn node_state_key_matches_node_at_genesis() -> Result<(), BoxError> {
+    async fn state_key_matches_node_at_genesis() -> Result<(), BoxError> {
         let _ledger_db = init_ledger_db().await?;
 
         // Every ledger version, oldest to latest. A new variant does not compile until it has a
@@ -3680,9 +3680,9 @@ mod tests {
             let ledger_state = LedgerState::from_genesis(genesis, ledger_version)?;
 
             assert_eq!(
-                const_hex::encode(ledger_state.node_state_key()?),
+                const_hex::encode(ledger_state.state_key()?),
                 expected,
-                "node state key for {fixture} drifted from the node's StateKey at genesis"
+                "state key for {fixture} drifted from the node's StateKey at genesis"
             );
         }
 

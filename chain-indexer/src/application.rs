@@ -602,7 +602,7 @@ where
         )
         .context("create ledger state from genesis")?;
         let genesis_state_key = genesis_ledger_state
-            .node_state_key()
+            .state_key()
             .context("compute genesis state key")?;
 
         if node_state_key == genesis_state_key {
@@ -653,7 +653,7 @@ where
 
     // Validate the ledger state against the node's `StateKey`, which commits to the whole
     // end-of-block ledger state and stays readable after the node prunes historical ledger states.
-    let state_key = ledger_state.node_state_key().context("compute state key")?;
+    let state_key = ledger_state.state_key().context("compute state key")?;
     if state_key != node_state_key {
         // The "ledger state root mismatch" wording predates the `StateKey` comparison and is kept
         // on purpose: QA scripts and tests (e.g. qa/scripts/test-hardfork-8to9.sh, the qa sync
@@ -1020,7 +1020,7 @@ mod tests {
                 .join("../indexer-common/tests/v8_genesis_undeployed_0_22_0.raw"),
         )?;
         let genesis_state_key =
-            LedgerState::from_genesis(&genesis, LedgerVersion::V8)?.node_state_key()?;
+            LedgerState::from_genesis(&genesis, LedgerVersion::V8)?.state_key()?;
         let wrong_state_key = ByteVec::from(vec![0; genesis_state_key.as_ref().len()]);
         let node = GenesisNode(genesis.into());
         let mut storage = MockStorage::default();
@@ -1068,7 +1068,7 @@ mod tests {
         };
         let (ledger_state, _) = index(block_0, fresh_ledger_state()?, &mut storage).await?;
         assert_eq!(storage.saved_blocks, 1);
-        assert_eq!(ledger_state.node_state_key()?, genesis_state_key);
+        assert_eq!(ledger_state.state_key()?, genesis_state_key);
 
         // A later block whose node key the indexer does not reproduce: the guard bails.
         let block_1 = node::Block {
@@ -1097,7 +1097,7 @@ mod tests {
             block_0.timestamp,
             false,
         )?;
-        let expected_state_key = expected_ledger_state.node_state_key()?;
+        let expected_state_key = expected_ledger_state.state_key()?;
         assert_ne!(expected_state_key, genesis_state_key);
         let block_0 = node::Block {
             state_key: expected_state_key.clone(),
@@ -1105,7 +1105,7 @@ mod tests {
         };
         let (ledger_state, _) = index(block_0, fresh_ledger_state()?, &mut storage).await?;
         assert_eq!(storage.saved_blocks, 2);
-        assert_eq!(ledger_state.node_state_key()?, expected_state_key);
+        assert_eq!(ledger_state.state_key()?, expected_state_key);
 
         Ok(())
     }

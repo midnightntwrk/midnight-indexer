@@ -11,8 +11,8 @@ divergent state - `index_block` in `chain-indexer/src/application.rs`:
 
 - **Full ledger state - every block.** The node stores the tagged arena key of its end-of-block
   ledger as `pallet_midnight::StateKey` in Substrate storage. The chain-indexer reads it for every
-  block and compares it to `ledger_state.node_state_key()`, the same key computed over its own
-  state (`indexer-common/src/domain/ledger/node_state_key.rs` mirrors the node's ledger wrapper);
+  block and compares it to `ledger_state.state_key()`, the same key computed over its own
+  state (`indexer-common/src/domain/ledger/state_key.rs` mirrors the node's ledger wrapper);
   mismatch → `bail!` with "ledger state root mismatch". At genesis the state key additionally
   disambiguates a pre- vs post-block-0 genesis.
 
