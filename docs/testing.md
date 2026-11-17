@@ -7,7 +7,7 @@ How the indexer is kept consistent with the node, and what the test layers cover
 The hard guarantee lives in the chain-indexer, not in a suite. For every block the
 chain-indexer applies the node's transactions to its **own** `LedgerState`, recomputes the
 merkle roots, and **`bail!`s (halts indexing) on any mismatch** rather than persisting a
-divergent state - `chain-indexer/src/application.rs` (~404-420):
+divergent state - `index_block` in `chain-indexer/src/application.rs`:
 
 - **Full ledger state - every block.** The node stores the tagged arena key of its end-of-block
   ledger as `pallet_midnight::StateKey` in Substrate storage. The chain-indexer reads it for every
@@ -26,6 +26,20 @@ anywhere - the guard is the source of truth.
 Per-block **dust roots** are computed, stored and served but not cross-checked against the node
 (there is no node dust-root RPC); they are covered transitively by the deterministic re-apply
 that the state key match guards each block.
+
+### Rolling out the per-block `StateKey` guard
+
+Older images compared the full ledger state only at genesis and checked later blocks on the zswap
+root alone. With the `StateKey` guard, any divergence outside zswap that those images let pass now
+halts chain-indexer with "ledger state root mismatch" at the first affected block, and stays halted
+across restarts. This applies both to a fresh sync of a live network and to an existing database
+resumed after the upgrade: blocks indexed before the upgrade are not re-checked, but a divergence
+carried in their persisted ledger state surfaces at the first block indexed afterwards. The only
+recovery is a fixed image plus a [reindex from genesis](./reindexing.md).
+
+Before releasing an image with this guard, run the sync suite in `qa/tests/tests/sync` with
+`MAX_BLOCKS=0` against that image for each live network, and mention the stricter check in the
+deployment notes.
 
 ## How CI exercises the guard
 

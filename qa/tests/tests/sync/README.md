@@ -27,11 +27,12 @@ precondition to wait for. Here the sync itself is the subject.
 
 ### What it does not catch
 
-Released images only compare the **zswap** merkle root per block. The full
-ledger-state-root comparison is gated to genesis
-(`chain-indexer/src/infra/subxt_node.rs`), so a *silent* full-state divergence
-passes here. Landing a per-block ledger-state-root guard upstream makes this suite
-strictly stronger with no change to the suite itself.
+Older images only compare the **zswap** merkle root per block and the full
+ledger state at genesis, so on those tags a *silent* full-state divergence
+passes here. Images with the per-block `StateKey` guard (`index_block` in
+`chain-indexer/src/application.rs`) compare the whole ledger state at every
+block and log `ledger state root mismatch` on any divergence, which this suite
+already catches with no change to the suite itself.
 
 ## When to Run
 

@@ -439,8 +439,9 @@ describe('indexer sync compatibility', () => {
        *
        * @given a released indexer image and a deployed chain selected by TARGET_ENV
        * @when the stack indexes that chain from genesis up to its block budget
-       * @then no container exits, no ledger or zswap state root mismatch is logged, and
-       *       the run reaches either its budget or the chain tip
+       * @then no container exits, no ledger state root mismatch is logged (older images may
+       *       also report a zswap state root mismatch), and the run reaches either its
+       *       budget or the chain tip
        */
       test('should index blocks without a state-root mismatch or a crash', async (ctx: TestContext) => {
         ctx.task!.meta.custom = { labels: ['Sync', 'ChainIndexer', 'Compatibility'] };

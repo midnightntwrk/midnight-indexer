@@ -5,8 +5,8 @@
 # `migrate_state_v8_to_v9` host fn is present from genesis), attaches the cloud
 # indexer stack, submits v8 transactions, drives the governance runtime upgrade to
 # the 2.1.0 WASM (spec_version -> 2_001_000, migration fires at apply+1), then
-# submits v9 transactions. The indexer must cross the boundary without a ledger/
-# zswap root mismatch and keep indexing.
+# submits v9 transactions. The indexer must cross the boundary without a ledger
+# state root mismatch and keep indexing.
 #
 # This is the generative, from-genesis rehearsal described in
 # docs/hardfork-devnet-rehearsal-8to9.md. It validates the live transaction path
