@@ -39,7 +39,9 @@ recovery is a fixed image plus a [reindex from genesis](./reindexing.md).
 
 Before releasing an image with this guard, run the sync suite in `qa/tests/tests/sync` with
 `MAX_BLOCKS=0` against that image for each live network, and mention the stricter check in the
-deployment notes.
+deployment notes. With `MAX_BLOCKS=0`, `MAX_DURATION_MS` is the only bound and defaults to
+30 minutes, so raise it to cover the whole chain (a multi-day run on a deployed network, see the
+suite's [runtime expectations](../qa/tests/tests/sync/README.md#runtime-expectations)).
 
 ## How CI exercises the guard
 
