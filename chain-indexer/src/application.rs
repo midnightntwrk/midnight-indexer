@@ -748,10 +748,27 @@ where
         info!(caught_up:%; "caught-up status changed")
     }
 
-    // Persist ledger state.
+    // Persist ledger state, then pin the contract states it flushed.
     let (new_ledger_state, ledger_state_key) =
         ledger_state.persist().context("persist ledger state")?;
     ledger_state = new_ledger_state;
+    let pinned = task::block_in_place(LedgerState::pin_roots);
+    if pinned.nodes > 0 || pinned.roots_pinned_on_write > 0 || pinned.roots_walked > 0 {
+        debug!(
+            block_height = block.height,
+            pinned = pinned.nodes,
+            roots_pinned_on_write = pinned.roots_pinned_on_write,
+            roots_walked = pinned.roots_walked;
+            "pinned contract states"
+        );
+    }
+    if !pinned.failed_roots.is_empty() {
+        warn!(
+            block_height = block.height,
+            failed_roots:? = pinned.failed_roots;
+            "contract state roots reaching nodes missing from the ledger DB left unpinned"
+        );
+    }
 
     // Determine system parameters change if any.
     let system_parameters_change = determine_system_parameters_change(&block, storage, node)
