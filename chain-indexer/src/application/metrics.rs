@@ -148,17 +148,25 @@ impl Metrics {
         );
     }
 
-    /// Record one storage-core gc-v1 mark-and-sweep pass, along with the gc root count observed
-    /// after it.
+    /// Record one storage-core gc-v1 mark-and-sweep pass.
+    pub fn record_gc(&self, duration: Duration, nodes_culled: usize) {
+        self.gc_run_count.increment(1);
+        self.gc_culled_node_count.increment(nodes_culled as u64);
+        self.gc_duration_seconds.record(duration.as_secs_f64());
+    }
+
+    /// Record the number of rows in `ledger_db_roots`, observed after a gc pass.
     ///
     /// The root count is the growth number to watch: per-action contract state roots are never
     /// unpersisted, so they accumulate with the number of *distinct* contract states. It is also the
     /// only live-set proxy available from outside storage-core — the mark set that actually bounds
     /// gc's memory is a `pub(crate)` field of `GcState`, so its size cannot be observed from here.
-    pub fn record_gc(&self, duration: Duration, nodes_culled: usize, root_count: usize) {
-        self.gc_run_count.increment(1);
-        self.gc_culled_node_count.increment(nodes_culled as u64);
-        self.gc_duration_seconds.record(duration.as_secs_f64());
+    ///
+    /// The count is of the root rows flushed to the ledger DB, which is also what gc marks from. It
+    /// can be one more than storage-core's in-memory view: the root of the ledger state that just
+    /// left the retention window, whose unpersist is flushed with the next block, until the next
+    /// gc pass records the count again.
+    pub fn record_root_count(&self, root_count: usize) {
         self.gc_root_count.set(root_count as f64);
     }
 

@@ -343,19 +343,19 @@ pub async fn run(
                     let elapsed = started.elapsed();
                     blocks_since_gc = 0;
 
+                    metrics.record_gc(elapsed, nodes_culled);
+                    if nodes_culled > 0 {
+                        debug!(nodes_culled, elapsed:?; "gc pass culled orphan arena nodes");
+                    }
+
                     // Root rows grow with *distinct* contract states rather than with actions,
                     // because per-action roots are content-addressed and refcounted. They are also
-                    // never unpersisted, so this only ever goes up and is the number to watch. The
-                    // scan is what gc itself does on every rescan, so it adds nothing asymptotically.
-                    let root_count = LedgerState::persisted_root_hashes().len();
-                    metrics.record_gc(elapsed, nodes_culled, root_count);
-                    if nodes_culled > 0 {
-                        debug!(
-                            nodes_culled,
-                            elapsed:?,
-                            root_count;
-                            "gc pass culled orphan arena nodes"
-                        );
+                    // never unpersisted, so this only ever goes up and is the number to watch.
+                    let started = Instant::now();
+                    if let Some(root_count) = ledger_db::root_count() {
+                        let elapsed = started.elapsed();
+                        metrics.record_root_count(root_count);
+                        debug!(root_count, elapsed:?; "counted gc roots");
                     }
                 }
 

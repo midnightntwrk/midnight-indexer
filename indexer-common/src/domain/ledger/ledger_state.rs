@@ -511,6 +511,9 @@ impl LedgerState {
     /// The raw arena hash bytes of all currently persisted gc roots. Fetches the full root set
     /// from the ledger DB once; bounded by the persisted history (the retention window going
     /// forward, plus pre-existing roots until they are reclaimed).
+    ///
+    /// Reads every root, so its cost grows with the number of roots: to count them, use
+    /// `ledger_db::root_count` instead.
     pub fn persisted_root_hashes() -> HashSet<Vec<u8>> {
         default_storage::<v1_1::LedgerDb>()
             .with_backend(|b| b.get_roots())
