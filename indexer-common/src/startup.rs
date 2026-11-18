@@ -167,9 +167,13 @@ async fn run_task<Context: Sync, J: Journal>(
         source,
     };
 
-    // A failed read of the task's entry is a failure of the task, so it follows FATAL.
+    // A failed read of the task's entry is a failure of the task, so it follows FATAL. A task that
+    // is not journaled has no entry to read.
     let executed = async {
-        let previous = journal.latest(task.id()).await?;
+        let previous = match task.journal() {
+            true => journal.latest(task.id()).await?,
+            false => None,
+        };
         let started_at = SystemTime::now();
         let entry = task.execute(context, previous).await?;
         Ok::<_, BoxError>(entry.map(|entry| (entry, started_at)))
@@ -647,6 +651,18 @@ mod tests {
         let not_fatal = task(Counting::<1, false> { fail: false });
         run(&context, &UnreadableJournal, &not_fatal).await?;
         assert_eq!(context.runs.load(Relaxed), 0, "skipped");
+
+        Ok(())
+    }
+
+    // A task that is not journaled does not read the journal, so it runs even when the journal
+    // cannot be read.
+    #[tokio::test]
+    async fn a_hook_runs_without_reading_the_journal() -> Result<(), BoxError> {
+        let context = Context::default();
+
+        run(&context, &UnreadableJournal, &task(Hook)).await?;
+        assert_eq!(context.runs.load(Relaxed), 1);
 
         Ok(())
     }
