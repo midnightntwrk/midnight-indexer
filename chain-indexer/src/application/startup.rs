@@ -15,7 +15,8 @@
 
 pub use indexer_common::startup::run;
 use indexer_common::{
-    startup::{BoxFuture, Entry, Task},
+    error::BoxError,
+    startup::{BoxFuture, Entry, Task, Value},
     version::git_sha,
 };
 use serde::{Deserialize, Serialize};
@@ -47,7 +48,21 @@ impl Build {
 
 impl<S: Sync> Task<S> for Build {
     const ID: &'static str = "indexer/build";
-    type State = Build;
+    const VERSION: u32 = 1;
+    /// `None` for an entry this version does not read, as one a newer version journaled; always
+    /// journaled as `Some`.
+    type State = Option<Build>;
+
+    /// An entry of another version, or one that does not read, is `None`, another build's, so this
+    /// build journals its own.
+    fn read_state(version: u32, state: Value) -> Result<Self::State, BoxError> {
+        // A version that changes the shape migrates older versions' entries here.
+        if version == <Self as Task<S>>::VERSION {
+            Ok(Build::deserialize(state).ok())
+        } else {
+            Ok(None)
+        }
+    }
 
     /// Pending when the version or git commit differs from the last recorded, so a restart of the
     /// same build records nothing. A commit not known at build time differs from a known one.
@@ -56,9 +71,11 @@ impl<S: Sync> Task<S> for Build {
         _context: &'a S,
         previous: Option<&'a Entry<Self::State>>,
     ) -> BoxFuture<'a, bool> {
-        let changed = previous.is_none_or(|previous| {
-            previous.state.version != self.version || previous.state.git_sha != self.git_sha
-        });
+        let changed = previous
+            .and_then(|previous| previous.state.as_ref())
+            .is_none_or(|previous| {
+                previous.version != self.version || previous.git_sha != self.git_sha
+            });
         Box::pin(async move { Ok(changed) })
     }
 
@@ -67,7 +84,7 @@ impl<S: Sync> Task<S> for Build {
         _context: &'a S,
         _previous: Option<&'a Entry<Self::State>>,
     ) -> BoxFuture<'a, Self::State> {
-        Box::pin(async move { Ok(self.clone()) })
+        Box::pin(async move { Ok(Some(self.clone())) })
     }
 }
 
@@ -86,14 +103,14 @@ mod tests {
         assert_eq!(build.highest_block_height, Some(42));
 
         let current = &build;
-        let pending = |previous: Option<Entry<Build>>| async move {
+        let pending = |previous: Option<Entry<Option<Build>>>| async move {
             Task::<()>::is_pending(current, &(), previous.as_ref()).await
         };
         assert!(pending(None).await?, "first start");
         assert!(
             !pending(Some(Entry {
                 version: 1,
-                state: Build::current(Some(7))
+                state: Some(Build::current(Some(7)))
             }))
             .await?,
             "same build restarted"
@@ -101,10 +118,10 @@ mod tests {
         assert!(
             pending(Some(Entry {
                 version: 1,
-                state: Build {
+                state: Some(Build {
                     version: "0.0.0".to_owned(),
                     ..Build::current(Some(7))
-                }
+                })
             }))
             .await?,
             "different version"
@@ -112,16 +129,24 @@ mod tests {
         assert!(
             pending(Some(Entry {
                 version: 1,
-                state: Build {
+                state: Some(Build {
                     git_sha: Some("0000000".to_owned()),
                     ..Build::current(Some(7))
-                }
+                })
             }))
             .await?,
             "same version from another commit"
         );
+        assert!(
+            pending(Some(Entry {
+                version: 2,
+                state: None
+            }))
+            .await?,
+            "an entry that does not read"
+        );
 
-        assert_eq!(Task::<()>::run(&build, &(), None).await?, build);
+        assert_eq!(Task::<()>::run(&build, &(), None).await?, Some(build));
 
         Ok(())
     }
@@ -141,6 +166,7 @@ mod storage_tests {
         },
         startup::{Journal, run, sequential, task},
     };
+    use indoc::indoc;
 
     #[tokio::test]
     async fn build_is_journaled_once_per_build() -> Result<(), BoxError> {
@@ -167,6 +193,32 @@ mod storage_tests {
                 .fetch_one(&*pool)
                 .await?;
         assert_eq!(entries, 2, "one entry per build");
+
+        Ok(())
+    }
+
+    // An entry a newer version of the task journaled, which this version cannot read, does not
+    // stop this build from journaling its own.
+    #[tokio::test]
+    async fn build_is_journaled_after_an_unreadable_newer_entry() -> Result<(), BoxError> {
+        let dir = tempfile::tempdir()?;
+        let url = dir.path().join("indexer.sqlite").display().to_string();
+        let pool = SqlitePool::new(sqlite::Config::with_url(url)).await?;
+        migrations::sqlite::run(&pool).await?;
+        let storage = Storage::new(pool.clone());
+
+        sqlx::query(indoc! {r#"
+            INSERT INTO journal (id, version, state, started_at, ended_at)
+            VALUES ('indexer/build', 99, '"not a build"', 0, 0)
+        "#})
+        .execute(&*pool)
+        .await?;
+
+        let build = Build::current(Some(7));
+        run(&storage, &storage, &sequential([task(build.clone())])).await?;
+        let entry = storage.latest("indexer/build").await?.expect("journaled");
+        assert_eq!(entry.version, 1);
+        assert_eq!(serde_json::from_value::<Build>(entry.state)?, build);
 
         Ok(())
     }
