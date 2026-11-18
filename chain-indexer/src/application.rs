@@ -168,24 +168,7 @@ pub async fn run(
     }
 
     // Read the stored system parameters once; from here on they are kept in step in memory.
-    let (d_parameter, terms_and_conditions) = tokio::try_join!(
-        async {
-            storage
-                .get_latest_d_parameter()
-                .await
-                .context("get latest D-parameter")
-        },
-        async {
-            storage
-                .get_latest_terms_and_conditions()
-                .await
-                .context("get latest terms and conditions")
-        },
-    )?;
-    let mut stored_system_parameters = SystemParameters {
-        d_parameter,
-        terms_and_conditions,
-    };
+    let mut stored_system_parameters = SystemParameters::load(&storage).await?;
 
     // Initialize metrics, only if published.
     let metrics = if metrics {
@@ -880,6 +863,29 @@ struct SystemParameters {
 }
 
 impl SystemParameters {
+    /// Read the latest stored system parameters.
+    async fn load(storage: &impl Storage) -> anyhow::Result<Self> {
+        let (d_parameter, terms_and_conditions) = tokio::try_join!(
+            async {
+                storage
+                    .get_latest_d_parameter()
+                    .await
+                    .context("get latest D-parameter")
+            },
+            async {
+                storage
+                    .get_latest_terms_and_conditions()
+                    .await
+                    .context("get latest terms and conditions")
+            },
+        )?;
+
+        Ok(Self {
+            d_parameter,
+            terms_and_conditions,
+        })
+    }
+
     /// Record a change once it is saved.
     fn apply(&mut self, change: SystemParametersChange) {
         if let Some(d_parameter) = change.d_parameter {
@@ -1098,6 +1104,84 @@ mod tests {
             Some((None, Some(tc2))),
             "only the T&C changed"
         );
+
+        Ok(())
+    }
+
+    // After a restart the latest saved system parameters are read back from the database, so the
+    // node's unchanged parameters record nothing and only what the node changed is recorded.
+    #[cfg(feature = "standalone")]
+    #[tokio::test]
+    async fn system_parameters_are_loaded_after_a_restart() -> anyhow::Result<()> {
+        use crate::infra::storage;
+        use indexer_common::infra::{
+            migrations,
+            pool::sqlite::{self, SqlitePool},
+        };
+
+        let dir = tempfile::tempdir()?;
+        let url = dir.path().join("indexer.sqlite").display().to_string();
+        let pool = SqlitePool::new(sqlite::Config::with_url(url)).await?;
+        migrations::sqlite::run(&pool).await?;
+        let mut storage = storage::Storage::new(pool);
+
+        let d_parameter = |n| DParameter {
+            num_permissioned_candidates: n,
+            num_registered_candidates: n,
+        };
+        let terms_and_conditions = TermsAndConditions {
+            hash: Default::default(),
+            url: "https://example.com/terms".to_owned(),
+        };
+
+        // Block 0 saves both parameters, block 1 a new D-parameter only.
+        let blocks = [
+            (
+                &*BLOCK_0,
+                Some(d_parameter(1)),
+                Some(terms_and_conditions.clone()),
+            ),
+            (&*BLOCK_1, Some(d_parameter(2)), None),
+        ];
+        for (block, d_parameter, terms_and_conditions) in blocks {
+            let (block, _) = <(Block, Vec<_>)>::from(block.to_owned());
+            let change = SystemParametersChange {
+                block_height: block.height,
+                block_hash: block.hash,
+                timestamp: block.timestamp,
+                d_parameter,
+                terms_and_conditions,
+            };
+            storage
+                .save_block(&block, &[], &[], &Default::default(), Some(&change), &[])
+                .await?;
+        }
+
+        // Restart: the stored system parameters are the latest of each.
+        let stored = SystemParameters::load(&storage).await?;
+        assert_eq!(stored.d_parameter, Some(d_parameter(2)));
+        assert_eq!(
+            stored.terms_and_conditions,
+            Some(terms_and_conditions.clone())
+        );
+
+        let (block, _) = <(Block, Vec<_>)>::from(BLOCK_1.to_owned());
+        let unchanged = SystemParameters {
+            d_parameter: Some(d_parameter(2)),
+            terms_and_conditions: Some(terms_and_conditions.clone()),
+        };
+        let change = determine_system_parameters_change(&block, &stored, &unchanged).await?;
+        assert!(change.is_none(), "the node's unchanged parameters");
+
+        let changed = SystemParameters {
+            d_parameter: Some(d_parameter(3)),
+            terms_and_conditions: Some(terms_and_conditions),
+        };
+        let change = determine_system_parameters_change(&block, &stored, &changed)
+            .await?
+            .expect("the node changed the D-parameter");
+        assert_eq!(change.d_parameter, Some(d_parameter(3)));
+        assert_eq!(change.terms_and_conditions, None);
 
         Ok(())
     }
