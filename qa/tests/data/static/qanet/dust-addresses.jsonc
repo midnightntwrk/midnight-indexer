@@ -1,0 +1,9 @@
+{
+  // A dust address whose wallet has spent backing NIGHT UTXOs in the current dust epoch, so a
+  // dustGenerations subscription with dtimeCutoffHeight=0 replays at least one
+  // DustGenerationDtimeUpdateItem. Used by the dtime cutoff tests (midnight-indexer#1283).
+  //
+  // Observed on 2026-11-04 at block 3382343: 27 DustGenerationsItem +
+  // 25 DustGenerationDtimeUpdateItem events.
+  "with-dtime-updates": "mn_dust_qanet1w0mvv26u2ztd3n7qa3gh3r4zw92mgrq0m9m2qg5dplzfemqefcu8ze4h067",
+}

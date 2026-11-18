@@ -38,6 +38,7 @@ import { createHash } from 'crypto';
 import {
   decodeBech32mAddress,
   deriveWalletKeys,
+  designateForDustWithKeys,
   NIGHT_TOKEN_ID,
   sendTokensWithKeys,
   startWalletSync,
@@ -47,10 +48,24 @@ import {
   type WalletKeys,
 } from '@shieldedtech/moth-wallet';
 import type { FacadeState, UtxoWithMeta } from '@midnightntwrk/wallet-sdk/facade';
-import type { Dust, DustFullInfo } from '@midnightntwrk/wallet-sdk/dust/v1';
+import type { DustWalletState } from '@midnightntwrk/wallet-sdk/dust';
+import {
+  CoinsAndBalances as CoinsAndBalancesV1,
+  coreStateOf as coreStateOfV1,
+  type Dust,
+  type DustFullInfo,
+} from '@midnightntwrk/wallet-sdk/dust/v1';
+import {
+  CoinsAndBalances as CoinsAndBalancesV2,
+  coreStateOf as coreStateOfV2,
+} from '@midnightntwrk/wallet-sdk/dust/v2';
+import { Option } from 'effect';
 import * as Rx from 'rxjs';
 import log from '@utils/logging/logger';
 import { env } from '../../environment/model';
+import { IndexerHttpClient } from '../indexer/http-client';
+import { GET_LATEST_BLOCK_DUST_ROOTS } from '../indexer/graphql/block-queries';
+import { rootHexLe, sameRoot } from './dust-root';
 import { ensureProofServer, proofServerMismatchHint } from './proof-server';
 import type { AddressType, ToolkitTransactionResult } from '../toolkit/toolkit-wrapper';
 import type {
@@ -63,6 +78,13 @@ import type {
 
 /** Minutes to allow for a cold sync. A warm one takes seconds. */
 const SYNC_TIMEOUT_MS = Number(process.env.MN_SYNC_TIMEOUT_MS ?? 6 * 60 * 60 * 1000);
+
+/**
+ * How long to wait for a dust registration submitted by {@link assertSpendableDust}
+ * to show up as DUST the wallet can spend. Registration is confirmed within a
+ * block or two; the wait covers the indexer and the wallet's sync behind it.
+ */
+const REGISTRATION_SETTLE_MS = 5 * 60 * 1000;
 
 /**
  * A "complete" sync whose applied and target indices are both zero means the
@@ -78,6 +100,8 @@ export interface MothWallet {
   readonly synced: SyncedWallet;
   readonly keys: WalletKeys;
   readonly networkId: string;
+  /** moth's cache/wallet name for the seed, for messages; never the seed itself. */
+  readonly name: string;
 }
 
 // One synced wallet per cache name, keyed so the restore is paid once per
@@ -139,6 +163,59 @@ const elapsed = (ms: number): string => {
   return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
 };
 
+/**
+ * The sync progress of the shielded and dust sub-wallets, counted in ledger
+ * events, with the wallet's own share of them known.
+ */
+type EventProgress = FacadeState['shielded']['progress'];
+
+/**
+ * The sync progress of the unshielded sub-wallet, counted in transactions.
+ * It does not know which transactions concern this wallet, so it has no
+ * per-wallet target.
+ */
+type TransactionProgress = FacadeState['unshielded']['progress'];
+
+type SubWallet = 'shielded' | 'unshielded' | 'dust';
+
+const ALL_SUB_WALLETS: readonly SubWallet[] = ['shielded', 'unshielded', 'dust'];
+
+/**
+ * Whether every named sub-wallet of a facade state reports a strictly complete
+ * sync: the one bar every read of the wallet's state waits behind, so a
+ * partially synced wallet cannot report a short balance.
+ */
+const isStrictlyComplete = (s: FacadeState, subWallets: readonly SubWallet[]): boolean =>
+  subWallets.every((name) => s[name].progress.isStrictlyComplete());
+
+/**
+ * Wait until every named sub-wallet of the moth facade reports a strictly
+ * complete sync, and return that facade state.
+ *
+ * @param purpose - What cannot happen without it, for the timeout message.
+ */
+const awaitStrictlyComplete = (
+  wallet: MothWallet,
+  subWallets: readonly SubWallet[],
+  purpose: string,
+): Promise<FacadeState> =>
+  Rx.firstValueFrom(
+    wallet.synced.facade.state().pipe(
+      Rx.filter((s) => isStrictlyComplete(s, subWallets)),
+      Rx.timeout({
+        each: SYNC_TIMEOUT_MS,
+        with: () =>
+          Rx.throwError(
+            () =>
+              new Error(
+                `moth did not reach a strictly-complete ${subWallets.join('/')} state in ` +
+                  `${(SYNC_TIMEOUT_MS / 60_000).toFixed(0)} minutes, so ${purpose}.`,
+              ),
+          ),
+      }),
+    ),
+  );
+
 const awaitSettled = async (
   facade: SyncedWallet['facade'],
   timeoutMs: number,
@@ -170,8 +247,8 @@ const awaitSettled = async (
 
   try {
     await Rx.firstValueFrom(
-      (facade.state() as Rx.Observable<any>).pipe(
-        Rx.tap((s: any) => {
+      facade.state().pipe(
+        Rx.tap((s) => {
           const now = Date.now();
           lastEmission = now;
           if (now - lastReport < 15_000) return;
@@ -179,50 +256,51 @@ const awaitSettled = async (
           // Grouped with thousands separators: these run to seven figures on a
           // deployed chain, and an ungrouped 1534959 is not readable at a glance.
           const n = (v: bigint | number) => Number(v).toLocaleString('en-US');
-          const one = (name: string, p: any) => {
-            if (!p) return `${name}=?`;
+          const one = (name: string, p: EventProgress | TransactionProgress) => {
             // Once a sub-wallet is done, say so instead of printing indices that
             // no longer change. It also gives the only sensible reading for a
             // wallet whose counters are 0/0 — complete with nothing to apply,
             // which "0/0" alone makes look stuck.
-            if (p.isStrictlyComplete?.() === true) return `${name}=synced 100.0%`;
-            const applied = p.appliedIndex ?? 0n;
+            if (p.isStrictlyComplete()) return `${name}=synced 100.0%`;
             // `highestRelevantWalletIndex` counts only the events that concern
-            // THIS wallet, which is what "synced" is judged against. For the
-            // unshielded sub-wallet that is legitimately 0 on a wallet with no
-            // unshielded history — it is complete, not stuck.
-            const target = p.highestRelevantWalletIndex ?? p.highestIndex ?? 0n;
+            // THIS wallet, which is what "synced" is judged against. The
+            // unshielded sub-wallet counts transactions and has no such
+            // per-wallet target, so its chain position is the target.
+            const [applied, target, chain] =
+              'appliedIndex' in p
+                ? [p.appliedIndex, p.highestRelevantWalletIndex, p.highestIndex]
+                : [p.appliedId, p.highestTransactionId, p.highestTransactionId];
             const pct =
               target > 0n ? ` ${((Number(applied) / Number(target)) * 100).toFixed(1)}%` : '';
             // The chain-wide stream position, shown only when it differs from
             // the per-wallet target. moth's TUI reports this larger number, so
             // without it the two disagree and look like a bug.
-            const chain = p.highestIndex ?? 0n;
             const ofChain = chain > target ? ` of ${n(chain)}` : '';
             return `${name}=${n(applied)}/${n(target)}${pct}${ofChain}`;
           };
+          // Each sub-wallet state exposes its `progress` directly; what sits
+          // under `.state` is the producing variant's sealed ledger state.
           const line =
             `moth syncing (${elapsed(now - started)})  ` +
-            `${one('shielded', s.shielded?.state?.progress)}  ` +
-            `${one('unshielded', s.unshielded?.progress)}  ` +
-            `${one('dust', s.dust?.state?.progress)}`;
+            `${one('shielded', s.shielded.progress)}  ` +
+            `${one('unshielded', s.unshielded.progress)}  ` +
+            `${one('dust', s.dust.progress)}`;
           log.info(line);
           // Global setup has no test log of its own and can sit here for well
           // over an hour on a first sync. Without a line on stdout a healthy slow
           // sync and a hung one look identical — which has already cost a run.
           if (echoToConsole) console.log(`[SETUP] ${line}`);
         }),
-        Rx.filter((s: any) => {
+        Rx.filter((s) => {
           try {
-            const complete =
-              s.shielded?.state?.progress?.isStrictlyComplete?.() === true &&
-              s.unshielded?.progress?.isStrictlyComplete?.() === true &&
-              s.dust?.state?.progress?.isStrictlyComplete?.() === true;
-            if (!complete) return false;
-            const idle = (p: any) =>
-              Number(p?.appliedIndex ?? 0n) === 0 &&
-              Number(p?.highestRelevantWalletIndex ?? p?.highestIndex ?? 0n) === 0;
-            if (idle(s.shielded?.state?.progress) && idle(s.dust?.state?.progress)) {
+            if (!isStrictlyComplete(s, ALL_SUB_WALLETS)) return false;
+            // From the fork the dust wallet syncs from the indexer's projections
+            // and its indices are block heights rather than event ids; they are
+            // still non-zero on any chain that has a block, so the dead-stream
+            // reading holds for it too.
+            const idle = (p: EventProgress) =>
+              p.appliedIndex === 0n && p.highestRelevantWalletIndex === 0n;
+            if (idle(s.shielded.progress) && idle(s.dust.progress)) {
               zeroTotalSince ??= Date.now();
               if (Date.now() - zeroTotalSince > ZERO_TOTAL_GRACE_MS) {
                 throw new Error(
@@ -241,9 +319,9 @@ const awaitSettled = async (
           }
         }),
         Rx.bufferCount(2, 1),
-        Rx.filter(([a, b]: any[]) => {
+        Rx.filter(([a, b]) => {
           try {
-            return (a.dust?.balance?.(new Date()) ?? 0n) === (b.dust?.balance?.(new Date()) ?? 0n);
+            return a.dust.balance(new Date()) === b.dust.balance(new Date());
           } catch {
             return true;
           }
@@ -278,8 +356,12 @@ export const openMothWallet = (seed: string, echoProgress = false): Promise<Moth
   if (existing) return existing;
 
   const opening = (async (): Promise<MothWallet> => {
-    const keys = deriveWalletKeys(seed);
     const network = await networkConfig();
+    // Per-role seeds, not ledger key objects: the SDK's forking wallets derive
+    // each ledger version's keys from them as the chain crosses the fork, and
+    // the caches they write carry which sync produced them, so nothing has to
+    // be loaded or set aside per ledger train here.
+    const keys = deriveWalletKeys(seed);
     log.info(`moth wallet: ${name} (cache ~/.moth/sync/${network.id}/${name}/)`);
     const synced = await startWalletSync(
       keys,
@@ -302,12 +384,176 @@ export const openMothWallet = (seed: string, echoProgress = false): Promise<Moth
       throw error;
     }
     log.info(`moth wallet ${name} synced`);
-    return { synced, keys, networkId: network.id };
+    return { synced, keys, networkId: network.id, name };
   })();
 
   openWallets.set(name, opening);
   opening.catch(() => openWallets.delete(name));
   return opening;
+};
+
+/**
+ * Refuse to spend from a wallet that holds no DUST, saying why, before the SDK
+ * fails the transaction with `Insufficient Funds: could not balance dust`.
+ *
+ * WHY. That SDK message reads as "fund the wallet", and on a chain that has
+ * just hard-forked the wallet is funded: a ledger hard fork can rebuild the
+ * dust generation tree from the Cardano-side registrations only, so a wallet
+ * whose NIGHT was registered before the fork keeps its NIGHT but has no DUST
+ * and no registration. The fix is to register the NIGHT again. Registration is
+ * self-funding (the fee is paid from the DUST the NIGHT would have generated
+ * had it been registered all along), so it is done here when
+ * `MOTH_REGISTER_DUST=1`, and named in the error otherwise.
+ *
+ * @param wallet - An open, settled moth wallet.
+ * @param purpose - What the caller is about to build, for the message.
+ */
+export const assertSpendableDust = async (wallet: MothWallet, purpose: string): Promise<void> => {
+  const read = async () => {
+    const s = await Rx.firstValueFrom(wallet.synced.facade.state());
+    const night = s.unshielded.availableCoins.filter((c) => c.utxo.type === NIGHT_TOKEN_ID);
+    return {
+      dustCoins: s.dust.availableCoins.length,
+      balance: s.dust.balance(new Date()),
+      night: night.length,
+      registered: night.filter((c) => c.meta.registeredForDustGeneration).length,
+    };
+  };
+
+  let state = await read();
+  if (state.balance > 0n) return;
+
+  if (state.dustCoins === 0 && state.night > 0 && process.env.MOTH_REGISTER_DUST === '1') {
+    log.warn(
+      `moth wallet ${wallet.name}: no DUST behind ${state.night} NIGHT UTXO(s); ` +
+        'registering them for DUST generation (MOTH_REGISTER_DUST=1)',
+    );
+    const txHash = await designateForDustWithKeys(
+      wallet.synced.facade,
+      wallet.keys,
+      wallet.networkId,
+      undefined,
+      (stage) => log.debug(`moth dust registration: ${stage}`),
+    );
+    if (txHash) {
+      log.info(`moth wallet ${wallet.name}: dust registration submitted (${txHash})`);
+      const deadline = Date.now() + REGISTRATION_SETTLE_MS;
+      while (state.balance === 0n && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 5_000));
+        state = await read();
+      }
+      if (state.balance > 0n) return;
+    } else {
+      log.warn(`moth wallet ${wallet.name}: moth found no unregistered NIGHT to register`);
+    }
+  }
+
+  const detail =
+    `${state.dustCoins} DUST UTXO(s), balance ${state.balance}, ${state.night} NIGHT UTXO(s) ` +
+    `of which ${state.registered} flagged registered for DUST generation`;
+  if (state.night === 0) {
+    throw new Error(
+      `moth wallet ${wallet.name} holds no DUST and no NIGHT (${detail}), so it cannot ${purpose}. ` +
+        `Fund it on ${wallet.networkId}.`,
+    );
+  }
+  if (state.dustCoins === 0) {
+    throw new Error(
+      `moth wallet ${wallet.name} holds NIGHT but no DUST (${detail}), so it cannot ${purpose}. ` +
+        'Its NIGHT is not registered for DUST generation on this chain (for example, ' +
+        'registrations made before a ledger hard fork are not carried over). Register it by ' +
+        "rerunning with MOTH_REGISTER_DUST=1, or with moth's designateForDust for the seed. If the " +
+        'NIGHT is flagged registered but the chain shows no DUST for it, compare the cached dust ' +
+        `state with a fresh replay before trusting either; a cache under ~/.moth/sync/${wallet.networkId}/` +
+        `${wallet.name}/ written by an older moth build can be set aside to force a rebuild.`,
+    );
+  }
+  throw new Error(
+    `moth wallet ${wallet.name} holds DUST UTXOs that have generated nothing yet (${detail}), ` +
+      `so it cannot ${purpose}. Retry in a few minutes.`,
+  );
+};
+
+/**
+ * How long to wait for the dust wallet to apply its own previous spend. A
+ * projections pass runs every few seconds; this covers a slow indexer behind
+ * the block that included the spend.
+ */
+const DUST_SPEND_SETTLE_MS = 3 * 60 * 1000;
+
+/**
+ * Hold until the dust wallet has caught up with its own previous spend, so the
+ * next DUST spend is proven from trees that contain it.
+ *
+ * WHY. From the ledger-9 fork the dust wallet syncs from the indexer's
+ * projections in passes rather than from a live event stream, so right after
+ * a spend of its own lands it still holds the tree it spent against: the
+ * spent output is booked as pending, the change output and the chain's new
+ * root are not there until the next pass. A second spend built in that window
+ * was refused by the node as `InvalidDustSpendProof`
+ * (`1010: Invalid Transaction: Custom error: 170`), which it also uses for
+ * genuinely bad proofs.
+ *
+ * WHAT IS WAITED FOR. Not equality with the chain tip: the tip's roots move
+ * whenever anyone's DUST transaction lands, so on a busy chain a wallet that
+ * syncs in passes may never be seen holding exactly them, and the node does
+ * not ask for that. It checks a spend's proof against the roots it recorded
+ * at the spend's declared time (`dust_spend_check` in the ledger's
+ * `verify.rs`), and the wallet SDK dates each spend at a block whose roots its
+ * trees hold: the newest one, or the block its last pass verified when that is
+ * recent (`SpendTime` in `wallet-sdk-dust-wallet`). What the SDK cannot make
+ * up for is a pass that has not happened, so the wait is for the wallet's own
+ * part only:
+ *
+ *  - no DUST output of this wallet is pending, meaning every spend it made has
+ *    been applied from the chain (or there was none); or
+ *  - its trees hold the tip's roots, meaning nothing that landed is missing
+ *    from them, whatever is still pending.
+ *
+ * The tip is read only while a spend is pending, with a query that asks for
+ * the two roots and nothing else.
+ *
+ * @param wallet - An open moth wallet.
+ * @param purpose - What the caller is about to build, for the message.
+ */
+export const awaitDustSpendSettled = async (wallet: MothWallet, purpose: string): Promise<void> => {
+  const indexer = new IndexerHttpClient();
+  const started = Date.now();
+  let lastReport = 0;
+  for (;;) {
+    const state = await Rx.firstValueFrom(wallet.synced.facade.state());
+    const pending = state.dust.pendingCoins.length;
+    if (pending === 0) return;
+
+    const local = dustLocalState(state.dust);
+    const tip = (await indexer.getLatestBlock(GET_LATEST_BLOCK_DUST_ROOTS)).data?.block;
+    const commitment = local.commitmentTreeRoot();
+    const generation = local.generatingTreeRoot();
+    if (
+      sameRoot(commitment, tip?.dustCommitmentMerkleTreeRoot) &&
+      sameRoot(generation, tip?.dustGenerationMerkleTreeRoot)
+    ) {
+      return;
+    }
+    const detail =
+      `${pending} DUST output(s) pending; commitment root wallet ${rootHexLe(commitment) || 'none'} ` +
+      `vs chain ${tip?.dustCommitmentMerkleTreeRoot ?? 'unknown'}, generation root wallet ` +
+      `${rootHexLe(generation) || 'none'} vs chain ${tip?.dustGenerationMerkleTreeRoot ?? 'unknown'} ` +
+      `at block ${tip?.height ?? '?'}`;
+    if (Date.now() - started > DUST_SPEND_SETTLE_MS) {
+      throw new Error(
+        `moth wallet ${wallet.name}: its DUST wallet did not apply its previous spend in ` +
+          `${DUST_SPEND_SETTLE_MS / 60_000} minutes, so it cannot ${purpose} (${detail}). Either ` +
+          'the wallet sync has stalled behind the indexer, or the previous spend never landed ' +
+          'and is still booked as pending.',
+      );
+    }
+    if (Date.now() - lastReport > 10_000) {
+      lastReport = Date.now();
+      log.debug(`moth wallet ${wallet.name}: waiting for its previous DUST spend (${detail})`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+  }
 };
 
 /**
@@ -324,6 +570,8 @@ export const generateSingleTxViaMoth = async (
   tokenType?: string,
 ): Promise<ToolkitTransactionResult> => {
   const wallet = await openMothWallet(sourceSeed);
+  await awaitDustSpendSettled(wallet, 'build the transfer');
+  await assertSpendableDust(wallet, 'build the transfer');
   const request: SendRequest = {
     type: addressType,
     tokenId: tokenType ?? NIGHT_TOKEN_ID,
@@ -426,29 +674,16 @@ export const closeMothWallets = async (): Promise<void> => {
  */
 export const listUnshieldedHoldingsViaMoth = async (seed: string): Promise<Map<string, bigint>> => {
   const wallet = await openMothWallet(seed);
-
-  const state = await Rx.firstValueFrom(
-    (wallet.synced.facade.state() as Rx.Observable<any>).pipe(
-      Rx.filter((s: any) => s.unshielded?.progress?.isStrictlyComplete?.() === true),
-      Rx.timeout({
-        each: SYNC_TIMEOUT_MS,
-        with: () =>
-          Rx.throwError(
-            () =>
-              new Error(
-                'moth did not reach a strictly-complete unshielded state in ' +
-                  `${(SYNC_TIMEOUT_MS / 60_000).toFixed(0)} minutes, so the wallet's ` +
-                  'spendable token types cannot be listed.',
-              ),
-          ),
-      }),
-    ),
+  const state = await awaitStrictlyComplete(
+    wallet,
+    ['unshielded'],
+    "the wallet's spendable token types cannot be listed",
   );
 
   const totals = new Map<string, bigint>();
-  for (const coin of state.unshielded.availableCoins as any[]) {
-    const tokenType = coin.utxo.type as string;
-    totals.set(tokenType, (totals.get(tokenType) ?? 0n) + BigInt(coin.utxo.value));
+  for (const coin of state.unshielded.availableCoins) {
+    const tokenType = coin.utxo.type;
+    totals.set(tokenType, (totals.get(tokenType) ?? 0n) + coin.utxo.value);
   }
   return totals;
 };
@@ -499,32 +734,6 @@ const toUtxo = (coin: UtxoWithMeta): Utxo => ({
 });
 
 /**
- * Wait until every named sub-wallet of the moth facade reports a strictly
- * complete sync, and return that facade state.
- */
-const awaitStrictlyComplete = (
-  wallet: MothWallet,
-  subWallets: readonly ('shielded' | 'unshielded' | 'dust')[],
-  purpose: string,
-): Promise<FacadeState> =>
-  Rx.firstValueFrom(
-    wallet.synced.facade.state().pipe(
-      Rx.filter((s) => subWallets.every((name) => s[name].progress.isStrictlyComplete())),
-      Rx.timeout({
-        each: SYNC_TIMEOUT_MS,
-        with: () =>
-          Rx.throwError(
-            () =>
-              new Error(
-                `moth did not reach a strictly-complete ${subWallets.join('/')} state in ` +
-                  `${(SYNC_TIMEOUT_MS / 60_000).toFixed(0)} minutes, so ${purpose}.`,
-              ),
-          ),
-      }),
-    ),
-  );
-
-/**
  * Read a seed's private wallet state from the moth-synced wallet, in the shape
  * the toolkit's `show-wallet --seed` command prints.
  *
@@ -544,7 +753,7 @@ export const showPrivateWalletStateViaMoth = async (seed: string): Promise<Priva
   const wallet = await openMothWallet(seed);
   const state = await awaitStrictlyComplete(
     wallet,
-    ['shielded', 'unshielded', 'dust'],
+    ALL_SUB_WALLETS,
     'the private wallet state cannot be read',
   );
 
@@ -607,6 +816,68 @@ export const showPublicWalletStateViaMoth = async (
 };
 
 /**
+ * The ledger's `DustLocalState` behind a dust sub-wallet state, which is where
+ * the generation lookup lives.
+ *
+ * The facade seals each variant's ledger state, because it is made of one
+ * ledger version's objects: the ledger-v8 variant produces it below the fork,
+ * the ledger-v9 one from it, and only the producing variant can read it back.
+ * Both ledgers expose `generationInfo` with the same shape, so whichever one
+ * answers serves the mapping below.
+ */
+const dustLocalState = (dust: DustWalletState) => {
+  const v2 = coreStateOfV2(dust);
+  if (Option.isSome(v2)) return v2.value.state;
+  const v1 = coreStateOfV1(dust);
+  if (Option.isSome(v1)) return v1.value.state;
+  throw new Error(
+    `moth emitted a dust state at protocol version ${dust.protocolVersion} that neither ` +
+      'the ledger-v8 nor the ledger-v9 dust variant can read, so its generation info cannot be read.',
+  );
+};
+
+/**
+ * The keys capability the coin readers below are built with. Listing and
+ * valuing coins derives no key, so reaching it is a bug in this module rather
+ * than something to supply.
+ */
+const noKeysNeeded = (): never => {
+  throw new Error('Reading available DUST coins does not need the keys capability.');
+};
+
+/**
+ * A dust wallet's available coins, each valued at `time`.
+ *
+ * `DustWalletState.availableCoins` cannot do this: it takes no time and falls
+ * back to the wallet's sync time. The variant's coins-and-balances capability
+ * takes one, and reads the same core state `dustLocalState` unseals, so it is
+ * built here for whichever variant produced the state.
+ *
+ * @param dust - A dust sub-wallet state, as the facade emits it.
+ * @param time - The time to value each coin's generated DUST at.
+ */
+const availableDustCoinsAt = (dust: DustWalletState, time: Date): readonly DustFullInfo[] => {
+  const v2 = coreStateOfV2(dust);
+  if (Option.isSome(v2)) {
+    return CoinsAndBalancesV2.makeDefaultCoinsAndBalancesCapability(
+      undefined,
+      noKeysNeeded,
+    ).getAvailableCoins(v2.value, time) as readonly DustFullInfo[];
+  }
+  const v1 = coreStateOfV1(dust);
+  if (Option.isSome(v1)) {
+    return CoinsAndBalancesV1.makeDefaultCoinsAndBalancesCapability(
+      undefined,
+      noKeysNeeded,
+    ).getAvailableCoins(v1.value, time);
+  }
+  throw new Error(
+    `moth emitted a dust state at protocol version ${dust.protocolVersion} that neither ` +
+      'the ledger-v8 nor the ledger-v9 dust variant can read, so its coins cannot be valued.',
+  );
+};
+
+/**
  * Read a seed's DUST balance from the moth-synced wallet, in the same shape the
  * toolkit's `dust-balance` command prints.
  *
@@ -631,20 +902,22 @@ export const getDustBalanceViaMoth = async (seed: string): Promise<DustBalance> 
   const { dust } = await awaitStrictlyComplete(wallet, ['dust'], 'the DUST balance cannot be read');
 
   // One clock for every figure below: `generatedNow` per UTXO and `total` must
-  // agree, and the wallet's own `availableCoins` getter would value the coins
-  // at its sync time instead.
+  // agree. The state's own `availableCoins` getter takes no time and values the
+  // coins at the wallet's sync time, so the coins are read through the
+  // producing variant's capability instead, which does take one.
   const now = new Date();
-  const coinsAndBalances = dust.capabilities.coinsAndBalances;
 
-  // `getAvailableCoins` already drops UTXOs without generation info (which have
-  // no value the toolkit can report, and the schema's `generation_info` is not
-  // nullable) and carries their `dtime`. The generation info is read again only
+  // The available coins already exclude UTXOs without generation info (which
+  // have no value the toolkit can report, and the schema's `generation_info` is
+  // not nullable) and carry their `dtime`. The generation info is read again only
   // for the fields the full info lacks (value, owner, nonce); it exists for
   // every coin returned here.
-  const coins: readonly DustFullInfo[] = coinsAndBalances.getAvailableCoins(dust.state, now);
+  const coins = availableDustCoinsAt(dust, now);
+  const local = dustLocalState(dust);
+  const generationOf = (token: Dust) => local.generationInfo(token as never);
 
   const generation_infos = coins.map(({ token, dtime }) => {
-    const generation = coinsAndBalances.getGenerationInfo(dust.state, token);
+    const generation = generationOf(token);
     if (!generation) {
       throw new Error(
         `moth returned an available DUST UTXO (nonce ${toHex(token.nonce)}) without generation info`,

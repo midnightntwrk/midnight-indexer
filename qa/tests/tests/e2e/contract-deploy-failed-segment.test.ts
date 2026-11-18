@@ -94,8 +94,11 @@ const indexesNodeTwo = line.major > 4 || (line.major === 4 && line.minor >= 4);
  * must go red with the indexer's own `ContractNotPresent` fatal. That control run is part of
  * the procedure, not an optional extra.
  */
+// Toolkit only: the transaction under test is hand-crafted (two deploys of the same contract in
+// one intent) and submitted as-is. midnight-js only builds well-formed deploys, so moth cannot
+// produce it, and the suite skips under TX_BACKEND=moth.
 describe
-  .skipIf(!env.isUndeployedEnv())
+  .skipIf(!env.isUndeployedEnv() || env.getTxBackend() === 'moth')
   .sequential('a contract deploy in a rolled-back fallible segment', () => {
     let indexer: IndexerHttpClient;
     let node: NodeRpcClient;

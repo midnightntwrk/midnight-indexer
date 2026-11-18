@@ -23,7 +23,7 @@ import { ToolkitWrapper } from '@utils/toolkit/toolkit-wrapper';
 import dataProvider from '@utils/testdata-provider';
 import { retry } from '@utils/retry-helper';
 import { getWalletLastActiveEpochMicros } from '@utils/undeployed/indexer-postgres';
-import { deriveAddresses } from '@utils/moth/moth-addresses';
+import { deriveAddresses, deriveViewingKey } from '@utils/moth/moth-addresses';
 
 // Server-side polling parameters under test (indexer-api/config.yaml:
 // progress_update_interval 30s, keep_wallet_alive_interval 10m; polling.rs:
@@ -68,8 +68,12 @@ describe.skipIf(!env.isUndeployedEnv())('subscription polling', () => {
   let toolkit: ToolkitWrapper;
 
   beforeAll(async () => {
+    // The container is only started on the toolkit backend: on moth the
+    // transfer, the addresses and the viewing keys never touch it.
     toolkit = new ToolkitWrapper({});
-    await toolkit.start();
+    if (env.getTxBackend() === 'toolkit') {
+      await toolkit.start();
+    }
   }, 120_000);
 
   afterAll(async () => {
@@ -246,7 +250,7 @@ describe.skipIf(!env.isUndeployedEnv())('subscription polling', () => {
       async (ctx: TestContext) => {
         ctx.task!.meta.custom = { labels: ['Subscription', 'Polling', 'Wallet'] };
 
-        const viewingKey = await toolkit.showViewingKey(randomBytes(32).toString('hex'));
+        const viewingKey = await deriveViewingKey(randomBytes(32).toString('hex'), toolkit);
         sessionId = await wsClient.openWalletSession(viewingKey);
         const connectedSessionId = sessionId;
 
@@ -337,7 +341,7 @@ describe.skipIf(!env.isUndeployedEnv())('subscription polling', () => {
       async (ctx: TestContext) => {
         ctx.task!.meta.custom = { labels: ['Subscription', 'Polling', 'Wallet'] };
 
-        const viewingKey = await toolkit.showViewingKey(randomBytes(32).toString('hex'));
+        const viewingKey = await deriveViewingKey(randomBytes(32).toString('hex'), toolkit);
         sessionId = await wsClient.openWalletSession(viewingKey);
 
         // Progress samples in arrival order; value = highestZswapEndIndex.
