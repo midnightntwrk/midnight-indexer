@@ -4,10 +4,10 @@ on:
   workflow_call:
     inputs:
       target_env:
-        description: 'Midnight target environment (preview/preprod)'
+        description: 'Midnight target environment (devnet/qanet/preview/preprod)'
         required: true
         type: string
-        default: preview
+        default: qanet
       node_version:
         description: 'Node.js version to use'
         required: false
@@ -40,16 +40,6 @@ jobs:
       INDEXER_API_VERSION: ${{ inputs.indexer_api_version }}
       LOG_LEVEL: DEBUG
     steps:
-      - name: Validate public test target
-        shell: bash
-        env:
-          TARGET_ENV: ${{ inputs.target_env }}
-        run: |
-          case "$TARGET_ENV" in
-            preview|preprod) ;;
-            *) echo "::error::This workflow only tests public or local environments; internal network tests run in shielded-gitops."; exit 1 ;;
-          esac
-
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
 

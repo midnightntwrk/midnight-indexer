@@ -1,0 +1,154 @@
+name: Private network ARC validation
+'on':
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Existing test suite to validate on ARC
+        type: choice
+        default: subscriptions
+        options:
+          - subscriptions
+          - integration
+      target_env:
+        description: Private target (integration supports devnet only)
+        type: choice
+        default: devnet
+        options:
+          - devnet
+          - qanet
+          - both
+permissions:
+  contents: read
+concurrency:
+  group: private-indexer-arc-validation-${{ inputs.suite }}-${{ inputs.target_env }}
+  cancel-in-progress: false
+jobs:
+  subscriptions:
+    if: github.repository == 'midnightntwrk/midnight-indexer' && github.ref == 'refs/heads/main' && vars.PRIVATE_NETWORK_TESTS_VALIDATION_ENABLED == 'true' && inputs.suite == 'subscriptions'
+    name: ${{ matrix.target_env }} / ${{ matrix.suite }}
+    runs-on:
+      group: arc-private-network-tests-indexer-validation
+      labels: arc-private-network-tests-indexer-validation
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        target_env: ${{ fromJSON(inputs.target_env == 'devnet' && '["devnet"]' || inputs.target_env == 'qanet' && '["qanet"]' || '["devnet","qanet"]') }}
+        suite:
+          - block-subscriptions
+          - ledger
+    defaults:
+      run:
+        working-directory: qa/tests
+    env:
+      TARGET_ENV: ${{ matrix.target_env }}
+      INDEXER_API_VERSION: ${{ matrix.target_env == 'qanet' && matrix.suite == 'block-subscriptions' && 'v3' || 'v4' }}
+      INDEXER_HOST: indexer.${{ matrix.target_env }}.shielded.tools
+      NODE_HOST: rpc.${{ matrix.target_env }}.shielded.tools
+      LOG_LEVEL: DEBUG
+    steps:
+      - name: Restore the prebuilt test workspace
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          test "$(cat /opt/private-test-source/.private-test-source-revision)" = 675a5f5117cb26d609c084927b7810d749a915dd
+          cp -a /opt/private-test-source/. "$GITHUB_WORKSPACE/"
+      - name: Run subscription tests
+        env:
+          SUITE: ${{ matrix.suite }}
+        run: bun run test:integration "$SUITE"
+      - name: Generate API coverage report (non-blocking)
+        if: always()
+        continue-on-error: true
+        run: bun run coverage:generate --target-env="$TARGET_ENV" --indexer-api-version="$INDEXER_API_VERSION"
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: indexer-${{ matrix.target_env }}-${{ matrix.suite }}-reports
+          path: qa/tests/reports/**
+          retention-days: 7
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: indexer-${{ matrix.target_env }}-${{ matrix.suite }}-logs
+          path: qa/tests/logs/**
+          retention-days: 7
+      - name: Upload API coverage report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: indexer-${{ matrix.target_env }}-${{ matrix.suite }}-coverage
+          path: qa/tests/coverage/output/**
+          retention-days: 7
+  integration:
+    if: github.repository == 'midnightntwrk/midnight-indexer' && github.ref == 'refs/heads/main' && vars.PRIVATE_NETWORK_TESTS_VALIDATION_ENABLED == 'true' && inputs.suite == 'integration'
+    name: Indexer QA integration tests / devnet
+    runs-on:
+      group: arc-private-network-tests-indexer-validation
+      labels: arc-private-network-tests-indexer-validation
+    timeout-minutes: 480
+    env:
+      INDEXER_HOST: indexer.devnet.shielded.tools
+      NODE_HOST: rpc.devnet.shielded.tools
+    steps:
+      - name: Validate integration target
+        env:
+          REQUESTED_ENV: ${{ inputs.target_env }}
+        run: test "$REQUESTED_ENV" = devnet || { echo "::error::The integration validation suite supports devnet only"; exit 1; }
+      - name: Restore the prebuilt test workspace
+        run: |
+          set -euo pipefail
+          test "$(cat /opt/private-test-source/.private-test-source-revision)" = 675a5f5117cb26d609c084927b7810d749a915dd
+          cp -a /opt/private-test-source/. "$GITHUB_WORKSPACE/"
+      - name: Verify ephemeral Docker daemon
+        shell: bash
+        run: docker info
+      - name: Login to GHCR for published toolkit images
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f
+        with:
+          registry: ghcr.io
+          username: MidnightCI
+          password: ${{ secrets.MIDNIGHTCI_PACKAGES_READ }}
+      - name: Run smoke tests
+        working-directory: qa/tests
+        env:
+          TARGET_ENV: devnet
+          GITHUB_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_READ }}
+          NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_READ }}
+          LOG_LEVEL: DEBUG
+        run: bun run test smoke
+      - name: Run integration tests
+        working-directory: qa/tests
+        env:
+          TARGET_ENV: devnet
+          GITHUB_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_READ }}
+          NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_READ }}
+          LOG_LEVEL: DEBUG
+        run: bun run test integration
+      - name: Generate API coverage report (non-blocking)
+        if: always()
+        continue-on-error: true
+        working-directory: qa/tests
+        run: bun run coverage:generate --target-env=devnet --indexer-api-version=v4
+      - name: Upload Integration Test Reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: junit-integration-test-reports-devnet
+          path: qa/tests/reports/custom-junit-report.xml
+          if-no-files-found: warn
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: qa-integration-tests-devnet-logs
+          path: qa/tests/logs
+      - name: Upload API coverage report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: qa-api-coverage-devnet
+          path: qa/tests/coverage/output/**
+          if-no-files-found: warn

@@ -85,7 +85,7 @@ suite's [runtime expectations](../qa/tests/tests/sync/README.md#runtime-expectat
 
 - CI runs against an **ephemeral fresh node**, never a deployed env.
 - Scheduled monitors (`.github/workflows/qa-test-*`, business hours) hit
-  `indexer.<env>.midnight.network` for preprod / preview and run
+  `indexer.<env>.midnight.network` for devnet / qanet / preprod / preview and run
   block-subscription + ledger-event streaming tests - they validate the **API** (streaming
   continuity, shape), **not** an indexer-vs-node root diff.
 
@@ -93,8 +93,17 @@ suite's [runtime expectations](../qa/tests/tests/sync/README.md#runtime-expectat
 
 - [Creating a release](./releasing.md)
 
-Devnet and qanet workflow ownership moves to `shieldedtech/shielded-gitops`, where
-private Kubernetes ARC runners execute the existing QA suites. The test code and
-environment configurations remain here; this repository no longer schedules or
-dispatches tests against those internal networks. Enable and verify the GitOps
-replacement before merging the workflow removals.
+## Private ARC validation
+
+The manual `private-network-arc-validation.yml` workflow validates the existing
+devnet/qanet suites on an isolated Kubernetes ARC pool before any migration to
+`shieldedtech/shielded-gitops`. Legacy workflows and schedules remain intact.
+The validation workflow starts disabled through the IaC-managed
+`PRIVATE_NETWORK_TESTS_VALIDATION_ENABLED` variable and accepts runs only from
+this repository's `main` branch. It restores the reviewed source and dependencies
+from the runner image, then executes tests without installing or building on ARC.
+
+Choose `subscriptions` with `both` networks to exercise all four existing block
+and ledger checks; qanet block streaming keeps API v3. The `integration` suite
+accepts devnet only, matching the existing integration caller. Enable the pool
+and validate source-repository runs before proposing removal of legacy callers.

@@ -3,6 +3,7 @@ self-hosted-runner:
     - ubuntu-latest-8-core-x64
     - ubuntu-latest-16-core-x64
     - ubuntu-latest-8-core-arm64
+    - arc-private-network-tests-indexer-validation
 
 paths:
   .github/workflows/*.{yml,yaml}:
