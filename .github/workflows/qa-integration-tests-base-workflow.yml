@@ -11,12 +11,10 @@ on:
     inputs:
       target_env:
         type: choice
-        description: Midnight target environment (devnet/qanet/preview/preprod)
+        description: Midnight target environment (preview/preprod)
         required: true
-        default: qanet
+        default: preview
         options:
-          - devnet
-          - qanet
           - preview
           - preprod
       ref:
@@ -43,9 +41,9 @@ on:
     inputs:
       target_env:
         type: string
-        description: Midnight target environment (devnet/qanet/preview/preprod)
+        description: Midnight target environment (undeployed/preview/preprod)
         required: true
-        default: qanet
+        default: preview
       ref:
         type: string
         description: Git ref
@@ -97,6 +95,16 @@ jobs:
       packages: read
     runs-on: ubuntu-latest
     steps:
+      - name: Validate public test target
+        shell: bash
+        env:
+          TARGET_ENV: ${{ inputs.target_env }}
+        run: |
+          case "$TARGET_ENV" in
+            undeployed|preview|preprod) ;;
+            *) echo "::error::This workflow only tests public or local environments; internal network tests run in shielded-gitops."; exit 1 ;;
+          esac
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref || github.sha }}
