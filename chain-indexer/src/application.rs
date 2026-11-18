@@ -1005,6 +1005,8 @@ mod tests {
         time::{Duration, SystemTime},
     };
     use thiserror::Error;
+    #[cfg(feature = "standalone")]
+    use {crate::infra::storage::testing::storage, indoc::indoc};
 
     #[test]
     fn system_parameters_follow_saved_changes() {
@@ -1113,17 +1115,7 @@ mod tests {
     #[cfg(feature = "standalone")]
     #[tokio::test]
     async fn system_parameters_are_loaded_after_a_restart() -> anyhow::Result<()> {
-        use crate::infra::storage;
-        use indexer_common::infra::{
-            migrations,
-            pool::sqlite::{self, SqlitePool},
-        };
-
-        let dir = tempfile::tempdir()?;
-        let url = dir.path().join("indexer.sqlite").display().to_string();
-        let pool = SqlitePool::new(sqlite::Config::with_url(url)).await?;
-        migrations::sqlite::run(&pool).await?;
-        let mut storage = storage::Storage::new(pool);
+        let (_dir, _pool, mut storage) = storage().await;
 
         let d_parameter = |n| DParameter {
             num_permissioned_candidates: n,
@@ -1182,6 +1174,70 @@ mod tests {
             .expect("the node changed the D-parameter");
         assert_eq!(change.d_parameter, Some(d_parameter(3)));
         assert_eq!(change.terms_and_conditions, None);
+
+        Ok(())
+    }
+
+    // No two consecutive stored D-parameters are equal, across a restart too: a block records the
+    // node's D-parameter only when it differs from the latest stored.
+    #[cfg(feature = "standalone")]
+    #[tokio::test]
+    async fn no_two_consecutive_d_parameters_are_equal() -> anyhow::Result<()> {
+        let (_dir, pool, mut storage) = storage().await;
+
+        let d_parameter = |n| DParameter {
+            num_permissioned_candidates: n,
+            num_registered_candidates: n,
+        };
+        // The node's D-parameter at each block; `None` marks a restart.
+        let reported = [
+            Some(1),
+            Some(1),
+            None,
+            Some(1),
+            Some(2),
+            None,
+            Some(2),
+            Some(2),
+            Some(1),
+        ];
+
+        let mut stored = SystemParameters::load(&storage).await?;
+        let mut height = 0;
+        for reported in reported {
+            let Some(reported) = reported else {
+                stored = SystemParameters::load(&storage).await?;
+                continue;
+            };
+
+            let (block, _) = <(Block, Vec<_>)>::from(BLOCK_1.to_owned());
+            let block = Block {
+                hash: ByteArray([height as u8 + 1; 32]),
+                height,
+                ..block
+            };
+            let node = SystemParameters {
+                d_parameter: Some(d_parameter(reported)),
+                terms_and_conditions: None,
+            };
+            let change = determine_system_parameters_change(&block, &stored, &node).await?;
+            storage
+                .save_block(&block, &[], &[], &Default::default(), change.as_ref(), &[])
+                .await?;
+            if let Some(change) = change {
+                stored.apply(change);
+            }
+            height += 1;
+        }
+
+        let saved = sqlx::query_as::<_, (i64, i32)>(indoc! {"
+            SELECT block_height, num_permissioned_candidates
+            FROM system_parameters_d
+            ORDER BY block_height
+        "})
+        .fetch_all(&*pool)
+        .await?;
+        assert_eq!(saved, [(0, 1), (3, 2), (6, 1)]);
 
         Ok(())
     }
