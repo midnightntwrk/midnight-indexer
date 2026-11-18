@@ -95,6 +95,14 @@ pub fn node_count() -> Option<usize> {
     OBSERVER.get().map(|db| db.size())
 }
 
+/// The number of rows in `ledger_db_roots`, or `None` before [init] has run. Changes not yet
+/// flushed are not counted, see [v1_1::LedgerDb::root_count].
+#[cfg_attr(docsrs, doc(cfg(any(feature = "cloud", feature = "standalone"))))]
+#[cfg(any(feature = "cloud", feature = "standalone"))]
+pub fn root_count() -> Option<usize> {
+    OBSERVER.get().map(|db| db.root_count())
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     /// Maximum number of arena nodes held in the storage-core caches. This is a node *count*, not

@@ -103,8 +103,14 @@ fn gc_catch_up_interval_default() -> NonZeroU32 {
     NonZeroU32::new(500).expect("500 is not zero")
 }
 
+/// Run the chain-indexer: index the node's blocks into `storage`, keeping the ledger state in the
+/// ledger DB, gc'ing it and publishing what was indexed via `publisher`, until SIGTERM is received
+/// or a task fails.
+///
+/// `metrics` tells whether metrics are published: if not, they are neither recorded nor computed.
 pub async fn run(
     config: Config,
+    metrics: bool,
     node: impl Node,
     mut storage: impl Storage,
     publisher: impl Publisher,
@@ -160,20 +166,24 @@ pub async fn run(
         );
     }
 
-    // Initialize metrics.
-    let transaction_count = storage
-        .get_transaction_count()
-        .await
-        .context("get transaction count")?;
-    let contract_action_count = storage
-        .get_contract_action_count()
-        .await
-        .context("get contract action count")?;
-    let metrics = Metrics::new(
-        highest_block_height,
-        transaction_count,
-        contract_action_count,
-    );
+    // Initialize metrics, only if published.
+    let metrics = if metrics {
+        let transaction_count = storage
+            .get_transaction_count()
+            .await
+            .context("get transaction count")?;
+        let contract_action_count = storage
+            .get_contract_action_count()
+            .await
+            .context("get contract action count")?;
+        Some(Metrics::new(
+            highest_block_height,
+            transaction_count,
+            contract_action_count,
+        ))
+    } else {
+        None
+    };
 
     // Load/initialize ledger state. Seed the retention window with the newest blocks' keys
     // (oldest first, each with the ledger version it was persisted under) so a restart keeps
@@ -188,35 +198,21 @@ pub async fn run(
         .await
         .context("get newest ledger state keys")?
         .into_iter()
-        .map(|(protocol_version, key)| {
-            let ledger_version = protocol_version.ledger_version();
-            LedgerState::root_hash_bytes(&key, ledger_version)
-                .map(|root_hash| (key, ledger_version, root_hash))
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .context("get ledger state root hashes")?;
+        .map(|(protocol_version, key)| (key, protocol_version.ledger_version()))
+        .collect::<Vec<_>>();
     let newest_count = newest_ledger_state_keys.len();
 
     // Must precede the seeding below, and is idempotent, hence unconditional; see
     // `LedgerState::repair_root_counts`.
-    let repair = LedgerState::repair_root_counts(
-        newest_ledger_state_keys
-            .iter()
-            .map(|(key, ledger_version, _)| (key, *ledger_version)),
-    )
-    .context("repair ledger state root counts")?;
+    let (repair, rooted) = LedgerState::repair_root_counts(newest_ledger_state_keys)
+        .context("repair ledger state root counts")?;
     if repair.raised_roots > 0 || repair.culled_roots > 0 {
         warn!(repair:?; "repaired under-counted ledger state gc roots");
     } else {
         info!(repair:?; "ledger state gc root counts are consistent");
     }
 
-    let persisted_root_hashes = LedgerState::persisted_root_hashes();
-    let mut persisted_ledger_state_keys = newest_ledger_state_keys
-        .into_iter()
-        .filter(|(_, _, root_hash)| persisted_root_hashes.contains(root_hash))
-        .map(|(key, ledger_version, _)| (key, ledger_version))
-        .collect::<VecDeque<_>>();
+    let mut persisted_ledger_state_keys = VecDeque::from(rooted);
     info!(
         seeded = persisted_ledger_state_keys.len(),
         skipped_unrooted = newest_count - persisted_ledger_state_keys.len();
@@ -304,7 +300,7 @@ pub async fn run(
                     &mut parent_block_timestamp,
                     &mut storage,
                     &publisher,
-                    &metrics,
+                    metrics.as_ref(),
                     &node,
                 )
                 .in_span(Span::root("get-and-index-block", SpanContext::random()))
@@ -352,28 +348,36 @@ pub async fn run(
                     let elapsed = started.elapsed();
                     blocks_since_gc = 0;
 
+                    if let Some(metrics) = &metrics {
+                        metrics.record_gc(elapsed, nodes_culled);
+                    }
+                    if nodes_culled > 0 {
+                        debug!(nodes_culled, elapsed:?; "gc pass culled orphan arena nodes");
+                    }
+
                     // Root rows grow with *distinct* contract states rather than with actions,
                     // because per-action roots are content-addressed and refcounted. They are also
-                    // never unpersisted, so this only ever goes up and is the number to watch. The
-                    // scan is what gc itself does on every rescan, so it adds nothing asymptotically.
-                    let root_count = LedgerState::persisted_root_hashes().len();
-                    metrics.record_gc(elapsed, nodes_culled, root_count);
-                    if nodes_culled > 0 {
-                        debug!(
-                            nodes_culled,
-                            elapsed:?,
-                            root_count;
-                            "gc pass culled orphan arena nodes"
-                        );
+                    // never unpersisted, so this only ever goes up and is the number to watch. It
+                    // costs a ledger DB query, so it is only counted when metrics are published.
+                    let started = Instant::now();
+                    if let Some(metrics) = &metrics
+                        && let Some(root_count) = ledger_db::root_count()
+                    {
+                        let elapsed = started.elapsed();
+                        metrics.record_root_count(root_count);
+                        debug!(root_count, elapsed:?; "counted gc roots");
                     }
                 }
 
-                // Sample the arena size, which is a full scan, so only on its own opt-in interval.
+                // Sample the arena size, which is a full scan, so only on its own opt-in interval and
+                // when metrics are published.
                 if arena_metrics_interval > 0
                     && blocks_since_arena_metrics >= arena_metrics_interval
                 {
                     blocks_since_arena_metrics = 0;
-                    if let Some(node_count) = ledger_db::node_count() {
+                    if let Some(metrics) = &metrics
+                        && let Some(node_count) = ledger_db::node_count()
+                    {
                         metrics.record_arena_node_count(node_count);
                         debug!(node_count; "sampled ledger DB node count");
                     }
@@ -484,7 +488,7 @@ async fn get_and_index_block<E, N>(
     parent_block_timestamp: &mut u64,
     storage: &mut impl Storage,
     publisher: &impl Publisher,
-    metrics: &Metrics,
+    metrics: Option<&Metrics>,
     node: &N,
 ) -> anyhow::Result<(LedgerState, SerializedLedgerStateKey)>
 where
@@ -539,7 +543,7 @@ async fn index_block<N>(
     parent_block_timestamp: &mut u64,
     storage: &mut impl Storage,
     publisher: &impl Publisher,
-    metrics: &Metrics,
+    metrics: Option<&Metrics>,
     node: &N,
 ) -> anyhow::Result<(LedgerState, SerializedLedgerStateKey)>
 where
@@ -692,7 +696,9 @@ where
     let uncaptured = ledger_state
         .capture_contract_state_keys(&mut transactions)
         .context("capture contract state keys")?;
-    metrics.record_uncaptured_contract_states(uncaptured);
+    if let Some(metrics) = metrics {
+        metrics.record_uncaptured_contract_states(uncaptured);
+    }
     let transactions = transactions;
 
     // At a hard fork, capture the translated state key of every contract without an action in this
@@ -816,7 +822,9 @@ where
     }
 
     // Update metrics.
-    metrics.update(&block, &transactions, node_block_height, *caught_up);
+    if let Some(metrics) = metrics {
+        metrics.update(&block, &transactions, node_block_height, *caught_up);
+    }
 
     info!(
         hash:% = block.hash,
@@ -912,9 +920,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{
-        application::{
-            gc_budget, gc_catch_up_interval_default, index_block, metrics::Metrics, node_blocks,
-        },
+        application::{gc_budget, gc_catch_up_interval_default, index_block, node_blocks},
         domain::{
             Block, BlockRef, ContractStateTranslation, DParameter, DustRegistrationEvent,
             LatestContractAction, LedgerState, SystemParametersChange, TermsAndConditions,
@@ -1047,7 +1053,7 @@ mod tests {
                 &mut 0,
                 storage,
                 &NoopPublisher,
-                &Metrics::new(None, 0, (0, 0, 0)),
+                None,
                 &node,
             )
             .await
