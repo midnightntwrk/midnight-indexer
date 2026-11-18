@@ -31,6 +31,10 @@ infra:
     max_connections: 10
     idle_timeout: "1m"
     max_lifetime: "5m"
+    # Skip the ping on every connection taken from the pool, a round trip per query. A query on a
+    # connection that died while idle then fails, which panics or exits the chain indexer; it
+    # resumes from the database when restarted.
+    test_before_acquire: false
 
   ledger_db:
     cache_max_nodes: 100000
