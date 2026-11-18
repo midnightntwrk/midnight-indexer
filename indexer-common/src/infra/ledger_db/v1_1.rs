@@ -75,6 +75,25 @@ impl LedgerDb {
     pub fn new(pool: crate::infra::pool::sqlite::SqlitePool) -> Self {
         Self { pool }
     }
+
+    /// The number of gc roots, counted in the database rather than read back as [DB::get_roots]
+    /// does.
+    ///
+    /// Only root counts flushed to the database are seen: unlike storage-core's backend
+    /// `get_roots`, this does not apply changes still pending in its write cache, e.g. an unpersist
+    /// since the last flush.
+    pub fn root_count(&self) -> usize {
+        block_in_place(|| {
+            Handle::current().block_on(async {
+                let count = sqlx::query_scalar::<_, i64>("SELECT count(*) FROM ledger_db_roots")
+                    .fetch_one(&*self.pool)
+                    .await
+                    .unwrap_or_panic("cannot count roots");
+
+                count as usize
+            })
+        })
+    }
 }
 
 impl DB for LedgerDb {
@@ -348,6 +367,9 @@ impl DB for LedgerDb {
         })
     }
 
+    /// Reads every row of `ledger_db_roots` and decodes its key, so its cost grows with the number
+    /// of roots. storage-core's gc calls it once per cycle. To count the roots, use
+    /// [LedgerDb::root_count] instead.
     fn get_roots(&self) -> HashMap<ArenaHash<Self::Hasher>, u32> {
         block_in_place(|| {
             Handle::current().block_on(async {
@@ -875,6 +897,7 @@ fn assert_batch_update_sets_root_counts(db: &mut LedgerDb) {
         db.get_roots(),
         HashMap::from([(first.clone(), 5), (third.clone(), 7)])
     );
+    assert_eq!(db.root_count(), 2);
 
     // Sets then clears `ROOTS` root counts, each in one batch.
     let roots = (0..ROOTS as u32)
@@ -885,9 +908,10 @@ fn assert_batch_update_sets_root_counts(db: &mut LedgerDb) {
         })
         .collect::<Vec<_>>();
     db.batch_update(roots.iter().map(|root| (root.clone(), SetRootCount(1))));
-    assert_eq!(db.get_roots().len(), ROOTS + 2);
+    assert_eq!(db.root_count(), ROOTS + 2);
     db.batch_update(roots.iter().map(|root| (root.clone(), SetRootCount(0))));
     assert_eq!(db.get_roots(), HashMap::from([(first, 5), (third, 7)]));
+    assert_eq!(db.root_count(), 2);
 }
 
 /// `get_root_count` must return the stored count, not the number of matching rows: `key` is the
