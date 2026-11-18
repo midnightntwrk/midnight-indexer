@@ -1221,14 +1221,10 @@ mod tests {
         let _ledger_db = init_ledger_db().await?;
 
         let network_id = NetworkId::try_from("undeployed".to_string())?;
-        let genesis = fs::read(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../indexer-common/tests/v8_genesis_undeployed_0_22_0.raw"),
-        )?;
+        let node = GenesisNode::undeployed()?;
         let genesis_state_key =
-            LedgerState::from_genesis(&genesis, LedgerVersion::V8)?.state_key()?;
+            LedgerState::from_genesis(&node.genesis, LedgerVersion::V8)?.state_key()?;
         let wrong_state_key = ByteVec::from(vec![0; genesis_state_key.as_ref().len()]);
-        let node = GenesisNode(genesis.into());
         let mut storage = MockStorage::default();
 
         let index = async |block: node::Block, ledger_state, storage: &mut MockStorage| {
@@ -1295,7 +1291,8 @@ mod tests {
             timestamp: 1_000,
             ..BLOCK_0.to_owned()
         };
-        let mut expected_ledger_state = LedgerState::from_genesis(&node.0, LedgerVersion::V8)?;
+        let mut expected_ledger_state =
+            LedgerState::from_genesis(&node.genesis, LedgerVersion::V8)?;
         expected_ledger_state.apply_transactions(
             [],
             BlockRef {
@@ -1320,9 +1317,102 @@ mod tests {
         Ok(())
     }
 
-    /// A node serving the given genesis ledger state and no blocks.
+    /// A system parameters change is applied to the stored system parameters only once its block is
+    /// saved: a failed save leaves them as they were, so the retried block records the change.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_index_block_applies_system_parameters_once_saved() -> Result<(), BoxError> {
+        let _ledger_db = init_ledger_db().await?;
+
+        let network_id = NetworkId::try_from("undeployed".to_string())?;
+        let d_parameter = DParameter {
+            num_permissioned_candidates: 1,
+            num_registered_candidates: 1,
+        };
+        let node = GenesisNode {
+            system_parameters: SystemParameters {
+                d_parameter: Some(d_parameter.clone()),
+                terms_and_conditions: None,
+            },
+            ..GenesisNode::undeployed()?
+        };
+        let block_0 = node::Block {
+            state_key: LedgerState::from_genesis(&node.genesis, LedgerVersion::V8)?.state_key()?,
+            ..BLOCK_0.to_owned()
+        };
+        let mut stored_system_parameters = SystemParameters {
+            d_parameter: None,
+            terms_and_conditions: None,
+        };
+
+        let index = async |storage: &mut MockStorage,
+                           stored_system_parameters: &mut SystemParameters| {
+            index_block(
+                0,
+                0,
+                block_0.clone(),
+                LedgerState::new(network_id.clone(), LedgerVersion::OLDEST)?,
+                &network_id,
+                &Arc::new(RwLock::new(None)),
+                &mut false,
+                &mut 0,
+                storage,
+                stored_system_parameters,
+                &NoopPublisher,
+                None,
+                &node,
+            )
+            .await
+        };
+
+        let mut storage = MockStorage {
+            fail_saves: true,
+            ..Default::default()
+        };
+        let result = index(&mut storage, &mut stored_system_parameters).await;
+        assert!(result.is_err(), "the save fails");
+        assert_eq!(stored_system_parameters.d_parameter, None, "not applied");
+
+        let mut storage = MockStorage::default();
+        index(&mut storage, &mut stored_system_parameters).await?;
+        let saved_d_parameters = storage
+            .saved_system_parameters_changes
+            .into_iter()
+            .map(|change| change.d_parameter)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            saved_d_parameters,
+            [Some(d_parameter.clone())],
+            "saved with the retried block"
+        );
+        assert_eq!(stored_system_parameters.d_parameter, Some(d_parameter));
+
+        Ok(())
+    }
+
+    /// A node serving the given genesis ledger state and system parameters, and no blocks.
     #[derive(Clone)]
-    struct GenesisNode(ByteVec);
+    struct GenesisNode {
+        genesis: ByteVec,
+        system_parameters: SystemParameters,
+    }
+
+    impl GenesisNode {
+        /// Serves the undeployed network's genesis ledger state and no system parameters.
+        fn undeployed() -> Result<Self, BoxError> {
+            let genesis = fs::read(
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../indexer-common/tests/v8_genesis_undeployed_0_22_0.raw"),
+            )?;
+
+            Ok(Self {
+                genesis: genesis.into(),
+                system_parameters: SystemParameters {
+                    d_parameter: None,
+                    terms_and_conditions: None,
+                },
+            })
+        }
+    }
 
     impl Node for GenesisNode {
         type Error = Infallible;
@@ -1345,26 +1435,25 @@ mod tests {
             block_hash: BlockHash,
             block_height: u64,
             timestamp: u64,
-            _node_version: NodeVersion,
+            node_version: NodeVersion,
         ) -> Result<SystemParametersChange, Self::Error> {
-            Ok(SystemParametersChange {
-                block_height,
-                block_hash,
-                timestamp,
-                d_parameter: None,
-                terms_and_conditions: None,
-            })
+            self.system_parameters
+                .fetch_system_parameters(block_hash, block_height, timestamp, node_version)
+                .await
         }
 
         async fn fetch_genesis_ledger_state(&self) -> Result<ByteVec, Self::Error> {
-            Ok(self.0.clone())
+            Ok(self.genesis.clone())
         }
     }
 
-    /// An empty storage counting saved blocks.
+    /// An empty storage counting saved blocks and keeping their system parameters changes, failing
+    /// every save if told to.
     #[derive(Clone, Default)]
     struct MockStorage {
         saved_blocks: usize,
+        saved_system_parameters_changes: Vec<SystemParametersChange>,
+        fail_saves: bool,
     }
 
     impl Storage for MockStorage {
@@ -1374,10 +1463,15 @@ mod tests {
             _transactions: &[Transaction],
             _dust_registration_events: &[DustRegistrationEvent],
             _ledger_state_key: &SerializedLedgerStateKey,
-            _system_parameters_change: Option<&SystemParametersChange>,
+            system_parameters_change: Option<&SystemParametersChange>,
             _contract_state_translations: &[(u64, ContractStateTranslation)],
         ) -> Result<Option<u64>, sqlx::Error> {
+            if self.fail_saves {
+                return Err(sqlx::Error::PoolClosed);
+            }
             self.saved_blocks += 1;
+            self.saved_system_parameters_changes
+                .extend(system_parameters_change.cloned());
             Ok(None)
         }
 
