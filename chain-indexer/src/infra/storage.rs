@@ -1859,7 +1859,7 @@ mod contract_state_translation_tests {
     };
 
     /// A migrated SQLite database and a `Storage` over it.
-    async fn storage() -> (tempfile::TempDir, SqlitePool, Storage) {
+    pub(super) async fn storage() -> (tempfile::TempDir, SqlitePool, Storage) {
         let dir = tempfile::tempdir().expect("create tempdir");
         let url = dir.path().join("indexer.sqlite").display().to_string();
         let pool = SqlitePool::new(sqlite::Config::with_url(url))
@@ -2037,5 +2037,27 @@ mod contract_state_translation_tests {
         save_contract_state_translations(&[], fork_block, 2, &mut tx)
             .await
             .expect("no translations");
+    }
+}
+
+#[cfg(all(test, feature = "standalone"))]
+mod system_parameters_tests {
+    use super::contract_state_translation_tests::storage;
+    use crate::domain::storage::Storage as _;
+
+    /// An empty database has no system parameters.
+    #[tokio::test]
+    async fn latest_system_parameters_are_none_when_empty() {
+        let (_dir, _pool, storage) = storage().await;
+
+        let (d_parameter, terms_and_conditions) = tokio::join!(
+            storage.get_latest_d_parameter(),
+            storage.get_latest_terms_and_conditions(),
+        );
+        assert_eq!(d_parameter.expect("get latest D-parameter"), None);
+        assert_eq!(
+            terms_and_conditions.expect("get latest terms and conditions"),
+            None
+        );
     }
 }
