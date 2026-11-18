@@ -104,8 +104,7 @@ mod tests {
     /// key queues its root, and `pin_roots` pins it once the ledger state is persisted, with no
     /// root queued by hand. Covers V8 and V9, each contract owning a coin commitment of its own, so
     /// each contract zswap state has a root of its own. Their nodes are new, so they are pinned as
-    /// written, without the walk, which in a debug build could not read them back: an inlined
-    /// Merkle path nests 67 deep, past the 50 a debug build deserializes.
+    /// written, without the walk.
     #[cfg(any(feature = "cloud", feature = "standalone"))]
     #[tokio::test(flavor = "multi_thread")]
     async fn contract_states_pin_per_block() -> Result<(), BoxError> {
@@ -282,6 +281,96 @@ mod tests {
             Some(true),
             "contract zswap state pinned"
         );
+
+        Ok(())
+    }
+
+    /// Pinning a stored contract zswap state with entries by its key, as the startup backfill
+    /// does, and a gc pass after it both read its nodes back from the ledger DB: an inlined Merkle
+    /// path nests 67 deep, past the 50 midnight-serialize deserializes with debug assertions on.
+    /// Covers V8 and V9, each contract owning a coin commitment of its own.
+    #[cfg(any(feature = "cloud", feature = "standalone"))]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn contract_zswap_state_with_entries_pins_by_key_and_survives_gc() -> Result<(), BoxError>
+    {
+        use midnight_base_crypto_v1::hash::HashOutput;
+        use midnight_coin_structure_v2::contract::ContractAddress as ContractAddressV8;
+        use midnight_coin_structure_v3::contract::ContractAddress as ContractAddressV9;
+        use midnight_onchain_runtime_v3::state::ContractState as ContractStateV3;
+        use midnight_onchain_runtime_v4::state::ContractState as ContractStateV4;
+        use midnight_storage_core_v1::arena::Sp;
+        use midnight_transient_crypto_v2::curve::Fr as FrV8;
+        use midnight_transient_crypto_v3::curve::Fr as FrV9;
+        use std::{ops::Deref, time::Duration};
+
+        let _ledger_db = init_ledger_db().await?;
+
+        let mut state = LedgerState::new("undeployed".try_into()?, LedgerVersion::V8)
+            .expect("ledger state can be constructed");
+
+        for (ledger_version, byte) in [(LedgerVersion::V8, 14), (LedgerVersion::V9, 15)] {
+            state = state.translate(ledger_version)?;
+            let hash = HashOutput([byte; 32]);
+            let address = match &mut state {
+                LedgerState::V8 { ledger_state, .. } => {
+                    let address = ContractAddressV8(hash);
+                    ledger_state.contract = ledger_state
+                        .contract
+                        .insert(address, ContractStateV3::default());
+                    let mut zswap = ledger_state.zswap.deref().to_owned();
+                    zswap.coin_coms = zswap
+                        .coin_coms
+                        .try_update(zswap.first_free, &FrV8::from(byte), Some(Sp::new(address)))
+                        .expect("insert coin commitment");
+                    zswap.first_free += 1;
+                    ledger_state.zswap = Sp::new(zswap);
+                    address.serialize()?
+                }
+                LedgerState::V9 { ledger_state, .. } => {
+                    let address = ContractAddressV9(hash);
+                    ledger_state.contract = ledger_state
+                        .contract
+                        .insert(address, ContractStateV4::default());
+                    let mut zswap = ledger_state.zswap.deref().to_owned();
+                    zswap.coin_coms = zswap
+                        .coin_coms
+                        .try_update(zswap.first_free, &FrV9::from(byte), Some(Sp::new(address)))
+                        .expect("insert coin commitment");
+                    zswap.first_free += 1;
+                    ledger_state.zswap = Sp::new(zswap);
+                    address.serialize()?
+                }
+            };
+            let zswap_key =
+                state.contract_zswap_state_key(&address, &mut ContractZswapIndices::default())?;
+            // Stored unpinned, as the history written before pinning existed.
+            clear_queue();
+            (state, _) = state.persist()?;
+
+            let zswap_root = ArenaHash::try_from(&zswap_key)?;
+            assert_eq!(
+                pinned(&zswap_root),
+                Some(false),
+                "{ledger_version}: contract zswap state stored unpinned"
+            );
+            let pinned_zswap = LedgerState::pin([zswap_root.clone()]);
+            assert!(
+                pinned_zswap.failed_roots.is_empty(),
+                "{ledger_version}: walked to the end"
+            );
+            assert_eq!(
+                pinned(&zswap_root),
+                Some(true),
+                "{ledger_version}: contract zswap state pinned"
+            );
+
+            LedgerState::gc(Duration::from_secs(60));
+            assert_eq!(
+                pinned(&zswap_root),
+                Some(true),
+                "{ledger_version}: kept by gc"
+            );
+        }
 
         Ok(())
     }
