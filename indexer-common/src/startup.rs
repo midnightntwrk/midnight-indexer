@@ -23,6 +23,7 @@ use serde::{Serialize, de::DeserializeOwned};
 /// The journaled form of a task's state.
 pub use serde_json::Value;
 use std::{
+    collections::HashSet,
     future::Future,
     pin::Pin,
     time::{SystemTime, UNIX_EPOCH},
@@ -118,6 +119,30 @@ pub enum Plan<Context> {
     Parallel(Vec<Plan<Context>>),
 }
 
+impl<Context> Plan<Context> {
+    /// The IDs of the plan's tasks, in plan order.
+    fn ids(&self) -> Vec<&'static str> {
+        use Plan::*;
+        match self {
+            Task(task) => vec![task.id()],
+            Sequential(plans) | Parallel(plans) => plans.iter().flat_map(Plan::ids).collect(),
+        }
+    }
+
+    /// Validates the plan.
+    ///
+    /// # Errors
+    ///
+    /// Fails if two tasks of the plan share an ID.
+    fn validate(&self) -> Result<(), DuplicateTaskId> {
+        let mut ids = HashSet::new();
+        match self.ids().into_iter().find(|id| !ids.insert(*id)) {
+            Some(id) => Err(DuplicateTaskId(id)),
+            None => Ok(()),
+        }
+    }
+}
+
 /// A plan of the given task alone.
 pub fn task<Context: Sync, T: Task<Context> + 'static>(task: T) -> Plan<Context> {
     Plan::Task(Box::new(task))
@@ -134,12 +159,18 @@ pub fn parallel<Context>(plans: impl IntoIterator<Item = Plan<Context>>) -> Plan
 }
 
 /// Run the plan. Takes no lock: if several instances can start at once, take one first.
+///
+/// # Errors
+///
+/// Fails before any task runs if the plan is invalid.
 pub fn run<'a, Context: Sync, J: Journal>(
     context: &'a Context,
     journal: &'a J,
     plan: &'a Plan<Context>,
 ) -> BoxFuture<'a> {
     Box::pin(async move {
+        plan.validate()?;
+
         match plan {
             Plan::Task(task) => run_task(context, journal, task.as_ref()).await,
             Plan::Sequential(plans) => {
@@ -202,6 +233,11 @@ pub struct TaskError {
     #[source]
     pub source: BoxError,
 }
+
+/// Two tasks of a plan share an ID.
+#[derive(Debug, thiserror::Error)]
+#[error("startup task ID {0} is not unique in the plan")]
+struct DuplicateTaskId(&'static str);
 
 /// Milliseconds since the Unix epoch, as the journal stores times.
 pub fn unix_millis(time: SystemTime) -> i64 {
@@ -653,6 +689,34 @@ mod tests {
         assert_eq!(context.runs.load(Relaxed), 0, "skipped");
 
         Ok(())
+    }
+
+    // A plan whose tasks share an ID fails before any task runs, nested or not.
+    #[tokio::test]
+    async fn duplicate_task_ids_fail_the_plan() {
+        let (context, journal) = (Context::default(), MemoryJournal::default());
+
+        let plans = [
+            parallel([
+                task(Counting::<1, true> { fail: false }),
+                task(Counting::<1, true> { fail: false }),
+            ]),
+            sequential([
+                task(Counting::<1, true> { fail: false }),
+                parallel([task(First), task(Counting::<2, true> { fail: false })]),
+            ]),
+        ];
+        for plan in &plans {
+            let error = run(&context, &journal, plan)
+                .await
+                .expect_err("a duplicate ID fails the plan");
+            assert_eq!(
+                error.to_string(),
+                "startup task ID test/counting is not unique in the plan"
+            );
+        }
+        assert_eq!(context.runs.load(Relaxed), 0);
+        assert!(journal.ids().is_empty());
     }
 
     // A task that is not journaled does not read the journal, so it runs even when the journal
