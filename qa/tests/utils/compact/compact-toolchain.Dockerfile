@@ -17,7 +17,7 @@
 # fixture needs nothing on the host but Docker. Built on first use by
 # `utils/compact/compact-compiler.ts` and cached as an image afterwards.
 
-FROM debian:trixie-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad
+FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
 
 # The compactc release to install, e.g. `0.30.0` or `0.33.0-rc.2`. Tags the image.
 ARG COMPACT_VERSION
