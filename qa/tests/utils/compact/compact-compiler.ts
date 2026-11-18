@@ -29,6 +29,12 @@ const DOCKERFILE = path.join(HERE, 'compact-toolchain.Dockerfile');
 const GENERATE_NODE_DATA = path.resolve(HERE, '../../../../generate_node_data.sh');
 
 /**
+ * The compactc moth's contract path needs: 0.36.0 emits compact-runtime 0.21.0,
+ * the runtime midnight-js 5.0.0 pins (see `utils/moth/moth-contracts.ts`).
+ */
+export const MOTH_COMPACTC_VERSION = '0.36.0';
+
+/**
  * The compactc release fixtures are compiled with.
  *
  * Pinned rather than floating: compiled output declares the
@@ -45,10 +51,34 @@ const GENERATE_NODE_DATA = path.resolve(HERE, '../../../../generate_node_data.sh
  *
  * The pin follows the node line under test, using the same rule
  * `generate_node_data.sh` uses for the chain data, read from that script so the
- * two cannot drift apart. Set `COMPACT_COMPILER_VERSION` to override it.
+ * two cannot drift apart.
+ *
+ * Under `TX_BACKEND=moth` on a ledger-9 chain the fixtures are loaded by moth's
+ * midnight-js 5 rather than the toolkit, so the pin is the compactc that emits
+ * the compact-runtime midnight-js 5 carries ({@link MOTH_COMPACTC_VERSION}),
+ * whatever `NODE_TAG` says — on a deployed env `NODE_TAG` is not set and falls
+ * back to a default that has nothing to do with the chain. On a ledger-8 chain
+ * moth hands contract actions to the toolkit (`mothHandlesContracts()` in
+ * `utils/moth/ledger.ts`), so the node-line rule applies there as it does for
+ * the toolkit backend: the 1.x toolkit cannot load a compact-runtime 0.21.0
+ * contract.
+ *
+ * Asynchronous because the ledger train is read from the chain, not from the
+ * environment. Set `COMPACT_COMPILER_VERSION` to override every case.
+ *
+ * @returns The compactc version to compile fixtures with on this run.
  */
-export const COMPACT_COMPILER_VERSION =
-  process.env.COMPACT_COMPILER_VERSION ?? compactcForNode(env.getNodeVersion());
+export const compactCompilerVersion = async (): Promise<string> => {
+  const override = process.env.COMPACT_COMPILER_VERSION;
+  if (override) return override;
+  if (env.getTxBackend() === 'moth') {
+    // Imported on demand: the ledger module pulls in moth-wallet and the wallet
+    // SDK, which the toolkit backend and the unit suite have no use for.
+    const { mothHandlesContracts } = await import('../moth/ledger');
+    if (await mothHandlesContracts()) return MOTH_COMPACTC_VERSION;
+  }
+  return compactcForNode(env.getNodeVersion());
+};
 
 /**
  * The compactc version `generate_node_data.sh` picks for a node tag, read from
@@ -98,9 +128,9 @@ const toolchainDigest = (): string =>
  * Set `COMPACT_TOOLCHAIN_IMAGE` to use a pre-built image instead (it must
  * already be present locally; nothing is built).
  */
-const TOOLCHAIN_IMAGE =
+const toolchainImage = (compactcVersion: string): string =>
   process.env.COMPACT_TOOLCHAIN_IMAGE ??
-  `compact-toolchain:${COMPACT_COMPILER_VERSION}-${toolchainDigest()}`;
+  `compact-toolchain:${compactcVersion}-${toolchainDigest()}`;
 
 /** The toolchain image build downloads a Debian base plus the compiler. */
 const IMAGE_BUILD_TIMEOUT_MS = 600_000;
@@ -142,9 +172,11 @@ export interface CompileCompactOptions {
 export async function compileCompactContract(options: CompileCompactOptions): Promise<string> {
   const { sourceDir, sourceFile, stage = [] } = options;
   const inputs = [sourceFile, ...stage].sort();
+  const compactcVersion = await compactCompilerVersion();
+  const image = toolchainImage(compactcVersion);
 
   const digest = createHash('sha256');
-  digest.update(`${COMPACT_COMPILER_VERSION}\0${COMPACT_MANAGER_VERSION}\0${TOOLCHAIN_IMAGE}`);
+  digest.update(`${compactcVersion}\0${COMPACT_MANAGER_VERSION}\0${image}`);
   for (const input of inputs) {
     const absolute = path.join(sourceDir, input);
     if (!fs.existsSync(absolute)) {
@@ -165,12 +197,12 @@ export async function compileCompactContract(options: CompileCompactOptions): Pr
 
   // The image comes first because handing a partial run's root-owned output
   // back to the host runs inside it, and it may have been pruned since.
-  await ensureToolchainImage();
+  await ensureToolchainImage(image, compactcVersion);
 
   // A directory without the marker is a partial run (interrupted, or a failed
   // compile). Its contents are root-owned, so hand ownership back first.
   if (fs.existsSync(outputDir)) {
-    await relaxOwnership(outputDir);
+    await relaxOwnership(outputDir, image);
     fs.rmSync(outputDir, { recursive: true, force: true });
   }
 
@@ -179,16 +211,16 @@ export async function compileCompactContract(options: CompileCompactOptions): Pr
     fs.copyFileSync(path.join(sourceDir, input), path.join(outputDir, input));
   }
 
-  log.info(`Compiling Compact fixture ${name} with compactc ${COMPACT_COMPILER_VERSION}`);
+  log.info(`Compiling Compact fixture ${name} with compactc ${compactcVersion}`);
   await dockerRun(
-    ['-v', `${outputDir}:/work`, TOOLCHAIN_IMAGE, `/work/${sourceFile}`, `/work/${MANAGED_DIR}`],
+    ['-v', `${outputDir}:/work`, image, `/work/${sourceFile}`, `/work/${MANAGED_DIR}`],
     `compiling ${sourceFile}`,
     COMPILE_TIMEOUT_MS,
   );
 
   // compactc runs as root in the container; without this the host process
   // cannot clean the cache directory up again.
-  await relaxOwnership(outputDir);
+  await relaxOwnership(outputDir, image);
 
   const contractEntry = path.join(outputDir, MANAGED_DIR, 'contract', 'index.js');
   if (!fs.existsSync(contractEntry)) {
@@ -197,7 +229,7 @@ export async function compileCompactContract(options: CompileCompactOptions): Pr
     );
   }
 
-  fs.writeFileSync(marker, `${TOOLCHAIN_IMAGE}\n`);
+  fs.writeFileSync(marker, `${image}\n`);
   log.debug(`Compiled Compact fixture ${name}: ${outputDir}`);
   return outputDir;
 }
@@ -215,31 +247,31 @@ export function compiledRuntimeVersion(compiledDir: string): string | undefined 
   return match?.[1];
 }
 
-async function ensureToolchainImage(): Promise<void> {
-  if (await dockerImageExists(TOOLCHAIN_IMAGE)) return;
+async function ensureToolchainImage(image: string, compactcVersion: string): Promise<void> {
+  if (await dockerImageExists(image)) return;
 
   if (process.env.COMPACT_TOOLCHAIN_IMAGE) {
     throw new Error(
-      `COMPACT_TOOLCHAIN_IMAGE=${TOOLCHAIN_IMAGE} is not present locally. ` +
+      `COMPACT_TOOLCHAIN_IMAGE=${image} is not present locally. ` +
         'Pull or build it first, or unset the variable to let the fixture build its own.',
     );
   }
 
-  log.info(`Building ${TOOLCHAIN_IMAGE} (first use only; cached as a Docker image afterwards)`);
+  log.info(`Building ${image} (first use only; cached as a Docker image afterwards)`);
   await runDocker(
     [
       'build',
       '--file',
       DOCKERFILE,
       '--build-arg',
-      `COMPACT_VERSION=${COMPACT_COMPILER_VERSION}`,
+      `COMPACT_VERSION=${compactcVersion}`,
       '--build-arg',
       `COMPACT_MANAGER_VERSION=${COMPACT_MANAGER_VERSION}`,
       '--tag',
-      TOOLCHAIN_IMAGE,
+      image,
       HERE,
     ],
-    `building ${TOOLCHAIN_IMAGE}`,
+    `building ${image}`,
     IMAGE_BUILD_TIMEOUT_MS,
   );
 }
@@ -254,22 +286,13 @@ async function dockerImageExists(image: string): Promise<boolean> {
 }
 
 /** Give the compiled output back to the host user, so the cache stays removable. */
-async function relaxOwnership(dir: string): Promise<void> {
+async function relaxOwnership(dir: string, image: string): Promise<void> {
   const uid = process.getuid?.();
   const gid = process.getgid?.();
   if (uid === undefined || gid === undefined) return;
   try {
     await dockerRun(
-      [
-        '--entrypoint',
-        'chown',
-        '-v',
-        `${dir}:/work`,
-        TOOLCHAIN_IMAGE,
-        '-R',
-        `${uid}:${gid}`,
-        '/work',
-      ],
+      ['--entrypoint', 'chown', '-v', `${dir}:/work`, image, '-R', `${uid}:${gid}`, '/work'],
       `restoring ownership of ${dir}`,
       COMPILE_TIMEOUT_MS,
     );

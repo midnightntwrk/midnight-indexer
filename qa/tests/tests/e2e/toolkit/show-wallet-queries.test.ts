@@ -26,6 +26,7 @@ import {
 } from '@utils/toolkit/schemas';
 import { env } from 'environment/model';
 import { seedFingerprint } from '@utils/moth/moth-backend';
+import { deriveAddresses } from '@utils/moth/moth-addresses';
 
 const TOOLKIT_STARTUP_TIMEOUT = 60_000;
 
@@ -43,11 +44,12 @@ const WALLET_STATE_TIMEOUT = isMoth ? 180_000 : TOOLKIT_STARTUP_TIMEOUT;
 describe(`show wallet queries using ${BACKEND}`, () => {
   let toolkit: ToolkitWrapper;
 
-  // The container is still needed under moth: `showAddress` derives the
-  // unshielded address through the toolkit.
+  // The container is only started on the toolkit backend. Under moth the
+  // wallet state comes from the synced wallet and the unshielded address from
+  // local key derivation, so nothing here touches the container.
   beforeAll(async () => {
     toolkit = new ToolkitWrapper({});
-    await toolkit.start();
+    if (!isMoth) await toolkit.start();
   }, TOOLKIT_STARTUP_TIMEOUT);
 
   afterAll(async () => {
@@ -113,9 +115,9 @@ describe(`show wallet queries using ${BACKEND}`, () => {
         // Same seed as the private state query, for the same reason.
         const walletSeed = dataProvider.getTransferFundingSeed();
 
-        // Get the unshielded address from the seed
-        const addressInfo = await toolkit.showAddress(walletSeed);
-        const walletAddress = addressInfo.unshielded;
+        // Get the unshielded address from the seed: the toolkit's `show-address`
+        // on the toolkit backend, local derivation on moth.
+        const walletAddress = (await deriveAddresses(walletSeed, toolkit)).unshielded;
 
         log.debug(`Querying public wallet state for address: ${walletAddress}`);
         const publicWalletState: PublicWalletState = await toolkit.showPublicWalletState(
