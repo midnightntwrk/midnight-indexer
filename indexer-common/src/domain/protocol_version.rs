@@ -23,6 +23,7 @@ pub enum ProtocolVersion {
     V1_0(u32),
     V2_0(u32),
     V2_1(u32),
+    V3_0(u32),
 }
 
 impl ProtocolVersion {
@@ -32,6 +33,7 @@ impl ProtocolVersion {
             ProtocolVersion::V1_0(_) => LedgerVersion::V8,
             ProtocolVersion::V2_0(_) => LedgerVersion::V9,
             ProtocolVersion::V2_1(_) => LedgerVersion::V9,
+            ProtocolVersion::V3_0(_) => LedgerVersion::V9,
         }
     }
 
@@ -41,6 +43,7 @@ impl ProtocolVersion {
             ProtocolVersion::V1_0(_) => NodeVersion::V1_0,
             ProtocolVersion::V2_0(_) => NodeVersion::V2_0,
             ProtocolVersion::V2_1(_) => NodeVersion::V2_1,
+            ProtocolVersion::V3_0(_) => NodeVersion::V3_0,
         }
     }
 
@@ -56,6 +59,7 @@ impl From<ProtocolVersion> for u32 {
             ProtocolVersion::V1_0(n) => n,
             ProtocolVersion::V2_0(n) => n,
             ProtocolVersion::V2_1(n) => n,
+            ProtocolVersion::V3_0(n) => n,
         }
     }
 }
@@ -81,6 +85,8 @@ impl TryFrom<u32> for ProtocolVersion {
             Ok(Self::V2_0(version))
         } else if (2_001_000..2_002_000).contains(&version) {
             Ok(Self::V2_1(version))
+        } else if (3_000_000..3_001_000).contains(&version) {
+            Ok(Self::V3_0(version))
         } else {
             Err(ProtocolVersionError::Unsupported(version))
         }
@@ -156,6 +162,7 @@ pub enum NodeVersion {
     V1_0,
     V2_0,
     V2_1,
+    V3_0,
 }
 
 #[cfg(test)]
@@ -164,40 +171,50 @@ mod tests {
     use assert_matches::assert_matches;
 
     #[test]
+    fn test_unsupported_protocol_version() {
+        for version in [
+            0_019_000_u32,
+            0_021_000,
+            0_023_000,
+            1_001_000,
+            2_002_000,
+            3_001_000,
+        ] {
+            assert_matches!(
+                ProtocolVersion::try_from(version),
+                Err(ProtocolVersionError::Unsupported(v)) if v == version
+            );
+        }
+    }
+
+    #[test]
     fn test_protocol_version() {
-        let version = ProtocolVersion::try_from(0_019_000_u32);
-        assert_matches!(version, Err(ProtocolVersionError::Unsupported(v)) if v == 0_019_000);
+        // Sweeping every minor version reaches every variant `try_from` can return, as each range
+        // starts on a multiple of 1_000.
+        let protocol_versions = (0..=u32::MAX)
+            .step_by(1_000)
+            .filter_map(|version| ProtocolVersion::try_from(version).ok());
 
-        let version = ProtocolVersion::try_from(0_021_000_u32);
-        assert_matches!(version, Err(ProtocolVersionError::Unsupported(v)) if v == 0_021_000);
+        for protocol_version in protocol_versions {
+            let version = u32::from(protocol_version);
 
-        let version = ProtocolVersion::try_from(0_023_000_u32);
-        assert_matches!(version, Err(ProtocolVersionError::Unsupported(v)) if v == 0_023_000);
+            // Exhaustive, so that a new protocol version does not compile until it has a case.
+            use ProtocolVersion::*;
+            let (versions, ledger_version, node_version) = match protocol_version {
+                V0_22(_) => (0_022_000..0_023_000, LedgerVersion::V8, NodeVersion::V0_22),
+                V1_0(_) => (1_000_000..1_001_000, LedgerVersion::V8, NodeVersion::V1_0),
+                V2_0(_) => (2_000_000..2_001_000, LedgerVersion::V9, NodeVersion::V2_0),
+                V2_1(_) => (2_001_000..2_002_000, LedgerVersion::V9, NodeVersion::V2_1),
+                V3_0(_) => (3_000_000..3_001_000, LedgerVersion::V9, NodeVersion::V3_0),
+            };
 
-        let version = ProtocolVersion::try_from(1_001_000_u32);
-        assert_matches!(version, Err(ProtocolVersionError::Unsupported(v)) if v == 1_001_000);
-
-        let version = ProtocolVersion::try_from(2_002_000_u32);
-        assert_matches!(version, Err(ProtocolVersionError::Unsupported(v)) if v == 2_002_000);
-
-        let version =
-            ProtocolVersion::try_from(0_022_666_u32).expect("0_022_666 is valid protocol version");
-        assert_eq!(version.ledger_version(), LedgerVersion::V8);
-        assert_eq!(version.node_version(), NodeVersion::V0_22);
-
-        let version =
-            ProtocolVersion::try_from(1_000_000_u32).expect("1_000_000 is valid protocol version");
-        assert_eq!(version.ledger_version(), LedgerVersion::V8);
-        assert_eq!(version.node_version(), NodeVersion::V1_0);
-
-        let version =
-            ProtocolVersion::try_from(2_000_000_u32).expect("2_000_000 is valid protocol version");
-        assert_eq!(version.ledger_version(), LedgerVersion::V9);
-        assert_eq!(version.node_version(), NodeVersion::V2_0);
-
-        let version =
-            ProtocolVersion::try_from(2_001_000_u32).expect("2_001_000 is valid protocol version");
-        assert_eq!(version.ledger_version(), LedgerVersion::V9);
-        assert_eq!(version.node_version(), NodeVersion::V2_1);
+            assert!(versions.contains(&version), "{version}");
+            assert_eq!(
+                protocol_version.ledger_version(),
+                ledger_version,
+                "{version}"
+            );
+            assert_eq!(protocol_version.node_version(), node_version, "{version}");
+        }
     }
 }

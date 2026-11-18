@@ -7,15 +7,17 @@ How the indexer is kept consistent with the node, and what the test layers cover
 The hard guarantee lives in the chain-indexer, not in a suite. For every block the
 chain-indexer applies the node's transactions to its **own** `LedgerState`, recomputes the
 merkle roots, and **`bail!`s (halts indexing) on any mismatch** rather than persisting a
-divergent state - `chain-indexer/src/application.rs` (~404-420):
+divergent state - `index_block` in `chain-indexer/src/application.rs`:
 
-- **Zswap merkle tree root - every block.** `ledger_state.zswap_merkle_tree_root()` is
-  compared to the node's per-block root; mismatch → `bail!`. This is the check that works
-  against every node version.
-- **Full ledger-state root - every block the node supplies one.** When `block.ledger_state_root`
-  is present (Node ≥ 0.22) the recomputed `ledger_state.root()` is compared to it; mismatch →
-  `bail!`. At genesis the state root additionally disambiguates a pre- vs post-block-0 genesis.
-  (A `TODO` retires the zswap-only path once Node < 0.22 support is dropped.)
+- **Full ledger state - every block.** The node stores the tagged arena key of its end-of-block
+  ledger as `pallet_midnight::StateKey` in Substrate storage. The chain-indexer reads it for every
+  block and compares it to `ledger_state.state_key()`, the same key computed over its own
+  state (`indexer-common/src/domain/ledger/state_key.rs` mirrors the node's ledger wrapper);
+  mismatch → `bail!` with "ledger state root mismatch". At genesis the state key additionally
+  disambiguates a pre- vs post-block-0 genesis.
+
+Reading `StateKey` from Substrate storage rather than asking the node to load its ledger state
+means the guard also works against a node that prunes historical ledger states.
 
 So the model is **fail loud, don't drift**: if the indexer ever computes a root the node
 disagrees with, it stops. There is no after-the-fact `assert!(indexer_root == node_root)`
@@ -23,7 +25,23 @@ anywhere - the guard is the source of truth.
 
 Per-block **dust roots** are computed, stored and served but not cross-checked against the node
 (there is no node dust-root RPC); they are covered transitively by the deterministic re-apply
-that the zswap/state-root match guards each block.
+that the state key match guards each block.
+
+### Rolling out the per-block `StateKey` guard
+
+Older images compared the full ledger state only at genesis and checked later blocks on the zswap
+root alone. With the `StateKey` guard, any divergence outside zswap that those images let pass now
+halts chain-indexer with "ledger state root mismatch" at the first affected block, and stays halted
+across restarts. This applies both to a fresh sync of a live network and to an existing database
+resumed after the upgrade: blocks indexed before the upgrade are not re-checked, but a divergence
+carried in their persisted ledger state surfaces at the first block indexed afterwards. The only
+recovery is a fixed image plus a [reindex from genesis](./reindexing.md).
+
+Before releasing an image with this guard, run the sync suite in `qa/tests/tests/sync` with
+`MAX_BLOCKS=0` against that image for each live network, and mention the stricter check in the
+deployment notes. With `MAX_BLOCKS=0`, `MAX_DURATION_MS` is the only bound and defaults to
+30 minutes, so raise it to cover the whole chain (a multi-day run on a deployed network, see the
+suite's [runtime expectations](../qa/tests/tests/sync/README.md#runtime-expectations)).
 
 ## How CI exercises the guard
 
@@ -31,13 +49,13 @@ that the zswap/state-root match guards each block.
 `ci-standalone.yaml`):
 
 - Starts a **real `midnightntwrk/midnight-node` container** (version = last line of
-  `NODE_VERSIONS`, currently `2.1.101`) whose chain DB is **pre-seeded from fixed data in
+  `NODE_VERSIONS`, currently `3.0.0-c3a556864675`) whose chain DB is **pre-seeded from fixed data in
   `.node/<version>/`** (bind-mounted, `CFG_PRESET=dev`) so it replays a known, deterministic
   chain, plus postgres + nats via testcontainers, and runs the **actual** chain-indexer /
   wallet-indexer / indexer-api binaries (cloud) or `indexer-standalone` + SQLite (standalone).
   It SIGTERMs and restarts chain-indexer once to exercise reconnect.
 - `indexer-tests/src/e2e.rs` then runs the assertions. It **collects the blocks subscription
-  (heights 0..=40) as the source of truth**, validating structural invariants as it goes: heights
+  (heights 0..=45) as the source of truth**, validating structural invariants as it goes: heights
   increment by one, parent-hash linkage, transactions reference their block and share its protocol
   version, segment results match the transaction status, fees parse, a contract call shares its
   deploy's address, unshielded balances have a valid token type + amount, and zswap/dust ledger

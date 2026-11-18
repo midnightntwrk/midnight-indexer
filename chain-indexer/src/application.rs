@@ -42,6 +42,7 @@ use std::{
     collections::{HashSet, VecDeque},
     error::Error as StdError,
     future::ready,
+    mem,
     num::{NonZeroU32, NonZeroUsize},
     pin::pin,
     sync::Arc,
@@ -530,7 +531,7 @@ where
 async fn index_block<N>(
     caught_up_max_distance: u32,
     caught_up_leeway: u32,
-    block: node::Block,
+    mut block: node::Block,
     mut ledger_state: LedgerState,
     network_id: &NetworkId,
     highest_block_on_node: &Arc<RwLock<Option<BlockRef>>>,
@@ -544,11 +545,9 @@ async fn index_block<N>(
 where
     N: Node,
 {
-    // Capture the node's zswap merkle tree root (domain type) before `try_into` serializes it, to
-    // compare against the zswap merkle tree root in the ledger state below.
-    let zswap_merkle_tree_root = block.zswap_merkle_tree_root;
-
-    let (mut block, transactions) = block.try_into().context("convert node block into domain")?;
+    // `block.into()` drops the state key, so move it out rather than copy it.
+    let node_state_key = mem::take(&mut block.state_key);
+    let (mut block, transactions) = block.into();
 
     let ledger_version = block.protocol_version.ledger_version();
     // Whether this block translates the ledger state, taken before the state is replaced.
@@ -600,39 +599,32 @@ where
 
     // Apply transactions to ledger state with special handling for genesis block.
     let (mut transactions, ledger_parameters) = if block.height == 0 {
-        // At genesis compare ledger state roots of genesis and block from node to detect whether
+        // At genesis compare the state keys of genesis and block from node to detect whether
         // genesis already includes transactions (post-block-0) or not (pre-block-0).
+        let genesis_ledger_state = node
+            .fetch_genesis_ledger_state()
+            .await
+            .context("fetch genesis ledger state")?;
+        let genesis_ledger_state = LedgerState::from_genesis(
+            genesis_ledger_state,
+            block.protocol_version.ledger_version(),
+        )
+        .context("create ledger state from genesis")?;
+        let genesis_state_key = genesis_ledger_state
+            .state_key()
+            .context("compute genesis state key")?;
 
-        if let Some(ledger_state_root) = block.ledger_state_root.as_ref() {
-            let genesis_ledger_state = node
-                .fetch_genesis_ledger_state()
-                .await
-                .context("fetch genesis ledger state")?;
-            let genesis_ledger_state = LedgerState::from_genesis(
-                genesis_ledger_state,
-                block.protocol_version.ledger_version(),
-            )
-            .context("create ledger state from genesis")?;
-            let genesis_ledger_state_root = genesis_ledger_state
-                .root()
-                .context("compute genesis ledger state root")?;
+        if node_state_key == genesis_state_key {
+            info!("post-block-0: applying transactions to fresh state, then use genesis state");
 
-            if *ledger_state_root == genesis_ledger_state_root {
-                info!("post-block-0: applying transactions to fresh state, then use genesis state");
+            let transactions_ledger_parameters = apply_transactions(&mut ledger_state)?;
+            ledger_state = genesis_ledger_state;
 
-                let transactions_ledger_parameters = apply_transactions(&mut ledger_state)?;
-                ledger_state = genesis_ledger_state;
-
-                transactions_ledger_parameters
-            } else {
-                info!("pre-block-0: applying transactions to genesis state");
-
-                ledger_state = genesis_ledger_state;
-                apply_transactions(&mut ledger_state)?
-            }
+            transactions_ledger_parameters
         } else {
-            // TODO: Remove once support for Node < 0.22 is dropped!
-            // Pre Node 0.22: no ledger_state_root RPC! Ignore genesis state.
+            info!("pre-block-0: applying transactions to genesis state");
+
+            ledger_state = genesis_ledger_state;
             apply_transactions(&mut ledger_state)?
         }
     } else {
@@ -643,6 +635,10 @@ where
 
     *parent_block_timestamp = block.timestamp;
     block.ledger_parameters = ledger_parameters.serialize()?;
+    block.zswap_merkle_tree_root = ledger_state
+        .zswap_merkle_tree_root()
+        .serialize()
+        .context("serialize zswap merkle tree root")?;
     block.zswap_end_index = ledger_state.zswap_first_free();
     // These two are NOT monotonic across the ledger 8 -> 9 boundary: the fork
     // wipes dust state, so both `first_free` counters reset to zero and the
@@ -664,28 +660,19 @@ where
         .dust_generation_merkle_tree_root()
         .context("get dust generation merkle tree root")?;
 
-    // Validate ledger state.
-    // TODO: Only use ledger state root comparison once support for Node < 0.22 is dropped!
-    let ledger_state_root = ledger_state.root().context("get ledger state root")?;
-    if let Some(node_ledger_state_root) = block.ledger_state_root.as_ref()
-        && *node_ledger_state_root != ledger_state_root
-    {
+    // Validate the ledger state against the node's `StateKey`, which commits to the whole
+    // end-of-block ledger state and stays readable after the node prunes historical ledger states.
+    let state_key = ledger_state.state_key().context("compute state key")?;
+    if state_key != node_state_key {
+        // The "ledger state root mismatch" wording predates the `StateKey` comparison and is kept
+        // on purpose: QA scripts and tests (e.g. qa/scripts/test-hardfork-8to9.sh, the qa sync
+        // suite, indexer-tests/tests/hardfork_e2e.rs) match on this phrase.
         bail!(
             "ledger state root mismatch for block {} at height {}: node={}, indexer={}",
             block.hash,
             block.height,
-            node_ledger_state_root,
-            ledger_state_root,
-        );
-    }
-    let local_zswap_merkle_tree_root = ledger_state.zswap_merkle_tree_root();
-    if local_zswap_merkle_tree_root != zswap_merkle_tree_root {
-        bail!(
-            "zswap state root mismatch for block {} at height {}: node={:?}, indexer={:?}",
-            block.hash,
-            block.height,
-            zswap_merkle_tree_root,
-            local_zswap_merkle_tree_root,
+            node_state_key,
+            state_key,
         );
     }
 
@@ -925,24 +912,32 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{
-        application::{gc_budget, gc_catch_up_interval_default, node_blocks},
+        application::{
+            gc_budget, gc_catch_up_interval_default, index_block, metrics::Metrics, node_blocks,
+        },
         domain::{
-            BlockRef, SystemParametersChange,
+            Block, BlockRef, ContractStateTranslation, DParameter, DustRegistrationEvent,
+            LatestContractAction, LedgerState, SystemParametersChange, TermsAndConditions,
+            Transaction,
             node::{self, Node},
+            storage::Storage,
         },
     };
-    use fake::{Fake, Faker};
     use futures::{Stream, StreamExt, TryStreamExt, stream};
     use indexer_common::{
         domain::{
-            BlockHash, ByteArray, ByteVec, NodeVersion, ProtocolVersion,
-            ledger::ZswapMerkleTreeRoot,
+            BlockHash, ByteArray, ByteVec, LedgerVersion, Message, NetworkId, NodeVersion,
+            ProtocolVersion, Publisher, SerializedLedgerStateKey,
         },
         error::BoxError,
+        testing::init_ledger_db,
     };
+    use parking_lot::RwLock;
     use std::{
         convert::Infallible,
-        num::NonZeroU32,
+        fs,
+        num::{NonZeroU32, NonZeroUsize},
+        path::Path,
         sync::{Arc, LazyLock, Mutex},
         time::Duration,
     };
@@ -1020,6 +1015,229 @@ mod tests {
         Ok(())
     }
 
+    /// The `StateKey` guard in `index_block`. At genesis a node key equal to the key of the genesis
+    /// state takes the post-block-0 path and the block is saved. A node key the indexer does not
+    /// reproduce, at genesis (taking the pre-block-0 path) or at a later block, halts indexing with
+    /// the "ledger state root mismatch" error before anything is saved.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_index_block_validates_state_key() -> Result<(), BoxError> {
+        let _ledger_db = init_ledger_db().await?;
+
+        let network_id = NetworkId::try_from("undeployed".to_string())?;
+        let genesis = fs::read(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../indexer-common/tests/v8_genesis_undeployed_0_22_0.raw"),
+        )?;
+        let genesis_state_key =
+            LedgerState::from_genesis(&genesis, LedgerVersion::V8)?.state_key()?;
+        let wrong_state_key = ByteVec::from(vec![0; genesis_state_key.as_ref().len()]);
+        let node = GenesisNode(genesis.into());
+        let mut storage = MockStorage::default();
+
+        let index = async |block: node::Block, ledger_state, storage: &mut MockStorage| {
+            index_block(
+                0,
+                0,
+                block,
+                ledger_state,
+                &network_id,
+                &Arc::new(RwLock::new(None)),
+                &mut false,
+                &mut 0,
+                storage,
+                &NoopPublisher,
+                &Metrics::new(None, 0, (0, 0, 0)),
+                &node,
+            )
+            .await
+        };
+        let fresh_ledger_state = || LedgerState::new(network_id.clone(), LedgerVersion::OLDEST);
+        let assert_mismatch = |result: anyhow::Result<_>| {
+            let Err(error) = result else {
+                panic!("state key mismatch fails indexing");
+            };
+            assert!(
+                format!("{error:#}").contains("ledger state root mismatch"),
+                "unexpected error: {error:#}"
+            );
+        };
+
+        // Genesis, node key unknown to the indexer: pre-block-0 path, then the guard bails.
+        let block_0 = node::Block {
+            state_key: wrong_state_key.clone(),
+            ..BLOCK_0.to_owned()
+        };
+        assert_mismatch(index(block_0, fresh_ledger_state()?, &mut storage).await);
+        assert_eq!(storage.saved_blocks, 0);
+
+        // Genesis, node key equal to the genesis state's: post-block-0 path, the guard passes.
+        let block_0 = node::Block {
+            state_key: genesis_state_key.clone(),
+            ..BLOCK_0.to_owned()
+        };
+        let (ledger_state, _) = index(block_0, fresh_ledger_state()?, &mut storage).await?;
+        assert_eq!(storage.saved_blocks, 1);
+        assert_eq!(ledger_state.state_key()?, genesis_state_key);
+
+        // A later block whose node key the indexer does not reproduce: the guard bails.
+        let block_1 = node::Block {
+            state_key: wrong_state_key,
+            ..BLOCK_1.to_owned()
+        };
+        assert_mismatch(index(block_1, ledger_state, &mut storage).await);
+        assert_eq!(storage.saved_blocks, 1);
+
+        // Genesis, node key equal to the genesis state plus block 0: pre-block-0 path, the guard
+        // passes. A non-zero timestamp makes applying block 0 change the key, so the node key
+        // cannot also match the genesis state and select the post-block-0 path.
+        let block_0 = node::Block {
+            timestamp: 1_000,
+            ..BLOCK_0.to_owned()
+        };
+        let mut expected_ledger_state = LedgerState::from_genesis(&node.0, LedgerVersion::V8)?;
+        expected_ledger_state.apply_transactions(
+            [],
+            BlockRef {
+                hash: block_0.hash,
+                height: block_0.height,
+            },
+            block_0.parent_hash,
+            block_0.timestamp,
+            block_0.timestamp,
+            false,
+        )?;
+        let expected_state_key = expected_ledger_state.state_key()?;
+        assert_ne!(expected_state_key, genesis_state_key);
+        let block_0 = node::Block {
+            state_key: expected_state_key.clone(),
+            ..block_0
+        };
+        let (ledger_state, _) = index(block_0, fresh_ledger_state()?, &mut storage).await?;
+        assert_eq!(storage.saved_blocks, 2);
+        assert_eq!(ledger_state.state_key()?, expected_state_key);
+
+        Ok(())
+    }
+
+    /// A node serving the given genesis ledger state and no blocks.
+    #[derive(Clone)]
+    struct GenesisNode(ByteVec);
+
+    impl Node for GenesisNode {
+        type Error = Infallible;
+
+        async fn highest_blocks(
+            &self,
+        ) -> Result<impl Stream<Item = Result<BlockRef, Self::Error>>, Self::Error> {
+            Ok(stream::empty())
+        }
+
+        fn finalized_blocks(
+            &mut self,
+            _highest_block: Option<BlockRef>,
+        ) -> impl Stream<Item = Result<node::Block, Self::Error>> {
+            stream::empty()
+        }
+
+        async fn fetch_system_parameters(
+            &self,
+            block_hash: BlockHash,
+            block_height: u64,
+            timestamp: u64,
+            _node_version: NodeVersion,
+        ) -> Result<SystemParametersChange, Self::Error> {
+            Ok(SystemParametersChange {
+                block_height,
+                block_hash,
+                timestamp,
+                d_parameter: None,
+                terms_and_conditions: None,
+            })
+        }
+
+        async fn fetch_genesis_ledger_state(&self) -> Result<ByteVec, Self::Error> {
+            Ok(self.0.clone())
+        }
+    }
+
+    /// An empty storage counting saved blocks.
+    #[derive(Clone, Default)]
+    struct MockStorage {
+        saved_blocks: usize,
+    }
+
+    impl Storage for MockStorage {
+        async fn save_block(
+            &mut self,
+            _block: &Block,
+            _transactions: &[Transaction],
+            _dust_registration_events: &[DustRegistrationEvent],
+            _ledger_state_key: &SerializedLedgerStateKey,
+            _system_parameters_change: Option<&SystemParametersChange>,
+            _contract_state_translations: &[(u64, ContractStateTranslation)],
+        ) -> Result<Option<u64>, sqlx::Error> {
+            self.saved_blocks += 1;
+            Ok(None)
+        }
+
+        async fn get_latest_contract_actions(
+            &self,
+        ) -> Result<Vec<(u64, LatestContractAction)>, sqlx::Error> {
+            Ok(vec![])
+        }
+
+        async fn get_highest_block(
+            &self,
+        ) -> Result<Option<(BlockRef, ProtocolVersion, SerializedLedgerStateKey)>, sqlx::Error>
+        {
+            Ok(None)
+        }
+
+        async fn get_highest_block_timestamp(&self) -> Result<Option<u64>, sqlx::Error> {
+            Ok(None)
+        }
+
+        async fn get_newest_ledger_state_keys(
+            &self,
+            _limit: NonZeroUsize,
+        ) -> Result<Vec<(ProtocolVersion, SerializedLedgerStateKey)>, sqlx::Error> {
+            Ok(vec![])
+        }
+
+        async fn get_transaction_count(&self) -> Result<u64, sqlx::Error> {
+            Ok(0)
+        }
+
+        async fn get_contract_action_count(&self) -> Result<(u64, u64, u64), sqlx::Error> {
+            Ok((0, 0, 0))
+        }
+
+        async fn contract_actions_without_state_keys_exist(&self) -> Result<bool, sqlx::Error> {
+            Ok(false)
+        }
+
+        async fn get_latest_d_parameter(&self) -> Result<Option<DParameter>, sqlx::Error> {
+            Ok(None)
+        }
+
+        async fn get_latest_terms_and_conditions(
+            &self,
+        ) -> Result<Option<TermsAndConditions>, sqlx::Error> {
+            Ok(None)
+        }
+    }
+
+    #[derive(Clone)]
+    struct NoopPublisher;
+
+    impl Publisher for NoopPublisher {
+        type Error = Infallible;
+
+        async fn publish<T: Message + Send + Sync>(&self, _message: &T) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
     #[derive(Clone)]
     struct MockNode;
 
@@ -1068,8 +1286,7 @@ mod tests {
         parent_hash: ZERO_HASH,
         author: Default::default(),
         timestamp: Default::default(),
-        zswap_merkle_tree_root: ZswapMerkleTreeRoot::V8(Faker.fake()),
-        ledger_state_root: None,
+        state_key: Default::default(),
         transactions: Default::default(),
         dust_registration_events: Default::default(),
         bridge_events: Default::default(),
@@ -1082,8 +1299,7 @@ mod tests {
         parent_hash: BLOCK_0_HASH,
         author: Default::default(),
         timestamp: Default::default(),
-        zswap_merkle_tree_root: ZswapMerkleTreeRoot::V8(Faker.fake()),
-        ledger_state_root: None,
+        state_key: Default::default(),
         transactions: Default::default(),
         dust_registration_events: Default::default(),
         bridge_events: Default::default(),
@@ -1096,8 +1312,7 @@ mod tests {
         parent_hash: BLOCK_1_HASH,
         author: Default::default(),
         timestamp: Default::default(),
-        zswap_merkle_tree_root: ZswapMerkleTreeRoot::V8(Faker.fake()),
-        ledger_state_root: None,
+        state_key: Default::default(),
         transactions: Default::default(),
         dust_registration_events: Default::default(),
         bridge_events: Default::default(),
@@ -1110,8 +1325,7 @@ mod tests {
         parent_hash: BLOCK_2_HASH,
         author: Default::default(),
         timestamp: Default::default(),
-        zswap_merkle_tree_root: ZswapMerkleTreeRoot::V8(Faker.fake()),
-        ledger_state_root: None,
+        state_key: Default::default(),
         transactions: Default::default(),
         dust_registration_events: Default::default(),
         bridge_events: Default::default(),

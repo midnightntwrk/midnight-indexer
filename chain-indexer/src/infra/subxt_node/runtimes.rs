@@ -15,6 +15,7 @@ mod v0_22_0;
 mod v1_0_300;
 mod v2_0_0;
 mod v2_1_100;
+mod v3_0_0;
 
 // To see how this is generated, look in build.rs
 include!(concat!(env!("OUT_DIR"), "/generated_runtime.rs"));
@@ -24,8 +25,9 @@ use crate::{
         BlockRef, DParameter, DustRegistrationEvent, TermsAndConditions,
         extrinsic::{Applied, EventIndex, ExtrinsicIndex, Phase, divergence},
     },
-    infra::subxt_node::{ContentSource, OnlineClientAtBlock, SubxtNodeError},
+    infra::subxt_node::{ConsensusEngine, ContentSource, OnlineClientAtBlock, SubxtNodeError},
 };
+use futures::future::try_join;
 use indexer_common::domain::{ByteVec, NodeVersion, TransactionHash, bridge::BridgeEvent};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -67,7 +69,7 @@ impl Transaction {
 /// Make block details depending on the given protocol version: fetch the block's raw extrinsics
 /// and events, and decode them.
 pub async fn make_block_details(
-    authorities: &mut Option<Vec<[u8; 32]>>,
+    authorities: &mut Option<(ConsensusEngine, Vec<[u8; 32]>)>,
     node_version: NodeVersion,
     block: &OnlineClientAtBlock,
     content: Option<ContentSource>,
@@ -79,37 +81,41 @@ pub async fn make_block_details(
 
     // Enactment block: decode this block's raw extrinsic bytes against the parent (old-runtime)
     // client. Raw event bytes are metadata-independent, so they are fetched from this block and
-    // re-decoded against the same client.
-    let (client, extrinsics) = match content {
-        Some(ContentSource {
-            client,
-            extrinsic_bodies,
-        }) => (Some(client), extrinsic_bodies),
-        None => {
-            let extrinsics = block
-                .extrinsics()
-                .fetch()
-                .await
-                .map_err(|error| SubxtNodeError::FetchExtrinsics(error.into()))?
-                .iter()
-                .map(|extrinsic| {
-                    extrinsic
-                        .map(|extrinsic| extrinsic.bytes().to_vec())
-                        .map_err(|error| SubxtNodeError::GetNextExtrinsic(error.into()))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            (None, extrinsics)
+    // re-decoded against the same client. Extrinsics and events are independent requests, so
+    // fetch them concurrently.
+    let fetch_extrinsics = async {
+        match content {
+            Some(ContentSource {
+                client,
+                extrinsic_bodies,
+            }) => Ok((Some(client), extrinsic_bodies)),
+            None => {
+                let extrinsics = block
+                    .extrinsics()
+                    .fetch()
+                    .await
+                    .map_err(|error| SubxtNodeError::FetchExtrinsics(error.into()))?
+                    .iter()
+                    .map(|extrinsic| {
+                        extrinsic
+                            .map(|extrinsic| extrinsic.bytes().to_vec())
+                            .map_err(|error| SubxtNodeError::GetNextExtrinsic(error.into()))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok((None, extrinsics))
+            }
         }
     };
+    let fetch_events = async {
+        block
+            .events()
+            .fetch()
+            .await
+            .map(|events| events.bytes().to_vec())
+            .map_err(|error| SubxtNodeError::FetchEvents(error.into()))
+    };
+    let ((client, extrinsics), events) = try_join(fetch_extrinsics, fetch_events).await?;
     let client = client.as_ref().unwrap_or(block);
-
-    let events = block
-        .events()
-        .fetch()
-        .await
-        .map_err(|error| SubxtNodeError::FetchEvents(error.into()))?
-        .bytes()
-        .to_vec();
 
     decode_block_details(
         authorities,
@@ -124,7 +130,7 @@ pub async fn make_block_details(
 
 /// Decode block details from raw extrinsics and events depending on the given protocol version.
 pub async fn decode_block_details(
-    authorities: &mut Option<Vec<[u8; 32]>>,
+    authorities: &mut Option<(ConsensusEngine, Vec<[u8; 32]>)>,
     node_version: NodeVersion,
     client: &AtBlock<impl OfflineClientAtBlockT<SubstrateConfig>>,
     block: BlockRef,
@@ -132,19 +138,13 @@ pub async fn decode_block_details(
     events: Vec<u8>,
 ) -> Result<BlockDetails, SubxtNodeError> {
     // TODO Replace this often repeated pattern with a macro?
+    use NodeVersion::*;
     match node_version {
-        NodeVersion::V0_22 => {
-            v0_22_0::make_block_details(authorities, client, block, extrinsics, events).await
-        }
-        NodeVersion::V1_0 => {
-            v1_0_300::make_block_details(authorities, client, block, extrinsics, events).await
-        }
-        NodeVersion::V2_0 => {
-            v2_0_0::make_block_details(authorities, client, block, extrinsics, events).await
-        }
-        NodeVersion::V2_1 => {
-            v2_1_100::make_block_details(authorities, client, block, extrinsics, events).await
-        }
+        V0_22 => v0_22_0::make_block_details(authorities, client, block, extrinsics, events).await,
+        V1_0 => v1_0_300::make_block_details(authorities, client, block, extrinsics, events).await,
+        V2_0 => v2_0_0::make_block_details(authorities, client, block, extrinsics, events).await,
+        V2_1 => v2_1_100::make_block_details(authorities, client, block, extrinsics, events).await,
+        V3_0 => v3_0_0::make_block_details(authorities, client, block, extrinsics, events).await,
     }
 }
 
@@ -189,46 +189,37 @@ pub async fn fetch_authorities(
     node_version: NodeVersion,
     block: &OnlineClientAtBlock,
 ) -> Result<Vec<[u8; 32]>, SubxtNodeError> {
+    use NodeVersion::*;
     match node_version {
-        NodeVersion::V0_22 => v0_22_0::fetch_authorities(block).await,
-        NodeVersion::V1_0 => v1_0_300::fetch_authorities(block).await,
-        NodeVersion::V2_0 => v2_0_0::fetch_authorities(block).await,
-        NodeVersion::V2_1 => v2_1_100::fetch_authorities(block).await,
+        V0_22 => v0_22_0::fetch_authorities(block).await,
+        V1_0 => v1_0_300::fetch_authorities(block).await,
+        V2_0 => v2_0_0::fetch_authorities(block).await,
+        V2_1 => v2_1_100::fetch_authorities(block).await,
+        V3_0 => v3_0_0::fetch_authorities(block).await,
+    }
+}
+
+/// Fetch the BABE authorities depending on the given node version. Only node 3.0 runs BABE.
+pub async fn fetch_babe_authorities(
+    node_version: NodeVersion,
+    block: &OnlineClientAtBlock,
+) -> Result<Vec<[u8; 32]>, SubxtNodeError> {
+    use NodeVersion::*;
+    match node_version {
+        V0_22 | V1_0 | V2_0 | V2_1 => Err(SubxtNodeError::NoBabeAuthorities(node_version)),
+        V3_0 => v3_0_0::fetch_babe_authorities(block).await,
     }
 }
 
 /// Decode slot depending on the given protocol version.
 pub fn decode_slot(slot: &[u8], node_version: NodeVersion) -> Result<u64, SubxtNodeError> {
+    use NodeVersion::*;
     match node_version {
-        NodeVersion::V0_22 => v0_22_0::decode_slot(slot),
-        NodeVersion::V1_0 => v1_0_300::decode_slot(slot),
-        NodeVersion::V2_0 => v2_0_0::decode_slot(slot),
-        NodeVersion::V2_1 => v2_1_100::decode_slot(slot),
-    }
-}
-
-pub async fn get_zswap_merkle_tree_root(
-    node_version: NodeVersion,
-    block: &OnlineClientAtBlock,
-) -> Result<Vec<u8>, SubxtNodeError> {
-    match node_version {
-        NodeVersion::V0_22 => v0_22_0::get_zswap_merkle_tree_root(block).await,
-        NodeVersion::V1_0 => v1_0_300::get_zswap_merkle_tree_root(block).await,
-        NodeVersion::V2_0 => v2_0_0::get_zswap_merkle_tree_root(block).await,
-        NodeVersion::V2_1 => v2_1_100::get_zswap_merkle_tree_root(block).await,
-    }
-}
-
-/// Get the pure ledger state root (without StorableLedgerState wrapping) at the given block.
-pub async fn get_ledger_state_root(
-    node_version: NodeVersion,
-    block: &OnlineClientAtBlock,
-) -> Result<Option<Vec<u8>>, SubxtNodeError> {
-    match node_version {
-        NodeVersion::V0_22 => v0_22_0::get_ledger_state_root(block).await,
-        NodeVersion::V1_0 => v1_0_300::get_ledger_state_root(block).await,
-        NodeVersion::V2_0 => v2_0_0::get_ledger_state_root(block).await,
-        NodeVersion::V2_1 => v2_1_100::get_ledger_state_root(block).await,
+        V0_22 => v0_22_0::decode_slot(slot),
+        V1_0 => v1_0_300::decode_slot(slot),
+        V2_0 => v2_0_0::decode_slot(slot),
+        V2_1 => v2_1_100::decode_slot(slot),
+        V3_0 => v3_0_0::decode_slot(slot),
     }
 }
 
@@ -237,11 +228,13 @@ pub async fn get_d_parameter(
     node_version: NodeVersion,
     block: &OnlineClientAtBlock,
 ) -> Result<DParameter, SubxtNodeError> {
+    use NodeVersion::*;
     match node_version {
-        NodeVersion::V0_22 => v0_22_0::get_d_parameter(block).await,
-        NodeVersion::V1_0 => v1_0_300::get_d_parameter(block).await,
-        NodeVersion::V2_0 => v2_0_0::get_d_parameter(block).await,
-        NodeVersion::V2_1 => v2_1_100::get_d_parameter(block).await,
+        V0_22 => v0_22_0::get_d_parameter(block).await,
+        V1_0 => v1_0_300::get_d_parameter(block).await,
+        V2_0 => v2_0_0::get_d_parameter(block).await,
+        V2_1 => v2_1_100::get_d_parameter(block).await,
+        V3_0 => v3_0_0::get_d_parameter(block).await,
     }
 }
 
@@ -252,11 +245,13 @@ pub async fn fetch_genesis_cnight_registrations(
     node_version: NodeVersion,
     block: &OnlineClientAtBlock,
 ) -> Result<Vec<DustRegistrationEvent>, SubxtNodeError> {
+    use NodeVersion::*;
     match node_version {
-        NodeVersion::V0_22 => v0_22_0::fetch_genesis_cnight_registrations(block).await,
-        NodeVersion::V1_0 => v1_0_300::fetch_genesis_cnight_registrations(block).await,
-        NodeVersion::V2_0 => v2_0_0::fetch_genesis_cnight_registrations(block).await,
-        NodeVersion::V2_1 => v2_1_100::fetch_genesis_cnight_registrations(block).await,
+        V0_22 => v0_22_0::fetch_genesis_cnight_registrations(block).await,
+        V1_0 => v1_0_300::fetch_genesis_cnight_registrations(block).await,
+        V2_0 => v2_0_0::fetch_genesis_cnight_registrations(block).await,
+        V2_1 => v2_1_100::fetch_genesis_cnight_registrations(block).await,
+        V3_0 => v3_0_0::fetch_genesis_cnight_registrations(block).await,
     }
 }
 
@@ -265,11 +260,13 @@ pub async fn get_terms_and_conditions(
     node_version: NodeVersion,
     block: &OnlineClientAtBlock,
 ) -> Result<Option<TermsAndConditions>, SubxtNodeError> {
+    use NodeVersion::*;
     match node_version {
-        NodeVersion::V0_22 => v0_22_0::get_terms_and_conditions(block).await,
-        NodeVersion::V1_0 => v1_0_300::get_terms_and_conditions(block).await,
-        NodeVersion::V2_0 => v2_0_0::get_terms_and_conditions(block).await,
-        NodeVersion::V2_1 => v2_1_100::get_terms_and_conditions(block).await,
+        V0_22 => v0_22_0::get_terms_and_conditions(block).await,
+        V1_0 => v1_0_300::get_terms_and_conditions(block).await,
+        V2_0 => v2_0_0::get_terms_and_conditions(block).await,
+        V2_1 => v2_1_100::get_terms_and_conditions(block).await,
+        V3_0 => v3_0_0::get_terms_and_conditions(block).await,
     }
 }
 
@@ -429,8 +426,11 @@ mod tests {
     };
     use parity_scale_codec::{Compact, Encode};
     use serde::Deserialize;
-    use std::{fs, path::Path};
-    use subxt::{Metadata, client::OfflineClient, config::substrate::SpecVersionForRange};
+    use std::{fmt::Debug, fs, path::Path};
+    use subxt::{
+        Metadata, client::OfflineClient, config::substrate::SpecVersionForRange,
+        ext::scale_decode::DecodeAsType, storage::Address, utils::Yes,
+    };
 
     /// A recorded block: raw extrinsics and `System.Events` bytes, as served by the node's RPC.
     #[derive(Deserialize)]
@@ -453,13 +453,15 @@ mod tests {
         const_hex::decode(hex).unwrap()
     }
 
-    /// Decode a block offline with the committed metadata in the given directory.
+    /// Decode a block offline with the committed metadata in the given directory, updating the
+    /// given cached authorities.
     async fn decode_raw(
         block: BlockRef,
         spec_version: u32,
         metadata_dir: &str,
         extrinsics: Vec<Vec<u8>>,
         events: Vec<u8>,
+        authorities: &mut Option<(ConsensusEngine, Vec<[u8; 32]>)>,
     ) -> Result<BlockDetails, SubxtNodeError> {
         let config = SubstrateConfig::builder()
             .set_metadata_for_spec_versions([(spec_version, metadata(metadata_dir).into())])
@@ -476,7 +478,15 @@ mod tests {
             .unwrap()
             .node_version();
 
-        decode_block_details(&mut None, node_version, &client, block, extrinsics, events).await
+        decode_block_details(
+            authorities,
+            node_version,
+            &client,
+            block,
+            extrinsics,
+            events,
+        )
+        .await
     }
 
     fn metadata(metadata_dir: &str) -> Metadata {
@@ -487,8 +497,13 @@ mod tests {
         Metadata::decode_from(&fs::read(path).unwrap()).unwrap()
     }
 
-    /// Decode a recorded block offline with the committed metadata in the given directory.
-    async fn decode(name: &str, metadata_dir: &str) -> Result<BlockDetails, SubxtNodeError> {
+    /// Decode a recorded block offline with the committed metadata in the given directory, updating
+    /// the given cached authorities.
+    async fn decode(
+        name: &str,
+        metadata_dir: &str,
+        authorities: &mut Option<(ConsensusEngine, Vec<[u8; 32]>)>,
+    ) -> Result<BlockDetails, SubxtNodeError> {
         let fixture = fixture(name);
         let block = BlockRef {
             hash: const_hex::decode_to_array(&fixture.hash).unwrap().into(),
@@ -503,6 +518,7 @@ mod tests {
             metadata_dir,
             extrinsics,
             events,
+            authorities,
         )
         .await
     }
@@ -559,7 +575,7 @@ mod tests {
     // indexer serves for its block 0.
     #[tokio::test]
     async fn genesis_block_of_devnet_runtime_1_0_300() {
-        let details = decode("devnet-0", "1.0.400").await.unwrap();
+        let details = decode("devnet-0", "1.0.400", &mut None).await.unwrap();
         assert_eq!(
             summary(&details),
             [
@@ -598,7 +614,7 @@ mod tests {
 
     #[tokio::test]
     async fn registrations_block_of_devnet_runtime_1_0_300() {
-        let details = decode("devnet-2", "1.0.400").await.unwrap();
+        let details = decode("devnet-2", "1.0.400", &mut None).await.unwrap();
         assert_eq!(
             summary(&details),
             [
@@ -614,7 +630,7 @@ mod tests {
 
     #[tokio::test]
     async fn midnight_transaction_block_of_devnet_runtime_1_0_300() {
-        let details = decode("devnet-8464", "1.0.400").await.unwrap();
+        let details = decode("devnet-8464", "1.0.400", &mut None).await.unwrap();
         assert_eq!(
             summary(&details),
             [
@@ -628,7 +644,9 @@ mod tests {
 
     #[tokio::test]
     async fn inherents_only_block_of_devnet_runtime_2_1_0() {
-        let details = decode("devnet-270248", "2.1.0-rc.4").await.unwrap();
+        let details = decode("devnet-270248", "2.1.0-rc.4", &mut None)
+            .await
+            .unwrap();
         assert_eq!(
             summary(&details),
             [
@@ -639,6 +657,44 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn midnight_transaction_block_of_undeployed_runtime_3_0_0() {
+        let details = decode("undeployed-5", "3.0.0-c3a556864675", &mut None)
+            .await
+            .unwrap();
+        assert_eq!(
+            summary(&details),
+            [
+                "timestamp Some(1794932838003)",
+                "R 3642 6d69646e..adbc2c04 ApplyExtrinsic(4) fully bc18d29c",
+                "registrations: 2",
+                "registrations first: (ApplyExtrinsic(1), 1, Registration { cardano_stake_key: dc2064a8…, dust_address: 0270cc28… })",
+                "registrations last: (ApplyExtrinsic(1), 2, MappingAdded { cardano_stake_key: dc2064a8…, dust_address: 0270cc28…, utxo_id: 04000000…, utxo_index: 1 })",
+                "bridge events: 0",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn session_rotation_block_of_undeployed_runtime_3_0_0() {
+        let mut authorities = Some((ConsensusEngine::Aura, vec![[1; 32]]));
+        let details = decode("undeployed-32", "3.0.0-c3a556864675", &mut authorities)
+            .await
+            .unwrap();
+        assert_eq!(
+            summary(&details),
+            [
+                "timestamp Some(1794933000005)",
+                "registrations: 2",
+                "registrations first: (ApplyExtrinsic(2), 4, Registration { cardano_stake_key: 69788796…, dust_address: 0224edb6… })",
+                "registrations last: (ApplyExtrinsic(2), 5, MappingAdded { cardano_stake_key: 69788796…, dust_address: 0224edb6…, utxo_id: 1f000000…, utxo_index: 1 })",
+                "bridge events: 0",
+            ]
+        );
+        // `NewSession` from `pallet_session` drops the cached authorities.
+        assert_eq!(authorities, None);
+    }
+
     /// The hash recorded on chain for a transaction, and the one computed from the bytes at
     /// genesis, is the one the indexer's ledger computes, so the two can be compared.
     #[tokio::test(flavor = "multi_thread")]
@@ -646,24 +702,31 @@ mod tests {
         let _ledger_db = init_ledger_db().await?;
 
         let mut checked = 0;
-        for name in ["devnet-0", "devnet-2", "devnet-8464"] {
-            let details = decode(name, "1.0.400").await?;
+        use LedgerVersion::*;
+        let blocks = [
+            ("devnet-0", "1.0.400", V8),
+            ("devnet-2", "1.0.400", V8),
+            ("devnet-8464", "1.0.400", V8),
+            ("undeployed-5", "3.0.0-c3a556864675", V9),
+        ];
+        for (name, metadata_dir, ledger_version) in blocks {
+            let details = decode(name, metadata_dir, &mut None).await?;
             for (_, transaction, outcome) in details.transactions {
                 use Transaction::*;
 
                 let hash = match transaction {
                     Regular(bytes) => {
-                        ledger::Transaction::deserialize(&bytes, LedgerVersion::V8)?.hash()
+                        ledger::Transaction::deserialize(&bytes, ledger_version)?.hash()
                     }
                     System(bytes) => {
-                        ledger::SystemTransaction::deserialize(&bytes, LedgerVersion::V8)?.hash()
+                        ledger::SystemTransaction::deserialize(&bytes, ledger_version)?.hash()
                     }
                 };
                 assert_eq!(outcome?.tx_hash(), hash, "{name}");
                 checked += 1;
             }
         }
-        assert_eq!(checked, 28);
+        assert_eq!(checked, 29);
 
         Ok(())
     }
@@ -912,13 +975,118 @@ mod tests {
         }
     }
 
-    const RUNTIMES: [(&str, u32); 5] = [
+    const RUNTIMES: [(&str, u32); 6] = [
         ("0.22.0", 22_000),
         ("1.0.400", 1_000_300),
         ("2.0.0-rc.4", 2_000_000),
         ("2.1.0-rc.4", 2_001_000),
         ("2.1.101", 2_001_100),
+        ("3.0.0-c3a556864675", 3_000_000),
     ];
+
+    /// `STATE_KEY_STORAGE_KEY` against the statically typed `Midnight::StateKey` address of every
+    /// generated runtime. The value is a `Vec<u8>`, or in 0.22.0 a `BoundedVec<u8>` around one, as
+    /// the conversions check at compile time, and it decodes from the SCALE-encoded `Vec<u8>` that
+    /// `fetch_state_key` reads.
+    #[test]
+    fn state_key_storage_key_matches_typed_runtime_apis() {
+        use crate::infra::subxt_node::STATE_KEY_STORAGE_KEY;
+
+        let state_key = vec![1_u8, 2, 3];
+        assert_typed_storage_address_matches(
+            runtime_0_22_0::storage().midnight().state_key(),
+            &STATE_KEY_STORAGE_KEY,
+            &state_key,
+            |value| value.0,
+            "0.22.0",
+            22_000,
+        );
+        assert_typed_storage_address_matches(
+            runtime_1_0_300::storage().midnight().state_key(),
+            &STATE_KEY_STORAGE_KEY,
+            &state_key,
+            |value| value,
+            "1.0.400",
+            1_000_300,
+        );
+        assert_typed_storage_address_matches(
+            runtime_2_0_0::storage().midnight().state_key(),
+            &STATE_KEY_STORAGE_KEY,
+            &state_key,
+            |value| value,
+            "2.0.0-rc.4",
+            2_000_000,
+        );
+        assert_typed_storage_address_matches(
+            runtime_2_1_100::storage().midnight().state_key(),
+            &STATE_KEY_STORAGE_KEY,
+            &state_key,
+            |value| value,
+            "2.1.101",
+            2_001_100,
+        );
+        assert_typed_storage_address_matches(
+            runtime_3_0_0::storage().midnight().state_key(),
+            &STATE_KEY_STORAGE_KEY,
+            &state_key,
+            |value| value,
+            "3.0.0-c3a556864675",
+            3_000_000,
+        );
+    }
+
+    /// Check a storage key read raw against a runtime's statically typed plain storage address:
+    /// the address validates against the runtime's metadata (so the codegen matches), it is a
+    /// plain value, its key is `storage_key`, and `value` SCALE-encoded decodes as the address's
+    /// value type and converts back to `value`.
+    fn assert_typed_storage_address_matches<
+        A: Address<KeyParts = (), IsPlain = Yes>,
+        V: Encode + PartialEq + Debug,
+    >(
+        address: A,
+        storage_key: &[u8],
+        value: &V,
+        into_value: fn(A::Value) -> V,
+        metadata_dir: &str,
+        spec_version: u32,
+    ) {
+        let pallet_name = address.pallet_name().to_owned();
+        let entry_name = address.entry_name().to_owned();
+        let context = format!("{metadata_dir}: {pallet_name}::{entry_name}");
+
+        let metadata = metadata(metadata_dir);
+        let value_ty = metadata
+            .pallet_by_name(&pallet_name)
+            .and_then(|pallet| pallet.storage())
+            .and_then(|storage| storage.entry_by_name(&entry_name))
+            .unwrap_or_else(|| panic!("{context}: no such storage entry"))
+            .value_ty();
+
+        let decoded =
+            A::Value::decode_as_type(&mut value.encode().as_slice(), value_ty, metadata.types())
+                .unwrap_or_else(|error| panic!("{context}: {error}"));
+        assert_eq!(&into_value(decoded), value, "{context}");
+
+        let config = SubstrateConfig::builder()
+            .set_metadata_for_spec_versions([(spec_version, metadata.into())])
+            .set_spec_version_for_block_ranges([SpecVersionForRange {
+                block_range: 0..u64::MAX,
+                spec_version,
+                transaction_version: 1,
+            }])
+            .build();
+        let client = OfflineClient::new_with_config(config)
+            .at_block(0_u64)
+            .unwrap();
+        let storage = client.storage();
+        let entry = storage
+            .entry(address)
+            .unwrap_or_else(|error| panic!("{context}: {error}"));
+
+        assert!(entry.is_plain(), "{context}");
+        assert_eq!(entry.key_prefix(), storage_key, "{context}");
+        assert_eq!(entry.fetch_key(()).unwrap(), storage_key, "{context}");
+    }
 
     #[tokio::test]
     async fn failed_midnight_extrinsic_keeps_its_place() {
@@ -927,7 +1095,7 @@ mod tests {
             let extrinsics = vec![synthetic.timestamp(), synthetic.midnight(&[7; 8])];
             let events = Synthetic::events(vec![synthetic.success(0), synthetic.call_filtered(1)]);
 
-            let details = decode_raw(block(), spec_version, dir, extrinsics, events)
+            let details = decode_raw(block(), spec_version, dir, extrinsics, events, &mut None)
                 .await
                 .unwrap();
 
@@ -962,7 +1130,7 @@ mod tests {
                 synthetic.success(3),
             ]);
 
-            let details = decode_raw(block(), spec_version, dir, extrinsics, events)
+            let details = decode_raw(block(), spec_version, dir, extrinsics, events, &mut None)
                 .await
                 .unwrap();
 
@@ -1000,7 +1168,7 @@ mod tests {
             ]);
             let extrinsics = vec![synthetic.timestamp(), synthetic.midnight(&[3; 8])];
 
-            let details = decode_raw(block(), spec_version, dir, extrinsics, events)
+            let details = decode_raw(block(), spec_version, dir, extrinsics, events, &mut None)
                 .await
                 .unwrap();
 
@@ -1035,7 +1203,7 @@ mod tests {
                 synthetic.success(1),
             ]);
 
-            let details = decode_raw(block(), spec_version, dir, extrinsics, events)
+            let details = decode_raw(block(), spec_version, dir, extrinsics, events, &mut None)
                 .await
                 .unwrap();
 
@@ -1062,7 +1230,7 @@ mod tests {
             let extrinsics = vec![synthetic.timestamp(), synthetic.midnight(&[7; 8])];
             let events = Synthetic::events(vec![synthetic.success(0), synthetic.success(1)]);
 
-            let details = decode_raw(block(), spec_version, dir, extrinsics, events)
+            let details = decode_raw(block(), spec_version, dir, extrinsics, events, &mut None)
                 .await
                 .unwrap();
 
@@ -1085,7 +1253,7 @@ mod tests {
             let extrinsics = vec![synthetic.timestamp(), synthetic.midnight_system(&[9; 8])];
             let events = Synthetic::events(vec![synthetic.success(0), synthetic.call_filtered(1)]);
 
-            let details = decode_raw(block(), spec_version, dir, extrinsics, events)
+            let details = decode_raw(block(), spec_version, dir, extrinsics, events, &mut None)
                 .await
                 .unwrap();
 

@@ -25,15 +25,14 @@ use crate::{
 use async_stream::try_stream;
 use const_hex::FromHexError;
 use fastrace::trace;
-use futures::{Stream, StreamExt, TryStreamExt, stream};
+use futures::{Stream, StreamExt, TryStreamExt, future::try_join, stream};
 use http::{
     HeaderMap,
     header::{InvalidHeaderValue, USER_AGENT},
 };
 use indexer_common::{
     domain::{
-        BlockAuthor, BlockHash, ByteVec, NodeVersion, ProtocolVersion, ProtocolVersionError,
-        ledger::{self, ZswapMerkleTreeRoot},
+        BlockAuthor, BlockHash, ByteVec, NodeVersion, ProtocolVersion, ProtocolVersionError, ledger,
     },
     error::BoxError,
 };
@@ -44,8 +43,12 @@ use std::{future::ready, time::Duration};
 use subxt::{
     OnlineClient, SubstrateConfig,
     config::{
-        Hash, RpcConfigFor,
-        substrate::{ConsensusEngineId, DigestItem, SubstrateHeader},
+        RpcConfigFor,
+        substrate::{
+            ConsensusEngineId, DigestItem,
+            DigestItem::{Consensus, PreRuntime},
+            SubstrateHeader,
+        },
     },
     rpcs::{
         LegacyRpcMethods,
@@ -73,23 +76,38 @@ pub(crate) struct ContentSource {
 const AURA_ENGINE_ID: ConsensusEngineId = *b"aura";
 const BABE_ENGINE_ID: ConsensusEngineId = *b"BABE";
 
-/// Name of the node runtime API reporting the active block-production engine, declared in
-/// `midnight-primitives-consensus-engine` and implemented alongside the pallet driving the
-/// Aura→BABE transition. Its presence in a block's runtime guarantees the correctness of Aura
-/// and BABE pre-runtime digests during the transition, so BABE digests are only trusted for
-/// author derivation where it exists.
-const CONSENSUS_ENGINE_RUNTIME_API: &str = "ConsensusEngineApi";
+/// Variant index of `NextEpochData` in BABE's `ConsensusLog`, fixed by BABE's digest encoding
+/// ([`sp_consensus_babe::ConsensusLog`]).
+///
+/// [`sp_consensus_babe::ConsensusLog`]: https://github.com/paritytech/polkadot-sdk/blob/polkadot-stable2609/substrate/primitives/consensus/babe/src/lib.rs#L125-L126
+const BABE_NEXT_EPOCH_DATA: u8 = 1;
 const CATCH_UP_LOG_INTERVAL: u64 = 1_000;
-
+/// `spec_version` of the first runtime with `pallet-consensus-engine`, [`ACTIVATION_SPEC_VERSION`]
+/// in `midnight-primitives-consensus-engine`. From this version on the pallet rejects a block whose
+/// Aura and BABE pre-runtime digests are out of layout, so BABE digests are trusted.
+///
+/// [`ACTIVATION_SPEC_VERSION`]: https://github.com/midnightntwrk/midnight-node/blob/e1efdccc1c2f065772620f51dfec26d2aaf54dab/primitives/consensus-engine/src/lib.rs#L30
+const CONSENSUS_ENGINE_ACTIVATION_SPEC_VERSION: u32 = 3_000_000;
 /// One GRANDPA session worth of blocks. Blocks within this distance of the finalized tip are
 /// fetched by hash (backward traversal) to avoid any risk of ingesting non-canonical blocks.
 /// Blocks further back are fetched by height with parent hash verification.
 const FINALIZATION_SAFETY_MARGIN: u64 = 400;
 
+/// Storage key of `Midnight::StateKey`, i.e. `twox128("Midnight") ++ twox128("StateKey")`. The
+/// item is identical in every supported runtime, hence read raw. The tests
+/// `state_key_storage_key_matches_all_runtimes` and `state_key_storage_key_matches_typed_runtime_apis`
+/// check this against the committed metadata and each runtime's generated API.
+const STATE_KEY_STORAGE_KEY: [u8; 32] = match const_hex::const_decode_to_array(
+    b"2a760f9a173a6df5cd4373ff49fa999bd3b3812d84b965be98ec477e3575379b",
+) {
+    Ok(key) => key,
+    Err(_) => panic!("invalid StateKey storage key"),
+};
+
 /// A [Node] implementation based on subxt.
 #[derive(Clone)]
 pub struct SubxtNode {
-    rpc_client: ReconnectingRpcClient,
+    rpc_client: LegacyRpcMethods<RpcConfigFor<SubstrateConfig>>,
     online_client: OnlineClient<SubstrateConfig>,
     subscription_recovery_timeout: Duration,
 }
@@ -118,6 +136,7 @@ impl SubxtNode {
 
         let online_client =
             OnlineClient::<SubstrateConfig>::from_rpc_client(rpc_client.clone()).await?;
+        let rpc_client = LegacyRpcMethods::new(rpc_client.into());
 
         Ok(Self {
             rpc_client,
@@ -184,9 +203,11 @@ impl SubxtNode {
 
     async fn make_block(
         &mut self,
-        authorities: &mut Option<Vec<[u8; 32]>>,
+        authorities: &mut Option<(ConsensusEngine, Vec<[u8; 32]>)>,
         block: OnlineClientAtBlock,
     ) -> Result<Block, SubxtNodeError> {
+        use ConsensusEngine::*;
+
         let hash = block.block_hash().0.into();
         let height = block.block_number();
         let header = block_header(&block).await?;
@@ -232,94 +253,111 @@ impl SubxtNode {
             "making block"
         );
 
-        // Fetch authorities if `None`, either initially or because of a `NewSession` event (below).
+        // The engine that authored this block decides which authority set holds its author.
+        let engine =
+            authoring_digest(&header.digest.logs, protocol_version).map(|(engine, _)| engine);
+
+        // A BABE block that starts an epoch is authored from that epoch's set. A block whose engine
+        // differs from the cached set's, such as the first BABE block, needs its own engine's set.
+        if engine == Some(Babe) && starts_epoch(&header.digest.logs)
+            || authorities
+                .as_ref()
+                .is_some_and(|(cached, _)| Some(*cached) != engine)
+        {
+            *authorities = None;
+        }
+
         if authorities.is_none() {
-            *authorities = Some(runtimes::fetch_authorities(state_node_version, &block).await?);
+            *authorities = match engine {
+                // An Aura rotation applies from the next block, so this block's set is in its
+                // parent's state, addressed by the runtime that executed this block.
+                Some(Aura) => {
+                    let parent = client_at(&self.online_client, header.parent_hash).await?;
+                    let authorities =
+                        runtimes::fetch_authorities(content_node_version, &parent).await?;
+                    Some((Aura, authorities))
+                }
+                // A BABE block's own state holds the set of the epoch it belongs to.
+                Some(Babe) => Some((
+                    Babe,
+                    runtimes::fetch_babe_authorities(state_node_version, &block).await?,
+                )),
+                // Only genesis lacks an authoring digest: the node's import rejects any other block
+                // without one.
+                None => None,
+            };
         }
         let author = authorities
             .as_ref()
-            .map(|authorities| {
-                // The state metadata can only be newer than the runtime that authored the
-                // block, so this can never enable BABE recognition too late.
-                let babe_supported = block
-                    .metadata_ref()
-                    .runtime_api_trait_by_name(CONSENSUS_ENGINE_RUNTIME_API)
-                    .is_some();
-                extract_block_author(&header, authorities, content_node_version, babe_supported)
+            .map(|(_, authorities)| {
+                author_from_digest_logs(&header.digest.logs, authorities, protocol_version)
             })
             .transpose()?
             .flatten();
 
-        // The node's ledger-9 host API detects the v8 StateKey at the 8->9 enactment block and
-        // dispatches this read to the v8 bridge. The MNSV protocol version remains the right
-        // decoder here: that block's committed ledger state is still v8 until apply+1.
-        let zswap_merkle_tree_root =
-            runtimes::get_zswap_merkle_tree_root(state_node_version, &block).await?;
-        let zswap_merkle_tree_root =
-            ZswapMerkleTreeRoot::deserialize(zswap_merkle_tree_root, ledger_version)?;
-
-        // At a runtime-upgrade enactment block the block reports the next runtime, so subxt binds
-        // it to the next runtime's metadata even though its extrinsics and events were produced by
-        // the previous runtime. Decode the content against the parent block's client (which carries
-        // the previous runtime's metadata), fed this block's raw, metadata-independent bytes. Away
-        // from enactment blocks the two runtimes are equal and no parent client is needed.
-        let content_source = if content_node_version != state_node_version {
-            let parent = block
-                .online_client()
-                .at_block(header.parent_hash)
-                .await
-                .map_err(|error| {
-                    SubxtNodeError::GetOnlineClientAt(header.parent_hash, error.into())
-                })?;
-            let legacy_rpc_methods = LegacyRpcMethods::<RpcConfigFor<SubstrateConfig>>::new(
-                self.rpc_client.to_owned().into(),
-            );
-            let extrinsic_bodies = legacy_rpc_methods
-                .chain_get_block(Some(block.block_hash()))
-                .await
-                .map_err(SubxtNodeError::FetchBlockBody)?
-                .ok_or(SubxtNodeError::BlockBodyNotFound)?
-                .block
-                .extrinsics
-                .into_iter()
-                .map(|bytes| bytes.0)
-                .collect::<Vec<_>>();
-            Some(ContentSource {
-                client: parent,
-                extrinsic_bodies,
-            })
-        } else {
-            None
-        };
-
-        let BlockDetails {
-            timestamp,
-            transactions,
-            mut dust_registration_events,
-            bridge_events,
-        } = runtimes::make_block_details(authorities, content_node_version, &block, content_source)
-            .await?;
-
-        // At genesis, Substrate does not emit events (Parity PR #5463). Fetch cNight
-        // registrations from pallet storage instead.
-        // Also fetch the ledger state root for genesis ledger state detection.
-        let ledger_state_root =
-            if height == 0 {
-                let genesis_registrations =
-                    runtimes::fetch_genesis_cnight_registrations(state_node_version, &block)
-                        .await?;
-                // Registrations read from storage are part of the genesis state, which is set
-                // before any extrinsic; their index is their position in the read.
-                dust_registration_events.extend(genesis_registrations.into_iter().enumerate().map(
-                    |(position, event)| (Phase::Initialization, position as EventIndex, event),
-                ));
-
-                runtimes::get_ledger_state_root(state_node_version, &block)
-                    .await?
-                    .map(Into::into)
+        // The state key and the block details are independent requests, so fetch them
+        // concurrently.
+        let fetch_block_details = async {
+            // At a runtime-upgrade enactment block the block reports the next runtime, so subxt
+            // binds it to the next runtime's metadata even though its extrinsics and events were
+            // produced by the previous runtime. Decode the content against the parent block's
+            // client (which carries the previous runtime's metadata), fed this block's raw,
+            // metadata-independent bytes. Away from enactment blocks the two runtimes are equal and
+            // no parent client is needed.
+            let content_source = if content_node_version != state_node_version {
+                let parent = client_at(&self.online_client, header.parent_hash).await?;
+                let extrinsic_bodies = self
+                    .rpc_client
+                    .chain_get_block(Some(block.block_hash()))
+                    .await
+                    .map_err(SubxtNodeError::FetchBlockBody)?
+                    .ok_or(SubxtNodeError::BlockBodyNotFound)?
+                    .block
+                    .extrinsics
+                    .into_iter()
+                    .map(|bytes| bytes.0)
+                    .collect::<Vec<_>>();
+                Some(ContentSource {
+                    client: parent,
+                    extrinsic_bodies,
+                })
             } else {
                 None
             };
+
+            runtimes::make_block_details(authorities, content_node_version, &block, content_source)
+                .await
+        };
+        let (
+            state_key,
+            BlockDetails {
+                timestamp,
+                transactions,
+                mut dust_registration_events,
+                bridge_events,
+            },
+        ) = try_join(
+            self.fetch_state_key(block.block_hash()),
+            fetch_block_details,
+        )
+        .await?;
+
+        // At genesis, Substrate does not emit events (Parity PR #5463). Fetch cNight
+        // registrations from pallet storage instead.
+        if height == 0 {
+            let genesis_registrations =
+                runtimes::fetch_genesis_cnight_registrations(state_node_version, &block).await?;
+            // Registrations read from storage are part of the genesis state, which is set before
+            // any extrinsic; their index is their position in the read.
+            dust_registration_events.extend(
+                genesis_registrations
+                    .into_iter()
+                    .enumerate()
+                    .map(|(position, event)| {
+                        (Phase::Initialization, position as EventIndex, event)
+                    }),
+            );
+        }
 
         let transactions = stream::iter(transactions)
             .then(|(phase, transaction, outcome)| async move {
@@ -337,8 +375,7 @@ impl SubxtNode {
             protocol_version,
             author,
             timestamp: timestamp.unwrap_or(0),
-            zswap_merkle_tree_root,
-            ledger_state_root,
+            state_key,
             transactions,
             dust_registration_events,
             bridge_events,
@@ -353,6 +390,22 @@ impl SubxtNode {
         );
 
         Ok(block)
+    }
+
+    /// Fetch the node's `pallet_midnight::StateKey` at the given block from Substrate storage, which
+    /// unlike the ledger state it refers to is not subject to the node's ledger state pruning.
+    #[trace]
+    async fn fetch_state_key(&self, hash: H256) -> Result<ByteVec, SubxtNodeError> {
+        let state_key = self
+            .rpc_client
+            .state_get_storage(&STATE_KEY_STORAGE_KEY, Some(hash))
+            .await
+            .map_err(SubxtNodeError::FetchStateKey)?
+            .ok_or(SubxtNodeError::StateKeyNotFound(hash))?;
+        let state_key =
+            Vec::<u8>::decode(&mut state_key.as_slice()).map_err(SubxtNodeError::DecodeStateKey)?;
+
+        Ok(state_key.into())
     }
 
     #[trace]
@@ -560,10 +613,8 @@ impl Node for SubxtNode {
     }
 
     async fn fetch_genesis_ledger_state(&self) -> Result<ByteVec, Self::Error> {
-        let legacy_rpc_methods = LegacyRpcMethods::<RpcConfigFor<SubstrateConfig>>::new(
-            self.rpc_client.to_owned().into(),
-        );
-        let properties = legacy_rpc_methods
+        let properties = self
+            .rpc_client
             .system_properties()
             .await
             .map_err(SubxtNodeError::FetchSystemProperties)?;
@@ -654,6 +705,15 @@ pub enum SubxtNodeError {
     #[error("block body not found")]
     BlockBodyNotFound,
 
+    #[error("cannot fetch state key")]
+    FetchStateKey(#[source] subxt::rpcs::Error),
+
+    #[error("state key not found at block {0}")]
+    StateKeyNotFound(H256),
+
+    #[error("cannot decode state key")]
+    DecodeStateKey(#[source] parity_scale_codec::Error),
+
     #[error("cannot fetch events")]
     FetchEvents(#[source] Box<subxt::error::EventsError>),
 
@@ -684,6 +744,9 @@ pub enum SubxtNodeError {
     #[error("cannot decode authorities")]
     DecodeAuthorities(#[source] Box<subxt::error::StorageValueError>),
 
+    #[error("node version {0} has no BABE authorities")]
+    NoBabeAuthorities(NodeVersion),
+
     #[error("invalid BABE pre-runtime digest variant tag {0}")]
     InvalidBabePreDigestTag(u8),
 
@@ -696,9 +759,6 @@ pub enum SubxtNodeError {
     #[error("cannot decode genesis cNight registration key")]
     DecodeGenesisCnightRegistrationKey(#[source] Box<subxt::error::StorageKeyError>),
 
-    #[error("cannot get zswap state root")]
-    GetZswapStateRoot(#[source] BoxError),
-
     #[error("cannot get D-Parameter")]
     GetDParameter(#[source] BoxError),
 
@@ -707,9 +767,6 @@ pub enum SubxtNodeError {
 
     #[error("cannot hex decode genesis ledger state")]
     HexDecodeGenesisLedgerState(#[source] FromHexError),
-
-    #[error("cannot get ledger state root")]
-    GetLedgerStateRoot(#[source] BoxError),
 
     #[error("cannot fetch system properties")]
     FetchSystemProperties(#[source] subxt::rpcs::Error),
@@ -734,65 +791,70 @@ async fn receive_block(
     finalized_blocks.try_next().await
 }
 
-/// Check an authority set against a block header's digest logs to determine the author of that
-/// block.
-fn extract_block_author<H>(
-    header: &SubstrateHeader<H>,
-    authorities: &[[u8; 32]],
-    content_node_version: NodeVersion,
-    babe_supported: bool,
-) -> Result<Option<BlockAuthor>, SubxtNodeError>
-where
-    H: Hash,
-{
-    author_from_digest_logs(
-        &header.digest.logs,
-        authorities,
-        content_node_version,
-        babe_supported,
-    )
+/// A block-production consensus engine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConsensusEngine {
+    Aura,
+    Babe,
 }
 
-/// Determine the block author from the pre-runtime digest logs, taking the first log with a
-/// recognized consensus engine that yields an author, in digest order (mirroring polkadot-js
-/// `extractAuthor`): Aura carries the slot (the author is the slot modulo the authority-set
-/// length), BABE carries the authority index explicitly in all of its pre-digest variants. BABE
-/// digests are only recognized if `babe_supported`, i.e. if the block's runtime guarantees
-/// their correctness (see [CONSENSUS_ENGINE_RUNTIME_API]); otherwise they are skipped like any
-/// unrecognized engine.
+/// The first Aura or BABE pre-runtime digest of a block executed by the runtime of
+/// `protocol_version`, naming the engine that authored the block, by the rule of the node's
+/// `authoring_engine`.
+///
+/// Before [CONSENSUS_ENGINE_ACTIVATION_SPEC_VERSION] nothing enforced the digest layout, so BABE
+/// digests are skipped and the block is Aura's. `protocol_version` comes from the block's MNSV
+/// digest, which the executing runtime writes and an author cannot forge.
+fn authoring_digest(
+    logs: &[DigestItem],
+    protocol_version: ProtocolVersion,
+) -> Option<(ConsensusEngine, &[u8])> {
+    use ConsensusEngine::*;
+
+    let babe_pre_digest_is_authoritative =
+        u32::from(protocol_version) >= CONSENSUS_ENGINE_ACTIVATION_SPEC_VERSION;
+    logs.iter().find_map(|log| match log {
+        PreRuntime(AURA_ENGINE_ID, pre_digest) => Some((Aura, pre_digest.as_slice())),
+        PreRuntime(BABE_ENGINE_ID, pre_digest) if babe_pre_digest_is_authoritative => {
+            Some((Babe, pre_digest.as_slice()))
+        }
+        _ => None,
+    })
+}
+
+/// Whether the block starts a new epoch, read from the next epoch's set (`NextEpochData`) the block
+/// announces. From node 3.0 on, every session rotation starts an epoch, under Aura as well as BABE.
+fn starts_epoch(logs: &[DigestItem]) -> bool {
+    logs.iter().any(|log| {
+        matches!(log, Consensus(BABE_ENGINE_ID, data) if data.first() == Some(&BABE_NEXT_EPOCH_DATA))
+    })
+}
+
+/// Determine the block author from the authoring digest of a block executed by the runtime of
+/// `protocol_version` (see [authoring_digest]).
 fn author_from_digest_logs(
     logs: &[DigestItem],
     authorities: &[[u8; 32]],
-    content_node_version: NodeVersion,
-    babe_supported: bool,
+    protocol_version: ProtocolVersion,
 ) -> Result<Option<BlockAuthor>, SubxtNodeError> {
     if authorities.is_empty() {
         return Ok(None);
     }
 
-    for log in logs {
-        let DigestItem::PreRuntime(engine_id, pre_digest) = log else {
-            continue;
-        };
-
-        let author = match *engine_id {
-            AURA_ENGINE_ID => {
-                let slot = runtimes::decode_slot(pre_digest, content_node_version)?;
-                let index = slot % authorities.len() as u64;
-                authorities.get(index as usize).copied().map(Into::into)
-            }
-
-            BABE_ENGINE_ID if babe_supported => babe_author(pre_digest, authorities)?,
-
-            _ => None,
-        };
-
-        if author.is_some() {
-            return Ok(author);
+    use ConsensusEngine::*;
+    let author = match authoring_digest(logs, protocol_version) {
+        // Aura assigns slots to authorities round-robin.
+        Some((Aura, pre_digest)) => {
+            let slot = runtimes::decode_slot(pre_digest, protocol_version.node_version())?;
+            let index = slot % authorities.len() as u64;
+            authorities.get(index as usize).copied().map(Into::into)
         }
-    }
+        // BABE names the authority by index in every pre-digest variant.
+        Some((Babe, pre_digest)) => babe_author(pre_digest, authorities)?,
+        None => None,
+    };
 
-    Ok(None)
+    Ok(author)
 }
 
 /// Determine the block author from a BABE pre-runtime digest. An out-of-range authority index
@@ -897,12 +959,41 @@ async fn block_header(
         .map_err(|error| SubxtNodeError::GetBlockHeader(error.into()))
 }
 
+/// The client at the block with `hash`, bound to that block's runtime.
+async fn client_at(
+    client: &OnlineClient<SubstrateConfig>,
+    hash: H256,
+) -> Result<OnlineClientAtBlock, SubxtNodeError> {
+    client
+        .at_block(hash)
+        .await
+        .map_err(|error| SubxtNodeError::GetOnlineClientAt(hash, error.into()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ProtocolVersion::*;
     use parity_scale_codec::Encode;
+    use std::{any::type_name, fmt::Debug, fs, path::Path};
+    use subxt::{
+        Metadata,
+        ext::{frame_decode::storage::encode_storage_key_prefix, scale_decode::DecodeAsType},
+    };
 
     const AUTHORITIES: [[u8; 32]; 3] = [[1; 32], [2; 32], [3; 32]];
+
+    /// A block executed by a runtime before `pallet-consensus-engine`.
+    const BEFORE_ACTIVATION: ProtocolVersion = V2_1(2_001_999);
+    /// A block executed by the first runtime with `pallet-consensus-engine`.
+    const AT_ACTIVATION: ProtocolVersion = V3_0(3_000_000);
+    /// A block executed by the latest supported runtime with `pallet-consensus-engine`.
+    const AFTER_ACTIVATION: ProtocolVersion = V3_0(3_000_999);
+
+    /// An Aura pre-digest: the SCALE-encoded slot.
+    fn aura_pre_digest(slot: u64) -> Vec<u8> {
+        slot.encode()
+    }
 
     /// A BABE pre-digest prefix: variant tag, then the SCALE-encoded authority index, then
     /// trailing payload (slot, VRF signature) which must be ignored.
@@ -913,14 +1004,104 @@ mod tests {
         pre_digest
     }
 
+    /// `STATE_KEY_STORAGE_KEY` is read raw rather than through each runtime's typed API, so check
+    /// it against every committed runtime metadata, with a byte vector as `fetch_state_key` expects.
+    #[test]
+    fn state_key_storage_key_matches_all_runtimes() {
+        assert_raw_storage_key_matches_all_runtimes(
+            "Midnight",
+            "StateKey",
+            &STATE_KEY_STORAGE_KEY,
+            vec![1_u8, 2, 3],
+        );
+    }
+
+    /// Check a storage key read raw, rather than through each runtime's typed API, against every
+    /// committed runtime metadata under `.node`: it is the prefix of `pallet_name::entry_name`,
+    /// the entry exists there as a plain value, and `value` round-trips through the entry's value
+    /// type, so the raw read decodes what the runtime stores.
+    fn assert_raw_storage_key_matches_all_runtimes<V: Encode + DecodeAsType + PartialEq + Debug>(
+        pallet_name: &str,
+        entry_name: &str,
+        storage_key: &[u8],
+        value: V,
+    ) {
+        let node_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../.node");
+        let metadata_paths = fs::read_dir(&node_dir)
+            .expect("read .node directory")
+            .map(|entry| {
+                entry
+                    .expect("read .node entry")
+                    .path()
+                    .join("metadata.scale")
+            })
+            .filter(|path| path.exists())
+            .collect::<Vec<_>>();
+        assert!(!metadata_paths.is_empty(), "no metadata.scale under .node");
+
+        assert_eq!(
+            encode_storage_key_prefix(pallet_name, entry_name),
+            storage_key
+        );
+
+        for path in metadata_paths {
+            let metadata = Metadata::decode_from(&fs::read(&path).expect("read metadata"))
+                .expect("decode metadata");
+            let storage = metadata
+                .pallet_by_name(pallet_name)
+                .and_then(|pallet| pallet.storage())
+                .unwrap_or_else(|| panic!("no {pallet_name} storage in {}", path.display()));
+            assert_eq!(storage.prefix(), pallet_name, "{}", path.display());
+            let entry = storage
+                .entry_by_name(entry_name)
+                .unwrap_or_else(|| panic!("no {pallet_name}::{entry_name} in {}", path.display()));
+            assert_eq!(entry.keys().len(), 0, "{} has a map", path.display());
+
+            let encoded = value.encode();
+            let mut input = encoded.as_slice();
+            let decoded = V::decode_as_type(&mut input, entry.value_ty(), metadata.types())
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "{pallet_name}::{entry_name} does not decode as {} in {}: {error}",
+                        type_name::<V>(),
+                        path.display()
+                    )
+                });
+            assert_eq!(decoded, value, "{}", path.display());
+            assert!(input.is_empty(), "{}", path.display());
+        }
+    }
+
     #[test]
     fn author_from_aura_digest() {
-        let logs = vec![DigestItem::PreRuntime(AURA_ENGINE_ID, 4u64.encode())];
+        let logs = vec![PreRuntime(AURA_ENGINE_ID, aura_pre_digest(4))];
 
-        let author = author_from_digest_logs(&logs, &AUTHORITIES, NodeVersion::V2_0, false)
-            .expect("author can be determined");
+        // Aura digests are not version-gated.
+        // After the flip `pallet-consensus-engine` rejects blocks carrying one.
+        for protocol_version in [
+            V2_0(2_000_000),
+            BEFORE_ACTIVATION,
+            AT_ACTIVATION,
+            AFTER_ACTIVATION,
+        ] {
+            let author = author_from_digest_logs(&logs, &AUTHORITIES, protocol_version)
+                .expect("author can be determined");
+            assert_eq!(author, Some(AUTHORITIES[1].into()), "{protocol_version:?}");
+        }
+    }
 
-        assert_eq!(author, Some([2; 32].into()));
+    #[test]
+    fn epoch_start_is_read_from_the_next_epoch_data_digest() {
+        let next_epoch_data = Consensus(BABE_ENGINE_ID, vec![BABE_NEXT_EPOCH_DATA, 0xaa]);
+        assert!(starts_epoch(&[next_epoch_data]));
+
+        // `OnDisabled`, another BABE consensus log.
+        assert!(!starts_epoch(&[Consensus(BABE_ENGINE_ID, vec![2, 0xaa])]));
+        assert!(!starts_epoch(&[Consensus(
+            AURA_ENGINE_ID,
+            vec![BABE_NEXT_EPOCH_DATA]
+        )]));
+        assert!(!starts_epoch(&[]));
     }
 
     #[test]
@@ -929,59 +1110,99 @@ mod tests {
             let author = babe_author(&babe_pre_digest(tag, 2), &AUTHORITIES)
                 .expect("author can be determined");
 
-            assert_eq!(author, Some([3; 32].into()));
+            assert_eq!(author, Some(AUTHORITIES[2].into()));
         }
     }
 
     #[test]
-    fn babe_digest_is_skipped_if_babe_not_supported() {
-        let logs = vec![DigestItem::PreRuntime(
-            BABE_ENGINE_ID,
-            babe_pre_digest(2, 2),
-        )];
-        let author = author_from_digest_logs(&logs, &AUTHORITIES, NodeVersion::V2_0, false)
-            .expect("skipped digest is not an error");
-        assert_eq!(author, None);
+    fn author_from_babe_digest() {
+        let logs = vec![PreRuntime(BABE_ENGINE_ID, babe_pre_digest(2, 2))];
 
+        // Before activation the BABE digest is skipped.
+        // From activation on, a BABE-only digest is the layout of every block (AFTER the flip).
+        for (protocol_version, expected) in [
+            (V2_0(2_000_000), None),
+            (BEFORE_ACTIVATION, None),
+            (AT_ACTIVATION, Some(AUTHORITIES[2].into())),
+            (AFTER_ACTIVATION, Some(AUTHORITIES[2].into())),
+        ] {
+            let author = author_from_digest_logs(&logs, &AUTHORITIES, protocol_version)
+                .expect("skipped digest is not an error");
+            assert_eq!(author, expected, "{protocol_version:?}");
+        }
+    }
+
+    // At the enactment block of the upgrade to the first runtime with `pallet-consensus-engine`,
+    // the state already holds that runtime, but the previous runtime executed the block, so a BABE
+    // digest placed ahead of the Aura one is not trusted.
+    #[test]
+    fn babe_first_in_a_block_executed_before_activation_is_aura() {
         let logs = vec![
-            DigestItem::PreRuntime(BABE_ENGINE_ID, babe_pre_digest(2, 2)),
-            DigestItem::PreRuntime(AURA_ENGINE_ID, 4u64.encode()),
+            PreRuntime(BABE_ENGINE_ID, babe_pre_digest(2, 2)),
+            PreRuntime(AURA_ENGINE_ID, aura_pre_digest(4)),
         ];
-        let author = author_from_digest_logs(&logs, &AUTHORITIES, NodeVersion::V2_0, false)
+        let author = author_from_digest_logs(&logs, &AUTHORITIES, BEFORE_ACTIVATION)
             .expect("author can be determined");
-        assert_eq!(author, Some([2; 32].into()));
+        assert_eq!(author, Some(AUTHORITIES[1].into()));
     }
 
     #[test]
     fn first_pre_runtime_digest_in_digest_order_wins() {
-        let logs = vec![
-            DigestItem::PreRuntime(BABE_ENGINE_ID, babe_pre_digest(2, 2)),
-            DigestItem::PreRuntime(AURA_ENGINE_ID, 4u64.encode()),
+        // Aura first, then the BABE marker: the pre-flip layout `pallet-consensus-engine` enforces.
+        let mut logs = vec![
+            PreRuntime(AURA_ENGINE_ID, aura_pre_digest(4)),
+            PreRuntime(BABE_ENGINE_ID, babe_pre_digest(2, 2)),
         ];
-        let author = author_from_digest_logs(&logs, &AUTHORITIES, NodeVersion::V2_0, true)
-            .expect("author can be determined");
-        assert_eq!(author, Some([3; 32].into()));
+        for protocol_version in [BEFORE_ACTIVATION, AT_ACTIVATION, AFTER_ACTIVATION] {
+            let author = author_from_digest_logs(&logs, &AUTHORITIES, protocol_version)
+                .expect("author can be determined");
+            assert_eq!(author, Some(AUTHORITIES[1].into()), "{protocol_version:?}");
+        }
 
+        // BABE first: skipped before activation, so Aura names the author.
+        // From activation on, BABE does.
+        logs.reverse();
+        for (protocol_version, expected) in [
+            (BEFORE_ACTIVATION, AUTHORITIES[1]),
+            (AT_ACTIVATION, AUTHORITIES[2]),
+            (AFTER_ACTIVATION, AUTHORITIES[2]),
+        ] {
+            let author = author_from_digest_logs(&logs, &AUTHORITIES, protocol_version)
+                .expect("author can be determined");
+            assert_eq!(author, Some(expected.into()), "{protocol_version:?}");
+        }
+    }
+
+    #[test]
+    fn first_pre_runtime_digest_decides_without_fallback() {
+        // Index 7 is outside the authority set, so the BABE digest yields no author.
         let logs = vec![
-            DigestItem::PreRuntime(AURA_ENGINE_ID, 4u64.encode()),
-            DigestItem::PreRuntime(BABE_ENGINE_ID, babe_pre_digest(2, 2)),
+            PreRuntime(BABE_ENGINE_ID, babe_pre_digest(2, 7)),
+            PreRuntime(AURA_ENGINE_ID, aura_pre_digest(4)),
         ];
-        let author = author_from_digest_logs(&logs, &AUTHORITIES, NodeVersion::V2_0, true)
-            .expect("author can be determined");
-        assert_eq!(author, Some([2; 32].into()));
+        // Before activation the BABE digest is skipped, so the Aura digest names the author.
+        for (protocol_version, expected) in [
+            (BEFORE_ACTIVATION, Some(AUTHORITIES[1].into())),
+            (AT_ACTIVATION, None),
+            (AFTER_ACTIVATION, None),
+        ] {
+            let author = author_from_digest_logs(&logs, &AUTHORITIES, protocol_version)
+                .expect("out-of-range index is not an error");
+            assert_eq!(author, expected, "{protocol_version:?}");
+        }
     }
 
     #[test]
     fn unrecognized_engine_is_skipped() {
         let logs = vec![
-            DigestItem::PreRuntime(*b"test", vec![0xaa]),
-            DigestItem::PreRuntime(AURA_ENGINE_ID, 4u64.encode()),
+            PreRuntime(*b"test", vec![0xaa]),
+            PreRuntime(AURA_ENGINE_ID, aura_pre_digest(4)),
         ];
 
-        let author = author_from_digest_logs(&logs, &AUTHORITIES, NodeVersion::V2_0, true)
+        let author = author_from_digest_logs(&logs, &AUTHORITIES, V2_0(2_000_000))
             .expect("author can be determined");
 
-        assert_eq!(author, Some([2; 32].into()));
+        assert_eq!(author, Some(AUTHORITIES[1].into()));
     }
 
     #[test]
@@ -1013,7 +1234,7 @@ mod tests {
 
     #[test]
     fn no_pre_runtime_digest_yields_no_author() {
-        let author = author_from_digest_logs(&[], &AUTHORITIES, NodeVersion::V2_0, true)
+        let author = author_from_digest_logs(&[], &AUTHORITIES, V2_0(2_000_000))
             .expect("no digest is not an error");
 
         assert_eq!(author, None);
@@ -1021,9 +1242,9 @@ mod tests {
 
     #[test]
     fn empty_authorities_yield_no_author() {
-        let logs = vec![DigestItem::PreRuntime(AURA_ENGINE_ID, 4u64.encode())];
+        let logs = vec![PreRuntime(AURA_ENGINE_ID, aura_pre_digest(4))];
 
-        let author = author_from_digest_logs(&logs, &[], NodeVersion::V2_0, true)
+        let author = author_from_digest_logs(&logs, &[], V2_0(2_000_000))
             .expect("empty authorities are not an error");
 
         assert_eq!(author, None);

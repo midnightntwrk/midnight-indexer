@@ -10,3 +10,8 @@ fail-fast = false
 # Terminate tests that take longer than 480s (240s * 2) to prevent indefinite hangs.
 # The e2e test depends on block production which can stall; this ensures cleanup.
 slow-timeout = { period = "240s", terminate-after = 2 }
+
+# The BABE flip test waits out epochs and a pause longer than two of them, about 7 minutes.
+[[profile.default.overrides]]
+filter = "test(babe_flip_with_skipped_epoch)"
+slow-timeout = { period = "240s", terminate-after = 4 }
