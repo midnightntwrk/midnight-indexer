@@ -133,6 +133,8 @@ jobs:
           echo "TOOLCHAIN=$toolchain" | tee -a "$GITHUB_ENV"
           version=$(grep '^version.*=' Cargo.toml | sed -E 's/version.*=.*"(.*)"/\1/')
           echo "VERSION=$version" | tee -a "$GITHUB_ENV"
+          # The commit as local builds report it, for `--version` and the startup journal.
+          echo "GIT_SHA=${GITHUB_SHA::8}" | tee -a "$GITHUB_ENV"
 
       - name: Login to DockerHub
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
@@ -191,11 +193,23 @@ jobs:
             RUST_VERSION=${{ env.TOOLCHAIN }}
             CARGO_AUDITABLE_VERSION=${{ env.CARGO_AUDITABLE_VERSION }}
             CARGO_CHEF_VERSION=${{ env.CARGO_CHEF_VERSION }}
+            MIDNIGHT_INDEXER_GIT_SHA=${{ env.GIT_SHA }}
           platforms: linux/${{ matrix.platform.arch }}
           tags: local/${{ matrix.image.name }}:check
           cache-from: &cache-from |
             type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.image.name }}:buildcache${{ matrix.platform.cache_scope }}
             type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.image.name }}:buildcache-${{ env.PROFILE }}${{ matrix.platform.cache_scope }}
+
+      - name: Check the image reports its commit
+        env:
+          IMAGE: ${{ matrix.image.name }}
+        run: |
+          version=$(docker run --rm --entrypoint "$IMAGE" "local/$IMAGE:check" --version)
+          echo "$version"
+          if ! grep -qF "$GIT_SHA" <<< "$version"; then
+            echo "the image does not report commit $GIT_SHA" >&2
+            exit 1
+          fi
 
       - name: Install Syft
         id: syft
