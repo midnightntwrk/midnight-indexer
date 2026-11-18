@@ -124,3 +124,9 @@ tower-http                  = { version = "0.7" }
 trait-variant               = { version = "0.1" }
 uuid                        = { version = "1.23", features = [ "serde" ] }
 walkdir                     = { version = "2.5" }
+
+# midnight-serialize limits deserialization to a depth of 50 with debug assertions on and 250 with
+# them off. A contract zswap state with entries stores an inlined Merkle path 67 deep, which gc and
+# pinning read back, so dev builds use the release limit.
+[profile.dev.package.midnight-serialize]
+debug-assertions = false
