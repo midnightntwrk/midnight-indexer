@@ -186,34 +186,21 @@ pub async fn run(
         .await
         .context("get newest ledger state keys")?
         .into_iter()
-        .map(|(protocol_version, key)| {
-            let ledger_version = protocol_version.ledger_version();
-            LedgerState::root_hash_bytes(&key, ledger_version)
-                .map(|root_hash| (key, ledger_version, root_hash))
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .context("get ledger state root hashes")?;
+        .map(|(protocol_version, key)| (key, protocol_version.ledger_version()))
+        .collect::<Vec<_>>();
     let newest_count = newest_ledger_state_keys.len();
 
     // Must precede the seeding below, and is idempotent, hence unconditional; see
     // `LedgerState::repair_root_counts`.
-    let (repair, rooted) = LedgerState::repair_root_counts(
-        newest_ledger_state_keys
-            .iter()
-            .map(|(key, ledger_version, _)| (key, *ledger_version)),
-    )
-    .context("repair ledger state root counts")?;
+    let (repair, rooted) = LedgerState::repair_root_counts(newest_ledger_state_keys)
+        .context("repair ledger state root counts")?;
     if repair.raised_roots > 0 || repair.culled_roots > 0 {
         warn!(repair:?; "repaired under-counted ledger state gc roots");
     } else {
         info!(repair:?; "ledger state gc root counts are consistent");
     }
 
-    let mut persisted_ledger_state_keys = newest_ledger_state_keys
-        .into_iter()
-        .filter(|(_, _, root_hash)| rooted.contains(root_hash))
-        .map(|(key, ledger_version, _)| (key, ledger_version))
-        .collect::<VecDeque<_>>();
+    let mut persisted_ledger_state_keys = VecDeque::from(rooted);
     info!(
         seeded = persisted_ledger_state_keys.len(),
         skipped_unrooted = newest_count - persisted_ledger_state_keys.len();
