@@ -16,10 +16,10 @@
 // Contract deploys, circuit calls and maintenance updates driven by midnight-js
 // in-process, with moth supplying the wallet.
 //
-// LEDGER TRAIN. This module runs on midnight-js 5 (5.0.0), whose current
+// LEDGER TRAIN. This module runs on midnight-js 5 (5.0.1), whose current
 // era is ledger 9: transactions cross to the wallet provider as live
 // `@midnightntwrk/ledger-v9` objects, and the compiled contract has to carry
-// compact-runtime 0.21.0, which is what compactc 0.36.0 emits. A ledger-8
+// compact-runtime 0.21.0, which is what compactc 0.36.1 emits. A ledger-8
 // chain is midnight-js 5's *retained* era: it needs the ledger-8 compact-runtime
 // resolvable next to the artifacts, which this harness does not carry, so
 // `mothHandlesContracts()` says no there and the ToolkitWrapper routes contract
@@ -47,7 +47,7 @@
 // and no IPC involved.
 //
 // ONE WASM COPY. `@midnightntwrk/ledger-v9` resolves to a single physical copy
-// in node_modules. midnight-js 5.0.0 moves transactions across its providers as
+// in node_modules. midnight-js 5.0.1 moves transactions across its providers as
 // `LedgerTransaction` handles (bytes plus era and stage) and decodes them with
 // its own ledger, so the hand-over does not trip `instanceof` on a second
 // copy; but moth's wallet SDK, this harness (`@midnightntwrk/wallet-sdk/ledger/v9`)
@@ -111,8 +111,8 @@ import { mothHandlesContracts } from './ledger';
  * The compiled contract this suite deploys: `counter.compact`, whose single
  * circuit `increment()` is the call key `callContract()` already defaults to.
  *
- * Built with compactc 0.36.0, which emits `checkRuntimeVersion('0.21.0')` to
- * match the `@midnight-ntwrk/compact-runtime` 0.21.0 that midnight-js 5.0.0
+ * Built with compactc 0.36.1, which emits `checkRuntimeVersion('0.21.0')` to
+ * match the `@midnight-ntwrk/compact-runtime` 0.21.0 that midnight-js 5.0.1
  * pins, and ships the integrity manifest the ZK config provider verifies the
  * keys against. An older build (0.16.0 from compactc 0.31.1) will not load here.
  */

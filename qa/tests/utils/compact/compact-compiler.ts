@@ -29,10 +29,10 @@ const DOCKERFILE = path.join(HERE, 'compact-toolchain.Dockerfile');
 const GENERATE_NODE_DATA = path.resolve(HERE, '../../../../generate_node_data.sh');
 
 /**
- * The compactc moth's contract path needs: 0.36.0 emits compact-runtime 0.21.0,
- * the runtime midnight-js 5.0.0 pins (see `utils/moth/moth-contracts.ts`).
+ * The compactc moth's contract path needs: 0.36.1 emits compact-runtime 0.21.0,
+ * the runtime midnight-js 5.0.1 pins (see `utils/moth/moth-contracts.ts`).
  */
-export const MOTH_COMPACTC_VERSION = '0.36.0';
+export const MOTH_COMPACTC_VERSION = '0.36.1';
 
 /**
  * The compactc release fixtures are compiled with.

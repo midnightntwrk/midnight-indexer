@@ -73,7 +73,7 @@ const READY_POLL_INTERVAL_MS = 1_000;
  */
 const PROOF_SERVER_TAG_BY_LEDGER: Record<LedgerVersion, string> = {
   v8: '8.1.0',
-  v9: '9.0.0',
+  v9: '9.0.2',
 };
 
 const proofServerTag = async (): Promise<string> =>
