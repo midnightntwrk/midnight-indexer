@@ -178,6 +178,7 @@ fn run() -> anyhow::Result<()> {
 
     runtime.block_on(async {
         telemetry::init_tracing(tracing_config);
+        let metrics = metrics_config.enabled;
         telemetry::init_metrics(metrics_config);
 
         let pool = pool::sqlite::SqlitePool::new(storage_config)
@@ -213,7 +214,15 @@ fn run() -> anyhow::Result<()> {
                     .context("create SubxtNode")?;
                 let sigterm =
                     signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
-                chain_app::run(application_config.into(), node, storage, publisher, sigterm).await
+                chain_app::run(
+                    application_config.into(),
+                    metrics,
+                    node,
+                    storage,
+                    publisher,
+                    sigterm,
+                )
+                .await
             })
         };
 
