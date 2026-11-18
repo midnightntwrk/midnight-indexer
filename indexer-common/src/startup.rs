@@ -50,7 +50,8 @@ pub trait Task<Context>: Send + Sync {
     const ID: &'static str;
     /// Bump to run the task again where it ran at an older version.
     const VERSION: u32 = 1;
-    /// Whether a failure stops startup; if not, it is logged and startup carries on.
+    /// Whether a failure, of the task or of reading its entry, stops startup; if not, it is logged
+    /// and startup carries on. A failure to append its entry always stops startup.
     const FATAL: bool = true;
     /// Whether a run is journaled. Hooks that run on every start and record nothing can opt out.
     const JOURNAL: bool = true;
@@ -166,11 +167,16 @@ async fn run_task<Context: Sync, J: Journal>(
         source,
     };
 
-    let previous = journal.latest(task.id()).await.map_err(failed)?;
-    let started_at = SystemTime::now();
+    // A failed read of the task's entry is a failure of the task, so it follows FATAL.
+    let executed = async {
+        let previous = journal.latest(task.id()).await?;
+        let started_at = SystemTime::now();
+        let entry = task.execute(context, previous).await?;
+        Ok::<_, BoxError>(entry.map(|entry| (entry, started_at)))
+    };
 
-    match task.execute(context, previous).await {
-        Ok(Some(entry)) if task.journal() => journal
+    match executed.await {
+        Ok(Some((entry, started_at))) if task.journal() => journal
             .append(task.id(), entry, started_at, SystemTime::now())
             .await
             .map_err(|source| failed(source).into()),
@@ -600,6 +606,47 @@ mod tests {
 
         run(&context, &MemoryJournal::default(), &counting).await?;
         assert_eq!(context.runs.load(Relaxed), 2, "ran again");
+
+        Ok(())
+    }
+
+    /// Fails every read.
+    struct UnreadableJournal;
+
+    impl Journal for UnreadableJournal {
+        async fn latest(&self, _id: &str) -> Result<Option<Entry<Value>>, BoxError> {
+            Err("read failed".into())
+        }
+
+        async fn append(
+            &self,
+            _id: &str,
+            _entry: Entry<Value>,
+            _started_at: SystemTime,
+            _ended_at: SystemTime,
+        ) -> Result<(), BoxError> {
+            Err("append failed".into())
+        }
+    }
+
+    // A failed read of the journal stops startup for a fatal task, and skips a task that is not.
+    #[tokio::test]
+    async fn a_failed_journal_read_follows_fatal() -> Result<(), BoxError> {
+        let context = Context::default();
+
+        let fatal = task(Counting::<1, true> { fail: false });
+        let error = run(&context, &UnreadableJournal, &fatal)
+            .await
+            .expect_err("a failed read fails a fatal task");
+        assert_eq!(error.to_string(), "startup task test/counting failed");
+        assert_eq!(
+            error.source().map(ToString::to_string).as_deref(),
+            Some("read failed")
+        );
+
+        let not_fatal = task(Counting::<1, false> { fail: false });
+        run(&context, &UnreadableJournal, &not_fatal).await?;
+        assert_eq!(context.runs.load(Relaxed), 0, "skipped");
 
         Ok(())
     }
