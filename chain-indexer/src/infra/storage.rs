@@ -25,13 +25,15 @@ use indexer_common::{
         SerializedContractStateKey, SerializedLedgerStateKey, TermsAndConditionsHash,
         UnshieldedUtxo, bridge::BridgeEvent,
     },
+    error::BoxError,
     infra::sqlx::U128BeBytes,
+    startup::{Entry, Journal, Value},
 };
 use indoc::indoc;
 use log::debug;
 use serde::{Deserialize, Serialize};
 use sqlx::{QueryBuilder, Type, types::Json};
-use std::num::NonZeroUsize;
+use std::{num::NonZeroUsize, time::SystemTime};
 
 #[cfg(feature = "cloud")]
 /// Sqlx transaction for Postgres.
@@ -299,6 +301,23 @@ impl domain::storage::Storage for Storage {
                 Ok(TermsAndConditions { hash, url })
             })
             .transpose()
+    }
+}
+
+/// The journal of startup tasks, in the indexer database.
+impl Journal for Storage {
+    async fn latest(&self, id: &str) -> Result<Option<Entry<Value>>, BoxError> {
+        self.pool.latest(id).await
+    }
+
+    async fn append(
+        &self,
+        id: &str,
+        entry: Entry<Value>,
+        started_at: SystemTime,
+        ended_at: SystemTime,
+    ) -> Result<(), BoxError> {
+        self.pool.append(id, entry, started_at, ended_at).await
     }
 }
 

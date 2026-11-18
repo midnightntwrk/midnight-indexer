@@ -26,9 +26,13 @@ ARG PROFILE=release
 COPY --from=planner /build/recipe.json recipe.json
 # Same package and features as the build below, so cargo reuses every dependency compiled here.
 RUN cargo chef cook -p indexer-tests --locked --profile $PROFILE --recipe-path recipe.json
+# The git commit, for `--version` and the startup journal, as .git is not in the build context.
+# Declared after cargo chef cook, so a new commit leaves the cached dependencies alone.
+ARG MIDNIGHT_INDEXER_GIT_SHA
 COPY --from=auditable /usr/local/cargo/bin/cargo-auditable /usr/local/cargo/bin/
 COPY . .
-RUN cargo auditable build -p indexer-tests --locked --profile $PROFILE && \
+RUN : "${MIDNIGHT_INDEXER_GIT_SHA:?build arg required}" && \
+    cargo auditable build -p indexer-tests --locked --profile $PROFILE && \
     if ! readelf -S "./target/${PROFILE/dev/debug}/indexer-tests" | grep -q '\.dep-v0'; then \
         echo "indexer-tests binary lacks the .dep-v0 section embedded by cargo auditable" >&2; exit 1; \
     fi && \
