@@ -40,6 +40,7 @@ impl PostgresPool {
             max_connections,
             idle_timeout,
             max_lifetime,
+            test_before_acquire,
         } = config;
 
         let connect_options = PgConnectOptions::new()
@@ -54,6 +55,7 @@ impl PostgresPool {
             .max_connections(max_connections)
             .idle_timeout(Some(idle_timeout))
             .max_lifetime(max_lifetime)
+            .test_before_acquire(test_before_acquire)
             .connect_with(connect_options)
             .await?;
         let pool = PostgresPool(inner);
@@ -100,6 +102,17 @@ pub struct Config {
 
     #[serde(with = "humantime_serde")]
     pub max_lifetime: Duration,
+
+    /// Ping each connection as it is taken from the pool, so one broken while idle is replaced
+    /// rather than failing a query. It costs a round trip per acquisition; with connections
+    /// recycled after `idle_timeout` and `max_lifetime`, a caller that retries or restarts on a
+    /// failed query can do without it.
+    #[serde(default = "test_before_acquire_default")]
+    pub test_before_acquire: bool,
+}
+
+fn test_before_acquire_default() -> bool {
+    true
 }
 
 #[cfg(test)]
@@ -111,6 +124,25 @@ mod tests {
     use std::{error::Error as StdError, time::Duration};
     use testcontainers::{ImageExt, runners::AsyncRunner};
     use testcontainers_modules::postgres::Postgres;
+
+    // Leaving `test_before_acquire` out keeps the connection test, which every service but the
+    // chain indexer relies on.
+    #[test]
+    fn test_before_acquire_defaults_to_true() {
+        let config = |test_before_acquire: &str| {
+            serde_json::from_str::<Config>(&format!(
+                r#"{{
+                    "host": "localhost", "port": 5432, "dbname": "indexer", "user": "indexer",
+                    "password": "postgres", "sslmode": "prefer", "max_connections": 10,
+                    "idle_timeout": "1m", "max_lifetime": "5m"{test_before_acquire}
+                }}"#
+            ))
+            .expect("config deserializes")
+        };
+
+        assert!(config("").test_before_acquire);
+        assert!(!config(r#", "test_before_acquire": false"#).test_before_acquire);
+    }
 
     #[tokio::test]
     async fn test_pool() -> Result<(), Box<dyn StdError>> {
@@ -137,6 +169,7 @@ mod tests {
             max_connections: 10,
             idle_timeout: Duration::from_secs(60),
             max_lifetime: Duration::from_secs(5 * 60),
+            test_before_acquire: true,
         };
 
         let pool = PostgresPool::new(config).await;

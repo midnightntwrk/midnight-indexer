@@ -220,6 +220,7 @@ async fn init_ledger_db()
         max_connections: 10,
         idle_timeout: Duration::from_secs(60),
         max_lifetime: Duration::from_secs(5 * 60),
+        test_before_acquire: true,
     };
     let pool = PostgresPool::new(config)
         .await
