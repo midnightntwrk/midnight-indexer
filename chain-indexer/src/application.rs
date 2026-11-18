@@ -197,7 +197,7 @@ pub async fn run(
 
     // Must precede the seeding below, and is idempotent, hence unconditional; see
     // `LedgerState::repair_root_counts`.
-    let repair = LedgerState::repair_root_counts(
+    let (repair, rooted) = LedgerState::repair_root_counts(
         newest_ledger_state_keys
             .iter()
             .map(|(key, ledger_version, _)| (key, *ledger_version)),
@@ -209,10 +209,9 @@ pub async fn run(
         info!(repair:?; "ledger state gc root counts are consistent");
     }
 
-    let persisted_root_hashes = LedgerState::persisted_root_hashes();
     let mut persisted_ledger_state_keys = newest_ledger_state_keys
         .into_iter()
-        .filter(|(_, _, root_hash)| persisted_root_hashes.contains(root_hash))
+        .filter(|(_, _, root_hash)| rooted.contains(root_hash))
         .map(|(key, ledger_version, _)| (key, ledger_version))
         .collect::<VecDeque<_>>();
     info!(

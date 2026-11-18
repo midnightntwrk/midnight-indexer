@@ -488,8 +488,8 @@ impl LedgerState {
         Ok(())
     }
 
-    /// The raw arena hash bytes of a serialized ledger state key, e.g. to check membership in
-    /// [Self::persisted_root_hashes].
+    /// The raw arena hash bytes of a serialized ledger state key, e.g. to check membership in the
+    /// roots [Self::repair_root_counts] returns.
     pub fn root_hash_bytes(
         key: &SerializedLedgerStateKey,
         ledger_version: LedgerVersion,
@@ -506,20 +506,6 @@ impl LedgerState {
     ) -> Result<bool, Error> {
         let hash = Self::arena_root_hash(key, ledger_version)?;
         Ok(default_storage::<v1_1::LedgerDb>().with_backend(|b| b.get(&hash).is_some()))
-    }
-
-    /// The raw arena hash bytes of all currently persisted gc roots. Fetches the full root set
-    /// from the ledger DB once; bounded by the persisted history (the retention window going
-    /// forward, plus pre-existing roots until they are reclaimed).
-    ///
-    /// Reads every root, so its cost grows with the number of roots: to count them, use
-    /// `ledger_db::root_count` instead.
-    pub fn persisted_root_hashes() -> HashSet<Vec<u8>> {
-        default_storage::<v1_1::LedgerDb>()
-            .with_backend(|b| b.get_roots())
-            .into_keys()
-            .map(|hash| hash.0.to_vec())
-            .collect()
     }
 
     /// Raise the ledger DB's gc root counts to match `window`, the retention window's ledger state
@@ -541,13 +527,17 @@ impl LedgerState {
     /// window had already unpersisted, and the seed is all-or-nothing per root, so a root shared
     /// by several blocks takes more unpersists than its stored count allows.
     ///
-    /// Call at startup, before seeding the retention window from [Self::persisted_root_hashes], so
-    /// the seed sees repaired counts.
+    /// Call at startup, before seeding the retention window. Also returns the raw arena hash bytes
+    /// of the window's roots that are roots once repaired, which the seed keeps: reading them here
+    /// spares the seed a second read of every root.
     pub fn repair_root_counts<'a>(
         window: impl IntoIterator<Item = (&'a SerializedLedgerStateKey, LedgerVersion)>,
-    ) -> Result<RootCountRepair, Error> {
-        window_root_counts(window)
-            .map(|wanted| raise_root_counts(&default_storage::<v1_1::LedgerDb>(), &wanted))
+    ) -> Result<(RootCountRepair, HashSet<Vec<u8>>), Error> {
+        window_root_counts(window).map(|wanted| {
+            let (repair, rooted) = raise_root_counts(&default_storage::<v1_1::LedgerDb>(), &wanted);
+            let rooted = rooted.into_iter().map(|hash| hash.0.to_vec()).collect();
+            (repair, rooted)
+        })
     }
 
     fn arena_root_hash(
@@ -2735,10 +2725,21 @@ fn window_root_counts<'a>(
 }
 
 /// Body of [LedgerState::repair_root_counts], with the storage passed in so tests can drive it
-/// without the process-global default.
-fn raise_root_counts(storage: &Storage<v1_1::LedgerDb>, wanted: &RootCounts) -> RootCountRepair {
+/// without the process-global default. Returns what it changed and the keys of `wanted` that are
+/// roots once repaired.
+///
+/// Reads every root once, via `get_roots`: storage-core's backend exposes no read of the counts of
+/// given keys.
+fn raise_root_counts(
+    storage: &Storage<v1_1::LedgerDb>,
+    wanted: &RootCounts,
+) -> (
+    RootCountRepair,
+    HashSet<ArenaHash<<v1_1::LedgerDb as DB>::Hasher>>,
+) {
     storage.with_backend(|backend| {
         let stored = backend.get_roots();
+        let mut rooted = HashSet::new();
         let mut repair = RootCountRepair {
             strays: stored
                 .keys()
@@ -2753,6 +2754,7 @@ fn raise_root_counts(storage: &Storage<v1_1::LedgerDb>, wanted: &RootCounts) -> 
             let have = stored.get(hash).copied().unwrap_or_default();
             let missing = want.saturating_sub(have);
             if missing == 0 {
+                rooted.insert(hash.to_owned());
                 continue;
             }
 
@@ -2769,13 +2771,14 @@ fn raise_root_counts(storage: &Storage<v1_1::LedgerDb>, wanted: &RootCounts) -> 
             for _ in 0..missing {
                 backend.persist(hash);
             }
+            rooted.insert(hash.to_owned());
             repair.raised_roots += 1;
             repair.raised_total += missing;
         }
 
         backend.flush_all_changes_to_db();
 
-        repair
+        (repair, rooted)
     })
 }
 
@@ -4497,7 +4500,10 @@ mod root_count_repair_tests {
         db::DB,
         storable::SMALL_OBJECT_LIMIT,
     };
-    use std::{collections::BTreeMap, error::Error as StdError};
+    use std::{
+        collections::{BTreeMap, HashSet},
+        error::Error as StdError,
+    };
 
     /// Blocks in the retention window referencing one and the same ledger state root.
     const WINDOW_HITS: u32 = 5;
@@ -4540,7 +4546,7 @@ mod root_count_repair_tests {
         set_stored_root_count(&pool, &healthy.hash(), 1);
 
         let wanted = BTreeMap::from([(under_counted.hash(), WINDOW_HITS), (healthy.hash(), 1)]);
-        let repair = raise_root_counts(&storage, &wanted);
+        let (repair, rooted) = raise_root_counts(&storage, &wanted);
 
         assert_eq!(
             repair,
@@ -4550,6 +4556,10 @@ mod root_count_repair_tests {
                 culled_roots: 0,
                 strays: 0,
             }
+        );
+        assert_eq!(
+            rooted,
+            HashSet::from([under_counted.hash(), healthy.hash()])
         );
         assert_eq!(
             stored_root_count(&pool, &under_counted.hash()).await?,
@@ -4574,7 +4584,7 @@ mod root_count_repair_tests {
         let culled = arena_hash([0xcc; 32]);
 
         let wanted = BTreeMap::from([(over_counted.hash(), 1), (culled.clone(), WINDOW_HITS)]);
-        let repair = raise_root_counts(&storage, &wanted);
+        let (repair, rooted) = raise_root_counts(&storage, &wanted);
 
         assert_eq!(
             repair,
@@ -4585,6 +4595,7 @@ mod root_count_repair_tests {
                 strays: 1,
             }
         );
+        assert_eq!(rooted, HashSet::from([over_counted.hash()]));
         assert_eq!(
             stored_root_count(&pool, &over_counted.hash()).await?,
             Some(3)
@@ -4604,9 +4615,10 @@ mod root_count_repair_tests {
 
         let wanted = BTreeMap::from([(root.hash(), WINDOW_HITS)]);
         raise_root_counts(&storage, &wanted);
-        let second = raise_root_counts(&storage, &wanted);
+        let (second, rooted) = raise_root_counts(&storage, &wanted);
 
         assert_eq!(second, RootCountRepair::default());
+        assert_eq!(rooted, HashSet::from([root.hash()]));
         assert_eq!(
             stored_root_count(&pool, &root.hash()).await?,
             Some(WINDOW_HITS.into())
@@ -4723,7 +4735,7 @@ mod root_count_repair_tests {
         // see only what is on disk.
         let restarted = Storage::new(16, LedgerDb::new(pool.clone()));
         let wanted = BTreeMap::from([(parent_hash.clone(), WINDOW_HITS)]);
-        let repair = raise_root_counts(&restarted, &wanted);
+        let (repair, rooted) = raise_root_counts(&restarted, &wanted);
 
         assert_eq!(
             repair,
@@ -4735,6 +4747,7 @@ mod root_count_repair_tests {
             },
             "a root with a culled descendant must be skipped, not re-rooted"
         );
+        assert!(rooted.is_empty());
         assert_eq!(
             stored_root_count(&pool, &parent_hash).await?,
             None,

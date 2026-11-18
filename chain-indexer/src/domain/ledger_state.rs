@@ -178,8 +178,8 @@ impl LedgerState {
             .map_err(Error::Unpersist)
     }
 
-    /// The raw arena hash bytes of a serialized ledger state key, e.g. to check membership in
-    /// [Self::persisted_root_hashes].
+    /// The raw arena hash bytes of a serialized ledger state key, e.g. to check membership in the
+    /// roots [Self::repair_root_counts] returns.
     pub fn root_hash_bytes(
         key: &SerializedLedgerStateKey,
         ledger_version: LedgerVersion,
@@ -187,15 +187,10 @@ impl LedgerState {
         indexer_common::domain::ledger::LedgerState::root_hash_bytes(key, ledger_version)
     }
 
-    /// The raw arena hash bytes of all currently persisted gc roots, fetched from the ledger DB.
-    pub fn persisted_root_hashes() -> HashSet<Vec<u8>> {
-        indexer_common::domain::ledger::LedgerState::persisted_root_hashes()
-    }
-
     /// See [`indexer_common::domain::ledger::LedgerState::repair_root_counts`].
     pub fn repair_root_counts<'a>(
         window: impl IntoIterator<Item = (&'a SerializedLedgerStateKey, LedgerVersion)>,
-    ) -> Result<RootCountRepair, indexer_common::domain::ledger::Error> {
+    ) -> Result<(RootCountRepair, HashSet<Vec<u8>>), indexer_common::domain::ledger::Error> {
         indexer_common::domain::ledger::LedgerState::repair_root_counts(window)
     }
 
