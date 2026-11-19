@@ -12,13 +12,13 @@ if [ -d "target/data/postgres" ] || [ -d "target/data/nats" ]; then
     echo "Cleaning postgres and nats data directories..."
     docker run --rm \
         -v "$(pwd):/project" \
-        alpine sh -c "rm -rf /project/target/data /project/target/postgres /project/target/nats"
+        "$ALPINE_IMAGE" sh -c "rm -rf /project/target/data /project/target/postgres /project/target/nats"
     echo "Data directories cleaned"
 fi
 
 docker run --rm \
     -v "$(pwd):/project" \
-    alpine sh -c "mkdir -p /project/target/data /project/target/postgres /project/target/nats"
+    "$ALPINE_IMAGE" sh -c "mkdir -p /project/target/data /project/target/postgres /project/target/nats"
 
 if [ -z "${NODE_TAG:-}" ]; then
   NODE_TAG=$(resolve_node_tag) || exit 1
@@ -71,7 +71,7 @@ echo "Copying fresh node data from $NODE_DATA_DIR/ into volume..."
 docker run --rm \
   -v "$(pwd)/$NODE_DATA_DIR:/source:ro" \
   -v $DOCKER_VOLUME_NAME:/node \
-  alpine sh -c "cp -r /source/. /node/ && chmod -R 777 /node/chain"
+  "$ALPINE_IMAGE" sh -c "cp -r /source/. /node/ && chmod -R 777 /node/chain"
 
 echo "Node data volume populated successfully"
 echo "NOTE: Any docker-compose warning about 'volume already exists' is harmless and expected"

@@ -1,0 +1,22 @@
+[extend]
+useDefault = true
+
+# These QA fixtures hold public on-chain data: Midnight contract addresses,
+# token-type hashes, and Cardano testnet addresses. Gitleaks' entropy-based
+# `generic-api-key` rule reports them as credentials.
+# Entries name single files so new fixtures under qa/tests/data/ stay scanned.
+[[allowlists]]
+description = "QA static fixtures: public chain addresses and token-type hashes"
+targetRules = ["generic-api-key"]
+paths = [
+  # Contract addresses and token-type hashes from a block-scanner run.
+  '''^qa/tests/data/static/devnet/token-holding-contracts\.jsonc$''',
+  # Contract addresses and token-type hashes from a block-scanner run.
+  '''^qa/tests/data/static/preview/token-holding-contracts\.jsonc$''',
+  # Cardano testnet addresses.
+  '''^qa/tests/data/static/qanet/cardano-stake-addresses\.jsonc$''',
+  # Contract addresses and token-type hashes.
+  '''^qa/tests/data/static/qanet/token-holding-contracts\.jsonc$''',
+  # Token-type hashes and owner addresses from a block-scanner run.
+  '''^qa/tests/data/static/qanet/unshielded-token-types\.jsonc$''',
+]

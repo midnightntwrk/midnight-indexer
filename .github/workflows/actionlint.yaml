@@ -6,11 +6,13 @@ permissions:
 on:
   pull_request:
     paths:
+      - ".github/actions/**"
       - ".github/workflows/*.yml"
       - ".github/workflows/*.yaml"
   push:
     branches: [main]
     paths:
+      - ".github/actions/**"
       - ".github/workflows/*.yml"
       - ".github/workflows/*.yaml"
 
