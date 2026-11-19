@@ -1884,26 +1884,9 @@ mod contract_event_correlation_tests {
 
 #[cfg(all(test, feature = "standalone"))]
 mod contract_state_translation_tests {
-    use super::*;
+    use super::{testing::storage, *};
     use crate::domain::storage::Storage as _;
-    use indexer_common::infra::{
-        migrations,
-        pool::sqlite::{self, SqlitePool},
-    };
-
-    /// A migrated SQLite database and a `Storage` over it.
-    async fn storage() -> (tempfile::TempDir, SqlitePool, Storage) {
-        let dir = tempfile::tempdir().expect("create tempdir");
-        let url = dir.path().join("indexer.sqlite").display().to_string();
-        let pool = SqlitePool::new(sqlite::Config::with_url(url))
-            .await
-            .expect("create pool");
-        migrations::sqlite::run(&pool)
-            .await
-            .expect("run migrations");
-        let storage = Storage::new(pool.clone());
-        (dir, pool, storage)
-    }
+    use indexer_common::infra::pool::sqlite::SqlitePool;
 
     fn hash(seed: u32) -> Vec<u8> {
         let mut hash = [0; 32];
@@ -2120,5 +2103,50 @@ mod contract_state_translation_tests {
         save_contract_state_translations(&[], fork_block, 2, &mut tx)
             .await
             .expect("no translations");
+    }
+}
+
+#[cfg(all(test, feature = "standalone"))]
+mod system_parameters_tests {
+    use super::testing::storage;
+    use crate::domain::storage::Storage as _;
+
+    /// An empty database has no system parameters.
+    #[tokio::test]
+    async fn latest_system_parameters_are_none_when_empty() {
+        let (_dir, _pool, storage) = storage().await;
+
+        let (d_parameter, terms_and_conditions) = tokio::join!(
+            storage.get_latest_d_parameter(),
+            storage.get_latest_terms_and_conditions(),
+        );
+        assert_eq!(d_parameter.expect("get latest D-parameter"), None);
+        assert_eq!(
+            terms_and_conditions.expect("get latest terms and conditions"),
+            None
+        );
+    }
+}
+
+#[cfg(all(test, feature = "standalone"))]
+pub(crate) mod testing {
+    use super::Storage;
+    use indexer_common::infra::{
+        migrations,
+        pool::sqlite::{self, SqlitePool},
+    };
+
+    /// A migrated SQLite database and a `Storage` over it.
+    pub(crate) async fn storage() -> (tempfile::TempDir, SqlitePool, Storage) {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let url = dir.path().join("indexer.sqlite").display().to_string();
+        let pool = SqlitePool::new(sqlite::Config::with_url(url))
+            .await
+            .expect("create pool");
+        migrations::sqlite::run(&pool)
+            .await
+            .expect("run migrations");
+        let storage = Storage::new(pool.clone());
+        (dir, pool, storage)
     }
 }
