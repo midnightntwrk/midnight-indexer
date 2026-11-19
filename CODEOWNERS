@@ -1,4 +1,4 @@
-* @midnightntwrk/mn-codeowners-indexer @midnightntwrk/mn-sre
+* @midnightntwrk/mn-codeowners-indexer @midnightntwrk/mn-qa @midnightntwrk/mn-sre
 /qa/ @midnightntwrk/mn-qa @midnightntwrk/mn-codeowners-indexer
 /.github/ @midnightntwrk/mn-security @midnightntwrk/mn-sre
 CODE_OF_CONDUCT.md @midnightntwrk/mn-security @midnightntwrk/mn-sre
