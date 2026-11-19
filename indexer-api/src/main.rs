@@ -11,6 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(target_os = "linux")]
+#[global_allocator]
+static ALLOC: indexer_common::Jemalloc = indexer_common::Jemalloc;
+
 #[cfg(feature = "cloud")]
 fn main() {
     use indexer_common::telemetry;
