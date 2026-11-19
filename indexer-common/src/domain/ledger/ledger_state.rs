@@ -23,7 +23,8 @@ use crate::{
         dust::{self},
         ledger::{
             ContractState, ContractZswapState, Error, IntentV8, IntentV9, LedgerDbContractState,
-            SerializableExt, TaggedSerializableExt, TransactionV8, TransactionV9, ZswapStateExt,
+            Pin, SerializableExt, TaggedSerializableExt, TransactionV8, TransactionV9,
+            ZswapStateExt,
             contract_state::ContractStateArenaKey,
             state_key::{NodeLedgerV8, NodeLedgerV9},
         },
@@ -90,9 +91,11 @@ use midnight_onchain_runtime_v4::{
     state::{EntryPointBuf, StateValue},
 };
 use midnight_serialize_v1::{Deserializable, tagged_deserialize};
+/// The hash a ledger DB node is stored under, such as a gc root's.
+pub use midnight_storage_core_v1::arena::ArenaHash;
 use midnight_storage_core_v1::{
     Storage,
-    arena::{ArenaHash, Sp, TypedArenaKey},
+    arena::{Sp, TypedArenaKey},
     backend::StorageBackend,
     db::DB,
     storage::default_storage,
@@ -540,7 +543,7 @@ impl LedgerState {
         Ok(repair_window(&default_storage::<v1_1::LedgerDb>(), window))
     }
 
-    fn arena_root_hash(
+    pub(super) fn arena_root_hash(
         key: &SerializedLedgerStateKey,
         ledger_version: LedgerVersion,
     ) -> Result<ArenaHash<<v1_1::LedgerDb as DB>::Hasher>, Error> {
@@ -570,8 +573,12 @@ impl LedgerState {
     /// Run a time-bounded mark-and-sweep garbage collection on the ledger DB.
     /// Returns the number of nodes culled. The bound is observed best-effort:
     /// gc() checks the budget between batches and stops when exceeded.
+    ///
+    /// Marks from the unpinned roots only: what a pinned root reaches is pinned, and the sweep
+    /// never scans pinned nodes.
     pub fn gc(bound: std::time::Duration) -> usize {
-        default_storage::<v1_1::LedgerDb>().with_backend(|b| b.gc(bound))
+        default_storage::<v1_1::LedgerDb>()
+            .with_backend(|b| b.gc_override_gc_roots(bound, |db| db.unpinned_roots()))
     }
 
     /// Apply the given serialized regular transaction to this ledger state and return the
@@ -1022,7 +1029,7 @@ impl LedgerState {
                     .contract
                     .lookup_sp(&address)
                     .map(|mut contract_state| {
-                        contract_state.persist();
+                        contract_state.pin();
                         let key = contract_state
                             .as_typed_key()
                             .tagged_serialize()
@@ -1042,7 +1049,7 @@ impl LedgerState {
                     .contract
                     .lookup_sp(&address)
                     .map(|mut contract_state| {
-                        contract_state.persist();
+                        contract_state.pin();
                         let key = contract_state
                             .as_typed_key()
                             .tagged_serialize()
@@ -1088,7 +1095,7 @@ impl LedgerState {
                     .filter_indices(contract_zswap_indices.get(address));
 
                 let mut contract_zswap_state = storage.alloc(contract_zswap_state);
-                contract_zswap_state.persist();
+                contract_zswap_state.pin();
                 contract_zswap_state
                     .as_typed_key()
                     .tagged_serialize()
@@ -1102,7 +1109,7 @@ impl LedgerState {
                     .filter_indices(contract_zswap_indices.get(address));
 
                 let mut contract_zswap_state = storage.alloc(contract_zswap_state);
-                contract_zswap_state.persist();
+                contract_zswap_state.pin();
                 contract_zswap_state
                     .as_typed_key()
                     .tagged_serialize()
@@ -2837,7 +2844,7 @@ fn dag_is_complete(
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     /// Regression scaffold for shielded-sre#515: the node feeds `block_fullness`
     /// with the stateless `Transaction::cost`; a state-aware cost diverges on
     /// contract calls and poisons fee-derived dust commitments.
@@ -3826,7 +3833,7 @@ mod tests {
     );
 
     #[cfg(feature = "cloud")]
-    async fn init_ledger_db()
+    pub(in crate::domain::ledger) async fn init_ledger_db()
     -> Result<testcontainers::ContainerAsync<testcontainers_modules::postgres::Postgres>, BoxError>
     {
         use crate::infra::{ledger_db, migrations, pool::postgres::PostgresPool};
@@ -3877,7 +3884,7 @@ mod tests {
     }
 
     #[cfg(feature = "standalone")]
-    async fn init_ledger_db() -> Result<tempfile::TempDir, BoxError> {
+    pub(in crate::domain::ledger) async fn init_ledger_db() -> Result<tempfile::TempDir, BoxError> {
         use crate::infra::{
             ledger_db, migrations,
             pool::{self, sqlite::SqlitePool},

@@ -15,7 +15,10 @@ mod metrics;
 mod startup;
 
 use crate::{
-    application::{metrics::Metrics, startup::Build},
+    application::{
+        metrics::Metrics,
+        startup::{Build, PinContractStates},
+    },
     domain::{
         Block, BlockRef, LedgerState, SystemParametersChange, Transaction,
         node::{self, Node},
@@ -234,7 +237,11 @@ pub async fn run(
     };
 
     // Startup tasks, once the ledger state is known to load, as they may read the ledger DB.
-    let plan = sequential([task(Build::current(highest_block_height))]);
+    // The build first, so the journal entries after it were written by it.
+    let plan = sequential([
+        task(Build::current(highest_block_height)),
+        task(PinContractStates),
+    ]);
     startup::run(&storage, &storage, &plan)
         .await
         .map_err(anyhow::Error::from_boxed)
@@ -754,10 +761,27 @@ where
         info!(caught_up:%; "caught-up status changed")
     }
 
-    // Persist ledger state.
+    // Persist ledger state, then pin the contract states it flushed.
     let (new_ledger_state, ledger_state_key) =
         ledger_state.persist().context("persist ledger state")?;
     ledger_state = new_ledger_state;
+    let pinned = task::block_in_place(LedgerState::pin_roots);
+    if pinned.nodes > 0 || pinned.roots_pinned_on_write > 0 || pinned.roots_walked > 0 {
+        debug!(
+            block_height = block.height,
+            pinned = pinned.nodes,
+            roots_pinned_on_write = pinned.roots_pinned_on_write,
+            roots_walked = pinned.roots_walked;
+            "pinned contract states"
+        );
+    }
+    if !pinned.failed_roots.is_empty() {
+        warn!(
+            block_height = block.height,
+            failed_roots:? = pinned.failed_roots;
+            "contract state roots reaching nodes missing from the ledger DB left unpinned"
+        );
+    }
 
     // Determine system parameters change if any.
     let system_parameters_change = determine_system_parameters_change(&block, storage, node)
@@ -933,7 +957,8 @@ mod tests {
     use indexer_common::{
         domain::{
             BlockHash, ByteArray, ByteVec, LedgerVersion, Message, NetworkId, NodeVersion,
-            ProtocolVersion, Publisher, SerializedLedgerStateKey,
+            ProtocolVersion, Publisher, SerializedContractStateKey, SerializedLedgerStateKey,
+            SerializedZswapStateKey,
         },
         error::BoxError,
         startup::{Entry, Journal, Value},
@@ -1231,6 +1256,18 @@ mod tests {
             &self,
         ) -> Result<Option<TermsAndConditions>, sqlx::Error> {
             Ok(None)
+        }
+
+        async fn get_contract_state_keys(
+            &self,
+        ) -> Result<
+            (
+                Vec<SerializedContractStateKey>,
+                Vec<SerializedZswapStateKey>,
+            ),
+            sqlx::Error,
+        > {
+            Ok((vec![], vec![]))
         }
     }
 

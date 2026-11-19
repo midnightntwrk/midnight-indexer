@@ -37,7 +37,8 @@ midnight-onchain-runtime_v3  = { package = "midnight-onchain-runtime", version =
 midnight-onchain-state_v3    = { package = "midnight-onchain-state", version = "=3.0.2" }
 midnight-serialize_v1        = { package = "midnight-serialize", version = "=1.2.1" }
 # One storage-core instance gives the v8 and v9 states, and the translation, one
-# arena.
+# arena. Before upgrading: the ledger DB's `DB::scan` leaves out pinned nodes,
+# which is right only while gc's sweep is its sole caller, as in 1.2.3.
 midnight-storage-core_v1     = { package = "midnight-storage-core", version = "=1.2.3" }
 # Ledger 8 storage. `v8-to-v9-state-translation` requires `^2.0.5`.
 midnight-storage_v2          = { package = "midnight-storage", version = "=2.0.5" }
@@ -123,3 +124,9 @@ tower-http                  = { version = "0.7" }
 trait-variant               = { version = "0.1" }
 uuid                        = { version = "1.23", features = [ "serde" ] }
 walkdir                     = { version = "2.5" }
+
+# midnight-serialize limits deserialization to a depth of 50 with debug assertions on and 250 with
+# them off. A contract zswap state with entries stores an inlined Merkle path 67 deep, which gc and
+# pinning read back, so dev builds use the release limit.
+[profile.dev.package.midnight-serialize]
+debug-assertions = false
