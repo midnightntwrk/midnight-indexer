@@ -59,6 +59,7 @@ indoc                        = { workspace = true }
 itertools                    = { workspace = true }
 log                          = { workspace = true, features = [ "kv_std" ] }
 logforth                     = { workspace = true, features = [ "append-fastrace", "diagnostic-fastrace", "starter-log" ] }
+metrics                      = { workspace = true }
 metrics-exporter-prometheus  = { workspace = true, features = [ "http-listener" ] }
 opentelemetry                = { workspace = true }
 opentelemetry_sdk            = { workspace = true }
@@ -76,12 +77,18 @@ tempfile                     = { workspace = true, optional = true }
 testcontainers               = { workspace = true, optional = true }
 testcontainers-modules       = { workspace = true, optional = true, features = [ "postgres" ] }
 thiserror                    = { workspace = true }
-tokio                        = { workspace = true, features = [ "time" ] }
+tokio                        = { workspace = true, features = [ "rt", "time" ] }
 tracing                      = { workspace = true }
 tracing-subscriber           = { workspace = true, features = [ "registry" ] }
 tokio-stream                 = { workspace = true, features = [ "sync" ] }
 trait-variant                = { workspace = true }
 uuid                         = { workspace = true }
+
+# Linux executables use jemalloc as the global allocator, as the node does. Each declares it in its
+# `main.rs` with the `Jemalloc` re-exported from `src/lib.rs`.
+[target.'cfg(target_os = "linux")'.dependencies]
+tikv-jemalloc-ctl = { workspace = true }
+tikv-jemallocator = { workspace = true }
 
 [dev-dependencies]
 anyhow                 = { workspace = true }
@@ -100,6 +107,9 @@ tokio                  = { workspace = true, features = [ "macros", "rt-multi-th
 cloud      = [ "async-nats", "serde_with", "sqlx/postgres", "sqlx/tls-rustls" ]
 standalone = [ "sqlx/sqlite" ]
 testing    = [ "anyhow", "rand", "tempfile", "testcontainers", "testcontainers-modules" ]
+# Builds jemalloc with heap profiling support (Linux only). Profiling stays off until enabled at
+# run time through `MALLOC_CONF`; see docs/heap-profiling.md.
+jemalloc-profiling = [ "tikv-jemallocator/profiling" ]
 
 [[bench]]
 name              = "ledger_transaction"

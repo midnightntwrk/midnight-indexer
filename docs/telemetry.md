@@ -33,6 +33,13 @@ current span as span events.
 - Logging style (kv field syntax, error chains) is documented in the module docs of
   `indexer-common/src/telemetry.rs`.
 
+## Allocator metrics and heap profiling
+
+On Linux the executables run on jemalloc, and `init_metrics` also publishes the allocator's own
+statistics as `indexer_memory_allocator_bytes{stat=...}`. Reading those series, and taking heap
+profiles from a build with the `jemalloc-profiling` feature, is covered in
+[Memory: allocator metrics and heap profiling](./heap-profiling.md).
+
 ## Turning tracing on
 
 Tracing is off by default. Config (all components share the shape):
