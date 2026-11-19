@@ -85,10 +85,16 @@ suite's [runtime expectations](../qa/tests/tests/sync/README.md#runtime-expectat
 
 - CI runs against an **ephemeral fresh node**, never a deployed env.
 - Scheduled monitors (`.github/workflows/qa-test-*`, business hours) hit
-  `indexer.<env>.midnight.network` for devnet / qanet / preprod / preview and run
+  `indexer.<env>.midnight.network` for preprod / preview and run
   block-subscription + ledger-event streaming tests - they validate the **API** (streaming
   continuity, shape), **not** an indexer-vs-node root diff.
 
 ## See also
 
 - [Creating a release](./releasing.md)
+
+Devnet and qanet workflow ownership moves to `shieldedtech/shielded-gitops`, where
+private Kubernetes ARC runners execute the existing QA suites. The test code and
+environment configurations remain here; this repository no longer schedules or
+dispatches tests against those internal networks. Enable and verify the GitOps
+replacement before merging the workflow removals.

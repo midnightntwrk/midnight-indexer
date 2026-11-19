@@ -216,11 +216,11 @@ export class Environment {
     // checked envName
     this.networkId = this.envName;
     this.indexerHost = resolveIndexerHost(
-      hostConfigByEnvName[this.envName].indexerHost,
+      process.env.INDEXER_HOST?.trim() || hostConfigByEnvName[this.envName].indexerHost,
       process.env.INDEXER_INSTANCE,
       this.isUndeployed,
     );
-    this.nodeHost = hostConfigByEnvName[this.envName].nodeHost;
+    this.nodeHost = process.env.NODE_HOST?.trim() || hostConfigByEnvName[this.envName].nodeHost;
     log.debug(`Using indexer host: ${this.indexerHost}`);
 
     // What we are actually doing here is the following:
