@@ -14,6 +14,7 @@
 mod contract_state;
 mod contract_zswap_state;
 mod ledger_state;
+mod pinning;
 mod secret_key;
 mod state_key;
 mod state_translation_v8_to_v9;
@@ -23,6 +24,7 @@ mod zswap_state;
 pub use contract_state::*;
 pub use contract_zswap_state::*;
 pub use ledger_state::*;
+pub use pinning::*;
 pub use secret_key::*;
 pub use transaction::*;
 pub use zswap_state::*;

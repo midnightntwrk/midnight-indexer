@@ -12,7 +12,10 @@
 // limitations under the License.
 
 use indexer_common::{
-    domain::{ProtocolVersion, SerializedLedgerStateKey},
+    domain::{
+        ProtocolVersion, SerializedContractStateKey, SerializedLedgerStateKey,
+        SerializedZswapStateKey,
+    },
     startup::Journal,
 };
 use std::num::NonZeroUsize;
@@ -81,4 +84,16 @@ where
     async fn get_latest_terms_and_conditions(
         &self,
     ) -> Result<Option<TermsAndConditions>, sqlx::Error>;
+
+    /// The keys of every contract state and contract zswap state stored, translations included,
+    /// each once.
+    async fn get_contract_state_keys(
+        &self,
+    ) -> Result<
+        (
+            Vec<SerializedContractStateKey>,
+            Vec<SerializedZswapStateKey>,
+        ),
+        sqlx::Error,
+    >;
 }
