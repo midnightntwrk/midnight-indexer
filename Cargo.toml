@@ -37,8 +37,7 @@ midnight-onchain-runtime_v3  = { package = "midnight-onchain-runtime", version =
 midnight-onchain-state_v3    = { package = "midnight-onchain-state", version = "=3.0.2" }
 midnight-serialize_v1        = { package = "midnight-serialize", version = "=1.2.1" }
 # One storage-core instance gives the v8 and v9 states, and the translation, one
-# arena. Before upgrading: the ledger DB's `DB::scan` leaves out pinned nodes,
-# which is right only while gc's sweep is its sole caller, as in 1.2.3.
+# arena.
 midnight-storage-core_v1     = { package = "midnight-storage-core", version = "=1.2.3" }
 # Ledger 8 storage. `v8-to-v9-state-translation` requires `^2.0.5`.
 midnight-storage_v2          = { package = "midnight-storage", version = "=2.0.5" }
@@ -130,3 +129,12 @@ walkdir                     = { version = "2.5" }
 # pinning read back, so dev builds use the release limit.
 [profile.dev.package.midnight-serialize]
 debug-assertions = false
+
+[patch.crates-io]
+# storage-core 1.2.3 from midnight-ledger#875, until released: gc reads keys and children without
+# objects, a flush reads root counts in one batch, and with layout-v2 stored nodes no longer have
+# their reference counts tracked in the write cache. serialize and base-crypto come from the same
+# branch, unchanged from their published 1.2.1 and 1.1.1, so storage-core shares their types.
+midnight-storage-core = { git = "https://github.com/midnightntwrk/midnight-ledger", branch = "storage-core-gc-io-871" }
+midnight-serialize    = { git = "https://github.com/midnightntwrk/midnight-ledger", branch = "storage-core-gc-io-871" }
+midnight-base-crypto  = { git = "https://github.com/midnightntwrk/midnight-ledger", branch = "storage-core-gc-io-871" }

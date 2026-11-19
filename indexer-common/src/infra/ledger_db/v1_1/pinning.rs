@@ -396,12 +396,6 @@ impl LedgerDb {
         &self,
         roots: impl IntoIterator<Item = &'a ArenaHash<DefaultHasher>> + Clone,
     ) -> Option<usize> {
-        // The hash a row's key stores, for `PINNED`.
-        let hash = |key: &[u8]| {
-            ArenaHash::<DefaultHasher>::deserialize(&mut &*key, 0)
-                .unwrap_or_panic("cannot deserialize key as ArenaHash")
-        };
-
         // Walk down from the roots, reading the frontier in batches.
         let mut seen = roots.clone().into_iter().cloned().collect::<HashSet<_>>();
         let mut frontier = seen.iter().cloned().collect::<Vec<_>>();
@@ -409,7 +403,7 @@ impl LedgerDb {
 
         while !frontier.is_empty() {
             let batch = frontier.split_off(frontier.len().saturating_sub(PIN_READ_SIZE));
-            let rows = self.pin_rows(&batch);
+            let rows = self.children_rows(&batch);
 
             // A missing node leaves all the roots unpinned.
             if rows.len() < batch.len() {
@@ -418,17 +412,15 @@ impl LedgerDb {
 
             // Follow unpinned rows' children, and record pinned rows in `PINNED`.
             let mut found_pinned = vec![];
-            for (key, object) in rows {
-                // Pinned rows have no object returned, and their descendants are pinned already.
-                let Some(object) = object else {
-                    found_pinned.push(hash(&key));
+            for (key, pinned, children) in rows {
+                // A pinned node's descendants are pinned already.
+                if pinned {
+                    found_pinned.push(key);
                     continue;
-                };
-                let object = OnDiskObject::<DefaultHasher>::deserialize(&mut object.as_slice(), 0)
-                    .unwrap_or_panic("cannot deserialize node as OnDiskObject");
-                for child in refs(&object) {
+                }
+                for child in children {
                     if seen.insert(child.clone()) {
-                        frontier.push(child.clone());
+                        frontier.push(child);
                     }
                 }
                 to_pin.push(key);
@@ -441,10 +433,11 @@ impl LedgerDb {
             .into_iter()
             .map(|root| root.0.to_vec())
             .collect::<Vec<_>>();
+        let nodes = to_pin.iter().map(|key| key.0.to_vec()).collect::<Vec<_>>();
 
         // Write the flags, then record the nodes in `PINNED`.
-        block_in_place(|| Handle::current().block_on(pin_keys(&self.pool, &roots, &to_pin)));
-        add_pinned(to_pin.iter().map(|key| hash(key)));
+        block_in_place(|| Handle::current().block_on(pin_keys(&self.pool, &roots, &nodes)));
+        add_pinned(to_pin.iter().cloned());
 
         Some(to_pin.len())
     }
@@ -489,48 +482,6 @@ impl LedgerDb {
                             .unwrap_or_panic("cannot deserialize key as ArenaHash")
                     })
                     .collect()
-            })
-        })
-    }
-
-    /// `(key, object)` of the stored ones among `keys`, the object only for an unpinned row.
-    fn pin_rows(&self, keys: &[ArenaHash<DefaultHasher>]) -> Vec<(Vec<u8>, Option<Vec<u8>>)> {
-        block_in_place(|| {
-            Handle::current().block_on(async {
-                // At most `PIN_READ_SIZE` keys, within SQLite's bind limit.
-                #[cfg(feature = "standalone")]
-                {
-                    let mut query = QueryBuilder::new(indoc! {"
-                        SELECT key, CASE WHEN pinned THEN NULL ELSE object END
-                        FROM ledger_db_nodes
-                        WHERE key IN (
-                    "});
-                    let mut bindings = query.separated(", ");
-                    for key in keys {
-                        bindings.push_bind(key.0.as_slice());
-                    }
-                    query.push(")");
-                    query
-                        .build_query_as::<(Vec<u8>, Option<Vec<u8>>)>()
-                        .fetch_all(&*self.pool)
-                        .await
-                        .unwrap_or_panic("cannot get nodes to pin")
-                }
-
-                #[cfg(feature = "cloud")]
-                {
-                    let query = indoc! {"
-                        SELECT key, CASE WHEN pinned THEN NULL ELSE object END
-                        FROM ledger_db_nodes
-                        WHERE key = ANY($1::bytea[])
-                    "};
-
-                    sqlx::query_as::<_, (Vec<u8>, Option<Vec<u8>>)>(query)
-                        .bind(keys.iter().map(|key| key.0.as_slice()).collect::<Vec<_>>())
-                        .fetch_all(&*self.pool)
-                        .await
-                        .unwrap_or_panic("cannot get nodes to pin")
-                }
             })
         })
     }
@@ -641,9 +592,9 @@ mod tests {
 
     // gc never culls a pinned node, even one no root it marks from reaches, while it still culls
     // unpinned garbage, and pinned nodes still load. Pinning is all or nothing per root: a root
-    // reaching a missing node is left unpinned, without holding back the others. Runs storage-core's
-    // own gc, so it fails if a storage-core upgrade stops sweeping through `DB::scan`. Shared by both
-    // suites.
+    // reaching a missing node is left unpinned, without holding back the others. Runs
+    // storage-core's own gc, so it fails if a storage-core upgrade stops sweeping through
+    // `DB::scan_keys`. Shared by both suites.
     fn assert_gc_keeps_pinned_nodes(storage: &Storage<LedgerDb>, db: &mut LedgerDb) {
         use std::time::Duration;
 
@@ -671,12 +622,14 @@ mod tests {
             0,
             "pinned already"
         );
+        assert_eq!(
+            db.batch_get_children([contract.0.clone()].into_iter()),
+            vec![(contract.0.clone(), vec![])],
+            "pinned nodes report no children"
+        );
 
-        let (scanned, _) = db.scan(None, 100);
-        let scanned = scanned
-            .into_iter()
-            .map(|(key, _)| key)
-            .collect::<HashSet<_>>();
+        let (scanned, _) = db.scan_keys(None, 100);
+        let scanned = scanned.into_iter().collect::<HashSet<_>>();
         assert_eq!(
             scanned,
             HashSet::from([ledger.0.clone(), ledger.1.clone(), garbage.0.clone()])

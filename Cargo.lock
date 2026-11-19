@@ -4723,8 +4723,7 @@ dependencies = [
 [[package]]
 name = "midnight-base-crypto"
 version = "1.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6dab067703b7d562c8bd7146adb18fda49622a57d0519e135e964bb6225acb5f"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=storage-core-gc-io-871#968520e613bcefc531f1a8c501381fb88f328baf"
 dependencies = [
  "anyhow",
  "atomic-write-file",
@@ -4738,7 +4737,7 @@ dependencies = [
  "indicatif",
  "k256 0.14.0",
  "lazy_static",
- "midnight-base-crypto-derive",
+ "midnight-base-crypto-derive 1.1.0 (git+https://github.com/midnightntwrk/midnight-ledger?branch=storage-core-gc-io-871)",
  "midnight-serialize",
  "pastey",
  "rand 0.8.8",
@@ -4758,6 +4757,16 @@ name = "midnight-base-crypto-derive"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "30565daf666e3016d2bb72073e2c3ff61ac3ad123912eec764a72e20758082f2"
+dependencies = [
+ "proc-macro2",
+ "quote 1.0.45",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "midnight-base-crypto-derive"
+version = "1.1.0"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=storage-core-gc-io-871#968520e613bcefc531f1a8c501381fb88f328baf"
 dependencies = [
  "proc-macro2",
  "quote 1.0.45",
@@ -5170,8 +5179,7 @@ dependencies = [
 [[package]]
 name = "midnight-serialize"
 version = "1.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08c3c1c593d3f7d690a725a0f03432039bdfc7c4c386f9b1550a3409756a9d9b"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=storage-core-gc-io-871#968520e613bcefc531f1a8c501381fb88f328baf"
 dependencies = [
  "crypto",
  "konst 0.4.3",
@@ -5184,8 +5192,7 @@ dependencies = [
 [[package]]
 name = "midnight-serialize-macros"
 version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d470675b20968294a11b14680c540c1ba9cccdbe89437ac939dfa688e91baf4"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=storage-core-gc-io-871#968520e613bcefc531f1a8c501381fb88f328baf"
 dependencies = [
  "proc-macro2",
  "quote 1.0.45",
@@ -5234,8 +5241,7 @@ dependencies = [
 [[package]]
 name = "midnight-storage-core"
 version = "1.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa4923fc43b6202934516e5b897983a9390d78076ca7059a46c2d17989dbe891"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=storage-core-gc-io-871#968520e613bcefc531f1a8c501381fb88f328baf"
 dependencies = [
  "archery",
  "crypto",
@@ -5260,8 +5266,7 @@ dependencies = [
 [[package]]
 name = "midnight-storage-macros"
 version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4664170f07ad92866c071806ed13d23a4c1e3ea531342cc5bfdf6aac6c7ea896"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=storage-core-gc-io-871#968520e613bcefc531f1a8c501381fb88f328baf"
 dependencies = [
  "midnight-serialize-macros",
  "proc-macro2",
@@ -5287,7 +5292,7 @@ dependencies = [
  "lazy_static",
  "lru 0.18.0",
  "midnight-base-crypto",
- "midnight-base-crypto-derive",
+ "midnight-base-crypto-derive 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "midnight-circuits 6.2.1",
  "midnight-curves 0.2.1",
  "midnight-proofs 0.7.2",
@@ -5322,7 +5327,7 @@ dependencies = [
  "lazy_static",
  "lru 0.18.0",
  "midnight-base-crypto",
- "midnight-base-crypto-derive",
+ "midnight-base-crypto-derive 1.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "midnight-circuits 7.3.0",
  "midnight-curves 0.3.1",
  "midnight-proofs 0.8.2",
