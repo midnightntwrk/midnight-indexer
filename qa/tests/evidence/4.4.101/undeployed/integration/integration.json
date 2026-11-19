@@ -1,0 +1,3904 @@
+{
+  "numTotalTestSuites": 180,
+  "numPassedTestSuites": 180,
+  "numFailedTestSuites": 0,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 315,
+  "numPassedTests": 175,
+  "numFailedTests": 0,
+  "numPendingTests": 120,
+  "numTodoTests": 20,
+  "snapshot": {
+    "added": 0,
+    "failure": false,
+    "filesAdded": 0,
+    "filesRemoved": 0,
+    "filesRemovedList": [],
+    "filesUnmatched": 0,
+    "filesUpdated": 0,
+    "matched": 0,
+    "total": 0,
+    "unchecked": 0,
+    "uncheckedKeysByFile": [],
+    "unmatched": 0,
+    "updated": 0,
+    "didUpdate": false
+  },
+  "startTime": 1793897621293,
+  "success": true,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["block queries", "a block query without parameters"],
+          "fullName": "block queries a block query without parameters should return the latest known block",
+          "status": "passed",
+          "title": "should return the latest known block",
+          "duration": 44.245416999999975,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Block", "Latest"], "testKey": "PM-17677" } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["block queries", "a block query without parameters"],
+          "fullName": "block queries a block query without parameters should respond with a block according to the requested schema",
+          "status": "passed",
+          "title": "should respond with a block according to the requested schema",
+          "duration": 11.088542000000018,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": ["Query", "Block", "Latest", "SchemaValidation"],
+              "testKey": "PM-17678"
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["block queries", "a block query by hash"],
+          "fullName": "block queries a block query by hash should return the block with that hash, given that block exists",
+          "status": "passed",
+          "title": "should return the block with that hash, given that block exists",
+          "duration": 25.11937499999999,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Block", "ByHash"], "testKey": "PM-17679" } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["block queries", "a block query by hash"],
+          "fullName": "block queries a block query by hash should return blocks according to the requested schema",
+          "status": "passed",
+          "title": "should return blocks according to the requested schema",
+          "duration": 16.835041999999987,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": ["Query", "Block", "ByHash", "SchemaValidation"],
+              "testKey": "PM-17680"
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["block queries", "a block query by hash"],
+          "fullName": "block queries a block query by hash should return a null block, given a block with that hash doesn't exist",
+          "status": "passed",
+          "title": "should return a null block, given a block with that hash doesn't exist",
+          "duration": 4.928917000000013,
+          "failureMessages": [],
+          "meta": {
+            "custom": { "labels": ["Query", "Block", "ByHash", "Negative"], "testKey": "PM-17681" }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["block queries", "a block query by hash"],
+          "fullName": "block queries a block query by hash should return an error, when the hash is invalid (malformed)",
+          "status": "passed",
+          "title": "should return an error, when the hash is invalid (malformed)",
+          "duration": 12.992291999999964,
+          "failureMessages": [],
+          "meta": {
+            "custom": { "labels": ["Query", "Block", "ByHash", "Negative"], "testKey": "PM-17683" }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["block queries", "a block query by height"],
+          "fullName": "block queries a block query by height should return the block with that height, given a valid height",
+          "status": "passed",
+          "title": "should return the block with that height, given a valid height",
+          "duration": 12.249416999999994,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Block", "ByHeight"], "testKey": "PM-17339" } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["block queries", "a block query by height"],
+          "fullName": "block queries a block query by height should return a blocks according to the requested schema",
+          "status": "passed",
+          "title": "should return a blocks according to the requested schema",
+          "duration": 13.071792000000016,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": ["Query", "Block", "ByHeight", "SchemaValidation"],
+              "testKey": "PM-17684"
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["block queries", "a block query by height"],
+          "fullName": "block queries a block query by height should return the genesis block, given height=0 is requested",
+          "status": "passed",
+          "title": "should return the genesis block, given height=0 is requested",
+          "duration": 31.28245899999996,
+          "failureMessages": [],
+          "meta": {
+            "custom": { "labels": ["Query", "Block", "ByHeight", "Genesis"], "testKey": "PM-17685" }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["block queries", "a block query by height"],
+          "fullName": "block queries a block query by height should return an empty body answer, given that block height requested is the maximum available height",
+          "status": "passed",
+          "title": "should return an empty body answer, given that block height requested is the maximum available height",
+          "duration": 2.9579579999999623,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": ["Query", "Block", "ByHeight", "Negative"],
+              "testKey": "PM-17686"
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["block queries", "a block query by height"],
+          "fullName": "block queries a block query by height should return an error, given an invalid height",
+          "status": "passed",
+          "title": "should return an error, given an invalid height",
+          "duration": 5.984957999999949,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": ["Query", "Block", "ByHeight", "Negative"],
+              "testKey": "PM-17687"
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["block queries", "a block query by height and hash"],
+          "fullName": "block queries a block query by height and hash should return an error, as only one parameter at a time can be used",
+          "status": "passed",
+          "title": "should return an error, as only one parameter at a time can be used",
+          "duration": 10.359250000000031,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": ["Query", "Block", "ByHeightAndHash", "Negative"],
+              "testKey": "PM-17688"
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["block queries", "block-level tree end indexes"],
+          "fullName": "block queries block-level tree end indexes should return non-negative integers for all three tree end index fields",
+          "status": "passed",
+          "title": "should return non-negative integers for all three tree end index fields",
+          "duration": 5.521665999999982,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Block", "EndIndex", "#1139"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["block queries", "block-level tree end indexes"],
+          "fullName": "block queries block-level tree end indexes should return non-decreasing tree end indexes from parent to child block",
+          "status": "passed",
+          "title": "should return non-decreasing tree end indexes from parent to child block",
+          "duration": 11.126500000000021,
+          "failureMessages": [],
+          "meta": {
+            "custom": { "labels": ["Query", "Block", "EndIndex", "Monotonicity", "#1139"] }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["block queries", "per-block dust merkle tree roots"],
+          "fullName": "block queries per-block dust merkle tree roots should return different dust generation roots for blocks with different tree sizes",
+          "status": "skipped",
+          "title": "should return different dust generation roots for blocks with different tree sizes",
+          "duration": 12.635209000000032,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Block", "Dust", "MerkleRoot", "#1260"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["block queries", "per-block dust merkle tree roots"],
+          "fullName": "block queries per-block dust merkle tree roots should return identical dust roots for repeated queries of the same block",
+          "status": "passed",
+          "title": "should return identical dust roots for repeated queries of the same block",
+          "duration": 18.018709,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Block", "Dust", "MerkleRoot", "#1260"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["block queries", "per-block dust merkle tree roots"],
+          "fullName": "block queries per-block dust merkle tree roots should return equal dust generation roots for parent and child with equal tree sizes",
+          "status": "passed",
+          "title": "should return equal dust generation roots for parent and child with equal tree sizes",
+          "duration": 12.750207999999986,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Block", "Dust", "MerkleRoot", "#1260"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["genesis block", "a block query to the genesis block"],
+          "fullName": "genesis block a block query to the genesis block should contain transactions with pre-fund wallet utxos",
+          "status": "passed",
+          "title": "should contain transactions with pre-fund wallet utxos",
+          "duration": 28.683333000000005,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": [
+                "Query",
+                "Block",
+                "ByHeight",
+                "Genesis",
+                "PreFundWallets",
+                "UnshieldedTokens"
+              ],
+              "testKey": "PM-17689"
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["genesis block", "a block query to the genesis block"],
+          "fullName": "genesis block a block query to the genesis block should contain utxos related to exactly 4 pre-fund wallets",
+          "status": "passed",
+          "title": "should contain utxos related to exactly 4 pre-fund wallets",
+          "duration": 26.650916999999993,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": [
+                "Query",
+                "Block",
+                "ByHeight",
+                "Genesis",
+                "PreFundWallets",
+                "UnshieldedTokens"
+              ],
+              "testKey": "PM-17690"
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["genesis block", "a block query to the genesis block"],
+          "fullName": "genesis block a block query to the genesis block should contain utxos with exactly 1 token type",
+          "status": "passed",
+          "title": "should contain utxos with exactly 1 token type",
+          "duration": 39.56054199999994,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": [
+                "Query",
+                "Block",
+                "ByHeight",
+                "Genesis",
+                "PreFundWallets",
+                "UnshieldedTokens"
+              ],
+              "testKey": "PM-17691"
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["genesis block", "a block query to the genesis block"],
+          "fullName": "genesis block a block query to the genesis block should contain utxos sorted by outputIndex in ascending order",
+          "status": "passed",
+          "title": "should contain utxos sorted by outputIndex in ascending order",
+          "duration": 40.30170799999996,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": [
+                "Query",
+                "Block",
+                "ByHeight",
+                "Genesis",
+                "PreFundWallets",
+                "UnshieldedTokens"
+              ],
+              "testKey": "PM-17692"
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["genesis block", "a block query to the genesis block"],
+          "fullName": "genesis block a block query to the genesis block should contain valid index ranges on regular transactions",
+          "status": "passed",
+          "title": "should contain valid index ranges on regular transactions",
+          "duration": 27.698667,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Transaction", "IndexFields", "Genesis"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["genesis block", "a block query to the genesis block"],
+          "fullName": "genesis block a block query to the genesis block should return block-level end indexes >= max RegularTransaction end indexes",
+          "status": "passed",
+          "title": "should return block-level end indexes >= max RegularTransaction end indexes",
+          "duration": 35.270458000000076,
+          "failureMessages": [],
+          "meta": {
+            "custom": { "labels": ["Query", "Block", "EndIndex", "Consistency", "#1139"] }
+          },
+          "tags": []
+        }
+      ],
+      "startTime": 1793897632202,
+      "endTime": 1793897632652.2705,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/integration/basic/queries/block-queries.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["bridge pool queries", "bridgePoolSummary"],
+          "fullName": "bridge pool queries bridgePoolSummary should return zero pool totals when no reserve or treasury events are indexed",
+          "status": "skipped",
+          "title": "should return zero pool totals when no reserve or treasury events are indexed",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge pool queries", "bridgePoolSummary"],
+          "fullName": "bridge pool queries bridgePoolSummary should expose lastEventBlockHeight as a positive integer where bridge events exist",
+          "status": "skipped",
+          "title": "should expose lastEventBlockHeight as a positive integer where bridge events exist",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge pool queries", "bridgePoolSummary"],
+          "fullName": "bridge pool queries bridgePoolSummary should return an empty snapshot when atBlock predates all bridge events",
+          "status": "skipped",
+          "title": "should return an empty snapshot when atBlock predates all bridge events",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge pool queries", "bridgePoolSummary"],
+          "fullName": "bridge pool queries bridgePoolSummary should set reserveTotal to the cumulative sum of ReserveTransfer amounts",
+          "status": "todo",
+          "title": "should set reserveTotal to the cumulative sum of ReserveTransfer amounts",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge pool queries", "bridgePoolSummary"],
+          "fullName": "bridge pool queries bridgePoolSummary should aggregate treasury inflows separately by INVALID and UNAPPROVED reason",
+          "status": "todo",
+          "title": "should aggregate treasury inflows separately by INVALID and UNAPPROVED reason",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge pool queries", "bridgePoolSummary"],
+          "fullName": "bridge pool queries bridgePoolSummary should accumulate more pool inflow at a later atBlock than an earlier one",
+          "status": "todo",
+          "title": "should accumulate more pool inflow at a later atBlock than an earlier one",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge pool queries", "bridgePoolSummary"],
+          "fullName": "bridge pool queries bridgePoolSummary should count SubminimalFlushTransfer.count in subminimumTxCount",
+          "status": "skipped",
+          "title": "should count SubminimalFlushTransfer.count in subminimumTxCount",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge pool queries", "bridgePoolSummary"],
+          "fullName": "bridge pool queries bridgePoolSummary should aggregate UnapprovedTransfer amounts under UNAPPROVED treasury reason",
+          "status": "skipped",
+          "title": "should aggregate UnapprovedTransfer amounts under UNAPPROVED treasury reason",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge pool queries", "bridgeReserveInflows"],
+          "fullName": "bridge pool queries bridgeReserveInflows should return an empty list when no ReserveTransfer events are indexed",
+          "status": "skipped",
+          "title": "should return an empty list when no ReserveTransfer events are indexed",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge pool queries", "bridgeReserveInflows"],
+          "fullName": "bridge pool queries bridgeReserveInflows should return ReserveTransfer events within the specified block range",
+          "status": "todo",
+          "title": "should return ReserveTransfer events within the specified block range",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge pool queries", "bridgeReserveInflows"],
+          "fullName": "bridge pool queries bridgeReserveInflows should return events with correct BridgeReserveTransfer field shape",
+          "status": "todo",
+          "title": "should return events with correct BridgeReserveTransfer field shape",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge pool queries", "bridgeReserveInflows"],
+          "fullName": "bridge pool queries bridgeReserveInflows should paginate ReserveTransfer events with offset and limit",
+          "status": "todo",
+          "title": "should paginate ReserveTransfer events with offset and limit",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge pool queries", "bridgeTreasuryInflows"],
+          "fullName": "bridge pool queries bridgeTreasuryInflows should return an empty list when no treasury-redirected events are indexed",
+          "status": "skipped",
+          "title": "should return an empty list when no treasury-redirected events are indexed",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge pool queries", "bridgeTreasuryInflows"],
+          "fullName": "bridge pool queries bridgeTreasuryInflows should return all treasury event types when no reason filter is given",
+          "status": "todo",
+          "title": "should return all treasury event types when no reason filter is given",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge pool queries", "bridgeTreasuryInflows"],
+          "fullName": "bridge pool queries bridgeTreasuryInflows should return only BridgeInvalidTransfer when reason=INVALID",
+          "status": "todo",
+          "title": "should return only BridgeInvalidTransfer when reason=INVALID",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge pool queries", "bridgeTreasuryInflows"],
+          "fullName": "bridge pool queries bridgeTreasuryInflows should respect blockHeightFrom and blockHeightTo filters for treasury inflows",
+          "status": "todo",
+          "title": "should respect blockHeightFrom and blockHeightTo filters for treasury inflows",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge pool queries", "bridgeTreasuryInflows"],
+          "fullName": "bridge pool queries bridgeTreasuryInflows should return only BridgeUnapprovedTransfer when reason=UNAPPROVED",
+          "status": "skipped",
+          "title": "should return only BridgeUnapprovedTransfer when reason=UNAPPROVED",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge pool queries", "bridgeTreasuryInflows"],
+          "fullName": "bridge pool queries bridgeTreasuryInflows should return only BridgeSubminimalFlushTransfer when reason=SUBMINIMAL_FLUSH",
+          "status": "skipped",
+          "title": "should return only BridgeSubminimalFlushTransfer when reason=SUBMINIMAL_FLUSH",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1793897621293,
+      "endTime": 1793897621293,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/integration/basic/queries/bridge-pool-queries.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["bridge queries", "bridgeEvents"],
+          "fullName": "bridge queries bridgeEvents should return an empty list for a recipient address with no bridge activity",
+          "status": "skipped",
+          "title": "should return an empty list for a recipient address with no bridge activity",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge queries", "bridgeEvents"],
+          "fullName": "bridge queries bridgeEvents should return events with the correct shape for BridgeUserTransfer",
+          "status": "skipped",
+          "title": "should return events with the correct shape for BridgeUserTransfer",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge queries", "bridgeEvents"],
+          "fullName": "bridge queries bridgeEvents should return only events for the specified recipient address",
+          "status": "skipped",
+          "title": "should return only events for the specified recipient address",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge queries", "bridgeEvents"],
+          "fullName": "bridge queries bridgeEvents should return events of the known variant types present on chain",
+          "status": "skipped",
+          "title": "should return events of the known variant types present on chain",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge queries", "bridgeEvents"],
+          "fullName": "bridge queries bridgeEvents should paginate results with offset and limit",
+          "status": "skipped",
+          "title": "should paginate results with offset and limit",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge queries", "bridgeEvents"],
+          "fullName": "bridge queries bridgeEvents should return only UserTransfer events when filtered by variant USER_TRANSFER",
+          "status": "skipped",
+          "title": "should return only UserTransfer events when filtered by variant USER_TRANSFER",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge queries", "bridgeEvents"],
+          "fullName": "bridge queries bridgeEvents should reject a malformed recipient with a GraphQL error",
+          "status": "skipped",
+          "title": "should reject a malformed recipient with a GraphQL error",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge queries", "claims via unshieldedTransactions"],
+          "fullName": "bridge queries claims via unshieldedTransactions should surface a BridgeClaimTransaction (recipient, amount) via unshieldedTransactions for a claim recipient",
+          "status": "todo",
+          "title": "should surface a BridgeClaimTransaction (recipient, amount) via unshieldedTransactions for a claim recipient",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge queries", "bridgeBalance"],
+          "fullName": "bridge queries bridgeBalance should return zero balance for an address with no bridge activity",
+          "status": "skipped",
+          "title": "should return zero balance for an address with no bridge activity",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge queries", "bridgeBalance"],
+          "fullName": "bridge queries bridgeBalance should return zero balance once an address has fully claimed",
+          "status": "skipped",
+          "title": "should return zero balance once an address has fully claimed",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge queries", "bridgeBalance"],
+          "fullName": "bridge queries bridgeBalance should set deposited to the sum of UserTransfer amounts for the address",
+          "status": "skipped",
+          "title": "should set deposited to the sum of UserTransfer amounts for the address",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge queries", "bridgeBalance"],
+          "fullName": "bridge queries bridgeBalance should reflect a non-zero remaining-claimable balance after a partial claim",
+          "status": "todo",
+          "title": "should reflect a non-zero remaining-claimable balance after a partial claim",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge queries", "bridgeDeposits"],
+          "fullName": "bridge queries bridgeDeposits should return an empty list for an address with no deposits",
+          "status": "skipped",
+          "title": "should return an empty list for an address with no deposits",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge queries", "bridgeDeposits"],
+          "fullName": "bridge queries bridgeDeposits should return only UserTransfer events by default (excludes UnapprovedTransfer)",
+          "status": "skipped",
+          "title": "should return only UserTransfer events by default (excludes UnapprovedTransfer)",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge queries", "bridgeDeposits"],
+          "fullName": "bridge queries bridgeDeposits should include UnapprovedTransfer events when includeUnapproved=true",
+          "status": "skipped",
+          "title": "should include UnapprovedTransfer events when includeUnapproved=true",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1793897621293,
+      "endTime": 1793897621293,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/integration/basic/queries/bridge-queries.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["contract event queries", "the contract event GraphQL schema"],
+          "fullName": "contract event queries the contract event GraphQL schema should expose ContractEvent as an interface with the common fields",
+          "status": "passed",
+          "title": "should expose ContractEvent as an interface with the common fields",
+          "duration": 4.566082999999992,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "ContractEvents", "SchemaValidation"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract event queries", "the contract event GraphQL schema"],
+          "fullName": "contract event queries the contract event GraphQL schema should expose all eleven concrete contract event types",
+          "status": "passed",
+          "title": "should expose all eleven concrete contract event types",
+          "duration": 2.7564590000000067,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "ContractEvents", "SchemaValidation"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract event queries", "the contract event GraphQL schema"],
+          "fullName": "contract event queries the contract event GraphQL schema should expose the ContractEventType enum with eleven variants",
+          "status": "passed",
+          "title": "should expose the ContractEventType enum with eleven variants",
+          "duration": 2.1222499999999798,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "ContractEvents", "SchemaValidation"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract event queries", "the contract event GraphQL schema"],
+          "fullName": "contract event queries the contract event GraphQL schema should expose the ContractEventFilter input fields",
+          "status": "passed",
+          "title": "should expose the ContractEventFilter input fields",
+          "duration": 4.175874999999991,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "ContractEvents", "SchemaValidation"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract event queries", "the contract event GraphQL schema"],
+          "fullName": "contract event queries the contract event GraphQL schema should expose the FieldPrefixFilter input fields",
+          "status": "passed",
+          "title": "should expose the FieldPrefixFilter input fields",
+          "duration": 2.0356669999999895,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "ContractEvents", "SchemaValidation"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract event queries",
+            "a contract events query for an address with no emitted events"
+          ],
+          "fullName": "contract event queries a contract events query for an address with no emitted events should return an empty list",
+          "status": "passed",
+          "title": "should return an empty list",
+          "duration": 5.245374999999996,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "ContractEvents"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract event queries",
+            "a contract events query for an address with no emitted events"
+          ],
+          "fullName": "contract event queries a contract events query for an address with no emitted events should return an empty list when filtered by event types",
+          "status": "passed",
+          "title": "should return an empty list when filtered by event types",
+          "duration": 3.9112080000000162,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "ContractEvents"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract event queries",
+            "a contract events query for an address with no emitted events"
+          ],
+          "fullName": "contract event queries a contract events query for an address with no emitted events should return an empty list when filtered by a block range",
+          "status": "passed",
+          "title": "should return an empty list when filtered by a block range",
+          "duration": 3.966959000000003,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "ContractEvents"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract event queries",
+            "a contract events query for an address with no emitted events"
+          ],
+          "fullName": "contract event queries a contract events query for an address with no emitted events should return an empty list when filtered by valid field prefixes",
+          "status": "passed",
+          "title": "should return an empty list when filtered by valid field prefixes",
+          "duration": 11.622332999999998,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "ContractEvents"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract event queries",
+            "a contract events query with an invalid filter"
+          ],
+          "fullName": "contract event queries a contract events query with an invalid filter should return an error when the contract address is empty",
+          "status": "passed",
+          "title": "should return an error when the contract address is empty",
+          "duration": 2.125541999999996,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "ContractEvents", "Negative"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract event queries",
+            "a contract events query with an invalid filter"
+          ],
+          "fullName": "contract event queries a contract events query with an invalid filter should return an error for malformed contract addresses",
+          "status": "passed",
+          "title": "should return an error for malformed contract addresses",
+          "duration": 25.263582999999983,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "ContractEvents", "Negative"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract event queries",
+            "a contract events query with an invalid filter"
+          ],
+          "fullName": "contract event queries a contract events query with an invalid filter should return an error for an unknown field prefix field name",
+          "status": "passed",
+          "title": "should return an error for an unknown field prefix field name",
+          "duration": 2.8870829999999614,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "ContractEvents", "Negative"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract event queries",
+            "a contract events query with an invalid filter"
+          ],
+          "fullName": "contract event queries a contract events query with an invalid filter should return an error when a field prefix is not hex",
+          "status": "passed",
+          "title": "should return an error when a field prefix is not hex",
+          "duration": 1.4216670000000136,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "ContractEvents", "Negative"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract event queries",
+            "a contract events query for a contract with emitted events"
+          ],
+          "fullName": "contract event queries a contract events query for a contract with emitted events should return events conforming to the contract event schema",
+          "status": "skipped",
+          "title": "should return events conforming to the contract event schema",
+          "duration": 3.7159580000000005,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "ContractEvents"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract event queries",
+            "a contract events query for a contract with emitted events"
+          ],
+          "fullName": "contract event queries a contract events query for a contract with emitted events should return only events of the requested type when filtered",
+          "status": "skipped",
+          "title": "should return only events of the requested type when filtered",
+          "duration": 0.3805000000000405,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "ContractEvents"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract event queries",
+            "a contract events query for a contract with emitted events"
+          ],
+          "fullName": "contract event queries a contract events query for a contract with emitted events should filter events by a prefix of an indexed field value",
+          "status": "skipped",
+          "title": "should filter events by a prefix of an indexed field value",
+          "duration": 0.3716250000000514,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "ContractEvents"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract event queries",
+            "a contract events query for a contract with emitted events"
+          ],
+          "fullName": "contract event queries a contract events query for a contract with emitted events should combine multiple field prefixes with AND semantics",
+          "status": "skipped",
+          "title": "should combine multiple field prefixes with AND semantics",
+          "duration": 0.260167000000024,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "ContractEvents"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract event queries",
+            "a contract events query for a contract with emitted events"
+          ],
+          "fullName": "contract event queries a contract events query for a contract with emitted events should return only events carrying the field for an empty prefix",
+          "status": "skipped",
+          "title": "should return only events carrying the field for an empty prefix",
+          "duration": 0.34370799999999235,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "ContractEvents"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract event queries",
+            "a contract events query for a contract with emitted events"
+          ],
+          "fullName": "contract event queries a contract events query for a contract with emitted events should reach every event through each of its indexed fields",
+          "status": "skipped",
+          "title": "should reach every event through each of its indexed fields",
+          "duration": 0.3022079999999505,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "ContractEvents"] } },
+          "tags": []
+        }
+      ],
+      "startTime": 1793897636186,
+      "endTime": 1793897636258.4216,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/integration/basic/queries/contract-event-queries.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["contract queries", "a contract query by address"],
+          "fullName": "contract queries a contract query by address should return success as they are valid contract addresses",
+          "status": "passed",
+          "title": "should return success as they are valid contract addresses",
+          "duration": 51.90749999999997,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract queries", "a contract query by address"],
+          "fullName": "contract queries a contract query by address should return the most recent action for a contract with multiple actions",
+          "status": "passed",
+          "title": "should return the most recent action for a contract with multiple actions",
+          "duration": 19.44483299999996,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract queries", "a contract query by address"],
+          "fullName": "contract queries a contract query by address should return null when contract with that address does not exist",
+          "status": "passed",
+          "title": "should return null when contract with that address does not exist",
+          "duration": 3.181791999999973,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract queries", "a contract query by address"],
+          "fullName": "contract queries a contract query by address should return an error for malformed addresses",
+          "status": "passed",
+          "title": "should return an error for malformed addresses",
+          "duration": 30.034707999999966,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract queries", "a contract query by address"],
+          "fullName": "contract queries a contract query by address should return non-empty unshieldedBalances for contracts known to hold tokens",
+          "status": "skipped",
+          "title": "should return non-empty unshieldedBalances for contracts known to hold tokens",
+          "duration": 3.8273750000000177,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract queries", "a contract query by address and offset"],
+          "fullName": "contract queries a contract query by address and offset should return the correct action using exact block hash where it was included",
+          "status": "passed",
+          "title": "should return the correct action using exact block hash where it was included",
+          "duration": 6.946208000000013,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract queries", "a contract query by address and offset"],
+          "fullName": "contract queries a contract query by address and offset should return the latest state using a future block hash",
+          "status": "passed",
+          "title": "should return the latest state using a future block hash",
+          "duration": 10.664917000000003,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract queries", "a contract query by address and offset"],
+          "fullName": "contract queries a contract query by address and offset should respond with a contract action according to the expected schema",
+          "status": "passed",
+          "title": "should respond with a contract action according to the expected schema",
+          "duration": 9.199958000000038,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract queries", "a contract query by address and offset"],
+          "fullName": "contract queries a contract query by address and offset should return the correct action using exact block height where it was included",
+          "status": "passed",
+          "title": "should return the correct action using exact block height where it was included",
+          "duration": 7.347458000000017,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract queries", "a contract query by address and offset"],
+          "fullName": "contract queries a contract query by address and offset should return the latest state using a future block height",
+          "status": "passed",
+          "title": "should return the latest state using a future block height",
+          "duration": 7.921334000000002,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract queries", "a contract query by address and offset"],
+          "fullName": "contract queries a contract query by address and offset should return the most recent contract action for that address before the specified block",
+          "status": "passed",
+          "title": "should return the most recent contract action for that address before the specified block",
+          "duration": 14.048291000000006,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract queries", "a contract query by address and offset"],
+          "fullName": "contract queries a contract query by address and offset should return null when contract with valid address and valid offset does not exist",
+          "status": "passed",
+          "title": "should return null when contract with valid address and valid offset does not exist",
+          "duration": 2.6215839999999844,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract queries", "a contract query by address and offset"],
+          "fullName": "contract queries a contract query by address and offset should return null when contract with valid address and non-existing hash does not exist",
+          "status": "passed",
+          "title": "should return null when contract with valid address and non-existing hash does not exist",
+          "duration": 2.3225000000000477,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract queries", "a contract query by address and offset"],
+          "fullName": "contract queries a contract query by address and offset should return error when contract with invalid address and valid hash",
+          "status": "passed",
+          "title": "should return error when contract with invalid address and valid hash",
+          "duration": 4.786416999999972,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract queries", "a contract query by address and offset"],
+          "fullName": "contract queries a contract query by address and offset should return error when contract with invalid address and non-existing hash",
+          "status": "passed",
+          "title": "should return error when contract with invalid address and non-existing hash",
+          "duration": 1.7467910000000302,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract queries", "a contract query by address and offset"],
+          "fullName": "contract queries a contract query by address and offset should return error when contract with valid address and invalid hash",
+          "status": "passed",
+          "title": "should return error when contract with valid address and invalid hash",
+          "duration": 1.7808749999999804,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract queries", "a contract query by address and offset"],
+          "fullName": "contract queries a contract query by address and offset should return error when contract with invalid address and invalid hash",
+          "status": "passed",
+          "title": "should return error when contract with invalid address and invalid hash",
+          "duration": 8.937457999999992,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract queries", "a contract query by address and offset"],
+          "fullName": "contract queries a contract query by address and offset should return null when contract with valid address and valid height does not exist",
+          "status": "passed",
+          "title": "should return null when contract with valid address and valid height does not exist",
+          "duration": 3.2053750000000036,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract queries", "a contract query by address and offset"],
+          "fullName": "contract queries a contract query by address and offset should return null when contract with valid address and non-existing height does not exist",
+          "status": "passed",
+          "title": "should return null when contract with valid address and non-existing height does not exist",
+          "duration": 2.177166999999997,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract queries", "a contract query by address and offset"],
+          "fullName": "contract queries a contract query by address and offset should return error when contract with invalid address and valid height",
+          "status": "passed",
+          "title": "should return error when contract with invalid address and valid height",
+          "duration": 1.6745840000000385,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract queries", "a contract query by address and offset"],
+          "fullName": "contract queries a contract query by address and offset should return error when contract with invalid address and invalid height",
+          "status": "passed",
+          "title": "should return error when contract with invalid address and invalid height",
+          "duration": 4.5558750000000146,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract queries", "a contract query by address and offset"],
+          "fullName": "contract queries a contract query by address and offset should return error for negative height",
+          "status": "passed",
+          "title": "should return error for negative height",
+          "duration": 1.3161249999999995,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract queries", "a contract query by address and offset"],
+          "fullName": "contract queries a contract query by address and offset should return error for non-integer height",
+          "status": "passed",
+          "title": "should return error for non-integer height",
+          "duration": 1.6263329999999883,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract queries", "a contract query by address and offset"],
+          "fullName": "contract queries a contract query by address and offset should return error for extremely large height",
+          "status": "passed",
+          "title": "should return error for extremely large height",
+          "duration": 1.5602910000000065,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract queries", "a contract query by address and offset"],
+          "fullName": "contract queries a contract query by address and offset should return null when using a block hash from before the action existed",
+          "status": "passed",
+          "title": "should return null when using a block hash from before the action existed",
+          "duration": 53.59912499999996,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract queries", "the contractEvents field on contract actions"],
+          "fullName": "contract queries the contractEvents field on contract actions should expose contractEvents on ContractCall",
+          "status": "passed",
+          "title": "should expose contractEvents on ContractCall",
+          "duration": 1.4448749999999109,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "ContractEvents", "SchemaValidation"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract queries", "the contractEvents field on contract actions"],
+          "fullName": "contract queries the contractEvents field on contract actions should not expose contractEvents on ContractDeploy or ContractUpdate",
+          "status": "passed",
+          "title": "should not expose contractEvents on ContractDeploy or ContractUpdate",
+          "duration": 3.3443750000000136,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "ContractEvents", "SchemaValidation"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract queries", "the block a contract state is anchored at"],
+          "fullName": "contract queries the block a contract state is anchored at should anchor the latest contract action state at the block it was last written",
+          "status": "passed",
+          "title": "should anchor the latest contract action state at the block it was last written",
+          "duration": 23.969999999999914,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "ContractAction", "StateAt"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract queries", "the block a contract state is anchored at"],
+          "fullName": "contract queries the block a contract state is anchored at should anchor the contract state at the block of its latest action",
+          "status": "passed",
+          "title": "should anchor the contract state at the block of its latest action",
+          "duration": 22.94212499999992,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Contract", "StateAt"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract queries", "the block a contract state is anchored at"],
+          "fullName": "contract queries the block a contract state is anchored at should anchor every recorded contract action at its own block",
+          "status": "passed",
+          "title": "should anchor every recorded contract action at its own block",
+          "duration": 27.082791000000043,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Contract", "Transaction", "StateAt"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract queries across a ledger hard fork",
+            "a contract untouched since the fork queried without an offset"
+          ],
+          "fullName": "contract queries across a ledger hard fork a contract untouched since the fork queried without an offset should serve the contract action state in the post-fork encoding of the node",
+          "status": "skipped",
+          "title": "should serve the contract action state in the post-fork encoding of the node",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract queries across a ledger hard fork",
+            "a contract untouched since the fork queried without an offset"
+          ],
+          "fullName": "contract queries across a ledger hard fork a contract untouched since the fork queried without an offset should serve the contract state in the post-fork encoding of the node",
+          "status": "skipped",
+          "title": "should serve the contract state in the post-fork encoding of the node",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract queries across a ledger hard fork",
+            "a contract untouched since the fork queried without an offset"
+          ],
+          "fullName": "contract queries across a ledger hard fork a contract untouched since the fork queried without an offset should anchor the translated state at the fork block",
+          "status": "skipped",
+          "title": "should anchor the translated state at the fork block",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract queries across a ledger hard fork",
+            "a contract untouched since the fork queried as of the blocks around it"
+          ],
+          "fullName": "contract queries across a ledger hard fork a contract untouched since the fork queried as of the blocks around it should serve the state in the encoding of the queried block",
+          "status": "skipped",
+          "title": "should serve the state in the encoding of the queried block",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract queries across a ledger hard fork",
+            "a contract untouched since the fork queried as of the blocks around it"
+          ],
+          "fullName": "contract queries across a ledger hard fork a contract untouched since the fork queried as of the blocks around it should anchor the state at the latest action before the fork and at the fork block after",
+          "status": "skipped",
+          "title": "should anchor the state at the latest action before the fork and at the fork block after",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract queries across a ledger hard fork",
+            "the recorded contract actions of a contract untouched since the fork"
+          ],
+          "fullName": "contract queries across a ledger hard fork the recorded contract actions of a contract untouched since the fork should keep every recorded contract action in the pre-fork encoding",
+          "status": "skipped",
+          "title": "should keep every recorded contract action in the pre-fork encoding",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract queries across a ledger hard fork",
+            "the recorded contract actions of a contract untouched since the fork"
+          ],
+          "fullName": "contract queries across a ledger hard fork the recorded contract actions of a contract untouched since the fork should list the recorded actions anchored at their own blocks",
+          "status": "skipped",
+          "title": "should list the recorded actions anchored at their own blocks",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1793897630188,
+      "endTime": 1793897630526.0828,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/integration/basic/queries/contract-queries.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["contract type queries", "a contract query by address"],
+          "fullName": "contract type queries a contract query by address should return the contract with state, maintenance authority and actions",
+          "status": "skipped",
+          "title": "should return the contract with state, maintenance authority and actions",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract type queries", "a contract query by address"],
+          "fullName": "contract type queries a contract query by address should return null for a non-existent contract",
+          "status": "skipped",
+          "title": "should return null for a non-existent contract",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract type queries", "a contract query by address"],
+          "fullName": "contract type queries a contract query by address should error for malformed contract addresses",
+          "status": "skipped",
+          "title": "should error for malformed contract addresses",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract type queries", "the maintenance authority"],
+          "fullName": "contract type queries the maintenance authority should expose a committee of valid verifying keys with threshold and counter",
+          "status": "skipped",
+          "title": "should expose a committee of valid verifying keys with threshold and counter",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract type queries", "the maintenance authority"],
+          "fullName": "contract type queries the maintenance authority should map an ECDSA committee verifying key",
+          "status": "todo",
+          "title": "should map an ECDSA committee verifying key",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract type queries", "the actions sub-query"],
+          "fullName": "contract type queries the actions sub-query should bound the actions list by limit",
+          "status": "skipped",
+          "title": "should bound the actions list by limit",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract type queries", "the actions sub-query"],
+          "fullName": "contract type queries the actions sub-query should filter actions by type DEPLOY",
+          "status": "skipped",
+          "title": "should filter actions by type DEPLOY",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract type queries", "the actions sub-query"],
+          "fullName": "contract type queries the actions sub-query should filter actions by type CALL",
+          "status": "skipped",
+          "title": "should filter actions by type CALL",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract type queries", "the actions sub-query"],
+          "fullName": "contract type queries the actions sub-query should filter actions by type UPDATE",
+          "status": "todo",
+          "title": "should filter actions by type UPDATE",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract type queries", "point-in-time state via offset"],
+          "fullName": "contract type queries point-in-time state via offset should return state as of a pinned block hash",
+          "status": "skipped",
+          "title": "should return state as of a pinned block hash",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract type queries", "point-in-time state via offset"],
+          "fullName": "contract type queries point-in-time state via offset should return state as of a pinned block height",
+          "status": "skipped",
+          "title": "should return state as of a pinned block height",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract type queries", "point-in-time state via offset"],
+          "fullName": "contract type queries point-in-time state via offset should return null when queried at a block before the contract existed",
+          "status": "skipped",
+          "title": "should return null when queried at a block before the contract existed",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1793897621293,
+      "endTime": 1793897621293,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/integration/basic/queries/contract-type-queries.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["contract zswap state queries", "block.contractZswapState"],
+          "fullName": "contract zswap state queries block.contractZswapState should return the contract-filtered zswap state for a known contract",
+          "status": "skipped",
+          "title": "should return the contract-filtered zswap state for a known contract",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract zswap state queries", "block.contractZswapState"],
+          "fullName": "contract zswap state queries block.contractZswapState should return null for a non-existent contract",
+          "status": "skipped",
+          "title": "should return null for a non-existent contract",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract zswap state queries", "block.contractZswapState"],
+          "fullName": "contract zswap state queries block.contractZswapState should return identical state for repeated queries pinned to the same block",
+          "status": "skipped",
+          "title": "should return identical state for repeated queries pinned to the same block",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract zswap state queries", "block.contractZswapState"],
+          "fullName": "contract zswap state queries block.contractZswapState should error for malformed contract addresses",
+          "status": "skipped",
+          "title": "should error for malformed contract addresses",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract zswap state queries", "block.contractZswapState"],
+          "fullName": "contract zswap state queries block.contractZswapState should error for a malformed block-hash offset",
+          "status": "skipped",
+          "title": "should error for a malformed block-hash offset",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract zswap state queries", "block.contractZswapState"],
+          "fullName": "contract zswap state queries block.contractZswapState should return the zswap state when the block is pinned by height",
+          "status": "skipped",
+          "title": "should return the zswap state when the block is pinned by height",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract zswap state queries", "the composed execution-inputs query"],
+          "fullName": "contract zswap state queries the composed execution-inputs query should resolve zswap state, ledger parameters and contract state anchored to one block",
+          "status": "skipped",
+          "title": "should resolve zswap state, ledger parameters and contract state anchored to one block",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["contract zswap state queries", "the composed execution-inputs query"],
+          "fullName": "contract zswap state queries the composed execution-inputs query should return null zswap state and null contract for a non-existent contract",
+          "status": "skipped",
+          "title": "should return null zswap state and null contract for a non-existent contract",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1793897621293,
+      "endTime": 1793897621293,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/integration/basic/queries/contract-zswap-state-queries.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "dust commitment merkle tree update queries",
+            "a collapsed update query with valid index range"
+          ],
+          "fullName": "dust commitment merkle tree update queries a collapsed update query with valid index range should return a collapsed update for a valid index range",
+          "status": "passed",
+          "title": "should return a collapsed update for a valid index range",
+          "duration": 30.640333999999996,
+          "failureMessages": [],
+          "meta": {
+            "custom": { "labels": ["Query", "Dust", "CommitmentMerkleTree", "CollapsedUpdate"] }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust commitment merkle tree update queries",
+            "a collapsed update query with valid index range"
+          ],
+          "fullName": "dust commitment merkle tree update queries a collapsed update query with valid index range should respond with a collapsed update according to the expected schema",
+          "status": "passed",
+          "title": "should respond with a collapsed update according to the expected schema",
+          "duration": 4.8902920000000165,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": [
+                "Query",
+                "Dust",
+                "CommitmentMerkleTree",
+                "CollapsedUpdate",
+                "SchemaValidation"
+              ]
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust commitment merkle tree update queries",
+            "a collapsed update query with valid index range"
+          ],
+          "fullName": "dust commitment merkle tree update queries a collapsed update query with valid index range should return a collapsed update for the full genesis dust range",
+          "status": "passed",
+          "title": "should return a collapsed update for the full genesis dust range",
+          "duration": 33.93854200000001,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": ["Query", "Dust", "CommitmentMerkleTree", "CollapsedUpdate", "FullRange"]
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust commitment merkle tree update queries",
+            "a collapsed update query with equal start and end indices"
+          ],
+          "fullName": "dust commitment merkle tree update queries a collapsed update query with equal start and end indices should return a valid update when startIndex equals endIndex",
+          "status": "passed",
+          "title": "should return a valid update when startIndex equals endIndex",
+          "duration": 2.952208000000013,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": ["Query", "Dust", "CommitmentMerkleTree", "CollapsedUpdate", "EdgeCase"]
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust commitment merkle tree update queries",
+            "a collapsed update query idempotency"
+          ],
+          "fullName": "dust commitment merkle tree update queries a collapsed update query idempotency should return identical results for the same query parameters",
+          "status": "passed",
+          "title": "should return identical results for the same query parameters",
+          "duration": 4.677500000000009,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": ["Query", "Dust", "CommitmentMerkleTree", "CollapsedUpdate", "Idempotency"]
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust commitment merkle tree update queries",
+            "a collapsed update query with invalid index range"
+          ],
+          "fullName": "dust commitment merkle tree update queries a collapsed update query with invalid index range should return an error when startIndex is greater than endIndex",
+          "status": "passed",
+          "title": "should return an error when startIndex is greater than endIndex",
+          "duration": 2.367916999999977,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": ["Query", "Dust", "CommitmentMerkleTree", "CollapsedUpdate", "Negative"]
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust commitment merkle tree update queries",
+            "a collapsed update query with invalid index range"
+          ],
+          "fullName": "dust commitment merkle tree update queries a collapsed update query with invalid index range should return an error when indices are negative",
+          "status": "passed",
+          "title": "should return an error when indices are negative",
+          "duration": 4.506957999999997,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": ["Query", "Dust", "CommitmentMerkleTree", "CollapsedUpdate", "Negative"]
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust commitment merkle tree update queries",
+            "a collapsed update query with invalid index range"
+          ],
+          "fullName": "dust commitment merkle tree update queries a collapsed update query with invalid index range should return an error when endIndex is beyond the indexed range",
+          "status": "passed",
+          "title": "should return an error when endIndex is beyond the indexed range",
+          "duration": 2.6778340000000185,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": ["Query", "Dust", "CommitmentMerkleTree", "CollapsedUpdate", "Negative"]
+            }
+          },
+          "tags": []
+        }
+      ],
+      "startTime": 1793897637329,
+      "endTime": 1793897637415.6777,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/integration/basic/queries/dust-commitment-update-queries.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "dust generation merkle tree update queries",
+            "a collapsed update query with valid index range"
+          ],
+          "fullName": "dust generation merkle tree update queries a collapsed update query with valid index range should return a collapsed update for a valid index range",
+          "status": "skipped",
+          "title": "should return a collapsed update for a valid index range",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generation merkle tree update queries",
+            "a collapsed update query with valid index range"
+          ],
+          "fullName": "dust generation merkle tree update queries a collapsed update query with valid index range should respond with a collapsed update according to the expected schema",
+          "status": "skipped",
+          "title": "should respond with a collapsed update according to the expected schema",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generation merkle tree update queries",
+            "a collapsed update query with valid index range"
+          ],
+          "fullName": "dust generation merkle tree update queries a collapsed update query with valid index range should return a collapsed update for the full genesis dust range",
+          "status": "skipped",
+          "title": "should return a collapsed update for the full genesis dust range",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generation merkle tree update queries",
+            "a collapsed update query with equal start and end indices"
+          ],
+          "fullName": "dust generation merkle tree update queries a collapsed update query with equal start and end indices should return a valid update when startIndex equals endIndex",
+          "status": "skipped",
+          "title": "should return a valid update when startIndex equals endIndex",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generation merkle tree update queries",
+            "a collapsed update query idempotency"
+          ],
+          "fullName": "dust generation merkle tree update queries a collapsed update query idempotency should return identical results for the same query parameters",
+          "status": "skipped",
+          "title": "should return identical results for the same query parameters",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generation merkle tree update queries",
+            "a collapsed update query with invalid index range"
+          ],
+          "fullName": "dust generation merkle tree update queries a collapsed update query with invalid index range should return an error when startIndex is greater than endIndex",
+          "status": "skipped",
+          "title": "should return an error when startIndex is greater than endIndex",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generation merkle tree update queries",
+            "a collapsed update query with invalid index range"
+          ],
+          "fullName": "dust generation merkle tree update queries a collapsed update query with invalid index range should return an error when indices are negative",
+          "status": "skipped",
+          "title": "should return an error when indices are negative",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generation merkle tree update queries",
+            "a collapsed update query with invalid index range"
+          ],
+          "fullName": "dust generation merkle tree update queries a collapsed update query with invalid index range should return an error when endIndex is beyond the indexed range",
+          "status": "skipped",
+          "title": "should return an error when endIndex is beyond the indexed range",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1793897621293,
+      "endTime": 1793897621293,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/integration/basic/queries/dust-generation-update-queries.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "dust generations queries",
+            "a dust generations query with a valid Cardano reward address"
+          ],
+          "fullName": "dust generations queries a dust generations query with a valid Cardano reward address should return dust generations for a registered address",
+          "status": "skipped",
+          "title": "should return dust generations for a registered address",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generations queries",
+            "a dust generations query with a valid Cardano reward address"
+          ],
+          "fullName": "dust generations queries a dust generations query with a valid Cardano reward address should respond with dust generations according to the expected schema",
+          "status": "skipped",
+          "title": "should respond with dust generations according to the expected schema",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generations queries",
+            "a dust generations query with a valid Cardano reward address"
+          ],
+          "fullName": "dust generations queries a dust generations query with a valid Cardano reward address should return registrations with valid fields for a registered address",
+          "status": "skipped",
+          "title": "should return registrations with valid fields for a registered address",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generations queries",
+            "a dust generations query with multiple addresses"
+          ],
+          "fullName": "dust generations queries a dust generations query with multiple addresses should return dust generations for multiple addresses",
+          "status": "skipped",
+          "title": "should return dust generations for multiple addresses",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generations queries",
+            "a dust generations query with non-registered address"
+          ],
+          "fullName": "dust generations queries a dust generations query with non-registered address should return empty registrations for a non-registered address",
+          "status": "skipped",
+          "title": "should return empty registrations for a non-registered address",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generations queries",
+            "a dust generations query with invalid input"
+          ],
+          "fullName": "dust generations queries a dust generations query with invalid input should return an empty result for an empty addresses array",
+          "status": "skipped",
+          "title": "should return an empty result for an empty addresses array",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generations queries",
+            "a dust generations query with invalid input"
+          ],
+          "fullName": "dust generations queries a dust generations query with invalid input should return an error for a malformed address",
+          "status": "skipped",
+          "title": "should return an error for a malformed address",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generations queries",
+            "a dustGenerations query with a multi-UTXO stake key (#926)"
+          ],
+          "fullName": "dust generations queries a dustGenerations query with a multi-UTXO stake key (#926) should aggregate nightBalance across all backing cNIGHT UTXOs",
+          "status": "skipped",
+          "title": "should aggregate nightBalance across all backing cNIGHT UTXOs",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generations queries",
+            "backwards compatibility with dustGenerationStatus"
+          ],
+          "fullName": "dust generations queries backwards compatibility with dustGenerationStatus should return consistent data from both endpoints for a registered address",
+          "status": "skipped",
+          "title": "should return consistent data from both endpoints for a registered address",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1793897621293,
+      "endTime": 1793897621293,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/integration/basic/queries/dust-generations-queries.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "dust generation status queries",
+            "a dust generation status query with a valid Cardano reward address"
+          ],
+          "fullName": "dust generation status queries a dust generation status query with a valid Cardano reward address should respond with a dust generation status response according to the requested schema",
+          "status": "skipped",
+          "title": "should respond with a dust generation status response according to the requested schema",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generation status queries",
+            "a dust generation status query with a valid Cardano reward address"
+          ],
+          "fullName": "dust generation status queries a dust generation status query with a valid Cardano reward address should report registered status for a registered Cardano reward address",
+          "status": "skipped",
+          "title": "should report registered status for a registered Cardano reward address",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generation status queries",
+            "a dust generation status query with a valid Cardano reward address"
+          ],
+          "fullName": "dust generation status queries a dust generation status query with a valid Cardano reward address should give the DUST destination address for the expected network when Cardano reward address is registered",
+          "status": "skipped",
+          "title": "should give the DUST destination address for the expected network when Cardano reward address is registered",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generation status queries",
+            "a dust generation status query with a valid Cardano reward address"
+          ],
+          "fullName": "dust generation status queries a dust generation status query with a valid Cardano reward address should correctly indicate registration status for a non-registered key",
+          "status": "skipped",
+          "title": "should correctly indicate registration status for a non-registered key",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generation status queries",
+            "a dust generation status query with a valid Cardano reward address"
+          ],
+          "fullName": "dust generation status queries a dust generation status query with a valid Cardano reward address should indicate zero generation for registered address without cNIGHT balance",
+          "status": "skipped",
+          "title": "should indicate zero generation for registered address without cNIGHT balance",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generation status queries",
+            "a dust generation status query with a valid Cardano reward address"
+          ],
+          "fullName": "dust generation status queries a dust generation status query with a valid Cardano reward address should report the correct value of max capacity for registered address with cNIGHT",
+          "status": "skipped",
+          "title": "should report the correct value of max capacity for registered address with cNIGHT",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generation status queries",
+            "a dust generation status query with a valid Cardano reward address"
+          ],
+          "fullName": "dust generation status queries a dust generation status query with a valid Cardano reward address should correctly indicate deregistered status for a previously registered Cardano reward address",
+          "status": "skipped",
+          "title": "should correctly indicate deregistered status for a previously registered Cardano reward address",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generation status queries",
+            "a dust generation status query with multiple valid Cardano reward addresses"
+          ],
+          "fullName": "dust generation status queries a dust generation status query with multiple valid Cardano reward addresses should return statuses for multiple Cardano reward addresses in order",
+          "status": "skipped",
+          "title": "should return statuses for multiple Cardano reward addresses in order",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generation status queries",
+            "a dust generation status query with multiple valid Cardano reward addresses"
+          ],
+          "fullName": "dust generation status queries a dust generation status query with multiple valid Cardano reward addresses should respond with dust generation statuses according to the requested schema for multiple addresses",
+          "status": "skipped",
+          "title": "should respond with dust generation statuses according to the requested schema for multiple addresses",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generation status queries",
+            "a dust generation status query with multiple valid Cardano reward addresses"
+          ],
+          "fullName": "dust generation status queries a dust generation status query with multiple valid Cardano reward addresses should return an error given the number of addresses is greater than 10",
+          "status": "skipped",
+          "title": "should return an error given the number of addresses is greater than 10",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generation status queries",
+            "a dust generation status query with malformed reward addresses"
+          ],
+          "fullName": "dust generation status queries a dust generation status query with malformed reward addresses should return an error when the address is in plain hex string format",
+          "status": "skipped",
+          "title": "should return an error when the address is in plain hex string format",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generation status queries",
+            "a dust generation status query with empty list of reward addresses"
+          ],
+          "fullName": "dust generation status queries a dust generation status query with empty list of reward addresses should return an empty list of dust generation statuses",
+          "status": "skipped",
+          "title": "should return an empty list of dust generation statuses",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generation status queries",
+            "a dust generation status query with a Cardano payment address"
+          ],
+          "fullName": "dust generation status queries a dust generation status query with a Cardano payment address should return an error as only Cardano reward addresses are supported",
+          "status": "skipped",
+          "title": "should return an error as only Cardano reward addresses are supported",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generation status queries",
+            "a dust generation status query with a Cardano reward address not meant for this network"
+          ],
+          "fullName": "dust generation status queries a dust generation status query with a Cardano reward address not meant for this network should return an error reporting the target network mismatch",
+          "status": "skipped",
+          "title": "should return an error reporting the target network mismatch",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generation status queries",
+            "a dust generation status query with duplicate reward addresses"
+          ],
+          "fullName": "dust generation status queries a dust generation status query with duplicate reward addresses should handle duplicate Cardano reward addresses appropriately",
+          "status": "skipped",
+          "title": "should handle duplicate Cardano reward addresses appropriately",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1793897621293,
+      "endTime": 1793897621293,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/integration/basic/queries/dust-queries.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "graphql http response compression",
+            "a GraphQL HTTP request with Accept-Encoding: gzip"
+          ],
+          "fullName": "graphql http response compression a GraphQL HTTP request with Accept-Encoding: gzip should return a gzip-compressed response",
+          "status": "passed",
+          "title": "should return a gzip-compressed response",
+          "duration": 31.03425,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "graphql http response compression",
+            "a GraphQL HTTP request with Accept-Encoding: br"
+          ],
+          "fullName": "graphql http response compression a GraphQL HTTP request with Accept-Encoding: br should return a brotli-compressed response",
+          "status": "passed",
+          "title": "should return a brotli-compressed response",
+          "duration": 7.686457999999988,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "graphql http response compression",
+            "a GraphQL HTTP request with Accept-Encoding: zstd"
+          ],
+          "fullName": "graphql http response compression a GraphQL HTTP request with Accept-Encoding: zstd should return a zstd-compressed response",
+          "status": "passed",
+          "title": "should return a zstd-compressed response",
+          "duration": 6.190791000000019,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "graphql http response compression",
+            "a GraphQL HTTP request with Accept-Encoding: identity"
+          ],
+          "fullName": "graphql http response compression a GraphQL HTTP request with Accept-Encoding: identity should return an uncompressed response",
+          "status": "passed",
+          "title": "should return an uncompressed response",
+          "duration": 5.868124999999992,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1793897638199,
+      "endTime": 1793897638250.8682,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/integration/basic/queries/graphql-http-compression.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "SPO epoch series queries",
+            "a registered totals series query with an epoch span within the maximum"
+          ],
+          "fullName": "SPO epoch series queries a registered totals series query with an epoch span within the maximum should accept a range covering a single epoch",
+          "status": "passed",
+          "title": "should accept a range covering a single epoch",
+          "duration": 39.13116600000001,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Spo", "Epoch"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "SPO epoch series queries",
+            "a registered totals series query with an epoch span within the maximum"
+          ],
+          "fullName": "SPO epoch series queries a registered totals series query with an epoch span within the maximum should accept a range whose span equals the maximum",
+          "status": "passed",
+          "title": "should accept a range whose span equals the maximum",
+          "duration": 8.389582999999988,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Spo", "Epoch"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "SPO epoch series queries",
+            "a registered totals series query with an epoch span within the maximum"
+          ],
+          "fullName": "SPO epoch series queries a registered totals series query with an epoch span within the maximum should accept a permitted span that does not start at epoch zero",
+          "status": "passed",
+          "title": "should accept a permitted span that does not start at epoch zero",
+          "duration": 7.986665999999985,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Spo", "Epoch"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "SPO epoch series queries",
+            "a registered totals series query with an epoch span exceeding the maximum"
+          ],
+          "fullName": "SPO epoch series queries a registered totals series query with an epoch span exceeding the maximum should reject a range one epoch beyond the maximum span",
+          "status": "passed",
+          "title": "should reject a range one epoch beyond the maximum span",
+          "duration": 2.34050000000002,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Spo", "Epoch", "Negative"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "SPO epoch series queries",
+            "a registered totals series query with an epoch span exceeding the maximum"
+          ],
+          "fullName": "SPO epoch series queries a registered totals series query with an epoch span exceeding the maximum should reject a reversed range whose span exceeds the maximum",
+          "status": "passed",
+          "title": "should reject a reversed range whose span exceeds the maximum",
+          "duration": 2.7252499999999884,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Spo", "Epoch", "Negative"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "SPO epoch series queries",
+            "a registered totals series query with an epoch span exceeding the maximum"
+          ],
+          "fullName": "SPO epoch series queries a registered totals series query with an epoch span exceeding the maximum should reject a range far beyond the maximum span without returning data",
+          "status": "passed",
+          "title": "should reject a range far beyond the maximum span without returning data",
+          "duration": 2.054000000000002,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Spo", "Epoch", "Negative"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "SPO epoch series queries",
+            "a registered SPO series query with an epoch span exceeding the maximum"
+          ],
+          "fullName": "SPO epoch series queries a registered SPO series query with an epoch span exceeding the maximum should reject a range beyond the maximum span",
+          "status": "passed",
+          "title": "should reject a range beyond the maximum span",
+          "duration": 1.9756660000000181,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Spo", "Epoch", "Negative"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "SPO epoch series queries",
+            "a registered SPO series query with an epoch span exceeding the maximum"
+          ],
+          "fullName": "SPO epoch series queries a registered SPO series query with an epoch span exceeding the maximum should accept a range whose span equals the maximum",
+          "status": "passed",
+          "title": "should accept a range whose span equals the maximum",
+          "duration": 101.39833300000001,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Spo", "Epoch"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "SPO epoch series queries",
+            "a registered presence query with an epoch span exceeding the maximum"
+          ],
+          "fullName": "SPO epoch series queries a registered presence query with an epoch span exceeding the maximum should reject a range beyond the maximum span",
+          "status": "passed",
+          "title": "should reject a range beyond the maximum span",
+          "duration": 4.315625000000011,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Spo", "Epoch", "Negative"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "SPO epoch series queries",
+            "a registered presence query with an epoch span exceeding the maximum"
+          ],
+          "fullName": "SPO epoch series queries a registered presence query with an epoch span exceeding the maximum should accept a range whose span equals the maximum",
+          "status": "passed",
+          "title": "should accept a range whose span equals the maximum",
+          "duration": 5.346374999999966,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Spo", "Epoch"] } },
+          "tags": []
+        }
+      ],
+      "startTime": 1793897637756,
+      "endTime": 1793897637932.3464,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/integration/basic/queries/spo-epoch-series-queries.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["transaction queries", "a transaction query by hash"],
+          "fullName": "transaction queries a transaction query by hash should return the transaction with that hash, given that transaction exists",
+          "status": "passed",
+          "title": "should return the transaction with that hash, given that transaction exists",
+          "duration": 320.85754199999997,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["transaction queries", "a transaction query by hash"],
+          "fullName": "transaction queries a transaction query by hash should return an empty transaction list, given a transaction with that hash doesn't exist",
+          "status": "passed",
+          "title": "should return an empty transaction list, given a transaction with that hash doesn't exist",
+          "duration": 3.079666999999972,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["transaction queries", "a transaction query by hash"],
+          "fullName": "transaction queries a transaction query by hash should return an error, given a hash is invalid (malformed)",
+          "status": "passed",
+          "title": "should return an error, given a hash is invalid (malformed)",
+          "duration": 11.425707999999986,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["transaction queries", "a transaction query by hash"],
+          "fullName": "transaction queries a transaction query by hash should return an error when called with an empty offset object",
+          "status": "passed",
+          "title": "should return an error when called with an empty offset object",
+          "duration": 1.7802909999999201,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["transaction queries", "a transaction query by identifier"],
+          "fullName": "transaction queries a transaction query by identifier should return the transaction with that identifier, given that transaction exists",
+          "status": "passed",
+          "title": "should return the transaction with that identifier, given that transaction exists",
+          "duration": 219.42262500000004,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["transaction queries", "a transaction query by identifier"],
+          "fullName": "transaction queries a transaction query by identifier should return an empty list of transactions, given a transaction with that identifier doesn't exist",
+          "status": "passed",
+          "title": "should return an empty list of transactions, given a transaction with that identifier doesn't exist",
+          "duration": 2.5476670000000468,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["transaction queries", "a transaction query by identifier"],
+          "fullName": "transaction queries a transaction query by identifier should return an error, given an invalid identifier",
+          "status": "passed",
+          "title": "should return an error, given an invalid identifier",
+          "duration": 6.533250000000066,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["transaction queries", "a transaction query by hash and identifier"],
+          "fullName": "transaction queries a transaction query by hash and identifier should return an error, as only one parameter at a time can be used",
+          "status": "passed",
+          "title": "should return an error, as only one parameter at a time can be used",
+          "duration": 2.1526249999999436,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "genesis transactions",
+            "transaction queries to the genesis block transactions"
+          ],
+          "fullName": "genesis transactions transaction queries to the genesis block transactions should return utxos related to 4 pre-fund wallets",
+          "status": "passed",
+          "title": "should return utxos related to 4 pre-fund wallets",
+          "duration": 279.47283300000004,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "genesis transactions",
+            "transaction queries to the genesis block transactions"
+          ],
+          "fullName": "genesis transactions transaction queries to the genesis block transactions should return utxos with 1 token type",
+          "status": "passed",
+          "title": "should return utxos with 1 token type",
+          "duration": 256.3149169999999,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "genesis transactions",
+            "transaction queries to the genesis block transactions"
+          ],
+          "fullName": "genesis transactions transaction queries to the genesis block transactions should return utxos sorted by outputIndex in ascending order",
+          "status": "passed",
+          "title": "should return utxos sorted by outputIndex in ascending order",
+          "duration": 213.2392920000002,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "genesis transactions",
+            "transaction queries to the genesis block transactions"
+          ],
+          "fullName": "genesis transactions transaction queries to the genesis block transactions should return system transactions when queried by hash",
+          "status": "passed",
+          "title": "should return system transactions when queried by hash",
+          "duration": 242.82041600000002,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "genesis transactions",
+            "transaction queries to the genesis block transactions"
+          ],
+          "fullName": "genesis transactions transaction queries to the genesis block transactions should not contain RegularTransaction-specific fields on system transactions",
+          "status": "passed",
+          "title": "should not contain RegularTransaction-specific fields on system transactions",
+          "duration": 190.6032090000001,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["genesis transactions", "schema validation"],
+          "fullName": "genesis transactions schema validation should respond with full transaction data according to the expected schema",
+          "status": "passed",
+          "title": "should respond with full transaction data according to the expected schema",
+          "duration": 7.945458000000144,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["genesis transactions", "schema validation"],
+          "fullName": "genesis transactions schema validation should respond with system transactions according to the expected schema",
+          "status": "passed",
+          "title": "should respond with system transactions according to the expected schema",
+          "duration": 0.21350000000029468,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["genesis transactions", "schema validation"],
+          "fullName": "genesis transactions schema validation should contain both regular and system transactions",
+          "status": "passed",
+          "title": "should contain both regular and system transactions",
+          "duration": 0.1303330000000642,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["genesis transactions", "schema validation"],
+          "fullName": "genesis transactions schema validation should respond with regular transactions according to the expected schema",
+          "status": "passed",
+          "title": "should respond with regular transactions according to the expected schema",
+          "duration": 1.768666999999823,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["genesis transactions", "schema validation"],
+          "fullName": "genesis transactions schema validation should respond with nested ledger events and unshielded outputs according to the expected schema",
+          "status": "passed",
+          "title": "should respond with nested ledger events and unshielded outputs according to the expected schema",
+          "duration": 1.3059579999999187,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1793897630016,
+      "endTime": 1793897631965.306,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/integration/basic/queries/transaction-queries.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "zswap merkle tree collapsed update queries",
+            "a collapsed update query with valid index range"
+          ],
+          "fullName": "zswap merkle tree collapsed update queries a collapsed update query with valid index range should return a collapsed update for a valid index range",
+          "status": "passed",
+          "title": "should return a collapsed update for a valid index range",
+          "duration": 32.38941700000001,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Zswap", "CollapsedUpdate"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "zswap merkle tree collapsed update queries",
+            "a collapsed update query with valid index range"
+          ],
+          "fullName": "zswap merkle tree collapsed update queries a collapsed update query with valid index range should respond with a collapsed update according to the expected schema",
+          "status": "passed",
+          "title": "should respond with a collapsed update according to the expected schema",
+          "duration": 4.526957999999979,
+          "failureMessages": [],
+          "meta": {
+            "custom": { "labels": ["Query", "Zswap", "CollapsedUpdate", "SchemaValidation"] }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "zswap merkle tree collapsed update queries",
+            "a collapsed update query with valid index range"
+          ],
+          "fullName": "zswap merkle tree collapsed update queries a collapsed update query with valid index range should return a collapsed update for the full genesis zswap range",
+          "status": "passed",
+          "title": "should return a collapsed update for the full genesis zswap range",
+          "duration": 33.28008300000002,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Zswap", "CollapsedUpdate", "FullRange"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "zswap merkle tree collapsed update queries",
+            "a collapsed update query with equal start and end indices"
+          ],
+          "fullName": "zswap merkle tree collapsed update queries a collapsed update query with equal start and end indices should return a valid update when startIndex equals endIndex",
+          "status": "passed",
+          "title": "should return a valid update when startIndex equals endIndex",
+          "duration": 3.102874999999983,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Zswap", "CollapsedUpdate", "EdgeCase"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "zswap merkle tree collapsed update queries",
+            "a collapsed update query idempotency"
+          ],
+          "fullName": "zswap merkle tree collapsed update queries a collapsed update query idempotency should return identical results for the same query parameters",
+          "status": "passed",
+          "title": "should return identical results for the same query parameters",
+          "duration": 5.133082999999999,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Zswap", "CollapsedUpdate", "Idempotency"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "zswap merkle tree collapsed update queries",
+            "a collapsed update query with invalid index range"
+          ],
+          "fullName": "zswap merkle tree collapsed update queries a collapsed update query with invalid index range should return an error when startIndex is greater than endIndex",
+          "status": "passed",
+          "title": "should return an error when startIndex is greater than endIndex",
+          "duration": 2.170166999999992,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Zswap", "CollapsedUpdate", "Negative"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "zswap merkle tree collapsed update queries",
+            "a collapsed update query with invalid index range"
+          ],
+          "fullName": "zswap merkle tree collapsed update queries a collapsed update query with invalid index range should return an error when indices are negative",
+          "status": "passed",
+          "title": "should return an error when indices are negative",
+          "duration": 5.165665999999987,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Zswap", "CollapsedUpdate", "Negative"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "zswap merkle tree collapsed update queries",
+            "a collapsed update query with invalid index range"
+          ],
+          "fullName": "zswap merkle tree collapsed update queries a collapsed update query with invalid index range should return an error when endIndex is beyond the indexed range",
+          "status": "passed",
+          "title": "should return an error when endIndex is beyond the indexed range",
+          "duration": 2.483458000000013,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Zswap", "CollapsedUpdate", "Negative"] } },
+          "tags": []
+        }
+      ],
+      "startTime": 1793897637051,
+      "endTime": 1793897637139.4834,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/integration/basic/queries/zswap-collapsed-update-queries.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "block subscriptions",
+            "a subscription to block updates without parameters"
+          ],
+          "fullName": "block subscriptions a subscription to block updates without parameters should stream blocks starting from the latest block",
+          "status": "passed",
+          "title": "should stream blocks starting from the latest block",
+          "duration": 5188.694958,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "block subscriptions",
+            "a subscription to block updates without parameters"
+          ],
+          "fullName": "block subscriptions a subscription to block updates without parameters should stream blocks adhering to the expected schema",
+          "status": "passed",
+          "title": "should stream blocks adhering to the expected schema",
+          "duration": 540.5547919999999,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["block subscriptions", "a subscription to block updates by hash"],
+          "fullName": "block subscriptions a subscription to block updates by hash should stream blocks starting from the block with that hash, given that hash exists",
+          "status": "passed",
+          "title": "should stream blocks starting from the block with that hash, given that hash exists",
+          "duration": 602.6525839999995,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["block subscriptions", "a subscription to block updates by hash"],
+          "fullName": "block subscriptions a subscription to block updates by hash should return an error message, given that hash doesn't exist",
+          "status": "passed",
+          "title": "should return an error message, given that hash doesn't exist",
+          "duration": 506.8735830000005,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["block subscriptions", "a subscription to block updates by hash"],
+          "fullName": "block subscriptions a subscription to block updates by hash should return an error message, given that hash is invalid",
+          "status": "passed",
+          "title": "should return an error message, given that hash is invalid",
+          "duration": 503.5596660000001,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["block subscriptions", "a subscription to block updates by height"],
+          "fullName": "block subscriptions a subscription to block updates by height should stream blocks from the block with that height, given that height exists",
+          "status": "passed",
+          "title": "should stream blocks from the block with that height, given that height exists",
+          "duration": 626.3898750000008,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["block subscriptions", "a subscription to block updates by height"],
+          "fullName": "block subscriptions a subscription to block updates by height should return an error message, given that height is higher than the latest block height",
+          "status": "passed",
+          "title": "should return an error message, given that height is higher than the latest block height",
+          "duration": 512.2311669999999,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["block subscriptions", "a subscription to block updates by height"],
+          "fullName": "block subscriptions a subscription to block updates by height should return an error message, given that height is invalid",
+          "status": "passed",
+          "title": "should return an error message, given that height is invalid",
+          "duration": 503.76724999999897,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "block subscriptions",
+            "a subscription to block updates by height and hash"
+          ],
+          "fullName": "block subscriptions a subscription to block updates by height and hash should return an error message, as only one parameter at a time can be used",
+          "status": "passed",
+          "title": "should return an error message, as only one parameter at a time can be used",
+          "duration": 506.1103329999987,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["block subscriptions", "regular transaction fees"],
+          "fullName": "block subscriptions regular transaction fees should report ledger paidFees and estimatedFees on regular transactions",
+          "status": "skipped",
+          "title": "should report ledger paidFees and estimatedFees on regular transactions",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1793897630021,
+      "endTime": 1793897639512.1104,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/integration/basic/subscriptions/block-subscriptions.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["bridge pool subscription", "bridgePoolUpdates"],
+          "fullName": "bridge pool subscription bridgePoolUpdates should emit current pool summary immediately on subscribe",
+          "status": "skipped",
+          "title": "should emit current pool summary immediately on subscribe",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge pool subscription", "bridgePoolUpdates"],
+          "fullName": "bridge pool subscription bridgePoolUpdates should push an update when a new ReserveTransfer is indexed",
+          "status": "todo",
+          "title": "should push an update when a new ReserveTransfer is indexed",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge pool subscription", "bridgePoolUpdates"],
+          "fullName": "bridge pool subscription bridgePoolUpdates should push an update when a new InvalidTransfer is indexed",
+          "status": "todo",
+          "title": "should push an update when a new InvalidTransfer is indexed",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge pool subscription", "bridgePoolUpdates"],
+          "fullName": "bridge pool subscription bridgePoolUpdates should not push a pool update for UserTransfer events (user address, not pool)",
+          "status": "todo",
+          "title": "should not push a pool update for UserTransfer events (user address, not pool)",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge pool subscription", "bridgePoolUpdates"],
+          "fullName": "bridge pool subscription bridgePoolUpdates should carry a running pool total in each frame (cumulative consistency)",
+          "status": "todo",
+          "title": "should carry a running pool total in each frame (cumulative consistency)",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge pool subscription", "bridgePoolUpdates"],
+          "fullName": "bridge pool subscription bridgePoolUpdates should push an update when an UnapprovedTransfer is indexed",
+          "status": "skipped",
+          "title": "should push an update when an UnapprovedTransfer is indexed",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge pool subscription", "bridgePoolUpdates"],
+          "fullName": "bridge pool subscription bridgePoolUpdates should push an update and increment subminimumTxCount when a flush is indexed",
+          "status": "skipped",
+          "title": "should push an update and increment subminimumTxCount when a flush is indexed",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1793897621293,
+      "endTime": 1793897621293,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/integration/basic/subscriptions/bridge-pool-subscriptions.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["bridge subscriptions", "bridgeEvents"],
+          "fullName": "bridge subscriptions bridgeEvents should replay historical events from the given cursor id",
+          "status": "skipped",
+          "title": "should replay historical events from the given cursor id",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge subscriptions", "bridgeEvents"],
+          "fullName": "bridge subscriptions bridgeEvents should only deliver events matching the recipient filter",
+          "status": "skipped",
+          "title": "should only deliver events matching the recipient filter",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge subscriptions", "bridgeEvents"],
+          "fullName": "bridge subscriptions bridgeEvents should only deliver events matching the variant filter",
+          "status": "skipped",
+          "title": "should only deliver events matching the variant filter",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge subscriptions", "bridgeEvents"],
+          "fullName": "bridge subscriptions bridgeEvents should resume from cursor without gap or duplication on reconnection",
+          "status": "skipped",
+          "title": "should resume from cursor without gap or duplication on reconnection",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge subscriptions", "bridgeEvents"],
+          "fullName": "bridge subscriptions bridgeEvents should deliver BridgeUnapprovedTransfer events via subscription",
+          "status": "skipped",
+          "title": "should deliver BridgeUnapprovedTransfer events via subscription",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge subscriptions", "claims via unshieldedTransactions"],
+          "fullName": "bridge subscriptions claims via unshieldedTransactions should observe claims as BridgeClaimTransaction via the unshieldedTransactions query",
+          "status": "todo",
+          "title": "should observe claims as BridgeClaimTransaction via the unshieldedTransactions query",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge subscriptions", "bridgeBalance"],
+          "fullName": "bridge subscriptions bridgeBalance should emit zero balance immediately for an address with no bridge activity",
+          "status": "skipped",
+          "title": "should emit zero balance immediately for an address with no bridge activity",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge subscriptions", "bridgeBalance"],
+          "fullName": "bridge subscriptions bridgeBalance should push an updated BridgeBalance when a relevant UserTransfer is indexed",
+          "status": "todo",
+          "title": "should push an updated BridgeBalance when a relevant UserTransfer is indexed",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge subscriptions", "bridgeBalance"],
+          "fullName": "bridge subscriptions bridgeBalance should push an updated BridgeBalance when a claim reduces the balance",
+          "status": "todo",
+          "title": "should push an updated BridgeBalance when a claim reduces the balance",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1793897621293,
+      "endTime": 1793897621293,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/integration/basic/subscriptions/bridge-subscriptions.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "contract event subscription",
+            "a contract events subscription for an address with no emitted events"
+          ],
+          "fullName": "contract event subscription a contract events subscription for an address with no emitted events should complete via the toBlock terminator without delivering events",
+          "status": "passed",
+          "title": "should complete via the toBlock terminator without delivering events",
+          "duration": 520.221708,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Subscription", "ContractEvents"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract event subscription",
+            "a contract events subscription with an invalid filter"
+          ],
+          "fullName": "contract event subscription a contract events subscription with an invalid filter should return an error when the contract address is empty",
+          "status": "passed",
+          "title": "should return an error when the contract address is empty",
+          "duration": 503.778958,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Subscription", "ContractEvents", "Negative"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract event subscription",
+            "a contract events subscription with an invalid filter"
+          ],
+          "fullName": "contract event subscription a contract events subscription with an invalid filter should return an error for an unknown field prefix field name",
+          "status": "passed",
+          "title": "should return an error for an unknown field prefix field name",
+          "duration": 509.38541699999996,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Subscription", "ContractEvents", "Negative"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract event subscription",
+            "a contract events subscription for a contract with emitted events"
+          ],
+          "fullName": "contract event subscription a contract events subscription for a contract with emitted events should stream events conforming to the contract event schema",
+          "status": "skipped",
+          "title": "should stream events conforming to the contract event schema",
+          "duration": 520.644875,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Subscription", "ContractEvents"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract event subscription",
+            "a contract events subscription for a contract with emitted events"
+          ],
+          "fullName": "contract event subscription a contract events subscription for a contract with emitted events should stream only events carrying the filtered field",
+          "status": "skipped",
+          "title": "should stream only events carrying the filtered field",
+          "duration": 507.05475000000024,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Subscription", "ContractEvents"] } },
+          "tags": []
+        }
+      ],
+      "startTime": 1793897632898,
+      "endTime": 1793897634431.3855,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/integration/basic/subscriptions/contract-event-subscriptions.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "contract action subscriptions",
+            "a subscription to contract action updates without parameters"
+          ],
+          "fullName": "contract action subscriptions a subscription to contract action updates without parameters should not replay existing contract actions",
+          "status": "passed",
+          "title": "should not replay existing contract actions",
+          "duration": 8577.507833,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Subscription", "ContractAction", "NoOffset"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract action subscriptions",
+            "a subscription to contract action updates from genesis"
+          ],
+          "fullName": "contract action subscriptions a subscription to contract action updates from genesis should stream contract actions adhering to the expected schema",
+          "status": "passed",
+          "title": "should stream contract actions adhering to the expected schema",
+          "duration": 521.4357500000006,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract action subscriptions",
+            "a subscription to contract action updates with block hash offset"
+          ],
+          "fullName": "contract action subscriptions a subscription to contract action updates with block hash offset should stream historical and new contract actions from a specific block hash",
+          "status": "passed",
+          "title": "should stream historical and new contract actions from a specific block hash",
+          "duration": 512.4362920000003,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract action subscriptions",
+            "a subscription to contract action updates with the block their state is anchored at"
+          ],
+          "fullName": "contract action subscriptions a subscription to contract action updates with the block their state is anchored at should anchor each streamed contract action at the block its state was written",
+          "status": "passed",
+          "title": "should anchor each streamed contract action at the block its state was written",
+          "duration": 9026.362958999998,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Subscription", "ContractAction", "StateAt"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract action subscriptions",
+            "a subscription from before a ledger hard fork to a contract untouched since"
+          ],
+          "fullName": "contract action subscriptions a subscription from before a ledger hard fork to a contract untouched since should re-emit the latest pre-fork action once at the fork block",
+          "status": "skipped",
+          "title": "should re-emit the latest pre-fork action once at the fork block",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1793897630057,
+      "endTime": 1793897648694.363,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/integration/basic/subscriptions/contract-subscriptions.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "dust generations subscription",
+            "a subscription at the latest block hash"
+          ],
+          "fullName": "dust generations subscription a subscription at the latest block hash should stream a complete generation snapshot for a registered dust address",
+          "status": "skipped",
+          "title": "should stream a complete generation snapshot for a registered dust address",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generations subscription",
+            "a subscription pinned to a block hash"
+          ],
+          "fullName": "dust generations subscription a subscription pinned to a block hash should deliver identical events for repeated subscriptions at the same block",
+          "status": "skipped",
+          "title": "should deliver identical events for repeated subscriptions at the same block",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generations subscription",
+            "a subscription pinned to a block hash"
+          ],
+          "fullName": "dust generations subscription a subscription pinned to a block hash should snapshot the generation tree at the queried block rather than the tip",
+          "status": "skipped",
+          "title": "should snapshot the generation tree at the queried block rather than the tip",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generations subscription",
+            "dtime update delivery relative to the cutoff height"
+          ],
+          "fullName": "dust generations subscription dtime update delivery relative to the cutoff height should replay owned dtime updates before generation items when the cutoff is zero",
+          "status": "skipped",
+          "title": "should replay owned dtime updates before generation items when the cutoff is zero",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generations subscription",
+            "dtime update delivery relative to the cutoff height"
+          ],
+          "fullName": "dust generations subscription dtime update delivery relative to the cutoff height should deliver no dtime updates when the cutoff equals the snapshot block height",
+          "status": "skipped",
+          "title": "should deliver no dtime updates when the cutoff equals the snapshot block height",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["dust generations subscription", "subscription error handling"],
+          "fullName": "dust generations subscription subscription error handling should return an error for an invalid dust address",
+          "status": "skipped",
+          "title": "should return an error for an invalid dust address",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["dust generations subscription", "subscription error handling"],
+          "fullName": "dust generations subscription subscription error handling should return an error for a valid address that is meant for another networkid",
+          "status": "skipped",
+          "title": "should return an error for a valid address that is meant for another networkid",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["dust generations subscription", "subscription error handling"],
+          "fullName": "dust generations subscription subscription error handling should return an error for a valid dust address passed in hex format",
+          "status": "skipped",
+          "title": "should return an error for a valid dust address passed in hex format",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["dust generations subscription", "subscription error handling"],
+          "fullName": "dust generations subscription subscription error handling should return an error for an unknown block hash",
+          "status": "skipped",
+          "title": "should return an error for an unknown block hash",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["dust generations subscription", "subscription error handling"],
+          "fullName": "dust generations subscription subscription error handling should return an error for a malformed block hash",
+          "status": "skipped",
+          "title": "should return an error for a malformed block hash",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["dust generations subscription", "subscription error handling"],
+          "fullName": "dust generations subscription subscription error handling should reject a block hash older than the snapshot freshness window",
+          "status": "skipped",
+          "title": "should reject a block hash older than the snapshot freshness window",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generations subscription",
+            "transactionHash on dust generation events"
+          ],
+          "fullName": "dust generations subscription transactionHash on dust generation events first item transactionHash resolves via transactions(offset)",
+          "status": "skipped",
+          "title": "first item transactionHash resolves via transactions(offset)",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust generations progress protocol version",
+            "a subscription pinned to a block hash"
+          ],
+          "fullName": "dust generations progress protocol version a subscription pinned to a block hash should report the pinned block protocol version in the progress event",
+          "status": "passed",
+          "title": "should report the pinned block protocol version in the progress event",
+          "duration": 557.5102499999999,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Subscription", "Dust", "Generations", "Progress"] } },
+          "tags": []
+        }
+      ],
+      "startTime": 1793897630101,
+      "endTime": 1793897630658.5103,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/integration/basic/subscriptions/dust-generations-subscriptions.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "dust ledger event subscriptions",
+            "a subscription to dust ledger events without offset (default replay)"
+          ],
+          "fullName": "dust ledger event subscriptions a subscription to dust ledger events without offset (default replay) streams events in ledger order",
+          "status": "passed",
+          "title": "streams events in ledger order",
+          "duration": 524.729541,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust ledger event subscriptions",
+            "subscription with explicit offset"
+          ],
+          "fullName": "dust ledger event subscriptions subscription with explicit offset streams events in ledger order starting from the specified ID",
+          "status": "passed",
+          "title": "streams events in ledger order starting from the specified ID",
+          "duration": 510.735583,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust ledger event subscriptions",
+            "subscription with explicit offset"
+          ],
+          "fullName": "dust ledger event subscriptions subscription with explicit offset validates historical dust events against schema",
+          "status": "passed",
+          "title": "validates historical dust events against schema",
+          "duration": 508.34008400000016,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["dust ledger event subscriptions", "subscription error handling"],
+          "fullName": "dust ledger event subscriptions subscription error handling should return an error for unknown field",
+          "status": "passed",
+          "title": "should return an error for unknown field",
+          "duration": 502.63762499999984,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["dust ledger event subscriptions", "subscription error handling"],
+          "fullName": "dust ledger event subscriptions subscription error handling rejects negative offset ID with an error",
+          "status": "passed",
+          "title": "rejects negative offset ID with an error",
+          "duration": 503.1027079999999,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1793897634117,
+      "endTime": 1793897636667.1028,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/integration/basic/subscriptions/dust-ledger-subscriptions.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "dust nullifier transactions subscription",
+            "streaming dust nullifier transactions with block range"
+          ],
+          "fullName": "dust nullifier transactions subscription streaming dust nullifier transactions with block range should stream transactions within a block range and complete",
+          "status": "passed",
+          "title": "should stream transactions within a block range and complete",
+          "duration": 542.813667,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust nullifier transactions subscription",
+            "subscription error handling"
+          ],
+          "fullName": "dust nullifier transactions subscription subscription error handling should return an error for empty nullifier prefixes",
+          "status": "passed",
+          "title": "should return an error for empty nullifier prefixes",
+          "duration": 505.1566250000001,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust nullifier transactions subscription",
+            "subscription error handling"
+          ],
+          "fullName": "dust nullifier transactions subscription subscription error handling should return an error when fromBlock is greater than toBlock",
+          "status": "passed",
+          "title": "should return an error when fromBlock is greater than toBlock",
+          "duration": 503.71125000000006,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust nullifier transactions subscription",
+            "transactionHash on dust nullifier events (#1114)"
+          ],
+          "fullName": "dust nullifier transactions subscription transactionHash on dust nullifier events (#1114) first event transactionHash resolves via transactions(offset)",
+          "status": "skipped",
+          "title": "first event transactionHash resolves via transactions(offset)",
+          "duration": 510.9607080000003,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "dust nullifier transactions subscription",
+            "transaction reference on dust nullifier events (#1115)"
+          ],
+          "fullName": "dust nullifier transactions subscription transaction reference on dust nullifier events (#1115) first event transaction.hash matches transactionHash",
+          "status": "skipped",
+          "title": "first event transaction.hash matches transactionHash",
+          "duration": 511.07445899999993,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1793897635633,
+      "endTime": 1793897637184.7112,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/integration/basic/subscriptions/dust-nullifier-subscriptions.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "shielded nullifier transactions subscription",
+            "streaming shielded nullifier transactions with block range"
+          ],
+          "fullName": "shielded nullifier transactions subscription streaming shielded nullifier transactions with block range should stream transactions within a block range and complete",
+          "status": "passed",
+          "title": "should stream transactions within a block range and complete",
+          "duration": 560.994667,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "shielded nullifier transactions subscription",
+            "subscription error handling"
+          ],
+          "fullName": "shielded nullifier transactions subscription subscription error handling should return an error for empty nullifier prefixes",
+          "status": "passed",
+          "title": "should return an error for empty nullifier prefixes",
+          "duration": 506.2679589999999,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "shielded nullifier transactions subscription",
+            "subscription error handling"
+          ],
+          "fullName": "shielded nullifier transactions subscription subscription error handling should return an error for an empty-string nullifier prefix element",
+          "status": "passed",
+          "title": "should return an error for an empty-string nullifier prefix element",
+          "duration": 505.8872080000001,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "shielded nullifier transactions subscription",
+            "subscription error handling"
+          ],
+          "fullName": "shielded nullifier transactions subscription subscription error handling should return an error when fromBlock is greater than toBlock",
+          "status": "passed",
+          "title": "should return an error when fromBlock is greater than toBlock",
+          "duration": 503.50637499999993,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "shielded nullifier transactions subscription",
+            "transactionHash on shielded nullifier events (#1114)"
+          ],
+          "fullName": "shielded nullifier transactions subscription transactionHash on shielded nullifier events (#1114) first event transactionHash resolves via transactions(offset)",
+          "status": "skipped",
+          "title": "first event transactionHash resolves via transactions(offset)",
+          "duration": 517.2057089999998,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "shielded nullifier transactions subscription",
+            "transaction reference on shielded nullifier events (#1115)"
+          ],
+          "fullName": "shielded nullifier transactions subscription transaction reference on shielded nullifier events (#1115) first event transaction.hash matches transactionHash",
+          "status": "skipped",
+          "title": "first event transaction.hash matches transactionHash",
+          "duration": 513.6169160000004,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1793897630777,
+      "endTime": 1793897632853.5063,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/integration/basic/subscriptions/shielded-nullifier-subscriptions.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "shielded transaction subscriptions",
+            "opening a session with viewing key"
+          ],
+          "fullName": "shielded transaction subscriptions opening a session with viewing key should return a session ID, given a valid viewing key",
+          "status": "passed",
+          "title": "should return a session ID, given a valid viewing key",
+          "duration": 581.5006249999997,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "shielded transaction subscriptions",
+            "opening a session with viewing key"
+          ],
+          "fullName": "shielded transaction subscriptions opening a session with viewing key should return an error, given an unsupported hex format viewing key",
+          "status": "passed",
+          "title": "should return an error, given an unsupported hex format viewing key",
+          "duration": 509.1284999999998,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "shielded transaction subscriptions",
+            "opening a session with viewing key"
+          ],
+          "fullName": "shielded transaction subscriptions opening a session with viewing key should return an error, given an invalid viewing key",
+          "status": "passed",
+          "title": "should return an error, given an invalid viewing key",
+          "duration": 503.6855830000004,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "shielded transaction subscriptions",
+            "opening a session with viewing key"
+          ],
+          "fullName": "shielded transaction subscriptions opening a session with viewing key should return an error, given a valid viewing key meant for a different network",
+          "status": "passed",
+          "title": "should return an error, given a valid viewing key meant for a different network",
+          "duration": 826.6742910000003,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "shielded transaction subscriptions",
+            "closing a session with session ID"
+          ],
+          "fullName": "shielded transaction subscriptions closing a session with session ID should terminate the session successfully, given a valid session ID",
+          "status": "passed",
+          "title": "should terminate the session successfully, given a valid session ID",
+          "duration": 558.4443339999998,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "shielded transaction subscriptions",
+            "closing a session with session ID"
+          ],
+          "fullName": "shielded transaction subscriptions closing a session with session ID should return an error, given an invalid session ID",
+          "status": "passed",
+          "title": "should return an error, given an invalid session ID",
+          "duration": 502.6192090000004,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "shielded transaction subscriptions",
+            "a subscription to wallet updates providing viewing key only"
+          ],
+          "fullName": "shielded transaction subscriptions a subscription to wallet updates providing viewing key only should stream wallet events starting from the beginning, given there are relevant transactions",
+          "status": "passed",
+          "title": "should stream wallet events starting from the beginning, given there are relevant transactions",
+          "duration": 2551.141125000001,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "shielded transaction subscriptions",
+            "a subscription to wallet updates providing viewing key only"
+          ],
+          "fullName": "shielded transaction subscriptions a subscription to wallet updates providing viewing key only should stream shielded transaction events adhering to the expected schema",
+          "status": "passed",
+          "title": "should stream shielded transaction events adhering to the expected schema",
+          "duration": 3554.240791,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "shielded transaction subscriptions",
+            "a subscription to wallet updates providing viewing key only"
+          ],
+          "fullName": "shielded transaction subscriptions a subscription to wallet updates providing viewing key only should be able to use highestZswapEndIndex from progress event in collapsed update query",
+          "status": "passed",
+          "title": "should be able to use highestZswapEndIndex from progress event in collapsed update query",
+          "duration": 569.3035419999997,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "shielded transaction subscriptions",
+            "a subscription to wallet updates providing viewing key only"
+          ],
+          "fullName": "shielded transaction subscriptions a subscription to wallet updates providing viewing key only should report the chain tip protocol version in the progress event",
+          "status": "passed",
+          "title": "should report the chain tip protocol version in the progress event",
+          "duration": 557.0089589999989,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Subscription", "Wallet", "Progress"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "shielded transaction subscriptions",
+            "a subscription to wallet updates providing viewing key only"
+          ],
+          "fullName": "shielded transaction subscriptions a subscription to wallet updates providing viewing key only should reject shieldedTransactions subscription when using expired session ID",
+          "status": "passed",
+          "title": "should reject shieldedTransactions subscription when using expired session ID",
+          "duration": 563.6064999999999,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1793897633990,
+      "endTime": 1793897645268.6064,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/integration/basic/subscriptions/shielded-transaction-subscriptions.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["subscription quotas", "per-connection concurrent subscription cap"],
+          "fullName": "subscription quotas per-connection concurrent subscription cap should reject a subscription beyond the per-connection cap",
+          "status": "passed",
+          "title": "should reject a subscription beyond the per-connection cap",
+          "duration": 1516.0524589999995,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Subscription", "Quota", "Negative"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["subscription quotas", "per-connection concurrent subscription cap"],
+          "fullName": "subscription quotas per-connection concurrent subscription cap should free a slot when an active subscription is closed",
+          "status": "passed",
+          "title": "should free a slot when an active subscription is closed",
+          "duration": 2515.3777499999997,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Subscription", "Quota"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["subscription quotas", "per-session subscription creation rate limit"],
+          "fullName": "subscription quotas per-session subscription creation rate limit should reject shielded subscription creations beyond the per-session rate limit",
+          "status": "passed",
+          "title": "should reject shielded subscription creations beyond the per-session rate limit",
+          "duration": 1559.5967499999997,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Subscription", "Quota", "Wallet", "Negative"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["subscription quotas", "per-session subscription creation rate limit"],
+          "fullName": "subscription quotas per-session subscription creation rate limit should allow a new shielded subscription after the rate limit refills",
+          "status": "passed",
+          "title": "should allow a new shielded subscription after the rate limit refills",
+          "duration": 9569.428667,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Subscription", "Quota", "Wallet"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["subscription quotas", "per-session subscription creation rate limit"],
+          "fullName": "subscription quotas per-session subscription creation rate limit should keep a live shielded subscription streaming while creations are rate-limited",
+          "status": "passed",
+          "title": "should keep a live shielded subscription streaming while creations are rate-limited",
+          "duration": 35658.47141699999,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Subscription", "Quota", "Wallet"] } },
+          "tags": []
+        }
+      ],
+      "startTime": 1793897633123,
+      "endTime": 1793897684508.4714,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/integration/basic/subscriptions/subscription-quotas.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "unshielded transaction subscriptions",
+            "a subscription to unshielded transaction events by address"
+          ],
+          "fullName": "unshielded transaction subscriptions a subscription to unshielded transaction events by address should stream unshielded transaction events related to that address, given that address has transactions",
+          "status": "passed",
+          "title": "should stream unshielded transaction events related to that address, given that address has transactions",
+          "duration": 5068.961874999999,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "unshielded transaction subscriptions",
+            "a subscription to unshielded transaction events by address"
+          ],
+          "fullName": "unshielded transaction subscriptions a subscription to unshielded transaction events by address should stream unshielded transaction events up to highest transaction id",
+          "status": "passed",
+          "title": "should stream unshielded transaction events up to highest transaction id",
+          "duration": 77.23066699999981,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "unshielded transaction subscriptions",
+            "a subscription to unshielded transaction events by address"
+          ],
+          "fullName": "unshielded transaction subscriptions a subscription to unshielded transaction events by address should stream unshielded transaction events that adhere to the expected schema",
+          "status": "passed",
+          "title": "should stream unshielded transaction events that adhere to the expected schema",
+          "duration": 71.79316699999981,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "unshielded transaction subscriptions",
+            "a subscription to unshielded transaction events by address"
+          ],
+          "fullName": "unshielded transaction subscriptions a subscription to unshielded transaction events by address should only return a transaction progress message with highest transaction = 0, given that address does not have transactions",
+          "status": "passed",
+          "title": "should only return a transaction progress message with highest transaction = 0, given that address does not have transactions",
+          "duration": 5037.796624999999,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "unshielded transaction subscriptions",
+            "a subscription to unshielded transaction events by address"
+          ],
+          "fullName": "unshielded transaction subscriptions a subscription to unshielded transaction events by address should report the chain tip protocol version in the progress update, given that address does not have transactions",
+          "status": "passed",
+          "title": "should report the chain tip protocol version in the progress update, given that address does not have transactions",
+          "duration": 5070.651249999999,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Subscription", "UnshieldedTokens", "Progress"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "unshielded transaction subscriptions",
+            "a subscription to unshielded transaction events by address"
+          ],
+          "fullName": "unshielded transaction subscriptions a subscription to unshielded transaction events by address should return an error message, given the address provided is in hex format",
+          "status": "passed",
+          "title": "should return an error message, given the address provided is in hex format",
+          "duration": 4.209208000000217,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "unshielded transaction subscriptions",
+            "a subscription to unshielded transaction events by address"
+          ],
+          "fullName": "unshielded transaction subscriptions a subscription to unshielded transaction events by address should return an error message, given the address provided is for another network",
+          "status": "passed",
+          "title": "should return an error message, given the address provided is for another network",
+          "duration": 283.24345900000117,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "unshielded transaction subscriptions",
+            "a subscription to unshielded transaction events by address and transaction id"
+          ],
+          "fullName": "unshielded transaction subscriptions a subscription to unshielded transaction events by address and transaction id should return a stream of transactions containing that address, starting from transaction id = 0",
+          "status": "passed",
+          "title": "should return a stream of transactions containing that address, starting from transaction id = 0",
+          "duration": 72.45487499999945,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "unshielded transaction subscriptions",
+            "a subscription to unshielded transaction events by address and transaction id"
+          ],
+          "fullName": "unshielded transaction subscriptions a subscription to unshielded transaction events by address and transaction id should return an error message, given the transaction id provided is negative",
+          "status": "passed",
+          "title": "should return an error message, given the transaction id provided is negative",
+          "duration": 44.292084000000614,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "unshielded transaction subscriptions",
+            "a subscription to unshielded transaction events by address and transaction id"
+          ],
+          "fullName": "unshielded transaction subscriptions a subscription to unshielded transaction events by address and transaction id should only return a transaction progress message without streaming transactions, given that the transaction id provided is bigger number",
+          "status": "passed",
+          "title": "should only return a transaction progress message without streaming transactions, given that the transaction id provided is bigger number",
+          "duration": 5043.225624999999,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "unshielded transaction subscriptions",
+            "a subscription to unshielded transaction events by address and transaction id"
+          ],
+          "fullName": "unshielded transaction subscriptions a subscription to unshielded transaction events by address and transaction id should start a transaction stream from the given transaction id",
+          "status": "passed",
+          "title": "should start a transaction stream from the given transaction id",
+          "duration": 10051.473125000004,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "unshielded transaction subscriptions",
+            "a subscription to unshielded transaction events by address and transaction id"
+          ],
+          "fullName": "unshielded transaction subscriptions a subscription to unshielded transaction events by address and transaction id should return an error message, given the address is provided in hex format",
+          "status": "passed",
+          "title": "should return an error message, given the address is provided in hex format",
+          "duration": 1.9989169999971637,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1793897634173,
+      "endTime": 1793897665000.999,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/integration/basic/subscriptions/unshielded-transaction-subscriptions.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "wallet connect options (startIndex)",
+            "opening a session with startIndex"
+          ],
+          "fullName": "wallet connect options (startIndex) opening a session with startIndex should accept startIndex = 0 (no-op equivalent of unset options)",
+          "status": "skipped",
+          "title": "should accept startIndex = 0 (no-op equivalent of unset options)",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "wallet connect options (startIndex)",
+            "opening a session with startIndex"
+          ],
+          "fullName": "wallet connect options (startIndex) opening a session with startIndex should skip historical scan when startIndex equals the current tip",
+          "status": "skipped",
+          "title": "should skip historical scan when startIndex equals the current tip",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "wallet connect options (startIndex)",
+            "opening a session with startIndex"
+          ],
+          "fullName": "wallet connect options (startIndex) opening a session with startIndex should accept startIndex past the current tip (fast-forward)",
+          "status": "skipped",
+          "title": "should accept startIndex past the current tip (fast-forward)",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1793897621293,
+      "endTime": 1793897621293,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/integration/basic/subscriptions/wallet-connect-options.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["websocket keepalive", "an idle socket without the client keepalive"],
+          "fullName": "websocket keepalive an idle socket without the client keepalive should be closed while idle past the idle limit",
+          "status": "skipped",
+          "title": "should be closed while idle past the idle limit",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["websocket keepalive", "an idle socket with the client keepalive"],
+          "fullName": "websocket keepalive an idle socket with the client keepalive should stay open while idle past the idle limit",
+          "status": "passed",
+          "title": "should stay open while idle past the idle limit",
+          "duration": 150537.112666,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Subscription", "WebSocket", "Keepalive"] } },
+          "tags": []
+        }
+      ],
+      "startTime": 1793897629884,
+      "endTime": 1793897780421.1125,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/integration/basic/subscriptions/websocket-keepalive.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "zswap ledger event subscriptions",
+            "a subscription to zswap ledger events without offset (default replay)"
+          ],
+          "fullName": "zswap ledger event subscriptions a subscription to zswap ledger events without offset (default replay) streams events in ledger order",
+          "status": "passed",
+          "title": "streams events in ledger order",
+          "duration": 527.4726659999999,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "zswap ledger event subscriptions",
+            "subscription with explicit offset"
+          ],
+          "fullName": "zswap ledger event subscriptions subscription with explicit offset streams events starting from the specified ID",
+          "status": "passed",
+          "title": "streams events starting from the specified ID",
+          "duration": 519.1822910000001,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "zswap ledger event subscriptions",
+            "subscription with explicit offset"
+          ],
+          "fullName": "zswap ledger event subscriptions subscription with explicit offset validates historical zswap events against schema",
+          "status": "passed",
+          "title": "validates historical zswap events against schema",
+          "duration": 518.0187079999998,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["zswap ledger event subscriptions", "subscription error handling"],
+          "fullName": "zswap ledger event subscriptions subscription error handling should return an error for unknown field",
+          "status": "passed",
+          "title": "should return an error for unknown field",
+          "duration": 503.7373329999998,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["zswap ledger event subscriptions", "subscription error handling"],
+          "fullName": "zswap ledger event subscriptions subscription error handling rejects negative offset ID with an error",
+          "status": "passed",
+          "title": "rejects negative offset ID with an error",
+          "duration": 505.57279199999994,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1793897633395,
+      "endTime": 1793897635969.5728,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/integration/basic/subscriptions/zswap-events-subscriptions.test.ts"
+    }
+  ]
+}

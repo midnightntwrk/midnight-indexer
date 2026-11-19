@@ -1,0 +1,1248 @@
+{
+  "numTotalTestSuites": 53,
+  "numPassedTestSuites": 53,
+  "numFailedTestSuites": 0,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 78,
+  "numPassedTests": 61,
+  "numFailedTests": 0,
+  "numPendingTests": 15,
+  "numTodoTests": 2,
+  "snapshot": {
+    "added": 0,
+    "failure": false,
+    "filesAdded": 0,
+    "filesRemoved": 0,
+    "filesRemovedList": [],
+    "filesUnmatched": 0,
+    "filesUpdated": 0,
+    "matched": 0,
+    "total": 0,
+    "unchecked": 0,
+    "uncheckedKeysByFile": [],
+    "unmatched": 0,
+    "updated": 0,
+    "didUpdate": false
+  },
+  "startTime": 1793897781789,
+  "success": true,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "contract actions in a guaranteed/fallible segment split",
+            "a Call whose guaranteed transcript applied but whose fallible segment failed"
+          ],
+          "fullName": "contract actions in a guaranteed/fallible segment split a Call whose guaranteed transcript applied but whose fallible segment failed the fixture produces a call with a guaranteed transcript",
+          "status": "passed",
+          "title": "the fixture produces a call with a guaranteed transcript",
+          "duration": 1.0137079999985872,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Fixture", "ContractCall", "GuaranteedTranscript"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract actions in a guaranteed/fallible segment split",
+            "a Call whose guaranteed transcript applied but whose fallible segment failed"
+          ],
+          "fullName": "contract actions in a guaranteed/fallible segment split a Call whose guaranteed transcript applied but whose fallible segment failed the fixture produces a partially successful transaction",
+          "status": "passed",
+          "title": "the fixture produces a partially successful transaction",
+          "duration": 0.2349170000088634,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Transaction", "PartialSuccess"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract actions in a guaranteed/fallible segment split",
+            "a Call whose guaranteed transcript applied but whose fallible segment failed"
+          ],
+          "fullName": "contract actions in a guaranteed/fallible segment split a Call whose guaranteed transcript applied but whose fallible segment failed is still reported by the indexer",
+          "status": "passed",
+          "title": "is still reported by the indexer",
+          "duration": 0.6790409999957774,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": ["Query", "Transaction", "ContractCall", "PartialSuccess", "Regression"]
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract actions in a guaranteed/fallible segment split",
+            "a Call where neither execution phase applied"
+          ],
+          "fullName": "contract actions in a guaranteed/fallible segment split a Call where neither execution phase applied the fixture produces a call without a guaranteed transcript",
+          "status": "passed",
+          "title": "the fixture produces a call without a guaranteed transcript",
+          "duration": 0.4958340000011958,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Fixture", "ContractCall", "FallibleOnly"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract actions in a guaranteed/fallible segment split",
+            "a Call where neither execution phase applied"
+          ],
+          "fullName": "contract actions in a guaranteed/fallible segment split a Call where neither execution phase applied the fixture still produces a partially successful transaction",
+          "status": "passed",
+          "title": "the fixture still produces a partially successful transaction",
+          "duration": 0.12437499999941792,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Transaction", "PartialSuccess"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract actions in a guaranteed/fallible segment split",
+            "a Call where neither execution phase applied"
+          ],
+          "fullName": "contract actions in a guaranteed/fallible segment split a Call where neither execution phase applied is not reported by the indexer",
+          "status": "passed",
+          "title": "is not reported by the indexer",
+          "duration": 0.13545800000429153,
+          "failureMessages": [],
+          "meta": {
+            "custom": { "labels": ["Query", "Transaction", "ContractCall", "PartialSuccess"] }
+          },
+          "tags": []
+        }
+      ],
+      "startTime": 1793898225804,
+      "endTime": 1793898273904.1355,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/e2e/contract-actions-partial-success.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "contract actions",
+            "a transaction to deploy a counter smart contract"
+          ],
+          "fullName": "contract actions a transaction to deploy a counter smart contract should be reported by the indexer through a transaction query by hash",
+          "status": "passed",
+          "title": "should be reported by the indexer through a transaction query by hash",
+          "duration": 11.0724999999984,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Transaction", "ByHash", "ContractDeploy"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract actions",
+            "a transaction to deploy a counter smart contract"
+          ],
+          "fullName": "contract actions a transaction to deploy a counter smart contract should be reported by the indexer through a block query by hash",
+          "status": "passed",
+          "title": "should be reported by the indexer through a block query by hash",
+          "duration": 16.391208000000915,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Block", "ByHash", "ContractDeploy"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract actions",
+            "a transaction to deploy a counter smart contract"
+          ],
+          "fullName": "contract actions a transaction to deploy a counter smart contract should be reported by the indexer through a contract action query by address",
+          "status": "passed",
+          "title": "should be reported by the indexer through a contract action query by address",
+          "duration": 11.069832999997743,
+          "failureMessages": [],
+          "meta": {
+            "custom": { "labels": ["Query", "ContractAction", "ByAddress", "ContractDeploy"] }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract actions",
+            "a transaction to call the store circuit on the deployed counter smart contract"
+          ],
+          "fullName": "contract actions a transaction to call the store circuit on the deployed counter smart contract should stream only the call to a subscription opened without an offset before it",
+          "status": "passed",
+          "title": "should stream only the call to a subscription opened without an offset before it",
+          "duration": 5006.696542000005,
+          "failureMessages": [],
+          "meta": {
+            "custom": { "labels": ["Subscription", "ContractAction", "NoOffset", "ContractCall"] }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract actions",
+            "a transaction to call the store circuit on the deployed counter smart contract"
+          ],
+          "fullName": "contract actions a transaction to call the store circuit on the deployed counter smart contract should be reported by the indexer through a transaction query by hash",
+          "status": "passed",
+          "title": "should be reported by the indexer through a transaction query by hash",
+          "duration": 33.24799999999959,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Transaction", "ByHash", "ContractCall"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract actions",
+            "a transaction to call the store circuit on the deployed counter smart contract"
+          ],
+          "fullName": "contract actions a transaction to call the store circuit on the deployed counter smart contract should be reported by the indexer through a block query by hash",
+          "status": "passed",
+          "title": "should be reported by the indexer through a block query by hash",
+          "duration": 23.624708999996074,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Block", "ByHash", "ContractCall"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract actions",
+            "a transaction to call the store circuit on the deployed counter smart contract"
+          ],
+          "fullName": "contract actions a transaction to call the store circuit on the deployed counter smart contract should be reported by the indexer through a contract action query by address",
+          "status": "passed",
+          "title": "should be reported by the indexer through a contract action query by address",
+          "duration": 9.59004200000345,
+          "failureMessages": [],
+          "meta": {
+            "custom": { "labels": ["Query", "ContractAction", "ByAddress", "ContractCall"] }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract actions",
+            "a transaction to update the counter smart contract"
+          ],
+          "fullName": "contract actions a transaction to update the counter smart contract should be reported by the indexer through a transaction query by hash",
+          "status": "passed",
+          "title": "should be reported by the indexer through a transaction query by hash",
+          "duration": 11.888332999995328,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Transaction", "ByHash", "ContractUpdate"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract actions",
+            "a transaction to update the counter smart contract"
+          ],
+          "fullName": "contract actions a transaction to update the counter smart contract should be reported by the indexer through a block query by hash",
+          "status": "passed",
+          "title": "should be reported by the indexer through a block query by hash",
+          "duration": 28.3674580000079,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Block", "ByHash", "ContractUpdate"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "contract actions",
+            "a transaction to update the counter smart contract"
+          ],
+          "fullName": "contract actions a transaction to update the counter smart contract should be reported by the indexer through a contract action query by address",
+          "status": "passed",
+          "title": "should be reported by the indexer through a contract action query by address",
+          "duration": 18.26416700000118,
+          "failureMessages": [],
+          "meta": {
+            "custom": { "labels": ["Query", "ContractAction", "ByAddress", "ContractUpdate"] }
+          },
+          "tags": []
+        }
+      ],
+      "startTime": 1793897924206,
+      "endTime": 1793898009199.2642,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/e2e/contract-actions-sequential.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "a contract deploy in a rolled-back fallible segment",
+            "the crafted transaction"
+          ],
+          "fullName": "a contract deploy in a rolled-back fallible segment the crafted transaction should carry two deploys of the same contract",
+          "status": "passed",
+          "title": "should carry two deploys of the same contract",
+          "duration": 1.1277499999996508,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["ContractDeploy", "FailedSegment", "Toolkit"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "a contract deploy in a rolled-back fallible segment",
+            "the crafted transaction"
+          ],
+          "fullName": "a contract deploy in a rolled-back fallible segment the crafted transaction should be included in a block the node serves",
+          "status": "passed",
+          "title": "should be included in a block the node serves",
+          "duration": 0.1779160000005504,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["ContractDeploy", "FailedSegment", "Node"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "a contract deploy in a rolled-back fallible segment",
+            "what the node holds afterwards"
+          ],
+          "fullName": "a contract deploy in a rolled-back fallible segment what the node holds afterwards should report an ordinary deploy as present",
+          "status": "passed",
+          "title": "should report an ordinary deploy as present",
+          "duration": 0.1555000000007567,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["ContractDeploy", "Node", "Oracle"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "a contract deploy in a rolled-back fallible segment",
+            "what the node holds afterwards"
+          ],
+          "fullName": "a contract deploy in a rolled-back fallible segment what the node holds afterwards should hold no contract at the rolled-back address",
+          "status": "passed",
+          "title": "should hold no contract at the rolled-back address",
+          "duration": 0.16779099999985192,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["ContractDeploy", "FailedSegment", "Node"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "a contract deploy in a rolled-back fallible segment",
+            "what the indexer reports"
+          ],
+          "fullName": "a contract deploy in a rolled-back fallible segment what the indexer reports should keep advancing past that block",
+          "status": "passed",
+          "title": "should keep advancing past that block",
+          "duration": 18079.203791,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["ContractDeploy", "FailedSegment", "Liveness"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "a contract deploy in a rolled-back fallible segment",
+            "what the indexer reports"
+          ],
+          "fullName": "a contract deploy in a rolled-back fallible segment what the indexer reports should report no deploy for the rolled-back address",
+          "status": "passed",
+          "title": "should report no deploy for the rolled-back address",
+          "duration": 25.538875000005646,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["ContractDeploy", "FailedSegment", "Query"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "a contract deploy in a rolled-back fallible segment",
+            "what the indexer reports"
+          ],
+          "fullName": "a contract deploy in a rolled-back fallible segment what the indexer reports should not increment indexer_uncaptured_contract_state_count",
+          "status": "todo",
+          "title": "should not increment indexer_uncaptured_contract_state_count",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1793898313500,
+      "endTime": 1793898331606.5388,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/e2e/contract-deploy-failed-segment.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["a contract whose balance map holds a shielded token"],
+          "fullName": "a contract whose balance map holds a shielded token the holdShielded call should declare a shielded token in its unshielded inputs",
+          "status": "passed",
+          "title": "the holdShielded call should declare a shielded token in its unshielded inputs",
+          "duration": 2.839124999998603,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["a contract whose balance map holds a shielded token"],
+          "fullName": "a contract whose balance map holds a shielded token the indexer should index the block that holds the holdShielded call",
+          "status": "passed",
+          "title": "the indexer should index the block that holds the holdShielded call",
+          "duration": 20435.629584000002,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["a contract whose balance map holds a shielded token"],
+          "fullName": "a contract whose balance map holds a shielded token the indexer should keep indexing past that block",
+          "status": "passed",
+          "title": "the indexer should keep indexing past that block",
+          "duration": 22755.732333000007,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["a contract whose balance map holds a shielded token"],
+          "fullName": "a contract whose balance map holds a shielded token the holdShielded contract action should report no unshielded balance",
+          "status": "passed",
+          "title": "the holdShielded contract action should report no unshielded balance",
+          "duration": 13.382666999998037,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["a contract whose balance map holds a shielded token"],
+          "fullName": "a contract whose balance map holds a shielded token the later ping contract action should also report no unshielded balance",
+          "status": "passed",
+          "title": "the later ping contract action should also report no unshielded balance",
+          "duration": 7.808833999995841,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1793898043598,
+      "endTime": 1793898086813.8088,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/e2e/contract-shielded-balance.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "unshielded custom token transactions",
+            "a successful unshielded transaction transferring 1 token between two addresses"
+          ],
+          "fullName": "unshielded custom token transactions a successful unshielded transaction transferring 1 token between two addresses should be reported by the indexer through a block query by hash",
+          "status": "skipped",
+          "title": "should be reported by the indexer through a block query by hash",
+          "duration": 0.8517499999998108,
+          "failureMessages": [],
+          "meta": {
+            "custom": { "labels": ["Query", "Block", "ByHash", "UnshieldedTokens", "CustomToken"] }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "unshielded custom token transactions",
+            "a successful unshielded transaction transferring 1 token between two addresses"
+          ],
+          "fullName": "unshielded custom token transactions a successful unshielded transaction transferring 1 token between two addresses should be reported by the indexer through a transaction query by hash",
+          "status": "skipped",
+          "title": "should be reported by the indexer through a transaction query by hash",
+          "duration": 0.14291600000069593,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": ["Query", "Transaction", "ByHash", "UnshieldedTokens", "CustomToken"]
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "unshielded custom token transactions",
+            "a successful unshielded transaction transferring 1 token between two addresses"
+          ],
+          "fullName": "unshielded custom token transactions a successful unshielded transaction transferring 1 token between two addresses should be reported by the indexer through an unshielded transaction event for the source address",
+          "status": "skipped",
+          "title": "should be reported by the indexer through an unshielded transaction event for the source address",
+          "duration": 0.15808299999935116,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": ["Subscription", "Transaction", "UnshieldedTokens", "CustomToken"]
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "unshielded custom token transactions",
+            "a successful unshielded transaction transferring 1 token between two addresses"
+          ],
+          "fullName": "unshielded custom token transactions a successful unshielded transaction transferring 1 token between two addresses should be reported by the indexer through an unshielded transaction event for the destination address",
+          "status": "skipped",
+          "title": "should be reported by the indexer through an unshielded transaction event for the destination address",
+          "duration": 0.15929200000027777,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": ["Subscription", "Transaction", "UnshieldedTokens", "CustomToken"]
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "unshielded custom token transactions",
+            "a successful unshielded transaction transferring 1 token between two addresses"
+          ],
+          "fullName": "unshielded custom token transactions a successful unshielded transaction transferring 1 token between two addresses should have transferred 1 token from the source to the destination address",
+          "status": "skipped",
+          "title": "should have transferred 1 token from the source to the destination address",
+          "duration": 0.16704200000003766,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["UnshieldedTokens", "CustomToken"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "unshielded custom token transactions",
+            "a successful unshielded transaction transferring 1 token between two addresses"
+          ],
+          "fullName": "unshielded custom token transactions a successful unshielded transaction transferring 1 token between two addresses should report the token type under test on every created and spent output",
+          "status": "skipped",
+          "title": "should report the token type under test on every created and spent output",
+          "duration": 0.0913749999999709,
+          "failureMessages": [],
+          "meta": {
+            "custom": { "labels": ["Query", "Block", "ByHash", "UnshieldedTokens", "CustomToken"] }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "unshielded custom token transactions",
+            "a successful unshielded transaction transferring 1 token between two addresses"
+          ],
+          "fullName": "unshielded custom token transactions a successful unshielded transaction transferring 1 token between two addresses should be reported by the indexer through a progress update event for the source address",
+          "status": "skipped",
+          "title": "should be reported by the indexer through a progress update event for the source address",
+          "duration": 0.13945800000055897,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": [
+                "Subscription",
+                "Transaction",
+                "Progress",
+                "UnshieldedTokens",
+                "CustomToken"
+              ]
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "unshielded custom token transactions",
+            "a successful unshielded transaction transferring 1 token between two addresses"
+          ],
+          "fullName": "unshielded custom token transactions a successful unshielded transaction transferring 1 token between two addresses should be reported by the indexer through a progress update event for the destination address",
+          "status": "skipped",
+          "title": "should be reported by the indexer through a progress update event for the destination address",
+          "duration": 0.0757499999999709,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": [
+                "Subscription",
+                "Transaction",
+                "Progress",
+                "UnshieldedTokens",
+                "CustomToken"
+              ]
+            }
+          },
+          "tags": []
+        }
+      ],
+      "startTime": 1793897781789,
+      "endTime": 1793897781789,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/e2e/custom-unshielded-token-transactions.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "unshielded NIGHT transactions",
+            "a successful unshielded transaction transferring 1 STAR between two addresses"
+          ],
+          "fullName": "unshielded NIGHT transactions a successful unshielded transaction transferring 1 STAR between two addresses should be reported by the indexer through a block query by hash",
+          "status": "passed",
+          "title": "should be reported by the indexer through a block query by hash",
+          "duration": 36.355374999999185,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": ["Query", "Block", "ByHash", "UnshieldedTokens", "NIGHT"],
+              "testKey": "PM-17711"
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "unshielded NIGHT transactions",
+            "a successful unshielded transaction transferring 1 STAR between two addresses"
+          ],
+          "fullName": "unshielded NIGHT transactions a successful unshielded transaction transferring 1 STAR between two addresses should be reported by the indexer through a transaction query by hash",
+          "status": "passed",
+          "title": "should be reported by the indexer through a transaction query by hash",
+          "duration": 16.700999999997293,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": ["Query", "Transaction", "ByHash", "UnshieldedTokens", "NIGHT"],
+              "testKey": "PM-17712"
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "unshielded NIGHT transactions",
+            "a successful unshielded transaction transferring 1 STAR between two addresses"
+          ],
+          "fullName": "unshielded NIGHT transactions a successful unshielded transaction transferring 1 STAR between two addresses should be reported by the indexer through an unshielded transaction event for the source address",
+          "status": "passed",
+          "title": "should be reported by the indexer through an unshielded transaction event for the source address",
+          "duration": 0.655666000002384,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": ["Subscription", "Transaction", "UnshieldedTokens", "NIGHT"],
+              "testKey": "PM-17713"
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "unshielded NIGHT transactions",
+            "a successful unshielded transaction transferring 1 STAR between two addresses"
+          ],
+          "fullName": "unshielded NIGHT transactions a successful unshielded transaction transferring 1 STAR between two addresses should be reported by the indexer through an unshielded transaction event for the destination address",
+          "status": "passed",
+          "title": "should be reported by the indexer through an unshielded transaction event for the destination address",
+          "duration": 0.9929169999995793,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": ["Subscription", "Transaction", "UnshieldedTokens", "NIGHT"],
+              "testKey": "PM-17714"
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "unshielded NIGHT transactions",
+            "a successful unshielded transaction transferring 1 STAR between two addresses"
+          ],
+          "fullName": "unshielded NIGHT transactions a successful unshielded transaction transferring 1 STAR between two addresses should have transferred 1 STAR from the source to the destination address",
+          "status": "passed",
+          "title": "should have transferred 1 STAR from the source to the destination address",
+          "duration": 19.19683299999815,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["UnshieldedTokens", "NIGHT"], "testKey": "PM-17715" } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "unshielded NIGHT transactions",
+            "a successful unshielded transaction transferring 1 STAR between two addresses"
+          ],
+          "fullName": "unshielded NIGHT transactions a successful unshielded transaction transferring 1 STAR between two addresses should report the token type under test on every created and spent output",
+          "status": "passed",
+          "title": "should report the token type under test on every created and spent output",
+          "duration": 20.872416999998677,
+          "failureMessages": [],
+          "meta": {
+            "custom": { "labels": ["Query", "Block", "ByHash", "UnshieldedTokens", "NIGHT"] }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "unshielded NIGHT transactions",
+            "a successful unshielded transaction transferring 1 STAR between two addresses"
+          ],
+          "fullName": "unshielded NIGHT transactions a successful unshielded transaction transferring 1 STAR between two addresses should be reported by the indexer through a progress update event for the source address",
+          "status": "passed",
+          "title": "should be reported by the indexer through a progress update event for the source address",
+          "duration": 5005.645791999999,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": ["Subscription", "Transaction", "Progress", "UnshieldedTokens", "NIGHT"]
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "unshielded NIGHT transactions",
+            "a successful unshielded transaction transferring 1 STAR between two addresses"
+          ],
+          "fullName": "unshielded NIGHT transactions a successful unshielded transaction transferring 1 STAR between two addresses should be reported by the indexer through a progress update event for the destination address",
+          "status": "passed",
+          "title": "should be reported by the indexer through a progress update event for the destination address",
+          "duration": 1.0458329999964917,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": ["Subscription", "Transaction", "Progress", "UnshieldedTokens", "NIGHT"]
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "unshielded NIGHT transactions",
+            "the genesis block of a chain minted with NIGHT alone"
+          ],
+          "fullName": "unshielded NIGHT transactions the genesis block of a chain minted with NIGHT alone should report the all-zeros NIGHT token type on its outputs",
+          "status": "passed",
+          "title": "should report the all-zeros NIGHT token type on its outputs",
+          "duration": 1.6145000000033178,
+          "failureMessages": [],
+          "meta": {
+            "custom": { "labels": ["Query", "Block", "ByHeight", "UnshieldedTokens", "NIGHT"] }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "unshielded NIGHT transactions",
+            "the dust activity of a confirmed NIGHT transaction"
+          ],
+          "fullName": "unshielded NIGHT transactions the dust activity of a confirmed NIGHT transaction should increase the dust commitment Merkle tree end index",
+          "status": "passed",
+          "title": "should increase the dust commitment Merkle tree end index",
+          "duration": 27.694166999994195,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": [
+                "Query",
+                "Transaction",
+                "Dust",
+                "CommitmentMerkleTree",
+                "UnshieldedTokens",
+                "NIGHT"
+              ]
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "unshielded NIGHT transactions",
+            "a confirmed unshielded transfer streamed to address subscriptions"
+          ],
+          "fullName": "unshielded NIGHT transactions a confirmed unshielded transfer streamed to address subscriptions should emit UnshieldedTransaction only for the target wallet (A > B1)",
+          "status": "passed",
+          "title": "should emit UnshieldedTransaction only for the target wallet (A > B1)",
+          "duration": 19935.878790999996,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Wallet", "Subscription", "MultiDestination"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "unshielded NIGHT transactions",
+            "a confirmed unshielded transfer streamed to address subscriptions"
+          ],
+          "fullName": "unshielded NIGHT transactions a confirmed unshielded transfer streamed to address subscriptions should emit UnshieldedTransaction only for the target wallet (A > B2)",
+          "status": "passed",
+          "title": "should emit UnshieldedTransaction only for the target wallet (A > B2)",
+          "duration": 18796.149040999997,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Wallet", "Subscription", "MultiDestination"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "unshielded NIGHT transactions",
+            "an address with no transaction history"
+          ],
+          "fullName": "unshielded NIGHT transactions an address with no transaction history should emit only ProgressUpdate for empty wallet",
+          "status": "passed",
+          "title": "should emit only ProgressUpdate for empty wallet",
+          "duration": 2601.8798749999987,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Wallet", "Subscription", "EmptyWallet"] } },
+          "tags": []
+        }
+      ],
+      "startTime": 1793897859078,
+      "endTime": 1793897905544.88,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/e2e/night-transactions.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "segment-split contract actions",
+            "a transaction to deploy a segment-split smart contract"
+          ],
+          "fullName": "segment-split contract actions a transaction to deploy a segment-split smart contract should be reported by the indexer through a transaction query by hash",
+          "status": "skipped",
+          "title": "should be reported by the indexer through a transaction query by hash",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "segment-split contract actions",
+            "a transaction to deploy a segment-split smart contract"
+          ],
+          "fullName": "segment-split contract actions a transaction to deploy a segment-split smart contract should be reported by the indexer through a block query by hash",
+          "status": "skipped",
+          "title": "should be reported by the indexer through a block query by hash",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "segment-split contract actions",
+            "a transaction to deploy a segment-split smart contract"
+          ],
+          "fullName": "segment-split contract actions a transaction to deploy a segment-split smart contract should be reported by the indexer through a contract action query by address",
+          "status": "skipped",
+          "title": "should be reported by the indexer through a contract action query by address",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "segment-split contract actions",
+            "a transaction to call the burnWithGuaranteed circuit on the deployed segment-split smart contract"
+          ],
+          "fullName": "segment-split contract actions a transaction to call the burnWithGuaranteed circuit on the deployed segment-split smart contract should be reported by the indexer through a transaction query by hash",
+          "status": "skipped",
+          "title": "should be reported by the indexer through a transaction query by hash",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "segment-split contract actions",
+            "a transaction to call the burnWithGuaranteed circuit on the deployed segment-split smart contract"
+          ],
+          "fullName": "segment-split contract actions a transaction to call the burnWithGuaranteed circuit on the deployed segment-split smart contract should be reported by the indexer through a block query by hash",
+          "status": "skipped",
+          "title": "should be reported by the indexer through a block query by hash",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "segment-split contract actions",
+            "a transaction to call the burnWithGuaranteed circuit on the deployed segment-split smart contract"
+          ],
+          "fullName": "segment-split contract actions a transaction to call the burnWithGuaranteed circuit on the deployed segment-split smart contract should be reported by the indexer through a contract action query by address",
+          "status": "skipped",
+          "title": "should be reported by the indexer through a contract action query by address",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1793897781789,
+      "endTime": 1793897781789,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/e2e/segment-probe-contract-actions.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "shielded transactions",
+            "a successful shielded transaction transferring 1 Shielded Token between two wallets"
+          ],
+          "fullName": "shielded transactions a successful shielded transaction transferring 1 Shielded Token between two wallets should be reported by the indexer through a block query by hash",
+          "status": "passed",
+          "title": "should be reported by the indexer through a block query by hash",
+          "duration": 40.768457999998645,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": ["Query", "Block", "ByHash", "ShieldedTokens"],
+              "testKey": "PM-17709"
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "shielded transactions",
+            "a successful shielded transaction transferring 1 Shielded Token between two wallets"
+          ],
+          "fullName": "shielded transactions a successful shielded transaction transferring 1 Shielded Token between two wallets should be reported by the indexer through a transaction query by hash",
+          "status": "passed",
+          "title": "should be reported by the indexer through a transaction query by hash",
+          "duration": 27.36320799999885,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": ["Query", "Transaction", "ByHash", "ShieldedTokens"],
+              "testKey": "PM-17710"
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "shielded transactions",
+            "a successful shielded transaction transferring 1 Shielded Token between two wallets"
+          ],
+          "fullName": "shielded transactions a successful shielded transaction transferring 1 Shielded Token between two wallets should stream Zswap events followed by DustSpendProcessed after a shielded transaction",
+          "status": "passed",
+          "title": "should stream Zswap events followed by DustSpendProcessed after a shielded transaction",
+          "duration": 538.158958,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": ["Subscription", "Zswap", "Dust", "LedgerEvents", "ShieldedTokens"]
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "shielded transactions",
+            "a successful shielded transaction transferring 1 Shielded Token between two wallets"
+          ],
+          "fullName": "shielded transactions a successful shielded transaction transferring 1 Shielded Token between two wallets should increase the zswap Merkle tree end index",
+          "status": "passed",
+          "title": "should increase the zswap Merkle tree end index",
+          "duration": 26.434916999998677,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Query", "Transaction", "Zswap", "ShieldedTokens"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "shielded transactions",
+            "a successful shielded transaction transferring 1 Shielded Token between two wallets"
+          ],
+          "fullName": "shielded transactions a successful shielded transaction transferring 1 Shielded Token between two wallets should increase the dust commitment Merkle tree end index",
+          "status": "passed",
+          "title": "should increase the dust commitment Merkle tree end index",
+          "duration": 19.25500000000102,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": ["Query", "Transaction", "Dust", "CommitmentMerkleTree", "ShieldedTokens"]
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "shielded transactions",
+            "a confirmed shielded transfer streamed to wallet sessions by viewing key"
+          ],
+          "fullName": "shielded transactions a confirmed shielded transfer streamed to wallet sessions by viewing key should stream the transaction to the source viewing key with a matching hash",
+          "status": "passed",
+          "title": "should stream the transaction to the source viewing key with a matching hash",
+          "duration": 3873.5169160000005,
+          "failureMessages": [],
+          "meta": {
+            "custom": { "labels": ["Subscription", "ShieldedTransaction", "ViewingKey", "Source"] }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "shielded transactions",
+            "a confirmed shielded transfer streamed to wallet sessions by viewing key"
+          ],
+          "fullName": "shielded transactions a confirmed shielded transfer streamed to wallet sessions by viewing key should stream the transaction to the destination viewing key with a matching hash",
+          "status": "passed",
+          "title": "should stream the transaction to the destination viewing key with a matching hash",
+          "duration": 560.1997090000004,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": ["Subscription", "ShieldedTransaction", "ViewingKey", "Destination"]
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "shielded transactions",
+            "a confirmed shielded transfer streamed to wallet sessions by viewing key"
+          ],
+          "fullName": "shielded transactions a confirmed shielded transfer streamed to wallet sessions by viewing key should not stream the transaction to an unrelated viewing key",
+          "status": "passed",
+          "title": "should not stream the transaction to an unrelated viewing key",
+          "duration": 20552.474125,
+          "failureMessages": [],
+          "meta": {
+            "custom": { "labels": ["Subscription", "ShieldedTransaction", "ViewingKey", "Privacy"] }
+          },
+          "tags": []
+        }
+      ],
+      "startTime": 1793898122901,
+      "endTime": 1793898148540.474,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/e2e/shielded-transactions.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "subscription polling",
+            "an unshielded transactions subscription for a never-used address"
+          ],
+          "fullName": "subscription polling an unshielded transactions subscription for a never-used address should emit progress immediately and back off while the address is idle",
+          "status": "passed",
+          "title": "should emit progress immediately and back off while the address is idle",
+          "duration": 96393.621541,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Subscription", "Polling", "UnshieldedTokens"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "subscription polling",
+            "an unshielded transactions subscription for a never-used address"
+          ],
+          "fullName": "subscription polling an unshielded transactions subscription for a never-used address should reset the polling interval when the address receives a transaction",
+          "status": "passed",
+          "title": "should reset the polling interval when the address receives a transaction",
+          "duration": 129144.433708,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Subscription", "Polling", "UnshieldedTokens"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "subscription polling",
+            "the keep-alive heartbeat of a shielded transactions subscription"
+          ],
+          "fullName": "subscription polling the keep-alive heartbeat of a shielded transactions subscription should refresh wallet activity once at subscription start and then throttle",
+          "status": "passed",
+          "title": "should refresh wallet activity once at subscription start and then throttle",
+          "duration": 92777.21412499997,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Subscription", "Polling", "Wallet"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "subscription polling",
+            "the keep-alive heartbeat of a shielded transactions subscription"
+          ],
+          "fullName": "subscription polling the keep-alive heartbeat of a shielded transactions subscription should keep a subscribed wallet active beyond the wallet-indexer inactivity TTL",
+          "status": "todo",
+          "title": "should keep a subscribed wallet active beyond the wallet-indexer inactivity TTL",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "subscription polling",
+            "a shielded transactions subscription on an idle wallet"
+          ],
+          "fullName": "subscription polling a shielded transactions subscription on an idle wallet should emit progress immediately and keep emitting while idle",
+          "status": "passed",
+          "title": "should emit progress immediately and keep emitting while idle",
+          "duration": 34176.11283300002,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Subscription", "Polling", "Wallet"] } },
+          "tags": []
+        }
+      ],
+      "startTime": 1793898335130,
+      "endTime": 1793898688637.1128,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/e2e/subscription-polling.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "unshielded balance indexing (deploy + mint + verify) [#1253 scaffold]"
+          ],
+          "fullName": "unshielded balance indexing (deploy + mint + verify) [#1253 scaffold] reports the contract remainder after mint-to-self then partial send",
+          "status": "skipped",
+          "title": "reports the contract remainder after mint-to-self then partial send",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1793897781789,
+      "endTime": 1793897781789,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/e2e/unshielded-balance-e2e.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "dust balance query using toolkit",
+            "a dust balance query with a valid wallet seed"
+          ],
+          "fullName": "dust balance query using toolkit a dust balance query with a valid wallet seed should respond with a dust balance according to the requested schema",
+          "status": "passed",
+          "title": "should respond with a dust balance according to the requested schema",
+          "duration": 607.7109580000001,
+          "failureMessages": [],
+          "meta": {
+            "custom": { "labels": ["Query", "Dust", "Toolkit", "Balance", "SchemaValidation"] }
+          },
+          "tags": []
+        }
+      ],
+      "startTime": 1793898155888,
+      "endTime": 1793898156495.711,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/e2e/toolkit/dust-balance.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["key material derivation validation", "a midnight shielded address"],
+          "fullName": "key material derivation validation a midnight shielded address should show with the expected prefix for the current network ID",
+          "status": "passed",
+          "title": "should show with the expected prefix for the current network ID",
+          "duration": 56.309291999999914,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["key material derivation validation", "a midnight shielded address"],
+          "fullName": "key material derivation validation a midnight shielded address should show with the expected prefix for all network IDs",
+          "status": "passed",
+          "title": "should show with the expected prefix for all network IDs",
+          "duration": 303.2857079999999,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["key material derivation validation", "a midnight unshielded address"],
+          "fullName": "key material derivation validation a midnight unshielded address should show with the expected prefix for the current network ID",
+          "status": "passed",
+          "title": "should show with the expected prefix for the current network ID",
+          "duration": 46.74350000000004,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["key material derivation validation", "a midnight unshielded address"],
+          "fullName": "key material derivation validation a midnight unshielded address should show with the expected prefix for all network IDs",
+          "status": "passed",
+          "title": "should show with the expected prefix for all network IDs",
+          "duration": 340.3760830000001,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["key material derivation validation", "a midnight viewing key"],
+          "fullName": "key material derivation validation a midnight viewing key should show with the expected prefix for the current network ID",
+          "status": "passed",
+          "title": "should show with the expected prefix for the current network ID",
+          "duration": 50.74524999999994,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["key material derivation validation", "a midnight viewing key"],
+          "fullName": "key material derivation validation a midnight viewing key should show with the expected prefix for all network IDs",
+          "status": "passed",
+          "title": "should show with the expected prefix for all network IDs",
+          "duration": 346.12820899999997,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1793898693498,
+      "endTime": 1793898694643.1282,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/e2e/toolkit/key-material.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "show wallet queries using toolkit",
+            "private wallet state query using toolkit"
+          ],
+          "fullName": "show wallet queries using toolkit private wallet state query using toolkit should respond with a private wallet state according to the requested schema",
+          "status": "passed",
+          "title": "should respond with a private wallet state according to the requested schema",
+          "duration": 629.8484170000002,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": ["Query", "Wallet", "Toolkit", "PrivateState", "SchemaValidation"]
+            }
+          },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "show wallet queries using toolkit",
+            "public wallet state query using toolkit"
+          ],
+          "fullName": "show wallet queries using toolkit public wallet state query using toolkit should respond with a public wallet state according to the requested schema",
+          "status": "passed",
+          "title": "should respond with a public wallet state according to the requested schema",
+          "duration": 857.0132920000001,
+          "failureMessages": [],
+          "meta": {
+            "custom": {
+              "labels": ["Query", "Wallet", "Toolkit", "PublicState", "SchemaValidation"]
+            }
+          },
+          "tags": []
+        }
+      ],
+      "startTime": 1793898151752,
+      "endTime": 1793898153239.0132,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/e2e/toolkit/show-wallet-queries.test.ts"
+    }
+  ]
+}

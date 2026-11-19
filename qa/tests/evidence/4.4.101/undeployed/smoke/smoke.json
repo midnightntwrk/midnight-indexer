@@ -1,0 +1,429 @@
+{
+  "numTotalTestSuites": 32,
+  "numPassedTestSuites": 32,
+  "numFailedTestSuites": 0,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 30,
+  "numPassedTests": 29,
+  "numFailedTests": 0,
+  "numPendingTests": 1,
+  "numTodoTests": 0,
+  "snapshot": {
+    "added": 0,
+    "failure": false,
+    "filesAdded": 0,
+    "filesRemoved": 0,
+    "filesRemovedList": [],
+    "filesUnmatched": 0,
+    "filesUpdated": 0,
+    "matched": 0,
+    "total": 0,
+    "unchecked": 0,
+    "uncheckedKeysByFile": [],
+    "unmatched": 0,
+    "updated": 0,
+    "didUpdate": false
+  },
+  "startTime": 1793897597883,
+  "success": true,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["bridge GraphQL schema", "types"],
+          "fullName": "bridge GraphQL schema types should expose BridgeEvent interface with flat blockHeight",
+          "status": "passed",
+          "title": "should expose BridgeEvent interface with flat blockHeight",
+          "duration": 5.097791000000029,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Smoke", "Bridge", "Schema"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge GraphQL schema", "types"],
+          "fullName": "bridge GraphQL schema types should expose the five concrete BridgeEvent variants",
+          "status": "passed",
+          "title": "should expose the five concrete BridgeEvent variants",
+          "duration": 15.660958999999991,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Smoke", "Bridge", "Schema"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge GraphQL schema", "types"],
+          "fullName": "bridge GraphQL schema types should expose BridgeSubminimalFlushTransfer without a cardanoTxHash",
+          "status": "passed",
+          "title": "should expose BridgeSubminimalFlushTransfer without a cardanoTxHash",
+          "duration": 2.445083000000011,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Smoke", "Bridge", "Schema"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge GraphQL schema", "types"],
+          "fullName": "bridge GraphQL schema types should expose BridgeClaimTransaction implementing Transaction",
+          "status": "passed",
+          "title": "should expose BridgeClaimTransaction implementing Transaction",
+          "duration": 7.085624999999993,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Smoke", "Bridge", "Schema"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge GraphQL schema", "types"],
+          "fullName": "bridge GraphQL schema types should expose BridgeBalance with deposited, claimed, balance",
+          "status": "passed",
+          "title": "should expose BridgeBalance with deposited, claimed, balance",
+          "duration": 3.558207999999979,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Smoke", "Bridge", "Schema"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge GraphQL schema", "types"],
+          "fullName": "bridge GraphQL schema types should expose BridgeEventVariant enum with five values",
+          "status": "passed",
+          "title": "should expose BridgeEventVariant enum with five values",
+          "duration": 2.5146670000000313,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Smoke", "Bridge", "Schema"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge GraphQL schema", "queries"],
+          "fullName": "bridge GraphQL schema queries should expose the bridge query fields on Query",
+          "status": "passed",
+          "title": "should expose the bridge query fields on Query",
+          "duration": 2.388417000000004,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Smoke", "Bridge", "Schema"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["bridge GraphQL schema", "subscriptions"],
+          "fullName": "bridge GraphQL schema subscriptions should expose the bridge subscription fields on Subscription",
+          "status": "passed",
+          "title": "should expose the bridge subscription fields on Subscription",
+          "duration": 2.2197499999999764,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["Smoke", "Bridge", "Schema"] } },
+          "tags": []
+        }
+      ],
+      "startTime": 1793897618978,
+      "endTime": 1793897619019.2197,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/smoke/bridge-schema.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "graphql health checks",
+            "an introspection message sent to the websocket channel"
+          ],
+          "fullName": "graphql health checks an introspection message sent to the websocket channel should return the supported graphql schema",
+          "status": "passed",
+          "title": "should return the supported graphql schema",
+          "duration": 528.485917,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "graphql health checks",
+            "an introspection message sent to the websocket channel"
+          ],
+          "fullName": "graphql health checks an introspection message sent to the websocket channel should return an error, given the depth of the query is > 15",
+          "status": "passed",
+          "title": "should return an error, given the depth of the query is > 15",
+          "duration": 520.529834,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "graphql health checks",
+            "an introspection request sent to the http channel"
+          ],
+          "fullName": "graphql health checks an introspection request sent to the http channel should return the supported graphql schema",
+          "status": "passed",
+          "title": "should return the supported graphql schema",
+          "duration": 28.164167000000134,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "graphql health checks",
+            "an introspection request sent to the http channel"
+          ],
+          "fullName": "graphql health checks an introspection request sent to the http channel should return an error, given the depth of the query is > 15",
+          "status": "passed",
+          "title": "should return an error, given the depth of the query is > 15",
+          "duration": 3.214291000000003,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1793897618970,
+      "endTime": 1793897620051.2144,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/smoke/graphql-healthchecks.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["GraphQL Schema Stability Check"],
+          "fullName": "GraphQL Schema Stability Check should not change the schema unexpectedly",
+          "status": "skipped",
+          "title": "should not change the schema unexpectedly",
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1793897597883,
+      "endTime": 1793897597883,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/smoke/graphql-schema-change.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["graphql schema deprecations", "RegularTransaction.merkleTreeRoot"],
+          "fullName": "graphql schema deprecations RegularTransaction.merkleTreeRoot should be marked deprecated with reason \"Use zswapMerkleTreeRoot instead\"",
+          "status": "passed",
+          "title": "should be marked deprecated with reason \"Use zswapMerkleTreeRoot instead\"",
+          "duration": 29.40537500000002,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["graphql schema deprecations", "RegularTransaction.startIndex"],
+          "fullName": "graphql schema deprecations RegularTransaction.startIndex should be marked deprecated with reason \"Use zswapStartIndex instead\"",
+          "status": "passed",
+          "title": "should be marked deprecated with reason \"Use zswapStartIndex instead\"",
+          "duration": 3.5600419999999815,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["graphql schema deprecations", "RegularTransaction.endIndex"],
+          "fullName": "graphql schema deprecations RegularTransaction.endIndex should be marked deprecated with reason \"Use zswapEndIndex instead\"",
+          "status": "passed",
+          "title": "should be marked deprecated with reason \"Use zswapEndIndex instead\"",
+          "duration": 3.288792000000001,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "graphql schema deprecations",
+            "RelevantTransaction.collapsedMerkleTree"
+          ],
+          "fullName": "graphql schema deprecations RelevantTransaction.collapsedMerkleTree should be marked deprecated with reason \"Use zswapCollapsedUpdate instead\"",
+          "status": "passed",
+          "title": "should be marked deprecated with reason \"Use zswapCollapsedUpdate instead\"",
+          "duration": 2.078833000000003,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "graphql schema deprecations",
+            "ShieldedTransactionsProgress.highestEndIndex"
+          ],
+          "fullName": "graphql schema deprecations ShieldedTransactionsProgress.highestEndIndex should be marked deprecated with reason \"Use highestZswapEndIndex instead\"",
+          "status": "passed",
+          "title": "should be marked deprecated with reason \"Use highestZswapEndIndex instead\"",
+          "duration": 2.6956249999999784,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "graphql schema deprecations",
+            "ShieldedTransactionsProgress.highestCheckedEndIndex"
+          ],
+          "fullName": "graphql schema deprecations ShieldedTransactionsProgress.highestCheckedEndIndex should be marked deprecated with reason \"Use highestCheckedZswapEndIndex instead\"",
+          "status": "passed",
+          "title": "should be marked deprecated with reason \"Use highestCheckedZswapEndIndex instead\"",
+          "duration": 1.9961669999999856,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "graphql schema deprecations",
+            "ShieldedTransactionsProgress.highestRelevantEndIndex"
+          ],
+          "fullName": "graphql schema deprecations ShieldedTransactionsProgress.highestRelevantEndIndex should be marked deprecated with reason \"Use highestRelevantZswapEndIndex instead\"",
+          "status": "passed",
+          "title": "should be marked deprecated with reason \"Use highestRelevantZswapEndIndex instead\"",
+          "duration": 3.1045000000000016,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["graphql schema deprecations", "RegularTransaction.fees"],
+          "fullName": "graphql schema deprecations RegularTransaction.fees should be marked deprecated with reason \"Use fee instead\"",
+          "status": "passed",
+          "title": "should be marked deprecated with reason \"Use fee instead\"",
+          "duration": 3.7523750000000007,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": ["graphql schema deprecations", "TransactionFees.estimatedFees"],
+          "fullName": "graphql schema deprecations TransactionFees.estimatedFees should be marked deprecated with reason \"Use paidFees instead\"",
+          "status": "passed",
+          "title": "should be marked deprecated with reason \"Use paidFees instead\"",
+          "duration": 3.9090830000000096,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1793897618864,
+      "endTime": 1793897618918.9092,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/smoke/graphql-schema-deprecations.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "progress protocol version schema",
+            "UnshieldedTransactionsProgress.protocolVersion"
+          ],
+          "fullName": "progress protocol version schema UnshieldedTransactionsProgress.protocolVersion should be served as a non-null Int",
+          "status": "passed",
+          "title": "should be served as a non-null Int",
+          "duration": 4.52404199999998,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["SchemaValidation", "Subscription", "Progress"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "progress protocol version schema",
+            "ShieldedTransactionsProgress.protocolVersion"
+          ],
+          "fullName": "progress protocol version schema ShieldedTransactionsProgress.protocolVersion should be served as a non-null Int",
+          "status": "passed",
+          "title": "should be served as a non-null Int",
+          "duration": 4.276749999999993,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["SchemaValidation", "Subscription", "Progress"] } },
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "progress protocol version schema",
+            "DustGenerationsProgress.protocolVersion"
+          ],
+          "fullName": "progress protocol version schema DustGenerationsProgress.protocolVersion should be served as a non-null Int",
+          "status": "passed",
+          "title": "should be served as a non-null Int",
+          "duration": 2.335583000000014,
+          "failureMessages": [],
+          "meta": { "custom": { "labels": ["SchemaValidation", "Subscription", "Progress"] } },
+          "tags": []
+        }
+      ],
+      "startTime": 1793897618906,
+      "endTime": 1793897618917.3357,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/smoke/progress-protocol-version-schema.test.ts"
+    },
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": ["service health checks", "a request to the /ready endpoint"],
+          "fullName": "service health checks a request to the /ready endpoint should return a 200 status code OK",
+          "status": "passed",
+          "title": "should return a 200 status code OK",
+          "duration": 26.17108299999998,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "service health checks",
+            "a request to an unrecognised path /api/v3/__regression_unknown_path"
+          ],
+          "fullName": "service health checks a request to an unrecognised path /api/v3/__regression_unknown_path should not 308 to a version-double-prefixed Location",
+          "status": "passed",
+          "title": "should not 308 to a version-double-prefixed Location",
+          "duration": 4.629667000000012,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "service health checks",
+            "a request to an unrecognised path /api/v3/__regression_unknown_path"
+          ],
+          "fullName": "service health checks a request to an unrecognised path /api/v3/__regression_unknown_path should terminate when redirects are followed",
+          "status": "passed",
+          "title": "should terminate when redirects are followed",
+          "duration": 2.076999999999998,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "service health checks",
+            "a request to an unrecognised path /api/v4/__regression_unknown_path"
+          ],
+          "fullName": "service health checks a request to an unrecognised path /api/v4/__regression_unknown_path should not 308 to a version-double-prefixed Location",
+          "status": "passed",
+          "title": "should not 308 to a version-double-prefixed Location",
+          "duration": 1.2005410000000154,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        },
+        {
+          "ancestorTitles": [
+            "service health checks",
+            "a request to an unrecognised path /api/v4/__regression_unknown_path"
+          ],
+          "fullName": "service health checks a request to an unrecognised path /api/v4/__regression_unknown_path should terminate when redirects are followed",
+          "status": "passed",
+          "title": "should terminate when redirects are followed",
+          "duration": 1.3817080000000033,
+          "failureMessages": [],
+          "meta": {},
+          "tags": []
+        }
+      ],
+      "startTime": 1793897618862,
+      "endTime": 1793897618897.3816,
+      "status": "passed",
+      "message": "",
+      "name": "/midnight-indexer/qa/tests/tests/smoke/service-healthchecks.test.ts"
+    }
+  ]
+}
