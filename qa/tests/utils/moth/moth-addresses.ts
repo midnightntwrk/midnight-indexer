@@ -26,9 +26,13 @@
 // (2026-09-17): moth's nightExternal / zswap / dust bech32m values are
 // character-for-character the toolkit's unshielded / shielded / dust.
 
-import { deriveAllAddressesFromSeed } from '@shieldedtech/moth-wallet';
+import { deriveAllAddressesFromSeed, deriveWalletKeys } from '@shieldedtech/moth-wallet';
+import { ShieldedEncryptionSecretKey } from '@midnightntwrk/wallet-sdk/address-format';
+import * as ledgerV8 from '@midnightntwrk/wallet-sdk/ledger/v8';
+import * as ledgerV9 from '@midnightntwrk/wallet-sdk/ledger/v9';
 import { env } from '../../environment/model';
 import type { ToolkitWrapper } from '../toolkit/toolkit-wrapper';
+import { loadLedger } from './ledger';
 
 /**
  * The address fields available from both backends.
@@ -94,6 +98,61 @@ export async function deriveAddresses(
   }
   const info = await toolkit.showAddress(seed, networkId);
   return { unshielded: info.unshielded, shielded: info.shielded, dust: info.dust };
+}
+
+/**
+ * Derive a seed's shielded viewing key using whichever backend is selected.
+ *
+ * The indexer's `connect` mutation takes the wallet's zswap encryption secret
+ * key, bech32m-encoded as `mn_shield-esk_<network>1...` (see
+ * `indexer-api/src/infra/api/v4/viewing_key.rs`). The toolkit prints that with
+ * `show-viewing-key`. On the moth backend it is derived in-process: moth's
+ * `deriveWalletKeys` walks the same HD path the toolkit does (its addresses
+ * match the toolkit's character for character), and the wallet SDK's
+ * `ShieldedEncryptionSecretKey` codec applies the same encoding the SDK uses
+ * for every other shielded key. No container, no network.
+ *
+ * moth's key bundle is per-role seeds (the one piece of key material that
+ * serves both ledger versions), so the zswap keys are derived from the shielded
+ * seed here with the ledger the chain runs, the same way moth's own
+ * `shieldedPublicKeysAt` does it. The codec only calls the key's own
+ * `serialize`, which both ledger generations expose, so one codec serves
+ * either train.
+ *
+ * @param seed - The seed to derive from. Never logged; neither is the key.
+ * @param toolkit - A started ToolkitWrapper. Required on the toolkit backend;
+ *                  ignored on the moth backend.
+ * @param networkId - Network to encode for (default: the target environment).
+ */
+export async function deriveViewingKey(
+  seed: string,
+  toolkit?: ToolkitWrapper,
+  networkId?: string,
+): Promise<string> {
+  const network = (networkId ?? env.getNetworkId()).toLowerCase();
+
+  if (env.getTxBackend() === 'moth') {
+    const ledger = await loadLedger();
+    const { shielded } = deriveWalletKeys(seed);
+    const keys =
+      ledger === 'v9'
+        ? ledgerV9.ZswapSecretKeys.fromSeed(shielded)
+        : ledgerV8.ZswapSecretKeys.fromSeed(shielded);
+    try {
+      const key = new ShieldedEncryptionSecretKey(keys.encryptionSecretKey as never);
+      return ShieldedEncryptionSecretKey.codec.encode(network, key).asString();
+    } finally {
+      keys.clear();
+    }
+  }
+
+  if (!toolkit) {
+    throw new Error(
+      'deriveViewingKey needs a started ToolkitWrapper on the toolkit backend. ' +
+        'Pass one, or run with TX_BACKEND=moth.',
+    );
+  }
+  return toolkit.showViewingKey(seed, networkId);
 }
 
 /**

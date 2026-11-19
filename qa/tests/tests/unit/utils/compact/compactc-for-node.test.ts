@@ -23,16 +23,26 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { compactcForNode } from '@utils/compact/compact-compiler';
+import {
+  compactCompilerVersion,
+  compactcForNode,
+  MOTH_COMPACTC_VERSION,
+} from '@utils/compact/compact-compiler';
+
+const { getTxBackend, mothHandlesContracts } = vi.hoisted(() => ({
+  getTxBackend: vi.fn(() => 'toolkit'),
+  mothHandlesContracts: vi.fn(async () => true),
+}));
 
 vi.mock('@utils/logging/logger', () => ({
   default: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
-// Importing the module resolves the default pin for the node under test; the
-// tests below call the reader directly, so any node line will do here.
 vi.mock('../../../../environment/model', () => ({
-  env: { getNodeVersion: () => '1.0.300' },
+  env: { getNodeVersion: () => '2.1.0-rc.4', getTxBackend },
 }));
+// The real module reads the ledger train from a live indexer and pulls in
+// moth-wallet; the pin only needs its answer.
+vi.mock('../../../../utils/moth/ledger', () => ({ mothHandlesContracts }));
 
 const REPO_ROOT = path.resolve(__dirname, '../../../../../..');
 const SCRIPT = path.join(REPO_ROOT, 'generate_node_data.sh');
@@ -66,6 +76,53 @@ function scriptWith(text: string): string {
   fs.writeFileSync(file, text);
   return file;
 }
+
+describe('compactCompilerVersion', () => {
+  const NODE_LINE_COMPACTC = '0.33.0-rc.2';
+
+  beforeEach(() => {
+    vi.stubEnv('COMPACT_COMPILER_VERSION', '');
+    getTxBackend.mockReturnValue('toolkit');
+    mothHandlesContracts.mockReset().mockResolvedValue(true);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('should follow the node line on the toolkit backend without asking for the ledger', async () => {
+    await expect(compactCompilerVersion()).resolves.toBe(NODE_LINE_COMPACTC);
+    expect(mothHandlesContracts).not.toHaveBeenCalled();
+  });
+
+  it('should pick the midnight-js 5 compactc when moth builds contracts (ledger 9)', async () => {
+    getTxBackend.mockReturnValue('moth');
+
+    await expect(compactCompilerVersion()).resolves.toBe(MOTH_COMPACTC_VERSION);
+  });
+
+  it('should follow the node line when moth hands contracts to the toolkit (ledger 8)', async () => {
+    getTxBackend.mockReturnValue('moth');
+    mothHandlesContracts.mockResolvedValue(false);
+
+    await expect(compactCompilerVersion()).resolves.toBe(NODE_LINE_COMPACTC);
+  });
+
+  it('should fail rather than guess when the ledger train is unknown', async () => {
+    getTxBackend.mockReturnValue('moth');
+    mothHandlesContracts.mockRejectedValue(new Error('indexer did not answer'));
+
+    await expect(compactCompilerVersion()).rejects.toThrow('indexer did not answer');
+  });
+
+  it('should let COMPACT_COMPILER_VERSION override every case', async () => {
+    vi.stubEnv('COMPACT_COMPILER_VERSION', '0.99.0');
+    getTxBackend.mockReturnValue('moth');
+
+    await expect(compactCompilerVersion()).resolves.toBe('0.99.0');
+    expect(mothHandlesContracts).not.toHaveBeenCalled();
+  });
+});
 
 describe('compactcForNode', () => {
   describe('with generate_node_data.sh', () => {
