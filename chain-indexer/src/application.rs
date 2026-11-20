@@ -17,7 +17,7 @@ mod startup;
 use crate::{
     application::{
         metrics::Metrics,
-        startup::{Build, PinContractStates},
+        startup::{Build, EnsureContractStateKeys, PinContractStates},
     },
     domain::{
         Block, BlockRef, DParameter, LedgerState, SystemParametersChange, TermsAndConditions,
@@ -153,21 +153,35 @@ pub async fn run(
         .context("get highest block timestamp")?
         .unwrap_or(0);
 
-    // Refuse to resume a database written before contract states were referenced by ledger-arena
-    // key. Those rows carried the state as a blob in columns that no longer exist, and the blobs
-    // cannot be recreated: their arena nodes were garbage collected and nothing can replay the
-    // chain for them. Failing here turns "you must reindex" into an actionable message instead of
-    // contract states silently reading back empty.
-    if storage
-        .contract_actions_without_state_keys_exist()
+    // From here on, SIGTERM cancels the startup tasks, then ends the indexing below.
+    let cancel = CancellationToken::new();
+    task::spawn({
+        let cancel = cancel.clone();
+        async move {
+            sigterm.recv().await;
+            warn!("SIGTERM received");
+            cancel.cancel();
+        }
+    });
+
+    // Startup tasks, before the ledger DB is touched. The build first, so the journal entries after
+    // it were written by it.
+    let plan = sequential([
+        task(Build::current(highest_block_height)),
+        // Refuse to resume a database written before contract states were referenced by
+        // ledger-arena key. Those rows carried the state as a blob in columns that no longer exist,
+        // and the blobs cannot be recreated: their arena nodes were garbage collected and nothing
+        // can replay the chain for them. Failing here turns "you must reindex" into an actionable
+        // message instead of contract states silently reading back empty.
+        task(EnsureContractStateKeys),
+    ]);
+    startup::run(&storage, &storage, &plan, &cancel)
         .await
-        .context("check for contract actions without state keys")?
-    {
-        bail!(
-            "found contract actions with no contract state key; they were indexed by a version \
-             that stored contract states as blobs, which cannot be converted. Wipe both the \
-             indexer database and the ledger DB and reindex from genesis; see docs/reindexing.md"
-        );
+        .map_err(anyhow::Error::from_boxed)
+        .context("run startup tasks")?;
+    if cancel.is_cancelled() {
+        warn!("cancelled during startup");
+        return Ok(());
     }
 
     // Read the stored system parameters once; from here on they are kept in step in memory.
@@ -240,24 +254,9 @@ pub async fn run(
             .context("create ledger state")?,
     };
 
-    // From here on, SIGTERM cancels the startup tasks, then ends the indexing below.
-    let cancel = CancellationToken::new();
-    task::spawn({
-        let cancel = cancel.clone();
-        async move {
-            sigterm.recv().await;
-            warn!("SIGTERM received");
-            cancel.cancel();
-        }
-    });
-
     // Startup tasks, once the ledger state is known to load, as they may read the ledger DB.
-    // The build first, so the journal entries after it were written by it. A cancelled task
-    // journals what it did, and the next start resumes it.
-    let plan = sequential([
-        task(Build::current(highest_block_height)),
-        task(PinContractStates),
-    ]);
+    // A cancelled task journals what it did, and the next start resumes it.
+    let plan = sequential([task(PinContractStates)]);
     startup::run(&storage, &storage, &plan, &cancel)
         .await
         .map_err(anyhow::Error::from_boxed)
