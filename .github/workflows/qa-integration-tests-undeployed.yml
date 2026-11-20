@@ -38,7 +38,6 @@ jobs:
     name: Indexer QA Integration Tests on undeployed
     uses: ./.github/workflows/qa-integration-tests-base-workflow.yml
     with:
-      target_env: undeployed
       ref: main
       node_tag: ${{ inputs.node_tag }}
       indexer_tag: ${{ inputs.indexer_tag }}

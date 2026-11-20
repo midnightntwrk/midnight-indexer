@@ -307,7 +307,7 @@ export function readSyncOptions(): SyncHarnessOptions {
  * in the project config because that config is resolved on every Vitest invocation, so
  * throwing there breaks suites that never asked for the sync project.
  *
- * `mainnet` cannot be caught here at all: it has no host entry, so `environment/model`
+ * A missing `INDEXER_HOST` or `NODE_HOST` cannot be caught here at all: `environment/model`
  * throws while being imported, before any of this runs - exactly as it does for every
  * other suite in the framework.
  */

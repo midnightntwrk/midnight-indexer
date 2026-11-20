@@ -49,16 +49,22 @@ days if unbounded.
 
 ```bash
 # From qa/tests. SYNC_INDEXER_TAG names the image tag under test.
-TARGET_ENV=qanet SYNC_INDEXER_TAG=4.3.7 bun run test:sync
+export INDEXER_HOST=<indexer host> NODE_HOST=<node host>
+TARGET_ENV=<env> SYNC_INDEXER_TAG=4.3.7 bun run test:sync
 
 # A larger budget, and the standalone topology instead of the deployed shape.
-TARGET_ENV=qanet SYNC_INDEXER_TAG=4.3.7 MAX_BLOCKS=50000 MAX_DURATION_MS=7200000 \
+TARGET_ENV=<env> SYNC_INDEXER_TAG=4.3.7 MAX_BLOCKS=50000 MAX_DURATION_MS=7200000 \
   SYNC_TOPOLOGY=standalone bun run test:sync
 ```
 
-`TARGET_ENV` selects the **chain** (its RPC endpoint and network id come from
-`environment/model.ts`), not a deployed indexer — the indexer under test always runs
-locally from `qa/docker/docker-compose-sync.yaml`.
+`TARGET_ENV` selects the **chain** (its network id comes from `environment/model.ts`),
+not a deployed indexer — the indexer under test always runs locally from
+`qa/docker/docker-compose-sync.yaml`.
+
+This repository carries no hosts for deployed chains, so every run supplies them:
+`NODE_HOST` is the RPC endpoint the indexer syncs from. `INDEXER_HOST` is never
+contacted by this suite, but `environment/model.ts` resolves both hosts while being
+imported and throws when either is missing, so set it too (any bare host will do).
 
 `undeployed` is rejected: it resolves to `ws://localhost:9944`, which inside the indexer
 container is the container itself, so the run could only fail after exhausting the node
@@ -71,8 +77,9 @@ it applies `--project` filtering, so anything thrown at a config's module scope 
 `test:smoke`, `test:integration` and `test:e2e` as well — runs that never asked for the
 sync project. Keep this project's config free of throws.
 
-`mainnet` needs no rejection here: it has no host entry, so `environment/model.ts` throws
-while being imported. That applies to every suite in the framework, not just this one.
+A missing host needs no check here: `environment/model.ts` throws while being imported
+and names the missing variable. That applies to every suite in the framework, not just
+this one.
 
 The images are declared `pull_policy: always`, so the run always tests the published
 image for the tag rather than a local build that happens to share it — `just
@@ -87,7 +94,9 @@ is unset or `docker compose` is unavailable, so the unit-level cases still run.
 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `TARGET_ENV` | Yes | — | Chain to index: `devnet`, `qanet`, `preview`, `preprod`, `stagenet`. `undeployed` is rejected (see below); `mainnet` is unusable framework-wide. |
+| `TARGET_ENV` | Yes | — | Chain to index: `devnet`, `qanet`, `preview`, `preprod`, `stagenet`, `mainnet`. `undeployed` is rejected (see above). |
+| `NODE_HOST` | Yes | — | RPC host of the chain to sync from, with optional port, no scheme or path. |
+| `INDEXER_HOST` | Yes | — | Required by the environment model but never contacted by this suite; any bare host. |
 | `SYNC_INDEXER_TAG` | Yes | — | Indexer image tag under test. Deliberately not `INDEXER_TAG`, which must not be set for deployed environments. |
 | `SYNC_TOPOLOGY` | No | `cloud` | `cloud` (chain-indexer + wallet-indexer + indexer-api + postgres + nats) or `standalone` (single container, SQLite). |
 | `SYNC_IMAGE_REGISTRY` | No | `midnightntwrk` | Image registry. |

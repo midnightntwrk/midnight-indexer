@@ -13,14 +13,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Host of the local stack, the only environment this repository targets. Any
+// other TARGET_ENV needs INDEXER_HOST, which also takes precedence over it.
 const INDEXER_BASE_URL: Record<string, string> = {
   undeployed: "localhost:8088",
-  devnet: "indexer.devnet.midnight.network",
-  preview: "indexer.preview.midnight.network",
-  preprod: "indexer.preprod.midnight.network",
-  qanet: "indexer.qanet.midnight.network",
-  stagenet: "indexer.stagenet.shielded.tools",
-  mainnet: "indexer.mainnet.midnight.network",
 };
 
 export let TARGET_ENV: string;
@@ -49,12 +45,22 @@ if (
   console.info(`[INFO ] - Indexer API version: ${INDEXER_API_VERSION}`);
 }
 
+const INDEXER_HOST: string | undefined =
+  Bun.env.INDEXER_HOST?.trim() || INDEXER_BASE_URL[TARGET_ENV];
+
+if (INDEXER_HOST === undefined) {
+  throw new Error(
+    `TARGET_ENV="${TARGET_ENV}" has no built-in indexer host. ` +
+      `Set INDEXER_HOST to the host (and optional port) to scan.`,
+  );
+}
+
 export const INDEXER_WS_URL: string =
   TARGET_ENV === "undeployed"
-    ? `ws://${INDEXER_BASE_URL[TARGET_ENV]}/api/${INDEXER_API_VERSION}/graphql/ws`
-    : `wss://${INDEXER_BASE_URL[TARGET_ENV]}/api/${INDEXER_API_VERSION}/graphql/ws`;
+    ? `ws://${INDEXER_HOST}/api/${INDEXER_API_VERSION}/graphql/ws`
+    : `wss://${INDEXER_HOST}/api/${INDEXER_API_VERSION}/graphql/ws`;
 
 export const INDEXER_HTTP_URL: string =
   TARGET_ENV === "undeployed"
-    ? `http://${INDEXER_BASE_URL[TARGET_ENV]}`
-    : `https://${INDEXER_BASE_URL[TARGET_ENV]}`;
+    ? `http://${INDEXER_HOST}`
+    : `https://${INDEXER_HOST}`;

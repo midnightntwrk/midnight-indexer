@@ -23,15 +23,15 @@ echo ""
 echo "Example 1: Running with default environment (undeployed)"
 echo "TARGET_ENV=undeployed bun run src/scanner.ts"
 
-# Example 2: Run with devnet environment
+# Example 2: Run against an environment without a built-in host
 echo ""
-echo "Example 2: Running with devnet environment"
-echo "TARGET_ENV=devnet bun run src/scanner.ts"
+echo "Example 2: Running against an environment without a built-in host"
+echo "TARGET_ENV=<env> INDEXER_HOST=<indexer host> bun run src/scanner.ts"
 
 # Example 3: Run with test data folder
 echo ""
 echo "Example 3: Running with test data folder"
-echo "TARGET_ENV=devnet bun run src/scanner.ts /path/to/test/data"
+echo "bun run src/scanner.ts /path/to/test/data"
 
 # Example 4: Build and run
 echo ""
@@ -42,8 +42,7 @@ echo "bun run run:scanner"
 echo ""
 echo "Available environments:"
 echo "- undeployed (default)"
-echo "- devnet"
-echo "- qanet"
+echo "- any other name, with INDEXER_HOST set"
 
 echo ""
 echo "For more information, see README.md"
