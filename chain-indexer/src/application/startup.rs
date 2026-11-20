@@ -264,41 +264,35 @@ mod tests {
         };
         assert!(pending(None).await?, "first start");
         assert!(
-            !pending(Some(Entry {
-                version: 1,
-                state: Some(Build::current(Some(7)))
-            }))
-            .await?,
+            !pending(Some(Entry::new(1, 1, Some(Build::current(Some(7)))))).await?,
             "same build restarted"
         );
         assert!(
-            pending(Some(Entry {
-                version: 1,
-                state: Some(Build {
+            pending(Some(Entry::new(
+                1,
+                1,
+                Some(Build {
                     version: "0.0.0".to_owned(),
                     ..Build::current(Some(7))
                 })
-            }))
+            )))
             .await?,
             "different version"
         );
         assert!(
-            pending(Some(Entry {
-                version: 1,
-                state: Some(Build {
+            pending(Some(Entry::new(
+                1,
+                1,
+                Some(Build {
                     git_sha: Some("0000000".to_owned()),
                     ..Build::current(Some(7))
                 })
-            }))
+            )))
             .await?,
             "same version from another commit"
         );
         assert!(
-            pending(Some(Entry {
-                version: 2,
-                state: None
-            }))
-            .await?,
+            pending(Some(Entry::new(1, 2, None))).await?,
             "an entry that does not read"
         );
 
@@ -489,18 +483,13 @@ mod storage_tests {
             .await?;
         insert_action(Some(&[0x02])).await?;
         run(&storage, &storage, &plan, &CancellationToken::new()).await?;
-        let entries = async || {
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM journal WHERE id = $1")
-                .bind(ID)
-                .fetch_one(&*pool)
-                .await
-        };
-        assert_eq!(entries().await?, 1);
+        let latest = storage.latest(ID).await?;
+        assert!(latest.is_some());
 
         // Once journaled, the check is not run again, so a later start journals nothing more.
         insert_action(Some(&[0x03])).await?;
         run(&storage, &storage, &plan, &CancellationToken::new()).await?;
-        assert_eq!(entries().await?, 1, "not run again");
+        assert_eq!(storage.latest(ID).await?, latest, "not run again");
 
         Ok(())
     }
