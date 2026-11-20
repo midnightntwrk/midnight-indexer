@@ -1702,7 +1702,8 @@ mod tests {
         async fn append(
             &self,
             _id: &str,
-            _entry: Entry<Value>,
+            _version: u32,
+            _state: Value,
             _started_at: SystemTime,
             _ended_at: SystemTime,
         ) -> Result<(), BoxError> {
