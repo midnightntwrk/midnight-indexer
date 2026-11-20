@@ -37,8 +37,9 @@ cd ../.. && source .envrc
 cd qa/tests
 NODE_TAG=1.0.0 INDEXER_TAG=4.3.2 TARGET_ENV=undeployed bun run test:smoke
 
-# 3b) Or run against a DEPLOYED environment (versions are fixed by the env — do NOT set NODE_TAG/INDEXER_TAG)
-TARGET_ENV=qanet bun run test:integration
+# 3b) Or run against a DEPLOYED environment (versions are fixed by the env — do NOT set NODE_TAG/INDEXER_TAG).
+#     Deployed environments have no built-in hosts: supply them.
+TARGET_ENV=<env> INDEXER_HOST=<indexer host> NODE_HOST=<node host> bun run test:integration
 ```
 
 See [Test Framework Organization](#-test-framework-organization) for the difference between `test:smoke`, `test:integration`, and `test:e2e`, and the [Environment Variables](#-environment-variables-reference) reference table for every supported variable.
@@ -196,7 +197,7 @@ Note: if you need to match a particular toolkit version:
 export NODE_TOOLKIT_TAG=1.0.0
 ```
 
-#### Deployed environment (devnet, qanet, preview, etc)
+#### Deployed environment
 
 When running against deployed environments, the Node and Indexer versions are fixed by the target environment and must not be overridden.
 
@@ -224,25 +225,25 @@ This controls the version segment in the API endpoint paths (e.g. `/api/v3/graph
 
 #### Indexer Blue/Green Instance
 
-The blue/green environments run two indexer instances behind the public `indexer.<env>.midnight.network` URL. In normal conditions that URL points at whichever instance is currently primary; a new indexer version is rolled out to the secondary instance first, so QA can validate it before it is promoted. To target a specific instance, set the `INDEXER_INSTANCE` environment variable:
+The blue/green environments run two indexer instances behind the `indexer.<env>.midnight.network` URL. In normal conditions that URL points at whichever instance is currently primary; a new indexer version is rolled out to the secondary instance first, so QA can validate it before it is promoted. To target a specific instance, set the `INDEXER_INSTANCE` environment variable:
 
 ```bash
 # Target the blue instance
-INDEXER_INSTANCE=blue TARGET_ENV=qanet bun run test:smoke
+INDEXER_INSTANCE=blue TARGET_ENV=<env> INDEXER_HOST=<indexer host> NODE_HOST=<node host> bun run test:smoke
 
 # Target the green instance
-INDEXER_INSTANCE=green TARGET_ENV=qanet bun run test:smoke
+INDEXER_INSTANCE=green TARGET_ENV=<env> INDEXER_HOST=<indexer host> NODE_HOST=<node host> bun run test:smoke
 ```
 
 This rewrites the indexer host to `indexer-blue.<env>.midnight.network` / `indexer-green.<env>.midnight.network` for both the HTTP and WebSocket clients. If not set, the clients use the primary `indexer.<env>.midnight.network` URL. The value is case-insensitive and accepts only `blue` or `green`; any other value fails fast.
 
-**Supported environments:** `INDEXER_INSTANCE` is only meaningful on the blue/green environments — `qanet`, `preview`, and `preprod`. It is ignored on `undeployed` (localhost has no blue/green split) and has no usable target on `devnet` (single instance) — see the preflight behaviour below.
+**Supported environments:** `INDEXER_INSTANCE` is only meaningful on the blue/green environments, such as `preview`. It is ignored on `undeployed` (localhost has no blue/green split) and has no usable target on a single-instance environment — see the preflight behaviour below. It rewrites a leading `indexer.` label, so with an `INDEXER_HOST` that does not start with `indexer.` it fails fast: put the instance's own host in `INDEXER_HOST` instead.
 
 When `INDEXER_INSTANCE` is set, a preflight check hits the resolved host's `/ready` endpoint before any tests run and fails fast with a clear message if the target isn't usable:
 
 - **HTTP 200** — routed and ready; tests proceed.
 - **HTTP 503** — routed but the instance hasn't caught up yet; wait for it to finish syncing.
-- **HTTP 404 / anything else** — no ingress for that colour. Only the *secondary* instance gets a colour-suffixed host; the *primary* is served at the bare `indexer.<env>` URL and flips colour on promotion. A 404 therefore means the chosen colour is currently the primary — target the other colour, or unset `INDEXER_INSTANCE`. (This also covers single-instance environments like `devnet`.)
+- **HTTP 404 / anything else** — no ingress for that colour. Only the *secondary* instance gets a colour-suffixed host; the *primary* is served at the bare `indexer.<env>` URL and flips colour on promotion. A 404 therefore means the chosen colour is currently the primary — target the other colour, or unset `INDEXER_INSTANCE`. (This also covers single-instance environments.)
 
 #### Vitest Worker Pool Cap
 
@@ -250,10 +251,10 @@ By default Vitest sizes its worker pool to all available parallelism (≈ `os.cp
 
 ```bash
 # Cap to a single worker (serial file execution)
-VITEST_MAX_WORKERS=1 TARGET_ENV=qanet bun run test:integration
+VITEST_MAX_WORKERS=1 TARGET_ENV=undeployed bun run test:integration
 
 # Or a percentage of available CPUs
-VITEST_MAX_WORKERS=50% TARGET_ENV=qanet bun run test:integration
+VITEST_MAX_WORKERS=50% TARGET_ENV=undeployed bun run test:integration
 ```
 
 Accepted values: a positive integer (`1`, `2`, …) or a `"<n>%"` percentage. Invalid values fail fast at config load with a clear error rather than crashing inside the worker pool. When the variable is unset, Vitest falls back to its default (all available parallelism), so local and unconstrained CI runs are unaffected.
@@ -438,30 +439,33 @@ TARGET_ENV=undeployed bun run test:integration
 
 ## 🌐 Running Against Deployed Environments
 
-There are a number of deployed environments that are used for testing components of the Midnight network. They are:
+This repository carries hosts only for the local `undeployed` stack. (`testnet` is a Cardano network type, not a `TARGET_ENV` value.)
 
-- devnet
-- qanet
-- preview
-- preprod
-- mainnet
+### Environments without built-in hosts
 
-Endpoints are derived automatically from the `TARGET_ENV` name (e.g. `qanet.midnight.network`), so you do **not** need to configure URLs manually. (`testnet` is a Cardano network type, not a `TARGET_ENV` value.)
+`preview`, `preprod`, `mainnet`, `devnet`, `qanet` and `stagenet` are valid `TARGET_ENV` values, but this repository does not carry their hosts. The name still selects the network ID, the Cardano network and the per-environment test behaviour, so keep it set and supply the rest:
+
+```bash
+TARGET_ENV=<env> INDEXER_HOST=<indexer host> NODE_HOST=<node host> bun run test:integration
+```
+
+- `INDEXER_HOST` and `NODE_HOST` are bare hosts with an optional port, without a scheme or path. Without them the run stops before any test starts and names the missing variable.
+- Test data is read from `data/static/<env>/`, as for every other environment.
+- Both variables also override the built-in host of `undeployed`.
 
 When running **E2E tests** against deployed environments,
 the test harness auto-starts the toolkit fetch cache (Postgres) container locally (see “Toolkit
-fetch cache (Postgres)” above) — unlike the **undeployed** e2e flow, which currently requires you to start it manually with `bash qa/scripts/start-toolkit-postgres.sh`. Just change the `TARGET_ENV` variable accordingly
+fetch cache (Postgres)” above) — unlike the **undeployed** e2e flow, which currently requires you to start it manually with `bash qa/scripts/start-toolkit-postgres.sh`. Set `TARGET_ENV` and the hosts accordingly
 (NOTE: use lower case for environment names):
 
 ```bash
-TARGET_ENV=devnet bun run test       # devnet
-TARGET_ENV=qanet bun run test    # qanet
+TARGET_ENV=<env> INDEXER_HOST=<indexer host> NODE_HOST=<node host> bun run test
 ```
 
 If the target environment uses a different indexer API version than the default (`v4`), set `INDEXER_API_VERSION` accordingly:
 
 ```bash
-TARGET_ENV=preprod INDEXER_API_VERSION=v3 bun run test:integration
+TARGET_ENV=<env> INDEXER_HOST=<indexer host> NODE_HOST=<node host> INDEXER_API_VERSION=v3 bun run test:integration
 ```
 
 ---
@@ -470,14 +474,16 @@ TARGET_ENV=preprod INDEXER_API_VERSION=v3 bun run test:integration
 
 | Variable              | Required                          | Default                | Description                                                                                          |
 | --------------------- | --------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------- |
-| `TARGET_ENV`          | Yes                               | —                      | Target environment: `undeployed`, `devnet`, `qanet`, `preview`, `preprod`, `mainnet` (lower case). Required; unset or invalid throws. |
+| `TARGET_ENV`          | Yes                               | —                      | Target environment: `undeployed`, or one without built-in hosts (`preview`, `preprod`, `mainnet`, `devnet`, `qanet`, `stagenet`) together with `INDEXER_HOST` and `NODE_HOST` (lower case). Required; unset or invalid throws. |
+| `INDEXER_HOST`        | Only without built-in hosts       | by `TARGET_ENV`        | Indexer host with optional port, no scheme or path. Overrides the built-in host. |
+| `NODE_HOST`           | Only without built-in hosts       | by `TARGET_ENV`        | Node RPC host with optional port, no scheme or path. Overrides the built-in host. |
 | `NODE_TAG`            | Yes (undeployed only)             | —                      | Node image tag. **Must be a value listed in [`NODE_VERSIONS`](../../NODE_VERSIONS) (repo root).** No auto-derivation. Must NOT be set for deployed envs (fixed by the env). |
 | `INDEXER_TAG`         | Yes (undeployed only)             | —                      | Indexer image tag. **Must be compatible with the selected `NODE_TAG`.** Must NOT be set for deployed envs (fixed by the env). |
 | `NODE_TOOLKIT_TAG`    | No                                | `latest-main`          | Node Toolkit version used by e2e/integration tests.                                                  |
 | `INDEXER_API_VERSION` | No                                | `v4`                   | GraphQL API version segment, e.g. `v3` → `/api/v3/graphql`.                                            |
 | `VITEST_MAX_WORKERS`  | No                                | all available CPUs     | Cap the Vitest worker pool. Accepts a positive integer (`1`, `2`, …) or a percentage (`"50%"`).       |
 | `MN_FETCH_CACHE`      | No (managed by harness)           | auto                   | Postgres-backed toolkit fetch cache. The `toolkit-postgres` container is started automatically.       |
-| `INDEXER_INSTANCE`    | No                                | (primary)              | Blue/green indexer instance to target: `blue` / `green`. Unset → primary (bare `indexer.<env>`). Only meaningful on `qanet`/`preview`/`preprod`; ignored for `undeployed`. A `/ready` preflight fails fast if the colour isn't routed. |
+| `INDEXER_INSTANCE`    | No                                | (primary)              | Blue/green indexer instance to target: `blue` / `green`. Unset → primary (bare `indexer.<env>`). Only meaningful on blue/green environments such as `preview`; ignored for `undeployed`. A `/ready` preflight fails fast if the colour isn't routed. |
 | `TX_BACKEND`          | No                                | `toolkit`              | What builds e2e transactions: `toolkit` (container) or `moth` (in-process moth-wallet). See [Transaction backend](#transaction-backend-toolkit-or-moth). |
 | `TX_BACKEND_MOTH_WALLET` | No                                | `qa-<seed fingerprint>` | Name of moth's on-disk wallet cache under `~/.moth/sync/<network>/`, to keep a dedicated light wallet warm. |
 | `FUNDING_SEED_<ENV>_LIGHT` | No                                | `FUNDING_SEED_<ENV>`   | Under `TX_BACKEND=moth`, a funded wallet with little history for transfers; its restore cost tracks the wallet's state, not the chain. |

@@ -84,10 +84,8 @@ suite's [runtime expectations](../qa/tests/tests/sync/README.md#runtime-expectat
 ## Against deployed environments
 
 - CI runs against an **ephemeral fresh node**, never a deployed env.
-- Scheduled monitors (`.github/workflows/qa-test-*`, business hours) hit
-  `indexer.<env>.midnight.network` for devnet / qanet / preprod / preview and run
-  block-subscription + ledger-event streaming tests - they validate the **API** (streaming
-  continuity, shape), **not** an indexer-vs-node root diff.
+- No workflow in this repository targets a deployed environment; a run against one
+  supplies `INDEXER_HOST` and `NODE_HOST` (see `qa/tests/README.md`).
 
 ## See also
 

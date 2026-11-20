@@ -475,7 +475,6 @@ jobs:
       - name: Run QA suites against the freshly built images
         uses: ./.github/actions/qa-integration-tests
         with:
-          target_env: undeployed
           # Per-arch tag: see the `needs:` note above.
           indexer_tag: ${{ steps.tags.outputs.indexer_tag }}-amd64
           node_tag: ${{ steps.tags.outputs.node_tag }}
