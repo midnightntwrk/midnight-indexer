@@ -46,6 +46,13 @@ keep the other. Don't.
 
 ## When a re-index is required
 
+- **A ledger state root mismatch.** chain-indexer halts with "ledger state root
+  mismatch" when its ledger state diverges from the node's `StateKey`. Since the
+  per-block `StateKey` guard, this also catches divergences that older images let
+  pass; see [Rolling out the per-block `StateKey`
+  guard](./testing.md#rolling-out-the-per-block-statekey-guard). Once the cause is
+  fixed, re-index from genesis.
+
 - **Contract states stored as arena keys** (the release that introduces
   `008`/`010_contract_state_keys.sql`). `contract_actions.state` and
   `contract_actions.zswap_state` held a full serialized state per action, one copy
