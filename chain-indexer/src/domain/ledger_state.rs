@@ -23,7 +23,7 @@ use indexer_common::domain::{
     ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, BlockHash, LedgerVersion,
     NetworkId, ProtocolVersion, SerializedContractAddress, SerializedLedgerStateKey,
     TransactionHash, TransactionResult,
-    ledger::{self, ContractZswapIndices, LedgerParameters, RootCountRepair},
+    ledger::{self, ArenaHash, ContractZswapIndices, LedgerParameters, Pinned, RootCountRepair},
 };
 use log::{debug, warn};
 use std::{
@@ -178,24 +178,16 @@ impl LedgerState {
             .map_err(Error::Unpersist)
     }
 
-    /// The raw arena hash bytes of a serialized ledger state key, e.g. to check membership in
-    /// [Self::persisted_root_hashes].
-    pub fn root_hash_bytes(
-        key: &SerializedLedgerStateKey,
-        ledger_version: LedgerVersion,
-    ) -> Result<Vec<u8>, indexer_common::domain::ledger::Error> {
-        indexer_common::domain::ledger::LedgerState::root_hash_bytes(key, ledger_version)
-    }
-
-    /// The raw arena hash bytes of all currently persisted gc roots, fetched from the ledger DB.
-    pub fn persisted_root_hashes() -> HashSet<Vec<u8>> {
-        indexer_common::domain::ledger::LedgerState::persisted_root_hashes()
-    }
-
     /// See [`indexer_common::domain::ledger::LedgerState::repair_root_counts`].
-    pub fn repair_root_counts<'a>(
-        window: impl IntoIterator<Item = (&'a SerializedLedgerStateKey, LedgerVersion)>,
-    ) -> Result<RootCountRepair, indexer_common::domain::ledger::Error> {
+    pub fn repair_root_counts(
+        window: Vec<(SerializedLedgerStateKey, LedgerVersion)>,
+    ) -> Result<
+        (
+            RootCountRepair,
+            Vec<(SerializedLedgerStateKey, LedgerVersion)>,
+        ),
+        indexer_common::domain::ledger::Error,
+    > {
         indexer_common::domain::ledger::LedgerState::repair_root_counts(window)
     }
 
@@ -203,6 +195,16 @@ impl LedgerState {
     /// number of arena nodes culled.
     pub fn gc(bound: std::time::Duration) -> usize {
         indexer_common::domain::ledger::LedgerState::gc(bound)
+    }
+
+    /// See [`indexer_common::domain::ledger::LedgerState::pin_roots`].
+    pub(crate) fn pin_roots() -> Pinned {
+        indexer_common::domain::ledger::LedgerState::pin_roots()
+    }
+
+    /// See [`indexer_common::domain::ledger::LedgerState::pin`].
+    pub(crate) fn pin(roots: impl IntoIterator<Item = ArenaHash>) -> Pinned {
+        indexer_common::domain::ledger::LedgerState::pin(roots)
     }
 
     /// Apply the given node transactions to this ledger state and return domain transactions.

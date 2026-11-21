@@ -21,7 +21,7 @@ use crate::{
 use fastrace::trace;
 use midnight_serialize_v1::tagged_deserialize;
 use midnight_storage_core_v1::{
-    arena::{Sp, TypedArenaKey},
+    arena::{ArenaHash, Sp, TypedArenaKey},
     db::DB,
     storage::default_storage,
 };
@@ -77,5 +77,14 @@ impl ContractZswapState {
     ) -> Result<TypedArenaKey<ZswapStateV9<v1_1::LedgerDb>, Hasher>, Error> {
         tagged_deserialize(&mut key.as_ref())
             .map_err(|error| Error::Deserialize("ZswapStateKey", error))
+    }
+}
+
+/// The root of a stored contract zswap state: the hash its key refers to.
+impl TryFrom<&SerializedZswapStateKey> for ArenaHash<Hasher> {
+    type Error = Error;
+
+    fn try_from(key: &SerializedZswapStateKey) -> Result<Self, Error> {
+        Ok(ContractZswapState::arena_key(key)?.key.hash().to_owned())
     }
 }

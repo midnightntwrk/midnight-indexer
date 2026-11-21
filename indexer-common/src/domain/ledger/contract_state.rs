@@ -353,6 +353,15 @@ impl ContractStateArenaKey {
     }
 }
 
+/// The root of a stored contract state: the hash its key refers to.
+impl TryFrom<&SerializedContractStateKey> for ArenaHash<Hasher> {
+    type Error = Error;
+
+    fn try_from(key: &SerializedContractStateKey) -> Result<Self, Error> {
+        Ok(ContractStateArenaKey::deserialize(key)?.hash().to_owned())
+    }
+}
+
 /// The tag prefix `tagged_serialize` writes ahead of a V8 contract state key.
 static V3_TAG: LazyLock<String> =
     LazyLock::new(tag_prefix::<TypedArenaKey<ContractStateV3<v1_1::LedgerDb>, Hasher>>);

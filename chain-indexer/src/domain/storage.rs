@@ -11,7 +11,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use indexer_common::domain::{ProtocolVersion, SerializedLedgerStateKey};
+use indexer_common::{
+    domain::{
+        ProtocolVersion, SerializedContractStateKey, SerializedLedgerStateKey,
+        SerializedZswapStateKey,
+    },
+    startup::Journal,
+};
 use std::num::NonZeroUsize;
 
 use crate::domain::{
@@ -23,7 +29,7 @@ use crate::domain::{
 #[trait_variant::make(Send)]
 pub trait Storage
 where
-    Self: Clone + Send + Sync + 'static,
+    Self: Clone + Send + Sync + Journal + 'static,
 {
     /// Save the given block with parameters and return the max regular transaction ID.
     async fn save_block(
@@ -78,4 +84,16 @@ where
     async fn get_latest_terms_and_conditions(
         &self,
     ) -> Result<Option<TermsAndConditions>, sqlx::Error>;
+
+    /// The keys of every contract state and contract zswap state stored, translations included,
+    /// each once.
+    async fn get_contract_state_keys(
+        &self,
+    ) -> Result<
+        (
+            Vec<SerializedContractStateKey>,
+            Vec<SerializedZswapStateKey>,
+        ),
+        sqlx::Error,
+    >;
 }

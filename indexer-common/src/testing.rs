@@ -94,6 +94,9 @@ pub const NETWORK_ID: &str = "undeployed";
 /// value of at least 1 works, so that `NOW - 1` does not underflow.
 pub const NOW: u64 = 1_800_000_000;
 
+/// Tag of the `postgres` image every Postgres test container runs, matching the compose files.
+pub const POSTGRES_IMAGE_TAG: &str = "17.12-alpine";
+
 /// Converts `seconds` to the milliseconds ledger block timestamps use.
 pub const fn millis(seconds: u64) -> u64 {
     seconds * 1_000
@@ -246,7 +249,7 @@ pub async fn init_ledger_db() -> Result<impl Sized, BoxError> {
         .with_db_name("indexer")
         .with_user("indexer")
         .with_password(env!("APP__INFRA__STORAGE__PASSWORD"))
-        .with_tag("17.1-alpine")
+        .with_tag(POSTGRES_IMAGE_TAG)
         .start()
         .await?;
     let postgres_port = postgres_container.get_host_port_ipv4(5432).await?;
@@ -261,6 +264,7 @@ pub async fn init_ledger_db() -> Result<impl Sized, BoxError> {
         max_connections: 10,
         idle_timeout: Duration::from_secs(60),
         max_lifetime: Duration::from_secs(5 * 60),
+        test_before_acquire: true,
     };
     let pool = PostgresPool::new(config).await?;
     migrations::postgres::run(&pool).await?;

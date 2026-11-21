@@ -11,6 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub(crate) mod pinning;
+
 use crate::error::StdErrorExt;
 use derive_more::Debug;
 use futures::TryStreamExt;
@@ -28,9 +30,10 @@ use midnight_storage_core_v1::{
 #[cfg(test)]
 use midnight_storage_core_v1::{Storage, storable::SMALL_OBJECT_LIMIT};
 use sqlx::QueryBuilder;
-#[cfg(feature = "cloud")]
-use std::collections::HashSet;
-use std::{collections::HashMap, future::ready};
+use std::{
+    collections::{HashMap, HashSet},
+    future::ready,
+};
 use tokio::{runtime::Handle, task::block_in_place};
 
 // Serialized node bytes per Postgres insert. Far below Postgres' 1 GB limit on one parameter value,
@@ -74,6 +77,25 @@ impl LedgerDb {
     #[cfg(feature = "standalone")]
     pub fn new(pool: crate::infra::pool::sqlite::SqlitePool) -> Self {
         Self { pool }
+    }
+
+    /// The number of gc roots, counted in the database rather than read back as [DB::get_roots]
+    /// does.
+    ///
+    /// Only root counts flushed to the database are seen: unlike storage-core's backend
+    /// `get_roots`, this does not apply changes still pending in its write cache, e.g. an unpersist
+    /// since the last flush.
+    pub fn root_count(&self) -> usize {
+        block_in_place(|| {
+            Handle::current().block_on(async {
+                let count = sqlx::query_scalar::<_, i64>("SELECT count(*) FROM ledger_db_roots")
+                    .fetch_one(&*self.pool)
+                    .await
+                    .unwrap_or_panic("cannot count roots");
+
+                count as usize
+            })
+        })
     }
 }
 
@@ -158,6 +180,7 @@ impl DB for LedgerDb {
                 tx.commit()
                     .await
                     .unwrap_or_panic("commit transaction for delete node");
+                pinning::remove_pinned([key]);
             })
         })
     }
@@ -179,6 +202,8 @@ impl DB for LedgerDb {
                 let mut inserts = Vec::new();
                 let mut deletes = Vec::new();
                 let mut root_counts = Vec::new();
+                // The pins of this flush, which leave the queue once it is committed.
+                let mut pinning = pinning::Pinning::default();
 
                 for (key, update) in updates {
                     match update {
@@ -186,8 +211,10 @@ impl DB for LedgerDb {
                             flush_deletes(&mut tx, &mut deletes).await;
                             inserts.push((key, object));
                         }
+                        // A flush that deletes pins nothing as written.
                         DeleteNode => {
-                            flush_inserts(&mut tx, &mut inserts).await;
+                            pinning.evict(&key);
+                            flush_inserts(&mut tx, &mut inserts, &HashSet::new()).await;
                             deletes.push(key);
                         }
                         // Root counts live in `ledger_db_roots`, which no node insert or delete
@@ -196,13 +223,16 @@ impl DB for LedgerDb {
                     }
                 }
 
-                flush_inserts(&mut tx, &mut inserts).await;
+                let pinned = pinning.nodes(&inserts);
+                flush_inserts(&mut tx, &mut inserts, pinned).await;
                 flush_deletes(&mut tx, &mut deletes).await;
-                flush_root_counts(&mut tx, root_counts).await;
+                let pinned = pinning.roots(&root_counts);
+                flush_root_counts(&mut tx, root_counts, pinned).await;
 
                 tx.commit()
                     .await
                     .unwrap_or_panic("commit transaction for batch update");
+                pinning.commit();
             })
         })
     }
@@ -348,6 +378,9 @@ impl DB for LedgerDb {
         })
     }
 
+    /// Reads every row of `ledger_db_roots` and decodes its key, so its cost grows with the number
+    /// of roots. storage-core's gc calls it once per cycle. To count the roots, use
+    /// [LedgerDb::root_count] instead.
     fn get_roots(&self) -> HashMap<ArenaHash<Self::Hasher>, u32> {
         block_in_place(|| {
             Handle::current().block_on(async {
@@ -392,6 +425,10 @@ impl DB for LedgerDb {
     /// reachable nodes, `gc()` scans the DB in batches, culls every scanned
     /// node not in the mark set, and uses the returned resume handle to pick
     /// up where a time-bounded pass left off. Not called by indexer code.
+    ///
+    /// Scans only the unpinned rows, which are all gc may cull: pinned rows are reachable from
+    /// roots that are never unpersisted. That leaves them out of every scan, which is only right
+    /// while gc's sweep is the sole caller; see the storage-core pin in the workspace manifest.
     fn scan(
         &self,
         resume_from: Option<Self::ScanResumeHandle>,
@@ -402,9 +439,10 @@ impl DB for LedgerDb {
     ) {
         block_in_place(|| {
             Handle::current().block_on(async {
-                let mut query = QueryBuilder::new("SELECT key, object FROM ledger_db_nodes");
+                let mut query =
+                    QueryBuilder::new("SELECT key, object FROM ledger_db_nodes WHERE NOT pinned");
                 if let Some(handle) = resume_from.as_ref() {
-                    query.push(" WHERE key > ");
+                    query.push(" AND key > ");
                     query.push_bind(handle.0.as_slice());
                 }
                 query.push(" ORDER BY key LIMIT ");
@@ -457,19 +495,30 @@ where
     }
 }
 
-// SQLite has no array parameters, so nodes are bound in chunks.
+// SQLite has no array parameters, so nodes are bound in chunks. Nodes in `pinned` are inserted
+// pinned, and a stored node stays pinned.
 #[cfg(feature = "standalone")]
 async fn flush_inserts<Hasher: WellBehavedHasher>(
     tx: &mut SqlxTransaction,
     inserts: &mut Vec<(ArenaHash<Hasher>, OnDiskObject<Hasher>)>,
+    pinned: &HashSet<ArenaHash<Hasher>>,
 ) {
     for chunk in inserts.chunks(BATCH_INSERT_SIZE) {
-        QueryBuilder::new("INSERT INTO ledger_db_nodes (key, object) ")
+        QueryBuilder::new("INSERT INTO ledger_db_nodes (key, object, pinned) ")
             .push_values(chunk, |mut q, (key, object)| {
                 let ser_object = serialize_object(object);
-                q.push_bind(key.0.as_slice()).push_bind(ser_object);
+                q.push_bind(key.0.as_slice())
+                    .push_bind(ser_object)
+                    .push(if pinned.contains(key) {
+                        "TRUE"
+                    } else {
+                        "FALSE"
+                    });
             })
-            .push(" ON CONFLICT (key) DO UPDATE SET object = EXCLUDED.object")
+            .push(indoc! {"
+                 ON CONFLICT (key) DO UPDATE
+                SET object = EXCLUDED.object, pinned = ledger_db_nodes.pinned OR EXCLUDED.pinned
+            "})
             .build()
             .execute(&mut **tx)
             .await
@@ -479,17 +528,20 @@ async fn flush_inserts<Hasher: WellBehavedHasher>(
     inserts.clear();
 }
 
-// Postgres takes the keys and the nodes as two `bytea[]` parameters, so every statement has the same
-// SQL whatever its number of nodes.
+// Postgres takes the keys, the nodes and their pinned flags as three array parameters, so every
+// statement has the same SQL whatever its number of nodes. Nodes in `pinned` are inserted pinned,
+// and a stored node stays pinned.
 #[cfg(feature = "cloud")]
 async fn flush_inserts<Hasher: WellBehavedHasher>(
     tx: &mut SqlxTransaction,
     inserts: &mut Vec<(ArenaHash<Hasher>, OnDiskObject<Hasher>)>,
+    pinned: &HashSet<ArenaHash<Hasher>>,
 ) {
     let query = indoc! {"
-        INSERT INTO ledger_db_nodes (key, object)
-        SELECT * FROM UNNEST($1::bytea[], $2::bytea[])
-        ON CONFLICT (key) DO UPDATE SET object = EXCLUDED.object
+        INSERT INTO ledger_db_nodes (key, object, pinned)
+        SELECT * FROM UNNEST($1::bytea[], $2::bytea[], $3::boolean[])
+        ON CONFLICT (key) DO UPDATE
+        SET object = EXCLUDED.object, pinned = ledger_db_nodes.pinned OR EXCLUDED.pinned
     "};
 
     for chunk in insert_chunks(inserts, |(_, object)| object.serialized_size()) {
@@ -497,15 +549,21 @@ async fn flush_inserts<Hasher: WellBehavedHasher>(
         // content-addressed and, with storage-core's `layout-v2`, carry no reference count, so rows
         // sharing a key are identical.
         let mut unique = HashSet::with_capacity(chunk.len());
-        let (keys, objects) = chunk
+        let (keys, (objects, pinned)) = chunk
             .iter()
             .filter(|(key, _)| unique.insert(key.0.as_slice()))
-            .map(|(key, object)| (key.0.as_slice(), serialize_object(object)))
-            .unzip::<_, _, Vec<_>, Vec<_>>();
+            .map(|(key, object)| {
+                (
+                    key.0.as_slice(),
+                    (serialize_object(object), pinned.contains(key)),
+                )
+            })
+            .unzip::<_, _, Vec<_>, (Vec<_>, Vec<_>)>();
 
         sqlx::query(query)
             .bind(keys)
             .bind(objects)
+            .bind(pinned)
             .execute(&mut **tx)
             .await
             .unwrap_or_panic("cannot batch insert nodes");
@@ -593,9 +651,11 @@ async fn delete_keys(tx: &mut SqlxTransaction, table: &'static str, keys: &[&[u8
     }
 }
 
+// Roots in `pinned` are written pinned with their counts, and a stored root stays pinned.
 async fn flush_root_counts<Hasher: WellBehavedHasher>(
     tx: &mut SqlxTransaction,
     root_counts: Vec<(ArenaHash<Hasher>, u32)>,
+    pinned: &HashSet<ArenaHash<Hasher>>,
 ) {
     // Collecting into a map keeps the last count per key, as applying the counts in order would. A
     // count of zero means the key is no longer a root.
@@ -613,20 +673,25 @@ async fn flush_root_counts<Hasher: WellBehavedHasher>(
 
     let set = set
         .iter()
-        .map(|(key, count)| (key.0.as_slice(), *count as i64))
+        .map(|(key, count)| (key.0.as_slice(), *count as i64, pinned.contains(key)))
         .collect::<Vec<_>>();
     upsert_root_counts(tx, &set).await;
 }
 
 // SQLite has no array parameters, so root counts are bound in chunks.
 #[cfg(feature = "standalone")]
-async fn upsert_root_counts(tx: &mut SqlxTransaction, root_counts: &[(&[u8], i64)]) {
+async fn upsert_root_counts(tx: &mut SqlxTransaction, root_counts: &[(&[u8], i64, bool)]) {
     for chunk in root_counts.chunks(BATCH_INSERT_SIZE) {
-        QueryBuilder::new("INSERT INTO ledger_db_roots (key, count) ")
-            .push_values(chunk, |mut q, (key, count)| {
-                q.push_bind(*key).push_bind(*count);
+        QueryBuilder::new("INSERT INTO ledger_db_roots (key, count, pinned) ")
+            .push_values(chunk, |mut q, (key, count, pinned)| {
+                q.push_bind(*key)
+                    .push_bind(*count)
+                    .push(if *pinned { "TRUE" } else { "FALSE" });
             })
-            .push(" ON CONFLICT (key) DO UPDATE SET count = EXCLUDED.count")
+            .push(indoc! {"
+                 ON CONFLICT (key) DO UPDATE
+                SET count = EXCLUDED.count, pinned = ledger_db_roots.pinned OR EXCLUDED.pinned
+            "})
             .build()
             .execute(&mut **tx)
             .await
@@ -634,22 +699,27 @@ async fn upsert_root_counts(tx: &mut SqlxTransaction, root_counts: &[(&[u8], i64
     }
 }
 
-// Postgres takes the keys and the counts as two array parameters, so every statement has the same
-// SQL whatever its number of root counts.
+// Postgres takes the keys, the counts and their pinned flags as three array parameters, so every
+// statement has the same SQL whatever its number of root counts.
 #[cfg(feature = "cloud")]
-async fn upsert_root_counts(tx: &mut SqlxTransaction, root_counts: &[(&[u8], i64)]) {
+async fn upsert_root_counts(tx: &mut SqlxTransaction, root_counts: &[(&[u8], i64, bool)]) {
     let query = indoc! {"
-        INSERT INTO ledger_db_roots (key, count)
-        SELECT * FROM UNNEST($1::bytea[], $2::bigint[])
-        ON CONFLICT (key) DO UPDATE SET count = EXCLUDED.count
+        INSERT INTO ledger_db_roots (key, count, pinned)
+        SELECT * FROM UNNEST($1::bytea[], $2::bigint[], $3::boolean[])
+        ON CONFLICT (key) DO UPDATE
+        SET count = EXCLUDED.count, pinned = ledger_db_roots.pinned OR EXCLUDED.pinned
     "};
 
     for chunk in root_counts.chunks(BATCH_ROWS) {
-        let (keys, counts) = chunk.iter().copied().unzip::<_, _, Vec<_>, Vec<_>>();
+        let (keys, (counts, pinned)) = chunk
+            .iter()
+            .map(|(key, count, pinned)| (*key, (*count, *pinned)))
+            .unzip::<_, _, Vec<_>, (Vec<_>, Vec<_>)>();
 
         sqlx::query(query)
             .bind(keys)
             .bind(counts)
+            .bind(pinned)
             .execute(&mut **tx)
             .await
             .unwrap_or_panic("cannot batch set root counts");
@@ -875,6 +945,7 @@ fn assert_batch_update_sets_root_counts(db: &mut LedgerDb) {
         db.get_roots(),
         HashMap::from([(first.clone(), 5), (third.clone(), 7)])
     );
+    assert_eq!(db.root_count(), 2);
 
     // Sets then clears `ROOTS` root counts, each in one batch.
     let roots = (0..ROOTS as u32)
@@ -885,9 +956,10 @@ fn assert_batch_update_sets_root_counts(db: &mut LedgerDb) {
         })
         .collect::<Vec<_>>();
     db.batch_update(roots.iter().map(|root| (root.clone(), SetRootCount(1))));
-    assert_eq!(db.get_roots().len(), ROOTS + 2);
+    assert_eq!(db.root_count(), ROOTS + 2);
     db.batch_update(roots.iter().map(|root| (root.clone(), SetRootCount(0))));
     assert_eq!(db.get_roots(), HashMap::from([(first, 5), (third, 7)]));
+    assert_eq!(db.root_count(), 2);
 }
 
 /// `get_root_count` must return the stored count, not the number of matching rows: `key` is the
@@ -1156,6 +1228,7 @@ mod postgres_tests {
         migrations::postgres::run as run_migrations,
         pool::{self, postgres::PostgresPool},
     };
+    use crate::testing::POSTGRES_IMAGE_TAG;
     use anyhow::Context;
     use midnight_storage_core_v1::{DefaultHasher, Storage, arena::ArenaHash, db::DB};
     use sqlx::postgres::PgSslMode;
@@ -1163,13 +1236,13 @@ mod postgres_tests {
     use testcontainers::{ImageExt, runners::AsyncRunner};
     use testcontainers_modules::postgres::Postgres;
 
-    async fn setup_pool()
+    pub(super) async fn setup_pool()
     -> Result<(testcontainers::ContainerAsync<Postgres>, PostgresPool), Box<dyn StdError>> {
         let container = Postgres::default()
             .with_db_name("indexer")
             .with_user("indexer")
             .with_password(env!("APP__INFRA__STORAGE__PASSWORD"))
-            .with_tag("17.1-alpine")
+            .with_tag(POSTGRES_IMAGE_TAG)
             .start()
             .await
             .context("start Postgres container")?;
@@ -1188,6 +1261,7 @@ mod postgres_tests {
             max_connections: 10,
             idle_timeout: Duration::from_secs(60),
             max_lifetime: Duration::from_secs(5 * 60),
+            test_before_acquire: true,
         };
         let pool = PostgresPool::new(config).await?;
         run_migrations(&pool).await.context("run migrations")?;

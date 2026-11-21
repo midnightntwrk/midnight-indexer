@@ -12,11 +12,16 @@
 // limitations under the License.
 
 mod metrics;
+mod startup;
 
 use crate::{
-    application::metrics::Metrics,
+    application::{
+        metrics::Metrics,
+        startup::{Build, PinContractStates},
+    },
     domain::{
-        Block, BlockRef, LedgerState, SystemParametersChange, Transaction,
+        Block, BlockRef, DParameter, LedgerState, SystemParametersChange, TermsAndConditions,
+        Transaction,
         node::{self, Node},
         should_bump_first_regular_tblock,
         storage::Storage,
@@ -32,6 +37,7 @@ use indexer_common::{
         SerializedLedgerStateKey, UnshieldedUtxoIndexed,
     },
     infra::ledger_db,
+    startup::{sequential, task},
 };
 use log::{debug, info, warn};
 use parking_lot::RwLock;
@@ -101,8 +107,14 @@ fn gc_catch_up_interval_default() -> NonZeroU32 {
     NonZeroU32::new(500).expect("500 is not zero")
 }
 
+/// Run the chain-indexer: index the node's blocks into `storage`, keeping the ledger state in the
+/// ledger DB, gc'ing it and publishing what was indexed via `publisher`, until SIGTERM is received
+/// or a task fails.
+///
+/// `metrics` tells whether metrics are published: if not, they are neither recorded nor computed.
 pub async fn run(
     config: Config,
+    metrics: bool,
     node: impl Node,
     mut storage: impl Storage,
     publisher: impl Publisher,
@@ -158,20 +170,27 @@ pub async fn run(
         );
     }
 
-    // Initialize metrics.
-    let transaction_count = storage
-        .get_transaction_count()
-        .await
-        .context("get transaction count")?;
-    let contract_action_count = storage
-        .get_contract_action_count()
-        .await
-        .context("get contract action count")?;
-    let metrics = Metrics::new(
-        highest_block_height,
-        transaction_count,
-        contract_action_count,
-    );
+    // Read the stored system parameters once; from here on they are kept in step in memory.
+    let mut stored_system_parameters = SystemParameters::load(&storage).await?;
+
+    // Initialize metrics, only if published.
+    let metrics = if metrics {
+        let transaction_count = storage
+            .get_transaction_count()
+            .await
+            .context("get transaction count")?;
+        let contract_action_count = storage
+            .get_contract_action_count()
+            .await
+            .context("get contract action count")?;
+        Some(Metrics::new(
+            highest_block_height,
+            transaction_count,
+            contract_action_count,
+        ))
+    } else {
+        None
+    };
 
     // Load/initialize ledger state. Seed the retention window with the newest blocks' keys
     // (oldest first, each with the ledger version it was persisted under) so a restart keeps
@@ -186,35 +205,21 @@ pub async fn run(
         .await
         .context("get newest ledger state keys")?
         .into_iter()
-        .map(|(protocol_version, key)| {
-            let ledger_version = protocol_version.ledger_version();
-            LedgerState::root_hash_bytes(&key, ledger_version)
-                .map(|root_hash| (key, ledger_version, root_hash))
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .context("get ledger state root hashes")?;
+        .map(|(protocol_version, key)| (key, protocol_version.ledger_version()))
+        .collect::<Vec<_>>();
     let newest_count = newest_ledger_state_keys.len();
 
     // Must precede the seeding below, and is idempotent, hence unconditional; see
     // `LedgerState::repair_root_counts`.
-    let repair = LedgerState::repair_root_counts(
-        newest_ledger_state_keys
-            .iter()
-            .map(|(key, ledger_version, _)| (key, *ledger_version)),
-    )
-    .context("repair ledger state root counts")?;
+    let (repair, rooted) = LedgerState::repair_root_counts(newest_ledger_state_keys)
+        .context("repair ledger state root counts")?;
     if repair.raised_roots > 0 || repair.culled_roots > 0 {
         warn!(repair:?; "repaired under-counted ledger state gc roots");
     } else {
         info!(repair:?; "ledger state gc root counts are consistent");
     }
 
-    let persisted_root_hashes = LedgerState::persisted_root_hashes();
-    let mut persisted_ledger_state_keys = newest_ledger_state_keys
-        .into_iter()
-        .filter(|(_, _, root_hash)| persisted_root_hashes.contains(root_hash))
-        .map(|(key, ledger_version, _)| (key, ledger_version))
-        .collect::<VecDeque<_>>();
+    let mut persisted_ledger_state_keys = VecDeque::from(rooted);
     info!(
         seeded = persisted_ledger_state_keys.len(),
         skipped_unrooted = newest_count - persisted_ledger_state_keys.len();
@@ -234,6 +239,17 @@ pub async fn run(
         None => LedgerState::new(network_id.clone(), LedgerVersion::OLDEST)
             .context("create ledger state")?,
     };
+
+    // Startup tasks, once the ledger state is known to load, as they may read the ledger DB.
+    // The build first, so the journal entries after it were written by it.
+    let plan = sequential([
+        task(Build::current(highest_block_height)),
+        task(PinContractStates),
+    ]);
+    startup::run(&storage, &storage, &plan)
+        .await
+        .map_err(anyhow::Error::from_boxed)
+        .context("run startup tasks")?;
 
     let highest_block_on_node = Arc::new(RwLock::new(None));
 
@@ -294,8 +310,9 @@ pub async fn run(
                     &mut caught_up,
                     &mut parent_block_timestamp,
                     &mut storage,
+                    &mut stored_system_parameters,
                     &publisher,
-                    &metrics,
+                    metrics.as_ref(),
                     &node,
                 )
                 .in_span(Span::root("get-and-index-block", SpanContext::random()))
@@ -343,28 +360,36 @@ pub async fn run(
                     let elapsed = started.elapsed();
                     blocks_since_gc = 0;
 
+                    if let Some(metrics) = &metrics {
+                        metrics.record_gc(elapsed, nodes_culled);
+                    }
+                    if nodes_culled > 0 {
+                        debug!(nodes_culled, elapsed:?; "gc pass culled orphan arena nodes");
+                    }
+
                     // Root rows grow with *distinct* contract states rather than with actions,
                     // because per-action roots are content-addressed and refcounted. They are also
-                    // never unpersisted, so this only ever goes up and is the number to watch. The
-                    // scan is what gc itself does on every rescan, so it adds nothing asymptotically.
-                    let root_count = LedgerState::persisted_root_hashes().len();
-                    metrics.record_gc(elapsed, nodes_culled, root_count);
-                    if nodes_culled > 0 {
-                        debug!(
-                            nodes_culled,
-                            elapsed:?,
-                            root_count;
-                            "gc pass culled orphan arena nodes"
-                        );
+                    // never unpersisted, so this only ever goes up and is the number to watch. It
+                    // costs a ledger DB query, so it is only counted when metrics are published.
+                    let started = Instant::now();
+                    if let Some(metrics) = &metrics
+                        && let Some(root_count) = ledger_db::root_count()
+                    {
+                        let elapsed = started.elapsed();
+                        metrics.record_root_count(root_count);
+                        debug!(root_count, elapsed:?; "counted gc roots");
                     }
                 }
 
-                // Sample the arena size, which is a full scan, so only on its own opt-in interval.
+                // Sample the arena size, which is a full scan, so only on its own opt-in interval and
+                // when metrics are published.
                 if arena_metrics_interval > 0
                     && blocks_since_arena_metrics >= arena_metrics_interval
                 {
                     blocks_since_arena_metrics = 0;
-                    if let Some(node_count) = ledger_db::node_count() {
+                    if let Some(metrics) = &metrics
+                        && let Some(node_count) = ledger_db::node_count()
+                    {
                         metrics.record_arena_node_count(node_count);
                         debug!(node_count; "sampled ledger DB node count");
                     }
@@ -474,8 +499,9 @@ async fn get_and_index_block<E, N>(
     caught_up: &mut bool,
     parent_block_timestamp: &mut u64,
     storage: &mut impl Storage,
+    stored_system_parameters: &mut SystemParameters,
     publisher: &impl Publisher,
-    metrics: &Metrics,
+    metrics: Option<&Metrics>,
     node: &N,
 ) -> anyhow::Result<(LedgerState, SerializedLedgerStateKey)>
 where
@@ -494,6 +520,7 @@ where
         caught_up,
         parent_block_timestamp,
         storage,
+        stored_system_parameters,
         publisher,
         metrics,
         node,
@@ -529,8 +556,9 @@ async fn index_block<N>(
     caught_up: &mut bool,
     parent_block_timestamp: &mut u64,
     storage: &mut impl Storage,
+    stored_system_parameters: &mut SystemParameters,
     publisher: &impl Publisher,
-    metrics: &Metrics,
+    metrics: Option<&Metrics>,
     node: &N,
 ) -> anyhow::Result<(LedgerState, SerializedLedgerStateKey)>
 where
@@ -683,7 +711,9 @@ where
     let uncaptured = ledger_state
         .capture_contract_state_keys(&mut transactions)
         .context("capture contract state keys")?;
-    metrics.record_uncaptured_contract_states(uncaptured);
+    if let Some(metrics) = metrics {
+        metrics.record_uncaptured_contract_states(uncaptured);
+    }
     let transactions = transactions;
 
     // At a hard fork, capture the translated state key of every contract without an action in this
@@ -739,15 +769,33 @@ where
         info!(caught_up:%; "caught-up status changed")
     }
 
-    // Persist ledger state.
+    // Persist ledger state, then pin the contract states it flushed.
     let (new_ledger_state, ledger_state_key) =
         ledger_state.persist().context("persist ledger state")?;
     ledger_state = new_ledger_state;
+    let pinned = task::block_in_place(LedgerState::pin_roots);
+    if pinned.nodes > 0 || pinned.roots_pinned_on_write > 0 || pinned.roots_walked > 0 {
+        debug!(
+            block_height = block.height,
+            pinned = pinned.nodes,
+            roots_pinned_on_write = pinned.roots_pinned_on_write,
+            roots_walked = pinned.roots_walked;
+            "pinned contract states"
+        );
+    }
+    if !pinned.failed_roots.is_empty() {
+        warn!(
+            block_height = block.height,
+            failed_roots:? = pinned.failed_roots;
+            "contract state roots reaching nodes missing from the ledger DB left unpinned"
+        );
+    }
 
     // Determine system parameters change if any.
-    let system_parameters_change = determine_system_parameters_change(&block, storage, node)
-        .await
-        .context("determine system parameters change")?;
+    let system_parameters_change =
+        determine_system_parameters_change(&block, stored_system_parameters, node)
+            .await
+            .context("determine system parameters change")?;
 
     // Save the block with its related data and system parameters atomically.
     let max_transaction_id = storage
@@ -761,6 +809,11 @@ where
         )
         .await
         .context("save block")?;
+
+    // Keep the stored system parameters in step with the change just saved.
+    if let Some(change) = system_parameters_change {
+        stored_system_parameters.apply(change);
+    }
 
     // Publish BlockIndexed.
     publisher
@@ -807,7 +860,9 @@ where
     }
 
     // Update metrics.
-    metrics.update(&block, &transactions, node_block_height, *caught_up);
+    if let Some(metrics) = metrics {
+        metrics.update(&block, &transactions, node_block_height, *caught_up);
+    }
 
     info!(
         hash:% = block.hash,
@@ -822,11 +877,55 @@ where
     Ok((ledger_state, ledger_state_key))
 }
 
+/// The latest stored system parameters, read once at startup and then kept in step with the
+/// changes saved. The chain indexer is their only writer.
+#[derive(Debug)]
+#[cfg_attr(test, derive(Clone))]
+struct SystemParameters {
+    d_parameter: Option<DParameter>,
+    terms_and_conditions: Option<TermsAndConditions>,
+}
+
+impl SystemParameters {
+    /// Read the latest stored system parameters.
+    async fn load(storage: &impl Storage) -> anyhow::Result<Self> {
+        let (d_parameter, terms_and_conditions) = tokio::try_join!(
+            async {
+                storage
+                    .get_latest_d_parameter()
+                    .await
+                    .context("get latest D-parameter")
+            },
+            async {
+                storage
+                    .get_latest_terms_and_conditions()
+                    .await
+                    .context("get latest terms and conditions")
+            },
+        )?;
+
+        Ok(Self {
+            d_parameter,
+            terms_and_conditions,
+        })
+    }
+
+    /// Record a change once it is saved.
+    fn apply(&mut self, change: SystemParametersChange) {
+        if let Some(d_parameter) = change.d_parameter {
+            self.d_parameter = Some(d_parameter);
+        }
+        if let Some(terms_and_conditions) = change.terms_and_conditions {
+            self.terms_and_conditions = Some(terms_and_conditions);
+        }
+    }
+}
+
 /// Fetch system parameters from the node and determine if they changed.
 #[trace]
 async fn determine_system_parameters_change<N>(
     block: &Block,
-    storage: &mut impl Storage,
+    stored: &SystemParameters,
     node: &N,
 ) -> anyhow::Result<Option<SystemParametersChange>>
 where
@@ -843,15 +942,10 @@ where
         .await
         .map_err(|error| anyhow::anyhow!("fetch system parameters: {error}"))?;
 
-    // Get the latest stored parameters.
-    let stored_d_param = storage
-        .get_latest_d_parameter()
-        .await
-        .context("get latest D-parameter")?;
-    let stored_tc = storage
-        .get_latest_terms_and_conditions()
-        .await
-        .context("get latest terms and conditions")?;
+    let SystemParameters {
+        d_parameter: stored_d_param,
+        terms_and_conditions: stored_tc,
+    } = stored;
 
     // Determine what has changed.
     let d_param_changed = current.d_parameter.as_ref().is_some_and(|current_d| {
@@ -904,7 +998,8 @@ where
 mod tests {
     use crate::{
         application::{
-            gc_budget, gc_catch_up_interval_default, index_block, metrics::Metrics, node_blocks,
+            SystemParameters, determine_system_parameters_change, gc_budget,
+            gc_catch_up_interval_default, index_block, node_blocks,
         },
         domain::{
             Block, BlockRef, ContractStateTranslation, DParameter, DustRegistrationEvent,
@@ -918,9 +1013,11 @@ mod tests {
     use indexer_common::{
         domain::{
             BlockHash, ByteArray, ByteVec, LedgerVersion, Message, NetworkId, NodeVersion,
-            ProtocolVersion, Publisher, SerializedLedgerStateKey,
+            ProtocolVersion, Publisher, SerializedContractStateKey, SerializedLedgerStateKey,
+            SerializedZswapStateKey,
         },
         error::BoxError,
+        startup::{Entry, Journal, Value},
         testing::init_ledger_db,
     };
     use parking_lot::RwLock;
@@ -930,9 +1027,283 @@ mod tests {
         num::{NonZeroU32, NonZeroUsize},
         path::Path,
         sync::{Arc, LazyLock, Mutex},
-        time::Duration,
+        time::{Duration, SystemTime},
     };
     use thiserror::Error;
+    #[cfg(feature = "standalone")]
+    use {crate::infra::storage::testing::storage, indoc::indoc};
+
+    #[test]
+    fn system_parameters_follow_saved_changes() {
+        let d_parameter = |n| DParameter {
+            num_permissioned_candidates: n,
+            num_registered_candidates: n,
+        };
+        let terms_and_conditions = TermsAndConditions {
+            hash: Default::default(),
+            url: "https://example.com/terms".to_string(),
+        };
+        let change = |d_parameter, terms_and_conditions| SystemParametersChange {
+            block_height: 1,
+            block_hash: Default::default(),
+            timestamp: 0,
+            d_parameter,
+            terms_and_conditions,
+        };
+        let mut stored = SystemParameters {
+            d_parameter: None,
+            terms_and_conditions: None,
+        };
+
+        stored.apply(change(
+            Some(d_parameter(1)),
+            Some(terms_and_conditions.clone()),
+        ));
+        assert_eq!(stored.d_parameter, Some(d_parameter(1)));
+        assert_eq!(
+            stored.terms_and_conditions,
+            Some(terms_and_conditions.clone())
+        );
+
+        // A change carries only what changed; the rest stays as stored.
+        stored.apply(change(Some(d_parameter(2)), None));
+        assert_eq!(stored.d_parameter, Some(d_parameter(2)));
+        assert_eq!(stored.terms_and_conditions, Some(terms_and_conditions));
+    }
+
+    // A change is recorded once: it is compared with the stored parameters, which follow each
+    // change saved, and only what changed is recorded.
+    #[tokio::test]
+    async fn system_parameters_change_is_recorded_once() -> anyhow::Result<()> {
+        let (block, _) = <(Block, Vec<_>)>::from(BLOCK_1.to_owned());
+        let d_parameter = |n| DParameter {
+            num_permissioned_candidates: n,
+            num_registered_candidates: n,
+        };
+        let terms_and_conditions = |url: &str| TermsAndConditions {
+            hash: Default::default(),
+            url: url.to_owned(),
+        };
+        let mut stored = SystemParameters {
+            d_parameter: None,
+            terms_and_conditions: None,
+        };
+
+        // What each block records, given what the node reports, saving and applying any change.
+        let mut record = async |d_parameter, terms_and_conditions| {
+            let node = SystemParameters {
+                d_parameter,
+                terms_and_conditions,
+            };
+            let change = determine_system_parameters_change(&block, &stored, &node).await?;
+            let recorded = change.as_ref().map(|change| {
+                (
+                    change.d_parameter.clone(),
+                    change.terms_and_conditions.clone(),
+                )
+            });
+            if let Some(change) = change {
+                stored.apply(change);
+            }
+            anyhow::Ok(recorded)
+        };
+
+        let (d1, d2) = (d_parameter(1), d_parameter(2));
+        let (tc1, tc2) = (terms_and_conditions("a"), terms_and_conditions("b"));
+        assert_eq!(
+            record(Some(d1.clone()), Some(tc1.clone())).await?,
+            Some((Some(d1.clone()), Some(tc1.clone()))),
+            "first values"
+        );
+        assert_eq!(
+            record(Some(d1), Some(tc1.clone())).await?,
+            None,
+            "unchanged"
+        );
+        assert_eq!(
+            record(Some(d2.clone()), Some(tc1)).await?,
+            Some((Some(d2.clone()), None)),
+            "only the D-parameter changed"
+        );
+        assert_eq!(record(Some(d2), None).await?, None, "T&C removed");
+        assert_eq!(
+            record(None, Some(tc2.clone())).await?,
+            Some((None, Some(tc2))),
+            "only the T&C changed"
+        );
+
+        Ok(())
+    }
+
+    // After a restart the latest saved system parameters are read back from the database, so the
+    // node's unchanged parameters record nothing and only what the node changed is recorded.
+    #[cfg(feature = "standalone")]
+    #[tokio::test]
+    async fn system_parameters_are_loaded_after_a_restart() -> anyhow::Result<()> {
+        let (_dir, _pool, mut storage) = storage().await;
+
+        let d_parameter = |n| DParameter {
+            num_permissioned_candidates: n,
+            num_registered_candidates: n,
+        };
+        let terms_and_conditions = TermsAndConditions {
+            hash: Default::default(),
+            url: "https://example.com/terms".to_owned(),
+        };
+
+        // Block 0 saves both parameters, block 1 a new D-parameter only.
+        let blocks = [
+            (
+                &*BLOCK_0,
+                Some(d_parameter(1)),
+                Some(terms_and_conditions.clone()),
+            ),
+            (&*BLOCK_1, Some(d_parameter(2)), None),
+        ];
+        for (block, d_parameter, terms_and_conditions) in blocks {
+            let (block, _) = <(Block, Vec<_>)>::from(block.to_owned());
+            let change = SystemParametersChange {
+                block_height: block.height,
+                block_hash: block.hash,
+                timestamp: block.timestamp,
+                d_parameter,
+                terms_and_conditions,
+            };
+            storage
+                .save_block(&block, &[], &[], &Default::default(), Some(&change), &[])
+                .await?;
+        }
+
+        // Restart: the stored system parameters are the latest of each.
+        let stored = SystemParameters::load(&storage).await?;
+        assert_eq!(stored.d_parameter, Some(d_parameter(2)));
+        assert_eq!(
+            stored.terms_and_conditions,
+            Some(terms_and_conditions.clone())
+        );
+
+        let (block, _) = <(Block, Vec<_>)>::from(BLOCK_1.to_owned());
+        let unchanged = SystemParameters {
+            d_parameter: Some(d_parameter(2)),
+            terms_and_conditions: Some(terms_and_conditions.clone()),
+        };
+        let change = determine_system_parameters_change(&block, &stored, &unchanged).await?;
+        assert!(change.is_none(), "the node's unchanged parameters");
+
+        let changed = SystemParameters {
+            d_parameter: Some(d_parameter(3)),
+            terms_and_conditions: Some(terms_and_conditions),
+        };
+        let change = determine_system_parameters_change(&block, &stored, &changed)
+            .await?
+            .expect("the node changed the D-parameter");
+        assert_eq!(change.d_parameter, Some(d_parameter(3)));
+        assert_eq!(change.terms_and_conditions, None);
+
+        Ok(())
+    }
+
+    // No two consecutive stored D-parameters are equal, across a restart too: a block records the
+    // node's D-parameter only when it differs from the latest stored.
+    #[cfg(feature = "standalone")]
+    #[tokio::test]
+    async fn no_two_consecutive_d_parameters_are_equal() -> anyhow::Result<()> {
+        let (_dir, pool, mut storage) = storage().await;
+
+        let d_parameter = |n| DParameter {
+            num_permissioned_candidates: n,
+            num_registered_candidates: n,
+        };
+        // The node's D-parameter at each block; `None` marks a restart.
+        let reported = [
+            Some(1),
+            Some(1),
+            None,
+            Some(1),
+            Some(2),
+            None,
+            Some(2),
+            Some(2),
+            Some(1),
+        ];
+
+        let mut stored = SystemParameters::load(&storage).await?;
+        let mut height = 0;
+        for reported in reported {
+            let Some(reported) = reported else {
+                stored = SystemParameters::load(&storage).await?;
+                continue;
+            };
+
+            let (block, _) = <(Block, Vec<_>)>::from(BLOCK_1.to_owned());
+            let block = Block {
+                hash: ByteArray([height as u8 + 1; 32]),
+                height,
+                ..block
+            };
+            let node = SystemParameters {
+                d_parameter: Some(d_parameter(reported)),
+                terms_and_conditions: None,
+            };
+            let change = determine_system_parameters_change(&block, &stored, &node).await?;
+            storage
+                .save_block(&block, &[], &[], &Default::default(), change.as_ref(), &[])
+                .await?;
+            if let Some(change) = change {
+                stored.apply(change);
+            }
+            height += 1;
+        }
+
+        let saved = sqlx::query_as::<_, (i64, i32)>(indoc! {"
+            SELECT block_height, num_permissioned_candidates
+            FROM system_parameters_d
+            ORDER BY block_height
+        "})
+        .fetch_all(&*pool)
+        .await?;
+        assert_eq!(saved, [(0, 1), (3, 2), (6, 1)]);
+
+        Ok(())
+    }
+
+    /// A node reporting these system parameters for every block.
+    impl Node for SystemParameters {
+        type Error = Infallible;
+
+        async fn highest_blocks(
+            &self,
+        ) -> Result<impl Stream<Item = Result<BlockRef, Self::Error>>, Self::Error> {
+            Ok(stream::empty())
+        }
+
+        fn finalized_blocks(
+            &mut self,
+            _highest_block: Option<BlockRef>,
+        ) -> impl Stream<Item = Result<node::Block, Self::Error>> {
+            stream::empty()
+        }
+
+        async fn fetch_system_parameters(
+            &self,
+            block_hash: BlockHash,
+            block_height: u64,
+            timestamp: u64,
+            _node_version: NodeVersion,
+        ) -> Result<SystemParametersChange, Self::Error> {
+            Ok(SystemParametersChange {
+                block_height,
+                block_hash,
+                timestamp,
+                d_parameter: self.d_parameter.clone(),
+                terms_and_conditions: self.terms_and_conditions.clone(),
+            })
+        }
+
+        async fn fetch_genesis_ledger_state(&self) -> Result<ByteVec, Self::Error> {
+            Ok(Default::default())
+        }
+    }
 
     #[test]
     fn test_gc_budget() {
@@ -1015,14 +1386,10 @@ mod tests {
         let _ledger_db = init_ledger_db().await?;
 
         let network_id = NetworkId::try_from("undeployed".to_string())?;
-        let genesis = fs::read(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../indexer-common/tests/v8_genesis_undeployed_0_22_0.raw"),
-        )?;
+        let node = GenesisNode::undeployed()?;
         let genesis_state_key =
-            LedgerState::from_genesis(&genesis, LedgerVersion::V8)?.state_key()?;
+            LedgerState::from_genesis(&node.genesis, LedgerVersion::V8)?.state_key()?;
         let wrong_state_key = ByteVec::from(vec![0; genesis_state_key.as_ref().len()]);
-        let node = GenesisNode(genesis.into());
         let mut storage = MockStorage::default();
 
         let index = async |block: node::Block, ledger_state, storage: &mut MockStorage| {
@@ -1036,8 +1403,12 @@ mod tests {
                 &mut false,
                 &mut 0,
                 storage,
+                &mut SystemParameters {
+                    d_parameter: None,
+                    terms_and_conditions: None,
+                },
                 &NoopPublisher,
-                &Metrics::new(None, 0, (0, 0, 0)),
+                None,
                 &node,
             )
             .await
@@ -1085,7 +1456,8 @@ mod tests {
             timestamp: 1_000,
             ..BLOCK_0.to_owned()
         };
-        let mut expected_ledger_state = LedgerState::from_genesis(&node.0, LedgerVersion::V8)?;
+        let mut expected_ledger_state =
+            LedgerState::from_genesis(&node.genesis, LedgerVersion::V8)?;
         expected_ledger_state.apply_transactions(
             [],
             BlockRef {
@@ -1110,9 +1482,102 @@ mod tests {
         Ok(())
     }
 
-    /// A node serving the given genesis ledger state and no blocks.
+    /// A system parameters change is applied to the stored system parameters only once its block is
+    /// saved: a failed save leaves them as they were, so the retried block records the change.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_index_block_applies_system_parameters_once_saved() -> Result<(), BoxError> {
+        let _ledger_db = init_ledger_db().await?;
+
+        let network_id = NetworkId::try_from("undeployed".to_string())?;
+        let d_parameter = DParameter {
+            num_permissioned_candidates: 1,
+            num_registered_candidates: 1,
+        };
+        let node = GenesisNode {
+            system_parameters: SystemParameters {
+                d_parameter: Some(d_parameter.clone()),
+                terms_and_conditions: None,
+            },
+            ..GenesisNode::undeployed()?
+        };
+        let block_0 = node::Block {
+            state_key: LedgerState::from_genesis(&node.genesis, LedgerVersion::V8)?.state_key()?,
+            ..BLOCK_0.to_owned()
+        };
+        let mut stored_system_parameters = SystemParameters {
+            d_parameter: None,
+            terms_and_conditions: None,
+        };
+
+        let index = async |storage: &mut MockStorage,
+                           stored_system_parameters: &mut SystemParameters| {
+            index_block(
+                0,
+                0,
+                block_0.clone(),
+                LedgerState::new(network_id.clone(), LedgerVersion::OLDEST)?,
+                &network_id,
+                &Arc::new(RwLock::new(None)),
+                &mut false,
+                &mut 0,
+                storage,
+                stored_system_parameters,
+                &NoopPublisher,
+                None,
+                &node,
+            )
+            .await
+        };
+
+        let mut storage = MockStorage {
+            fail_saves: true,
+            ..Default::default()
+        };
+        let result = index(&mut storage, &mut stored_system_parameters).await;
+        assert!(result.is_err(), "the save fails");
+        assert_eq!(stored_system_parameters.d_parameter, None, "not applied");
+
+        let mut storage = MockStorage::default();
+        index(&mut storage, &mut stored_system_parameters).await?;
+        let saved_d_parameters = storage
+            .saved_system_parameters_changes
+            .into_iter()
+            .map(|change| change.d_parameter)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            saved_d_parameters,
+            [Some(d_parameter.clone())],
+            "saved with the retried block"
+        );
+        assert_eq!(stored_system_parameters.d_parameter, Some(d_parameter));
+
+        Ok(())
+    }
+
+    /// A node serving the given genesis ledger state and system parameters, and no blocks.
     #[derive(Clone)]
-    struct GenesisNode(ByteVec);
+    struct GenesisNode {
+        genesis: ByteVec,
+        system_parameters: SystemParameters,
+    }
+
+    impl GenesisNode {
+        /// Serves the undeployed network's genesis ledger state and no system parameters.
+        fn undeployed() -> Result<Self, BoxError> {
+            let genesis = fs::read(
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../indexer-common/tests/v8_genesis_undeployed_0_22_0.raw"),
+            )?;
+
+            Ok(Self {
+                genesis: genesis.into(),
+                system_parameters: SystemParameters {
+                    d_parameter: None,
+                    terms_and_conditions: None,
+                },
+            })
+        }
+    }
 
     impl Node for GenesisNode {
         type Error = Infallible;
@@ -1135,26 +1600,25 @@ mod tests {
             block_hash: BlockHash,
             block_height: u64,
             timestamp: u64,
-            _node_version: NodeVersion,
+            node_version: NodeVersion,
         ) -> Result<SystemParametersChange, Self::Error> {
-            Ok(SystemParametersChange {
-                block_height,
-                block_hash,
-                timestamp,
-                d_parameter: None,
-                terms_and_conditions: None,
-            })
+            self.system_parameters
+                .fetch_system_parameters(block_hash, block_height, timestamp, node_version)
+                .await
         }
 
         async fn fetch_genesis_ledger_state(&self) -> Result<ByteVec, Self::Error> {
-            Ok(self.0.clone())
+            Ok(self.genesis.clone())
         }
     }
 
-    /// An empty storage counting saved blocks.
+    /// An empty storage counting saved blocks and keeping their system parameters changes, failing
+    /// every save if told to.
     #[derive(Clone, Default)]
     struct MockStorage {
         saved_blocks: usize,
+        saved_system_parameters_changes: Vec<SystemParametersChange>,
+        fail_saves: bool,
     }
 
     impl Storage for MockStorage {
@@ -1164,10 +1628,15 @@ mod tests {
             _transactions: &[Transaction],
             _dust_registration_events: &[DustRegistrationEvent],
             _ledger_state_key: &SerializedLedgerStateKey,
-            _system_parameters_change: Option<&SystemParametersChange>,
+            system_parameters_change: Option<&SystemParametersChange>,
             _contract_state_translations: &[(u64, ContractStateTranslation)],
         ) -> Result<Option<u64>, sqlx::Error> {
+            if self.fail_saves {
+                return Err(sqlx::Error::PoolClosed);
+            }
             self.saved_blocks += 1;
+            self.saved_system_parameters_changes
+                .extend(system_parameters_change.cloned());
             Ok(None)
         }
 
@@ -1215,6 +1684,34 @@ mod tests {
             &self,
         ) -> Result<Option<TermsAndConditions>, sqlx::Error> {
             Ok(None)
+        }
+
+        async fn get_contract_state_keys(
+            &self,
+        ) -> Result<
+            (
+                Vec<SerializedContractStateKey>,
+                Vec<SerializedZswapStateKey>,
+            ),
+            sqlx::Error,
+        > {
+            Ok((vec![], vec![]))
+        }
+    }
+
+    impl Journal for MockStorage {
+        async fn latest(&self, _id: &str) -> Result<Option<Entry<Value>>, BoxError> {
+            Ok(None)
+        }
+
+        async fn append(
+            &self,
+            _id: &str,
+            _entry: Entry<Value>,
+            _started_at: SystemTime,
+            _ended_at: SystemTime,
+        ) -> Result<(), BoxError> {
+            Ok(())
         }
     }
 

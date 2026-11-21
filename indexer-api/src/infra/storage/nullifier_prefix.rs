@@ -22,6 +22,8 @@ use crate::{
 use chacha20poly1305::{ChaCha20Poly1305, KeyInit};
 use futures::TryStreamExt;
 use indexer_common::infra::migrations;
+#[cfg(feature = "cloud")]
+use indexer_common::testing::POSTGRES_IMAGE_TAG;
 use indoc::indoc;
 #[cfg(feature = "cloud")]
 use sqlx::Postgres as Db;
@@ -55,7 +57,7 @@ async fn storage() -> (impl Sized, Storage) {
     use testcontainers_modules::postgres::Postgres;
 
     let container = Postgres::default()
-        .with_tag("17.1-alpine")
+        .with_tag(POSTGRES_IMAGE_TAG)
         .start()
         .await
         .expect("start Postgres");
@@ -76,6 +78,7 @@ async fn storage() -> (impl Sized, Storage) {
         max_connections: 2,
         idle_timeout: Duration::from_secs(60),
         max_lifetime: Duration::from_secs(300),
+        test_before_acquire: true,
     })
     .await
     .expect("create pool");
