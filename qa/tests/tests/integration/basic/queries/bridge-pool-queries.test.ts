@@ -21,17 +21,9 @@
 // Unapproved, SubminimalFlush). Per-address balance (UserTransfer/claims) is
 // covered by #941.
 //
-// Test-data reality (2026-07): no reserve or treasury events exist on any
-// environment (the only bridge data anywhere is a single UserTransfer on
-// devnet, which does not touch these pools). So the pool totals are legitimately
-// all-zero everywhere, and the inflow lists are empty. That makes the well-formed
-// zero-state and empty-list cases real, executable tests; the cases that need
-// non-zero aggregation stay test.todo until a data source can produce reserve /
-// treasury events.
-//   test.todo → needs reserve/treasury event data not producible in any env yet.
-//   test.skip → blocked on an in-flight feature: UNAPPROVED on approval
-//               governance (#940); SUBMINIMAL_FLUSH on a triggerable flush
-//               threshold (node team).
+// Zero-state cases query genesis: deployed chains can already contain bridge
+// events at block 1 and later. Current-state cases must use observed event data.
+// Non-zero aggregation cases remain tracked below until their fixtures exist.
 //
 // Tracking: https://github.com/midnightntwrk/midnight-indexer/issues/944
 
@@ -45,8 +37,8 @@ import { BRIDGE_TREASURY_REASONS } from '@utils/indexer/indexer-types';
 const httpClient = new IndexerHttpClient();
 
 const ZERO_U128 = '0'.repeat(32);
-// An early block that predates any possible bridge event, for the atBlock snapshot.
-const EARLY_BLOCK = 1;
+// Bridge observation starts after genesis.
+const GENESIS_BLOCK = 0;
 
 let surfacePresent = false;
 
@@ -64,17 +56,17 @@ describe.skipIf(env.isUndeployedEnv() || env.isMainnetEnv())('bridge pool querie
 
   describe('bridgePoolSummary', () => {
     /**
-     * @given an environment with no reserve or treasury bridge events indexed
+     * @given genesis, before reserve or treasury bridge events can be observed
      * @when bridgePoolSummary is queried
      * @then reserveTotal and every treasuryByReason total are the zero-value hex
      *       string, subminimumTxCount is 0, and the three treasury reasons
      *       (INVALID, UNAPPROVED, SUBMINIMAL_FLUSH) are each present
      */
-    test('should return zero pool totals when no reserve or treasury events are indexed', async (ctx: TestContext) => {
+    test('should return zero pool totals at genesis', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Query', 'Bridge', 'Pool'] };
       if (!surfacePresent) return ctx.skip();
 
-      const response = await httpClient.getBridgePoolSummary();
+      const response = await httpClient.getBridgePoolSummary(GENESIS_BLOCK);
 
       expect(response).toBeSuccess();
       const pool = response.data!.bridgePoolSummary;
@@ -112,8 +104,8 @@ describe.skipIf(env.isUndeployedEnv() || env.isMainnetEnv())('bridge pool querie
     });
 
     /**
-     * @given a block that predates any bridge event (block 1)
-     * @when bridgePoolSummary(atBlock: 1) is queried
+     * @given genesis, before bridge observation begins
+     * @when bridgePoolSummary(atBlock: 0) is queried
      * @then the snapshot has null lastEventBlockHeight and zero totals, confirming
      *       the point-in-time snapshot excludes later events
      */
@@ -121,7 +113,7 @@ describe.skipIf(env.isUndeployedEnv() || env.isMainnetEnv())('bridge pool querie
       ctx.task!.meta.custom = { labels: ['Query', 'Bridge', 'Pool', 'ByHeight'] };
       if (!surfacePresent) return ctx.skip();
 
-      const response = await httpClient.getBridgePoolSummary(EARLY_BLOCK);
+      const response = await httpClient.getBridgePoolSummary(GENESIS_BLOCK);
 
       expect(response).toBeSuccess();
       const pool = response.data!.bridgePoolSummary;
@@ -164,15 +156,15 @@ describe.skipIf(env.isUndeployedEnv() || env.isMainnetEnv())('bridge pool querie
 
   describe('bridgeReserveInflows', () => {
     /**
-     * @given an environment with no ReserveTransfer events indexed
+     * @given genesis, before ReserveTransfer events can be observed
      * @when bridgeReserveInflows is queried
      * @then the response is successful and returns an empty array
      */
-    test('should return an empty list when no ReserveTransfer events are indexed', async (ctx: TestContext) => {
+    test('should return no reserve inflows at genesis', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Query', 'Bridge', 'Pool', 'Negative'] };
       if (!surfacePresent) return ctx.skip();
 
-      const response = await httpClient.getBridgeReserveInflows();
+      const response = await httpClient.getBridgeReserveInflows({ blockHeightTo: GENESIS_BLOCK });
 
       expect(response).toBeSuccess();
       expect(response.data?.bridgeReserveInflows).toEqual([]);
@@ -202,15 +194,15 @@ describe.skipIf(env.isUndeployedEnv() || env.isMainnetEnv())('bridge pool querie
 
   describe('bridgeTreasuryInflows', () => {
     /**
-     * @given an environment with no treasury-redirected events indexed
+     * @given genesis, before treasury-redirected events can be observed
      * @when bridgeTreasuryInflows is queried
      * @then the response is successful and returns an empty array
      */
-    test('should return an empty list when no treasury-redirected events are indexed', async (ctx: TestContext) => {
+    test('should return no treasury inflows at genesis', async (ctx: TestContext) => {
       ctx.task!.meta.custom = { labels: ['Query', 'Bridge', 'Pool', 'Negative'] };
       if (!surfacePresent) return ctx.skip();
 
-      const response = await httpClient.getBridgeTreasuryInflows();
+      const response = await httpClient.getBridgeTreasuryInflows({ blockHeightTo: GENESIS_BLOCK });
 
       expect(response).toBeSuccess();
       expect(response.data?.bridgeTreasuryInflows).toEqual([]);
