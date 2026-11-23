@@ -49,12 +49,15 @@ if (
   console.info(`[INFO ] - Indexer API version: ${INDEXER_API_VERSION}`);
 }
 
+const indexerHost =
+  Bun.env.INDEXER_HOST?.trim() || INDEXER_BASE_URL[TARGET_ENV];
+
 export const INDEXER_WS_URL: string =
   TARGET_ENV === "undeployed"
-    ? `ws://${INDEXER_BASE_URL[TARGET_ENV]}/api/${INDEXER_API_VERSION}/graphql/ws`
-    : `wss://${INDEXER_BASE_URL[TARGET_ENV]}/api/${INDEXER_API_VERSION}/graphql/ws`;
+    ? `ws://${indexerHost}/api/${INDEXER_API_VERSION}/graphql/ws`
+    : `wss://${indexerHost}/api/${INDEXER_API_VERSION}/graphql/ws`;
 
 export const INDEXER_HTTP_URL: string =
   TARGET_ENV === "undeployed"
-    ? `http://${INDEXER_BASE_URL[TARGET_ENV]}`
-    : `https://${INDEXER_BASE_URL[TARGET_ENV]}`;
+    ? `http://${indexerHost}`
+    : `https://${indexerHost}`;
