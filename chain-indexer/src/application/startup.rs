@@ -89,11 +89,17 @@ impl<S: Storage> Task<S> for PinContractStates {
         _previous: Option<&'a Entry<Self::State>>,
     ) -> BoxFuture<'a, Self::State> {
         Box::pin(async move {
+            let started = Instant::now();
             let (state_keys, zswap_state_keys) = storage.get_contract_state_keys().await?;
             let (roots, invalid_keys) = Self::roots(&state_keys, &zswap_state_keys);
 
             let roots_count = roots.len();
-            info!(roots = roots_count; "pinning the contract state history");
+            info!(
+                roots = roots_count,
+                invalid_keys,
+                elapsed:? = started.elapsed();
+                "pinning the contract state history, read the stored keys"
+            );
             let started = Instant::now();
             let pinned = block_in_place(|| LedgerState::pin(roots));
             if !pinned.failed_roots.is_empty() {

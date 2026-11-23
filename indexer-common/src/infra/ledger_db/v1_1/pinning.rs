@@ -34,6 +34,7 @@ use crate::domain::ledger;
 use indoc::indoc;
 #[cfg(feature = "cloud")]
 use itertools::{EitherOrBoth, Itertools};
+use log::{info, warn};
 use midnight_serialize_v1::Deserializable;
 use midnight_storage_core_v1::{DefaultHasher, arena::ArenaHash, backend::OnDiskObject};
 #[cfg(feature = "standalone")]
@@ -41,6 +42,7 @@ use sqlx::QueryBuilder;
 use std::{
     collections::{HashMap, HashSet},
     sync::{LazyLock, Mutex, OnceLock},
+    time::{Duration, Instant},
 };
 use tokio::{runtime::Handle, task::block_in_place};
 
@@ -52,6 +54,43 @@ static PINNED: LazyLock<Mutex<PinnedNodes>> = LazyLock::new(Default::default);
 static PINNER: OnceLock<LedgerDb> = OnceLock::new();
 /// The roots to pin, the input; see [queue].
 static QUEUE: LazyLock<Mutex<Queue>> = LazyLock::new(Default::default);
+
+/// How often a long walk or write of pins logs its progress. One that takes less logs nothing.
+const PROGRESS_INTERVAL: Duration = Duration::from_secs(30);
+
+/// When a walk or write of pins logs: progress every [PROGRESS_INTERVAL], and its end only if it
+/// took that long, so the short ones that pin a block's roots log nothing.
+struct Progress {
+    started: Instant,
+    logged: Instant,
+}
+
+impl Progress {
+    fn new() -> Self {
+        let now = Instant::now();
+        Self {
+            started: now,
+            logged: now,
+        }
+    }
+
+    /// Logs progress with `log`, given the time elapsed, once every [PROGRESS_INTERVAL].
+    fn log(&mut self, log: impl FnOnce(Duration)) {
+        if self.logged.elapsed() >= PROGRESS_INTERVAL {
+            self.logged = Instant::now();
+            log(self.started.elapsed());
+        }
+    }
+
+    /// Completes, logging the end with `log`, given the time elapsed, if it took at least
+    /// [PROGRESS_INTERVAL].
+    fn complete(self, log: impl FnOnce(Duration)) {
+        let elapsed = self.started.elapsed();
+        if elapsed >= PROGRESS_INTERVAL {
+            log(elapsed);
+        }
+    }
+}
 
 /// Set the handle pinning writes through, and how many nodes [PINNED] holds at most; see
 /// [crate::infra::ledger_db::init].
@@ -379,15 +418,39 @@ impl LedgerDb {
         }
 
         // A node is missing below some root: pin root by root, so it holds back only its own.
-        roots
-            .into_iter()
-            .fold(ledger::Pinned::default(), |mut pinned, root| {
+        let total = roots.len();
+        warn!(roots = total; "a node the roots reach is missing, pinning root by root");
+        let mut progress = Progress::new();
+        let pinned = roots.into_iter().enumerate().fold(
+            ledger::Pinned::default(),
+            |mut pinned, (index, root)| {
                 match self.pin_all_reachable([&root]) {
                     Some(nodes) => pinned.nodes += nodes,
                     None => pinned.failed_roots.push(root),
                 }
+                progress.log(|elapsed| {
+                    info!(
+                        roots_processed = index + 1,
+                        roots = total,
+                        nodes = pinned.nodes,
+                        failed_roots = pinned.failed_roots.len(),
+                        elapsed:?;
+                        "pinning root by root"
+                    )
+                });
                 pinned
-            })
+            },
+        );
+        progress.complete(|elapsed| {
+            info!(
+                roots = total,
+                nodes = pinned.nodes,
+                failed_roots = pinned.failed_roots.len(),
+                elapsed:?;
+                "pinned root by root"
+            )
+        });
+        pinned
     }
 
     /// Pins every node reachable from `roots` that is not pinned yet, and the root rows of `roots`,
@@ -406,6 +469,7 @@ impl LedgerDb {
         let mut seen = roots.clone().into_iter().cloned().collect::<HashSet<_>>();
         let mut frontier = seen.iter().cloned().collect::<Vec<_>>();
         let mut to_pin = vec![];
+        let (mut progress, mut batches) = (Progress::new(), 0);
 
         while !frontier.is_empty() {
             let batch = frontier.split_off(frontier.len().saturating_sub(PIN_READ_SIZE));
@@ -434,7 +498,27 @@ impl LedgerDb {
                 to_pin.push(key);
             }
             add_pinned(found_pinned);
+
+            // Log the walk's progress if it is long.
+            batches += 1;
+            progress.log(|elapsed| {
+                info!(
+                    batches,
+                    nodes = to_pin.len(),
+                    frontier = frontier.len(),
+                    elapsed:?;
+                    "walking the ledger DB for nodes to pin"
+                )
+            });
         }
+        progress.complete(|elapsed| {
+            info!(
+                batches,
+                nodes = to_pin.len(),
+                elapsed:?;
+                "walked the ledger DB for nodes to pin"
+            )
+        });
 
         // Flag every root's row, as a root's node may be pinned already through another root.
         let roots = roots
@@ -557,6 +641,8 @@ async fn pin_keys(pool: &sqlx::SqlitePool, roots: &[Vec<u8>], nodes: &[Vec<u8>])
         .await
         .unwrap_or_panic("begin transaction for pinning");
 
+    let chunks = roots.len().div_ceil(BATCH_DELETE_SIZE) + nodes.len().div_ceil(BATCH_DELETE_SIZE);
+    let (mut progress, mut written) = (Progress::new(), 0);
     for (update, keys) in updates {
         for chunk in keys.chunks(BATCH_DELETE_SIZE) {
             let mut query = QueryBuilder::new(update);
@@ -571,12 +657,29 @@ async fn pin_keys(pool: &sqlx::SqlitePool, roots: &[Vec<u8>], nodes: &[Vec<u8>])
                 .execute(&mut *tx)
                 .await
                 .unwrap_or_panic("cannot pin keys");
+
+            written += 1;
+            progress.log(|elapsed| {
+                info!(chunks_written = written, chunks, elapsed:?; "writing pinned flags")
+            });
         }
     }
 
+    // Commit, logging the commit's time and the write's if the write is long.
+    let started = Instant::now();
     tx.commit()
         .await
         .unwrap_or_panic("commit transaction for pinning");
+    let commit = started.elapsed();
+    progress.complete(|elapsed| {
+        info!(
+            roots = roots.len(),
+            nodes = nodes.len(),
+            commit:?,
+            elapsed:?;
+            "wrote pinned flags"
+        )
+    });
 }
 
 // Sets `pinned` on the root rows of `roots` not flagged yet, so a root pinned before is not written
@@ -599,12 +702,33 @@ async fn pin_keys(pool: &sqlx::PgPool, roots: &[Vec<u8>], nodes: &[Vec<u8>]) {
                 .begin()
                 .await
                 .unwrap_or_panic("begin transaction for pinning");
-            for (roots, nodes) in chunks {
+            let mut progress = Progress::new();
+            for (written, (roots, nodes)) in chunks.iter().enumerate() {
                 pin_chunk(&mut *tx, roots, nodes).await;
+                progress.log(|elapsed| {
+                    info!(
+                        chunks_written = written + 1,
+                        chunks = chunks.len(),
+                        elapsed:?;
+                        "writing pinned flags"
+                    )
+                });
             }
+            // Commit, logging the commit's time and the write's if the write is long.
+            let started = Instant::now();
             tx.commit()
                 .await
                 .unwrap_or_panic("commit transaction for pinning");
+            let commit = started.elapsed();
+            progress.complete(|elapsed| {
+                info!(
+                    roots = roots.len(),
+                    nodes = nodes.len(),
+                    commit:?,
+                    elapsed:?;
+                    "wrote pinned flags"
+                )
+            });
         }
     }
 }
