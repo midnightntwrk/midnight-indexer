@@ -21,7 +21,7 @@ use indexer_common::{
         ledger::{ArenaHash, Error},
     },
     error::BoxError,
-    startup::{BoxFuture, Entry, Task, Value},
+    startup::{BoxFuture, CancellationToken, Entry, Task, Value},
     version::git_sha,
 };
 use itertools::Itertools;
@@ -87,6 +87,7 @@ impl<S: Storage> Task<S> for PinContractStates {
         &'a self,
         storage: &'a S,
         _previous: Option<&'a Entry<Self::State>>,
+        _cancel: &'a CancellationToken,
     ) -> BoxFuture<'a, Self::State> {
         Box::pin(async move {
             let started = Instant::now();
@@ -189,6 +190,7 @@ impl<S: Sync> Task<S> for Build {
         &'a self,
         _context: &'a S,
         _previous: Option<&'a Entry<Self::State>>,
+        _cancel: &'a CancellationToken,
     ) -> BoxFuture<'a, Self::State> {
         Box::pin(async move { Ok(Some(self.clone())) })
     }
@@ -199,7 +201,7 @@ mod tests {
     use super::{Build, PinContractStates};
     use indexer_common::{
         error::BoxError,
-        startup::{Entry, Task},
+        startup::{CancellationToken, Entry, Task},
     };
 
     #[tokio::test]
@@ -252,7 +254,10 @@ mod tests {
             "an entry that does not read"
         );
 
-        assert_eq!(Task::<()>::run(&build, &(), None).await?, Some(build));
+        assert_eq!(
+            Task::<()>::run(&build, &(), None, &CancellationToken::new()).await?,
+            Some(build)
+        );
 
         Ok(())
     }
@@ -298,7 +303,7 @@ mod storage_tests {
             migrations,
             pool::sqlite::{self, SqlitePool},
         },
-        startup::{Journal, run, sequential, task},
+        startup::{CancellationToken, Journal, run, sequential, task},
     };
     use indoc::indoc;
 
@@ -312,8 +317,8 @@ mod storage_tests {
 
         let build = Build::current(Some(7));
         let plan = sequential([task(build.clone())]);
-        run(&storage, &storage, &plan).await?;
-        run(&storage, &storage, &plan).await?;
+        run(&storage, &storage, &plan, &CancellationToken::new()).await?;
+        run(&storage, &storage, &plan, &CancellationToken::new()).await?;
         let entry = storage.latest("indexer/build").await?.expect("journaled");
         assert_eq!(serde_json::from_value::<Build>(entry.state)?, build);
 
@@ -321,7 +326,13 @@ mod storage_tests {
             git_sha: Some("00000000".to_owned()),
             ..Build::current(Some(9))
         };
-        run(&storage, &storage, &sequential([task(other)])).await?;
+        run(
+            &storage,
+            &storage,
+            &sequential([task(other)]),
+            &CancellationToken::new(),
+        )
+        .await?;
         let entries =
             sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM journal WHERE id = 'indexer/build'")
                 .fetch_one(&*pool)
@@ -349,7 +360,13 @@ mod storage_tests {
         .await?;
 
         let build = Build::current(Some(7));
-        run(&storage, &storage, &sequential([task(build.clone())])).await?;
+        run(
+            &storage,
+            &storage,
+            &sequential([task(build.clone())]),
+            &CancellationToken::new(),
+        )
+        .await?;
         let entry = storage.latest("indexer/build").await?.expect("journaled");
         assert_eq!(entry.version, 1);
         assert_eq!(serde_json::from_value::<Build>(entry.state)?, build);

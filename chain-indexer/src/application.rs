@@ -37,7 +37,7 @@ use indexer_common::{
         SerializedLedgerStateKey, UnshieldedUtxoIndexed,
     },
     infra::ledger_db,
-    startup::{sequential, task},
+    startup::{CancellationToken, sequential, task},
 };
 use log::{debug, info, warn};
 use parking_lot::RwLock;
@@ -240,16 +240,32 @@ pub async fn run(
             .context("create ledger state")?,
     };
 
+    // From here on, SIGTERM cancels the startup tasks, then ends the indexing below.
+    let cancel = CancellationToken::new();
+    task::spawn({
+        let cancel = cancel.clone();
+        async move {
+            sigterm.recv().await;
+            warn!("SIGTERM received");
+            cancel.cancel();
+        }
+    });
+
     // Startup tasks, once the ledger state is known to load, as they may read the ledger DB.
-    // The build first, so the journal entries after it were written by it.
+    // The build first, so the journal entries after it were written by it. A cancelled task
+    // journals what it did, and the next start resumes it.
     let plan = sequential([
         task(Build::current(highest_block_height)),
         task(PinContractStates),
     ]);
-    startup::run(&storage, &storage, &plan)
+    startup::run(&storage, &storage, &plan, &cancel)
         .await
         .map_err(anyhow::Error::from_boxed)
         .context("run startup tasks")?;
+    if cancel.is_cancelled() {
+        warn!("cancelled during startup");
+        return Ok(());
+    }
 
     let highest_block_on_node = Arc::new(RwLock::new(None));
 
@@ -415,8 +431,7 @@ pub async fn run(
             result
         },
 
-        _ = sigterm.recv() => {
-            warn!("SIGTERM received");
+        _ = cancel.cancelled() => {
             highest_block_on_node_task.abort();
             index_blocks_task.abort();
             Ok(())
