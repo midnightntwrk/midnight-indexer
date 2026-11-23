@@ -34,10 +34,8 @@ use tokio::task::block_in_place;
 /// everything they reach, so gc's sweep skips them and gc no longer marks from them. Contract
 /// states written since are pinned as their block is indexed; see `LedgerState::pin_roots`.
 ///
-/// Safe to run again: the walk stops at pinned nodes and root rows already flagged are not written,
-/// so a rerun after a committed pin pins nothing. The roots are pinned in one walk, written in one
-/// statement or transaction, so an interrupted pin commits nothing and a rerun starts over; only
-/// when a node is missing are roots pinned one by one, and a rerun then skips those committed.
+/// Safe to run again: the walk stops at pinned nodes, so a rerun pins only what is left. Cancelled,
+/// as on SIGTERM, it journals its progress, and the next start resumes it.
 ///
 /// A stored key that cannot be read is logged and left unpinned, the others pinned all the same,
 /// rather than failing every start: a rerun would not read it either.
@@ -45,7 +43,10 @@ pub(super) struct PinContractStates;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct PinnedContractStates {
-    /// Nodes pinned.
+    /// Whether all roots were processed; if not, it was cancelled and the next start resumes it.
+    #[serde(default = "completed_default")]
+    completed: bool,
+    /// Nodes pinned, counted over the runs since the last that completed.
     nodes: usize,
     /// Roots left unpinned, as a node they reach is missing; their hashes are logged. gc marks them
     /// as before.
@@ -55,6 +56,10 @@ pub(super) struct PinnedContractStates {
     /// before.
     #[serde(default)]
     invalid_keys: usize,
+}
+
+fn completed_default() -> bool {
+    true
 }
 
 impl PinContractStates {
@@ -83,13 +88,22 @@ impl<S: Storage> Task<S> for PinContractStates {
     const ID: &'static str = "ledger_db/pin_contract_states";
     type State = PinnedContractStates;
 
+    fn completed(state: &Self::State) -> bool {
+        state.completed
+    }
+
     fn run<'a>(
         &'a self,
         storage: &'a S,
-        _previous: Option<&'a Entry<Self::State>>,
-        _cancel: &'a CancellationToken,
+        previous: Option<&'a Entry<Self::State>>,
+        cancel: &'a CancellationToken,
     ) -> BoxFuture<'a, Self::State> {
         Box::pin(async move {
+            // Nodes pinned by any cancelled runs before this one.
+            let pinned_before = previous
+                .filter(|previous| !previous.state.completed)
+                .map_or(0, |previous| previous.state.nodes);
+
             let started = Instant::now();
             let (state_keys, zswap_state_keys) = storage.get_contract_state_keys().await?;
             let (roots, invalid_keys) = Self::roots(&state_keys, &zswap_state_keys);
@@ -102,15 +116,20 @@ impl<S: Storage> Task<S> for PinContractStates {
                 "pinning the contract state history, read the stored keys"
             );
             let started = Instant::now();
-            let pinned = block_in_place(|| LedgerState::pin(roots));
+            let pinned = block_in_place(|| LedgerState::pin(roots, || cancel.is_cancelled()));
             if !pinned.failed_roots.is_empty() {
                 warn!(
                     failed_roots:? = pinned.failed_roots;
                     "contract state roots reaching nodes missing from the ledger DB left unpinned"
                 );
             }
-            let (nodes, failed_roots) = (pinned.nodes, pinned.failed_roots.len());
+            let (completed, nodes, failed_roots) = (
+                !pinned.cancelled,
+                pinned_before + pinned.nodes,
+                pinned.failed_roots.len(),
+            );
             info!(
+                completed,
                 roots = roots_count,
                 nodes,
                 failed_roots,
@@ -120,6 +139,7 @@ impl<S: Storage> Task<S> for PinContractStates {
             );
 
             Ok(PinnedContractStates {
+                completed,
                 nodes,
                 failed_roots,
                 invalid_keys,
@@ -198,7 +218,7 @@ impl<S: Sync> Task<S> for Build {
 
 #[cfg(test)]
 mod tests {
-    use super::{Build, PinContractStates};
+    use super::{Build, PinContractStates, PinnedContractStates};
     use indexer_common::{
         error::BoxError,
         startup::{CancellationToken, Entry, Task},
@@ -260,6 +280,19 @@ mod tests {
         );
 
         Ok(())
+    }
+
+    // An entry journaled before the backfill could be cancelled reads as completed, so it does not
+    // run again.
+    #[test]
+    fn pinned_contract_states_read_as_completed_without_the_flag() {
+        let state = serde_json::from_value::<PinnedContractStates>(serde_json::json!({
+            "nodes": 7,
+            "failed_roots": 0,
+            "invalid_keys": 0,
+        }))
+        .expect("entry reads");
+        assert!(state.completed);
     }
 
     /// Stored keys that cannot be read are counted, and leave the readable ones' roots to be
