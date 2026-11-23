@@ -34,6 +34,7 @@ use crate::domain::ledger;
 use indoc::indoc;
 #[cfg(feature = "cloud")]
 use itertools::{EitherOrBoth, Itertools};
+use log::{info, warn};
 use midnight_serialize_v1::Deserializable;
 use midnight_storage_core_v1::{DefaultHasher, arena::ArenaHash, backend::OnDiskObject};
 #[cfg(feature = "standalone")]
@@ -41,6 +42,7 @@ use sqlx::QueryBuilder;
 use std::{
     collections::{HashMap, HashSet},
     sync::{LazyLock, Mutex, OnceLock},
+    time::{Duration, Instant},
 };
 use tokio::{runtime::Handle, task::block_in_place};
 
@@ -52,6 +54,43 @@ static PINNED: LazyLock<Mutex<PinnedNodes>> = LazyLock::new(Default::default);
 static PINNER: OnceLock<LedgerDb> = OnceLock::new();
 /// The roots to pin, the input; see [queue].
 static QUEUE: LazyLock<Mutex<Queue>> = LazyLock::new(Default::default);
+
+/// How often a long walk or write of pins logs its progress. One that takes less logs nothing.
+const PROGRESS_INTERVAL: Duration = Duration::from_secs(30);
+
+/// When a walk or write of pins logs: progress every [PROGRESS_INTERVAL], and its end only if it
+/// took that long, so the short ones that pin a block's roots log nothing.
+struct Progress {
+    started: Instant,
+    logged: Instant,
+}
+
+impl Progress {
+    fn new() -> Self {
+        let now = Instant::now();
+        Self {
+            started: now,
+            logged: now,
+        }
+    }
+
+    /// Logs progress with `log`, given the time elapsed, once every [PROGRESS_INTERVAL].
+    fn log(&mut self, log: impl FnOnce(Duration)) {
+        if self.logged.elapsed() >= PROGRESS_INTERVAL {
+            self.logged = Instant::now();
+            log(self.started.elapsed());
+        }
+    }
+
+    /// Completes, logging the end with `log`, given the time elapsed, if it took at least
+    /// [PROGRESS_INTERVAL].
+    fn complete(self, log: impl FnOnce(Duration)) {
+        let elapsed = self.started.elapsed();
+        if elapsed >= PROGRESS_INTERVAL {
+            log(elapsed);
+        }
+    }
+}
 
 /// Set the handle pinning writes through, and how many nodes [PINNED] holds at most; see
 /// [crate::infra::ledger_db::init].
@@ -152,9 +191,11 @@ pub(crate) fn queue(root: ArenaHash<DefaultHasher>) {
 /// the last call. A pinned node's descendants are pinned already, so the walk stops there; a root
 /// reaching a missing node is left unpinned, with all it reaches.
 ///
+/// Pins in batches, and no further batch once `cancelled` returns true.
+///
 /// Panics if the ledger DB is not initialized, rather than pinning nothing and reporting that as
 /// done.
-pub(crate) fn pin_queued() -> ledger::Pinned {
+pub(crate) fn pin_queued(cancelled: &dyn Fn() -> bool) -> ledger::Pinned {
     let Queue {
         roots,
         pinned_on_write,
@@ -164,7 +205,7 @@ pub(crate) fn pin_queued() -> ledger::Pinned {
     let mut pinned = PINNER
         .get()
         .expect("ledger DB initialized before pinning")
-        .pin_reachable(roots);
+        .pin_reachable(roots, cancelled);
     pinned.nodes += pinned_on_write;
     pinned.roots_pinned_on_write = roots_pinned_on_write;
     pinned.roots_walked = roots_walked;
@@ -358,6 +399,9 @@ const PIN_READ_SIZE: usize = BATCH_DELETE_SIZE;
 #[cfg(feature = "cloud")]
 const PIN_READ_SIZE: usize = BATCH_ROWS;
 
+// Roots pinned per transaction: an interrupted pin loses at most one batch.
+const PIN_BATCH_ROOTS: usize = 20_000;
+
 impl LedgerDb {
     /// Pins every node reachable from `roots` that is not pinned yet. A pinned node's descendants
     /// are pinned already, so the walk stops there.
@@ -366,11 +410,81 @@ impl LedgerDb {
     /// by nothing, and if it were unpinned, the sweep would cull it. A root reaching a missing node
     /// is therefore left unpinned, with all it reaches, and marked as before; the other roots are
     /// pinned regardless.
-    fn pin_reachable(&self, roots: HashSet<ArenaHash<DefaultHasher>>) -> ledger::Pinned {
-        if roots.is_empty() {
-            return ledger::Pinned::default();
+    ///
+    /// Pins the roots in batches of [PIN_BATCH_ROOTS], each committed with all it reaches, so an
+    /// interrupted pin keeps the batches committed and a rerun, stopping at pinned nodes, does
+    /// not walk them again. Once `cancelled` returns true, it pins no further batch.
+    fn pin_reachable(
+        &self,
+        roots: HashSet<ArenaHash<DefaultHasher>>,
+        cancelled: &dyn Fn() -> bool,
+    ) -> ledger::Pinned {
+        let total = roots.len();
+        let mut roots = roots.into_iter();
+        let (mut progress, mut batches, mut processed) = (Progress::new(), 0, 0);
+
+        let mut pinned = ledger::Pinned::default();
+        loop {
+            let batch = roots.by_ref().take(PIN_BATCH_ROOTS).collect::<Vec<_>>();
+            if batch.is_empty() {
+                break;
+            }
+            if cancelled() {
+                warn!(
+                    roots_processed = processed,
+                    roots = total,
+                    nodes = pinned.nodes;
+                    "pinning in batches cancelled"
+                );
+                pinned.cancelled = true;
+                break;
+            }
+
+            let size = batch.len();
+            let batch_pinned = self.pin(batch, cancelled);
+            pinned.nodes += batch_pinned.nodes;
+            pinned.failed_roots.extend(batch_pinned.failed_roots);
+            if batch_pinned.cancelled {
+                pinned.cancelled = true;
+                break;
+            }
+            processed += size;
+
+            batches += 1;
+            progress.log(|elapsed| {
+                info!(
+                    batches,
+                    roots_processed = processed,
+                    roots = total,
+                    nodes = pinned.nodes,
+                    failed_roots = pinned.failed_roots.len(),
+                    elapsed:?;
+                    "pinning in batches"
+                )
+            });
         }
 
+        progress.complete(|elapsed| {
+            info!(
+                cancelled = pinned.cancelled,
+                roots_processed = processed,
+                roots = total,
+                nodes = pinned.nodes,
+                failed_roots = pinned.failed_roots.len(),
+                elapsed:?;
+                "pinned in batches"
+            )
+        });
+        pinned
+    }
+
+    /// Pins `roots` in one transaction, or root by root if a node is missing below one, so it holds
+    /// back only its own root, then no further root once `cancelled` returns true.
+    fn pin(
+        &self,
+        roots: Vec<ArenaHash<DefaultHasher>>,
+        cancelled: &dyn Fn() -> bool,
+    ) -> ledger::Pinned {
         if let Some(nodes) = self.pin_all_reachable(&roots) {
             return ledger::Pinned {
                 nodes,
@@ -378,16 +492,43 @@ impl LedgerDb {
             };
         }
 
-        // A node is missing below some root: pin root by root, so it holds back only its own.
-        roots
-            .into_iter()
-            .fold(ledger::Pinned::default(), |mut pinned, root| {
+        let total = roots.len();
+        warn!(roots = total; "a node the roots reach is missing, pinning root by root");
+        let mut progress = Progress::new();
+        let pinned = roots.into_iter().enumerate().fold(
+            ledger::Pinned::default(),
+            |mut pinned, (index, root)| {
+                if pinned.cancelled || cancelled() {
+                    pinned.cancelled = true;
+                    return pinned;
+                }
                 match self.pin_all_reachable([&root]) {
                     Some(nodes) => pinned.nodes += nodes,
                     None => pinned.failed_roots.push(root),
                 }
+                progress.log(|elapsed| {
+                    info!(
+                        roots_processed = index + 1,
+                        roots = total,
+                        nodes = pinned.nodes,
+                        failed_roots = pinned.failed_roots.len(),
+                        elapsed:?;
+                        "pinning root by root"
+                    )
+                });
                 pinned
-            })
+            },
+        );
+        progress.complete(|elapsed| {
+            info!(
+                roots = total,
+                nodes = pinned.nodes,
+                failed_roots = pinned.failed_roots.len(),
+                elapsed:?;
+                "pinned root by root"
+            )
+        });
+        pinned
     }
 
     /// Pins every node reachable from `roots` that is not pinned yet, and the root rows of `roots`,
@@ -406,6 +547,7 @@ impl LedgerDb {
         let mut seen = roots.clone().into_iter().cloned().collect::<HashSet<_>>();
         let mut frontier = seen.iter().cloned().collect::<Vec<_>>();
         let mut to_pin = vec![];
+        let (mut progress, mut batches) = (Progress::new(), 0);
 
         while !frontier.is_empty() {
             let batch = frontier.split_off(frontier.len().saturating_sub(PIN_READ_SIZE));
@@ -434,7 +576,27 @@ impl LedgerDb {
                 to_pin.push(key);
             }
             add_pinned(found_pinned);
+
+            // Log the walk's progress if it is long.
+            batches += 1;
+            progress.log(|elapsed| {
+                info!(
+                    batches,
+                    nodes = to_pin.len(),
+                    frontier = frontier.len(),
+                    elapsed:?;
+                    "walking the ledger DB for nodes to pin"
+                )
+            });
         }
+        progress.complete(|elapsed| {
+            info!(
+                batches,
+                nodes = to_pin.len(),
+                elapsed:?;
+                "walked the ledger DB for nodes to pin"
+            )
+        });
 
         // Flag every root's row, as a root's node may be pinned already through another root.
         let roots = roots
@@ -557,6 +719,8 @@ async fn pin_keys(pool: &sqlx::SqlitePool, roots: &[Vec<u8>], nodes: &[Vec<u8>])
         .await
         .unwrap_or_panic("begin transaction for pinning");
 
+    let chunks = roots.len().div_ceil(BATCH_DELETE_SIZE) + nodes.len().div_ceil(BATCH_DELETE_SIZE);
+    let (mut progress, mut written) = (Progress::new(), 0);
     for (update, keys) in updates {
         for chunk in keys.chunks(BATCH_DELETE_SIZE) {
             let mut query = QueryBuilder::new(update);
@@ -571,12 +735,29 @@ async fn pin_keys(pool: &sqlx::SqlitePool, roots: &[Vec<u8>], nodes: &[Vec<u8>])
                 .execute(&mut *tx)
                 .await
                 .unwrap_or_panic("cannot pin keys");
+
+            written += 1;
+            progress.log(|elapsed| {
+                info!(chunks_written = written, chunks, elapsed:?; "writing pinned flags")
+            });
         }
     }
 
+    // Commit, logging the commit's time and the write's if the write is long.
+    let started = Instant::now();
     tx.commit()
         .await
         .unwrap_or_panic("commit transaction for pinning");
+    let commit = started.elapsed();
+    progress.complete(|elapsed| {
+        info!(
+            roots = roots.len(),
+            nodes = nodes.len(),
+            commit:?,
+            elapsed:?;
+            "wrote pinned flags"
+        )
+    });
 }
 
 // Sets `pinned` on the root rows of `roots` not flagged yet, so a root pinned before is not written
@@ -599,12 +780,33 @@ async fn pin_keys(pool: &sqlx::PgPool, roots: &[Vec<u8>], nodes: &[Vec<u8>]) {
                 .begin()
                 .await
                 .unwrap_or_panic("begin transaction for pinning");
-            for (roots, nodes) in chunks {
+            let mut progress = Progress::new();
+            for (written, (roots, nodes)) in chunks.iter().enumerate() {
                 pin_chunk(&mut *tx, roots, nodes).await;
+                progress.log(|elapsed| {
+                    info!(
+                        chunks_written = written + 1,
+                        chunks = chunks.len(),
+                        elapsed:?;
+                        "writing pinned flags"
+                    )
+                });
             }
+            // Commit, logging the commit's time and the write's if the write is long.
+            let started = Instant::now();
             tx.commit()
                 .await
                 .unwrap_or_panic("commit transaction for pinning");
+            let commit = started.elapsed();
+            progress.complete(|elapsed| {
+                info!(
+                    roots = roots.len(),
+                    nodes = nodes.len(),
+                    commit:?,
+                    elapsed:?;
+                    "wrote pinned flags"
+                )
+            });
         }
     }
 }
@@ -632,7 +834,9 @@ async fn pin_chunk<'e>(executor: impl sqlx::PgExecutor<'e>, roots: &[Vec<u8>], n
 
 #[cfg(test)]
 mod tests {
-    use super::{LedgerDb, PIN_READ_SIZE, PINNED, Queue, queue, reset_pinned, take_queued};
+    use super::{
+        LedgerDb, PIN_BATCH_ROOTS, PIN_READ_SIZE, PINNED, Queue, queue, reset_pinned, take_queued,
+    };
     use crate::infra::ledger_db::v1_1::persist_nodes;
     use midnight_storage_core_v1::{
         Storage, arena::Sp, db::DB, db::Update::DeleteNode, storable::SMALL_OBJECT_LIMIT,
@@ -654,20 +858,41 @@ mod tests {
             root.persist();
             root
         };
-        let roots = [rooted(1), rooted(2), rooted(3)];
+        let roots = [rooted(1), rooted(2), rooted(3), rooted(4)];
         storage.with_backend(|backend| backend.flush_all_changes_to_db());
-        let [contract, ledger, garbage] = roots.map(|root| {
+        let [contract, ledger, garbage, first] = roots.map(|root| {
             let leaf = root.as_ref().as_ref().expect("leaf").hash();
             (root.hash(), leaf)
         });
 
-        // A root reaching a missing node is left unpinned, without holding back the others.
+        // The garbage's leaf is missing.
         db.batch_update([(garbage.1.clone(), DeleteNode)].into_iter());
-        let pinned = db.pin_reachable(HashSet::from([garbage.0.clone(), contract.0.clone()]));
+
+        // Cancelled while pinning root by root, it keeps the roots pinned so far and leaves the rest.
+        let calls = std::cell::Cell::new(0);
+        let cancelled = || {
+            calls.set(calls.get() + 1);
+            calls.get() > 1
+        };
+        let roots = vec![first.0.clone(), garbage.0.clone(), contract.0.clone()];
+        let pinned = db.pin(roots, &cancelled);
+        assert!(pinned.cancelled);
+        assert_eq!(pinned.nodes, 2, "the first root and its leaf");
+        assert!(
+            pinned.failed_roots.is_empty(),
+            "the missing node not reached"
+        );
+
+        // A root reaching a missing node is left unpinned, without holding back the others.
+        let pinned = db.pin_reachable(
+            HashSet::from([garbage.0.clone(), contract.0.clone()]),
+            &|| false,
+        );
         assert_eq!(pinned.nodes, 2);
         assert_eq!(pinned.failed_roots, vec![garbage.0.clone()]);
         assert_eq!(
-            db.pin_reachable(HashSet::from([contract.0.clone()])).nodes,
+            db.pin_reachable(HashSet::from([contract.0.clone()]), &|| false)
+                .nodes,
             0,
             "pinned already"
         );
@@ -685,7 +910,8 @@ mod tests {
         // A root whose node was pinned through another root is flagged as it is pinned itself.
         db.set_root_count(contract.1.clone(), 1);
         assert_eq!(
-            db.pin_reachable(HashSet::from([contract.1.clone()])).nodes,
+            db.pin_reachable(HashSet::from([contract.1.clone()]), &|| false)
+                .nodes,
             0
         );
 
@@ -727,7 +953,7 @@ mod tests {
             .map(|(key, _)| key)
             .collect::<Vec<_>>();
 
-        let pinned = db.pin_reachable(roots.iter().cloned().collect());
+        let pinned = db.pin_reachable(roots.iter().cloned().collect(), &|| false);
         assert_eq!(pinned.nodes, count);
         assert!(pinned.failed_roots.is_empty());
         assert!(db.unpinned_roots().is_empty(), "every root row flagged");
@@ -740,7 +966,8 @@ mod tests {
         first.persist();
         storage.with_backend(|backend| backend.flush_all_changes_to_db());
         assert_eq!(
-            db.pin_reachable(HashSet::from([first.hash()])).nodes,
+            db.pin_reachable(HashSet::from([first.hash()]), &|| false)
+                .nodes,
             2,
             "the root and its leaf"
         );
@@ -750,11 +977,40 @@ mod tests {
         second.persist();
         storage.with_backend(|backend| backend.flush_all_changes_to_db());
         assert_eq!(
-            db.pin_reachable(HashSet::from([second.hash()])).nodes,
+            db.pin_reachable(HashSet::from([second.hash()]), &|| false)
+                .nodes,
             1,
             "only the new root"
         );
         assert!(db.unpinned_roots().is_empty(), "the new root's row flagged");
+    }
+
+    // Pinning commits each batch of roots with all it reaches: cancelled after the first, as on
+    // SIGTERM, it keeps that batch committed, and pinning the roots again resumes after it. Shared
+    // by both suites.
+    fn assert_pinning_resumes_after_committed_batches(
+        storage: &Storage<LedgerDb>,
+        db: &mut LedgerDb,
+    ) {
+        let roots = persist_nodes(storage, db, PIN_BATCH_ROOTS + 1)
+            .into_iter()
+            .map(|(key, _)| key)
+            .collect::<HashSet<_>>();
+
+        let batches = std::cell::Cell::new(0);
+        let cancelled = || {
+            batches.set(batches.get() + 1);
+            batches.get() > 1
+        };
+        let pinned = db.pin_reachable(roots.clone(), &cancelled);
+        assert!(pinned.cancelled);
+        assert_eq!(pinned.nodes, PIN_BATCH_ROOTS, "the first batch");
+        assert_eq!(db.unpinned_roots().len(), 1, "the root of the next batch");
+
+        let pinned = db.pin_reachable(roots, &|| false);
+        assert!(!pinned.cancelled);
+        assert_eq!(pinned.nodes, 1, "only the root left");
+        assert!(db.unpinned_roots().is_empty());
     }
 
     // Pinning between bounded gc passes: storage-core keeps a cycle's mark set across passes and
@@ -792,13 +1048,18 @@ mod tests {
 
         // The contract is pinned, and a root is written and pinned, after the cycle started.
         assert_eq!(
-            db.pin_reachable(HashSet::from([contract.0.clone()])).nodes,
+            db.pin_reachable(HashSet::from([contract.0.clone()]), &|| false)
+                .nodes,
             2
         );
         let late = rooted(4);
         storage.with_backend(|backend| backend.flush_all_changes_to_db());
         let late = (late.hash(), late.as_ref().as_ref().expect("leaf").hash());
-        assert_eq!(db.pin_reachable(HashSet::from([late.0.clone()])).nodes, 2);
+        assert_eq!(
+            db.pin_reachable(HashSet::from([late.0.clone()]), &|| false)
+                .nodes,
+            2
+        );
 
         // The cycle completes, culling only the garbage, and a new one culls nothing.
         assert_eq!(gc_pass(Duration::MAX), 2);
@@ -909,7 +1170,7 @@ mod tests {
             (&roots, pinned_on_write),
             (&HashSet::from([third.hash()]), 0)
         );
-        assert_eq!(db.pin_reachable(roots).nodes, 2);
+        assert_eq!(db.pin_reachable(roots, &|| false).nodes, 2);
         assert_eq!(db.pinned(&older.hash()), Some(true));
 
         // A new root above a missing leaf stays queued, and the walk leaves it unpinned.
@@ -923,7 +1184,7 @@ mod tests {
         flush();
         assert_eq!(db.pinned(&fourth.hash()), Some(false));
         let roots = take_queued().roots;
-        let pinned = db.pin_reachable(roots);
+        let pinned = db.pin_reachable(roots, &|| false);
         assert_eq!(pinned.nodes, 0);
         assert_eq!(pinned.failed_roots, vec![fourth.hash()]);
 
@@ -937,7 +1198,7 @@ mod tests {
         flush();
         assert_eq!(db.pinned(&fifth.hash()), Some(false), "not in PINNED");
         let roots = take_queued().roots;
-        assert_eq!(db.pin_reachable(roots).nodes, 1, "only the root");
+        assert_eq!(db.pin_reachable(roots, &|| false).nodes, 1, "only the root");
         let mut sixth = storage.alloc(Some(
             storage.alloc(Some(storage.alloc(Some(storage.alloc(Some(leaf.clone())))))),
         ));
@@ -974,7 +1235,7 @@ mod tests {
         let roots = take_queued().roots;
         assert_eq!(roots, HashSet::from([top.hash()]));
         assert_eq!(
-            db.pin_reachable(roots).nodes,
+            db.pin_reachable(roots, &|| false).nodes,
             3,
             "both levels and the older leaf"
         );
@@ -1208,7 +1469,7 @@ mod tests {
         use super::{
             assert_bounded_gc_keeps_nodes_pinned_between_passes, assert_gc_keeps_pinned_nodes,
             assert_pinning_crosses_batches, assert_pinning_on_write,
-            assert_pinning_on_write_batches,
+            assert_pinning_on_write_batches, assert_pinning_resumes_after_committed_batches,
         };
         use crate::infra::ledger_db::v1_1::{LedgerDb, sqlite_tests::setup_pool};
         use midnight_storage_core_v1::Storage;
@@ -1230,6 +1491,16 @@ mod tests {
             let storage = Storage::new(16, LedgerDb::new(pool.clone()));
             let mut db = LedgerDb::new(pool);
             assert_pinning_crosses_batches(&storage, &mut db);
+            Ok(())
+        }
+
+        // See `assert_pinning_resumes_after_committed_batches`.
+        #[tokio::test(flavor = "multi_thread")]
+        async fn pinning_resumes_after_committed_batches() -> Result<(), Box<dyn StdError>> {
+            let pool = setup_pool().await?;
+            let storage = Storage::new(16, LedgerDb::new(pool.clone()));
+            let mut db = LedgerDb::new(pool);
+            assert_pinning_resumes_after_committed_batches(&storage, &mut db);
             Ok(())
         }
 
@@ -1270,7 +1541,7 @@ mod tests {
         use super::{
             assert_bounded_gc_keeps_nodes_pinned_between_passes, assert_gc_keeps_pinned_nodes,
             assert_pinning_crosses_batches, assert_pinning_on_write,
-            assert_pinning_on_write_batches,
+            assert_pinning_on_write_batches, assert_pinning_resumes_after_committed_batches,
         };
         use crate::infra::ledger_db::v1_1::{LedgerDb, postgres_tests::setup_pool};
         use midnight_storage_core_v1::Storage;
@@ -1292,6 +1563,16 @@ mod tests {
             let storage = Storage::new(16, LedgerDb::new(pool.clone()));
             let mut db = LedgerDb::new(pool);
             assert_pinning_crosses_batches(&storage, &mut db);
+            Ok(())
+        }
+
+        // See `assert_pinning_resumes_after_committed_batches`.
+        #[tokio::test(flavor = "multi_thread")]
+        async fn pinning_resumes_after_committed_batches() -> Result<(), Box<dyn StdError>> {
+            let (_container, pool) = setup_pool().await?;
+            let storage = Storage::new(16, LedgerDb::new(pool.clone()));
+            let mut db = LedgerDb::new(pool);
+            assert_pinning_resumes_after_committed_batches(&storage, &mut db);
             Ok(())
         }
 
