@@ -75,7 +75,7 @@ TARGET_ENV=undeployed bun run scan
 The scanner uses this information as configuration input:
 
 - Environment variables for target environment (`TARGET_ENV`, defaults to `undeployed`)
-- **INDEXER_HOST** (optional) — Override the indexer hostname (and optional port), without a scheme or path. Both HTTP harvesting and WebSocket scanning use this host; `TARGET_ENV` still selects the output directory. Useful for private endpoints or a specific deployment instance.
+- **INDEXER_HOST** (optional) — Override the deployed indexer hostname (and optional port), without a scheme or path. Both HTTPS harvesting and secure WebSocket scanning use this host; `TARGET_ENV` still selects the output directory. Useful for private endpoints or a specific deployment instance. The `undeployed` target keeps its built-in loopback endpoint.
 - **START_BLOCK_HEIGHT** (optional) — Start scanning from this block height. Must be less than the latest block height. When set, overrides resume behavior and the blocks file is created/overwritten (not appended). Stats at end are still merged with any existing stats for that environment.
 - WebSocket URLs for different networks (automatically extracted from the target environment)
 - GraphQL subscription queries (available in a separate GraphQL file)

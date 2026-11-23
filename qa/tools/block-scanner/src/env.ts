@@ -54,10 +54,10 @@ const indexerHost =
 
 export const INDEXER_WS_URL: string =
   TARGET_ENV === "undeployed"
-    ? `ws://${indexerHost}/api/${INDEXER_API_VERSION}/graphql/ws`
+    ? `ws://${INDEXER_BASE_URL[TARGET_ENV]}/api/${INDEXER_API_VERSION}/graphql/ws`
     : `wss://${indexerHost}/api/${INDEXER_API_VERSION}/graphql/ws`;
 
 export const INDEXER_HTTP_URL: string =
   TARGET_ENV === "undeployed"
-    ? `http://${indexerHost}`
+    ? `http://${INDEXER_BASE_URL[TARGET_ENV]}`
     : `https://${indexerHost}`;
