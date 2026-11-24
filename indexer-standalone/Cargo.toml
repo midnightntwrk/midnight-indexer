@@ -25,7 +25,7 @@ log             = { workspace = true, features = [ "kv" ] }
 secrecy         = { workspace = true }
 serde           = { workspace = true, features = [ "derive" ] }
 spo-indexer     = { path = "../spo-indexer", optional = true }
-tokio           = { workspace = true, features = [ "macros", "rt-multi-thread", "signal" ] }
+tokio           = { workspace = true, features = [ "macros", "rt-multi-thread", "signal", "time" ] }
 wallet-indexer  = { path = "../wallet-indexer", optional = true }
 
 [features]

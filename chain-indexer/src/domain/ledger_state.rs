@@ -203,8 +203,11 @@ impl LedgerState {
     }
 
     /// See [`indexer_common::domain::ledger::LedgerState::pin`].
-    pub(crate) fn pin(roots: impl IntoIterator<Item = ArenaHash>) -> Pinned {
-        indexer_common::domain::ledger::LedgerState::pin(roots)
+    pub(crate) fn pin(
+        roots: impl IntoIterator<Item = ArenaHash>,
+        cancelled: impl Fn() -> bool,
+    ) -> Pinned {
+        indexer_common::domain::ledger::LedgerState::pin(roots, cancelled)
     }
 
     /// Apply the given node transactions to this ledger state and return domain transactions.

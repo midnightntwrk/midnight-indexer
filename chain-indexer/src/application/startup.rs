@@ -21,7 +21,7 @@ use indexer_common::{
         ledger::{ArenaHash, Error},
     },
     error::BoxError,
-    startup::{BoxFuture, Entry, Task, Value},
+    startup::{BoxFuture, CancellationToken, Entry, Task, Value},
     version::git_sha,
 };
 use itertools::Itertools;
@@ -34,10 +34,8 @@ use tokio::task::block_in_place;
 /// everything they reach, so gc's sweep skips them and gc no longer marks from them. Contract
 /// states written since are pinned as their block is indexed; see `LedgerState::pin_roots`.
 ///
-/// Safe to run again: the walk stops at pinned nodes and root rows already flagged are not written,
-/// so a rerun after a committed pin pins nothing. The roots are pinned in one walk, written in one
-/// statement or transaction, so an interrupted pin commits nothing and a rerun starts over; only
-/// when a node is missing are roots pinned one by one, and a rerun then skips those committed.
+/// Safe to run again: the walk stops at pinned nodes, so a rerun pins only what is left. Cancelled,
+/// as on SIGTERM, it journals its progress, and the next start resumes it.
 ///
 /// A stored key that cannot be read is logged and left unpinned, the others pinned all the same,
 /// rather than failing every start: a rerun would not read it either.
@@ -45,7 +43,10 @@ pub(super) struct PinContractStates;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(super) struct PinnedContractStates {
-    /// Nodes pinned.
+    /// Whether all roots were processed; if not, it was cancelled and the next start resumes it.
+    #[serde(default = "completed_default")]
+    completed: bool,
+    /// Nodes pinned, counted over the runs since the last that completed.
     nodes: usize,
     /// Roots left unpinned, as a node they reach is missing; their hashes are logged. gc marks them
     /// as before.
@@ -55,6 +56,10 @@ pub(super) struct PinnedContractStates {
     /// before.
     #[serde(default)]
     invalid_keys: usize,
+}
+
+fn completed_default() -> bool {
+    true
 }
 
 impl PinContractStates {
@@ -83,27 +88,48 @@ impl<S: Storage> Task<S> for PinContractStates {
     const ID: &'static str = "ledger_db/pin_contract_states";
     type State = PinnedContractStates;
 
+    fn completed(state: &Self::State) -> bool {
+        state.completed
+    }
+
     fn run<'a>(
         &'a self,
         storage: &'a S,
-        _previous: Option<&'a Entry<Self::State>>,
+        previous: Option<&'a Entry<Self::State>>,
+        cancel: &'a CancellationToken,
     ) -> BoxFuture<'a, Self::State> {
         Box::pin(async move {
+            // Nodes pinned by any cancelled runs before this one.
+            let pinned_before = previous
+                .filter(|previous| !previous.state.completed)
+                .map_or(0, |previous| previous.state.nodes);
+
+            let started = Instant::now();
             let (state_keys, zswap_state_keys) = storage.get_contract_state_keys().await?;
             let (roots, invalid_keys) = Self::roots(&state_keys, &zswap_state_keys);
 
             let roots_count = roots.len();
-            info!(roots = roots_count; "pinning the contract state history");
+            info!(
+                roots = roots_count,
+                invalid_keys,
+                elapsed:? = started.elapsed();
+                "pinning the contract state history, read the stored keys"
+            );
             let started = Instant::now();
-            let pinned = block_in_place(|| LedgerState::pin(roots));
+            let pinned = block_in_place(|| LedgerState::pin(roots, || cancel.is_cancelled()));
             if !pinned.failed_roots.is_empty() {
                 warn!(
                     failed_roots:? = pinned.failed_roots;
                     "contract state roots reaching nodes missing from the ledger DB left unpinned"
                 );
             }
-            let (nodes, failed_roots) = (pinned.nodes, pinned.failed_roots.len());
+            let (completed, nodes, failed_roots) = (
+                !pinned.cancelled,
+                pinned_before + pinned.nodes,
+                pinned.failed_roots.len(),
+            );
             info!(
+                completed,
                 roots = roots_count,
                 nodes,
                 failed_roots,
@@ -113,6 +139,7 @@ impl<S: Storage> Task<S> for PinContractStates {
             );
 
             Ok(PinnedContractStates {
+                completed,
                 nodes,
                 failed_roots,
                 invalid_keys,
@@ -183,17 +210,46 @@ impl<S: Sync> Task<S> for Build {
         &'a self,
         _context: &'a S,
         _previous: Option<&'a Entry<Self::State>>,
+        _cancel: &'a CancellationToken,
     ) -> BoxFuture<'a, Self::State> {
         Box::pin(async move { Ok(Some(self.clone())) })
     }
 }
 
+/// Fails if contract actions without contract state keys exist. Checking scans every contract
+/// action, so once passed it is journaled and not run again: such actions can only predate it.
+pub(super) struct EnsureContractStateKeys;
+
+impl<S: Storage> Task<S> for EnsureContractStateKeys {
+    const ID: &'static str = "contract_actions/state_keys";
+    type State = ();
+
+    fn run<'a>(
+        &'a self,
+        storage: &'a S,
+        _previous: Option<&'a Entry<Self::State>>,
+        _cancel: &'a CancellationToken,
+    ) -> BoxFuture<'a, Self::State> {
+        Box::pin(async move {
+            if storage.contract_actions_without_state_keys_exist().await? {
+                return Err("found contract actions with no contract state key; they were indexed \
+                     by a version that stored contract states as blobs, which cannot be converted. \
+                     Wipe both the indexer database and the ledger DB and re-index from genesis; see \
+                     docs/re-indexing.md"
+                    .into());
+            }
+
+            Ok(())
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Build, PinContractStates};
+    use super::{Build, PinContractStates, PinnedContractStates};
     use indexer_common::{
         error::BoxError,
-        startup::{Entry, Task},
+        startup::{CancellationToken, Entry, Task},
     };
 
     #[tokio::test]
@@ -208,47 +264,57 @@ mod tests {
         };
         assert!(pending(None).await?, "first start");
         assert!(
-            !pending(Some(Entry {
-                version: 1,
-                state: Some(Build::current(Some(7)))
-            }))
-            .await?,
+            !pending(Some(Entry::new(1, 1, Some(Build::current(Some(7)))))).await?,
             "same build restarted"
         );
         assert!(
-            pending(Some(Entry {
-                version: 1,
-                state: Some(Build {
+            pending(Some(Entry::new(
+                1,
+                1,
+                Some(Build {
                     version: "0.0.0".to_owned(),
                     ..Build::current(Some(7))
                 })
-            }))
+            )))
             .await?,
             "different version"
         );
         assert!(
-            pending(Some(Entry {
-                version: 1,
-                state: Some(Build {
+            pending(Some(Entry::new(
+                1,
+                1,
+                Some(Build {
                     git_sha: Some("0000000".to_owned()),
                     ..Build::current(Some(7))
                 })
-            }))
+            )))
             .await?,
             "same version from another commit"
         );
         assert!(
-            pending(Some(Entry {
-                version: 2,
-                state: None
-            }))
-            .await?,
+            pending(Some(Entry::new(1, 2, None))).await?,
             "an entry that does not read"
         );
 
-        assert_eq!(Task::<()>::run(&build, &(), None).await?, Some(build));
+        assert_eq!(
+            Task::<()>::run(&build, &(), None, &CancellationToken::new()).await?,
+            Some(build)
+        );
 
         Ok(())
+    }
+
+    // An entry journaled before the backfill could be cancelled reads as completed, so it does not
+    // run again.
+    #[test]
+    fn pinned_contract_states_read_as_completed_without_the_flag() {
+        let state = serde_json::from_value::<PinnedContractStates>(serde_json::json!({
+            "nodes": 7,
+            "failed_roots": 0,
+            "invalid_keys": 0,
+        }))
+        .expect("entry reads");
+        assert!(state.completed);
     }
 
     /// Stored keys that cannot be read are counted, and leave the readable ones' roots to be
@@ -284,7 +350,7 @@ mod tests {
 // same build adds nothing, and another build adds its own entry. SQLite only, needing no container.
 #[cfg(all(test, feature = "standalone"))]
 mod storage_tests {
-    use super::Build;
+    use super::{Build, EnsureContractStateKeys};
     use crate::infra::storage::Storage;
     use indexer_common::{
         error::BoxError,
@@ -292,7 +358,7 @@ mod storage_tests {
             migrations,
             pool::sqlite::{self, SqlitePool},
         },
-        startup::{Journal, run, sequential, task},
+        startup::{CancellationToken, Journal, Task, run, sequential, task},
     };
     use indoc::indoc;
 
@@ -306,8 +372,8 @@ mod storage_tests {
 
         let build = Build::current(Some(7));
         let plan = sequential([task(build.clone())]);
-        run(&storage, &storage, &plan).await?;
-        run(&storage, &storage, &plan).await?;
+        run(&storage, &storage, &plan, &CancellationToken::new()).await?;
+        run(&storage, &storage, &plan, &CancellationToken::new()).await?;
         let entry = storage.latest("indexer/build").await?.expect("journaled");
         assert_eq!(serde_json::from_value::<Build>(entry.state)?, build);
 
@@ -315,7 +381,13 @@ mod storage_tests {
             git_sha: Some("00000000".to_owned()),
             ..Build::current(Some(9))
         };
-        run(&storage, &storage, &sequential([task(other)])).await?;
+        run(
+            &storage,
+            &storage,
+            &sequential([task(other)]),
+            &CancellationToken::new(),
+        )
+        .await?;
         let entries =
             sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM journal WHERE id = 'indexer/build'")
                 .fetch_one(&*pool)
@@ -343,10 +415,81 @@ mod storage_tests {
         .await?;
 
         let build = Build::current(Some(7));
-        run(&storage, &storage, &sequential([task(build.clone())])).await?;
+        run(
+            &storage,
+            &storage,
+            &sequential([task(build.clone())]),
+            &CancellationToken::new(),
+        )
+        .await?;
         let entry = storage.latest("indexer/build").await?.expect("journaled");
         assert_eq!(entry.version, 1);
         assert_eq!(serde_json::from_value::<Build>(entry.state)?, build);
+
+        Ok(())
+    }
+
+    // The check fails, journaling nothing, while a contract action without a state key exists, and
+    // once passed is not run again.
+    #[tokio::test]
+    async fn contract_state_keys_are_checked_until_they_pass() -> Result<(), BoxError> {
+        const ID: &str = <EnsureContractStateKeys as Task<Storage>>::ID;
+
+        let dir = tempfile::tempdir()?;
+        let url = dir.path().join("indexer.sqlite").display().to_string();
+        let pool = SqlitePool::new(sqlite::Config::with_url(url)).await?;
+        migrations::sqlite::run(&pool).await?;
+        let storage = Storage::new(pool.clone());
+        let plan = sequential([task(EnsureContractStateKeys)]);
+
+        // Insert a contract action with the given contract state and zswap state key. One without,
+        // as a version storing contract states as blobs left it once migrated, is what the check
+        // refuses. It references no transaction, so foreign keys are off while inserting it.
+        let insert_action = async |state_key: Option<&[u8]>| -> Result<(), BoxError> {
+            let mut connection = pool.acquire().await?;
+            sqlx::query("PRAGMA foreign_keys = OFF")
+                .execute(&mut *connection)
+                .await?;
+            sqlx::query(indoc! {"
+                INSERT INTO contract_actions (
+                    transaction_id, variant, address, attributes, state_key, zswap_state_key
+                )
+                VALUES (1, 'Deploy', x'01', '{}', $1, $1)
+            "})
+            .bind(state_key)
+            .execute(&mut *connection)
+            .await?;
+            sqlx::query("PRAGMA foreign_keys = ON")
+                .execute(&mut *connection)
+                .await?;
+            Ok(())
+        };
+
+        // An action without keys fails the check, and nothing is journaled.
+        insert_action(None).await?;
+        let error = run(&storage, &storage, &plan, &CancellationToken::new())
+            .await
+            .expect_err("action without keys");
+        let reason = std::error::Error::source(&*error).map(ToString::to_string);
+        assert!(
+            reason.is_some_and(|reason| reason.contains("re-index")),
+            "{error:?}"
+        );
+        assert!(storage.latest(ID).await?.is_none());
+
+        // Only actions with keys pass the check, which is journaled.
+        sqlx::query("DELETE FROM contract_actions")
+            .execute(&*pool)
+            .await?;
+        insert_action(Some(&[0x02])).await?;
+        run(&storage, &storage, &plan, &CancellationToken::new()).await?;
+        let latest = storage.latest(ID).await?;
+        assert!(latest.is_some());
+
+        // Once journaled, the check is not run again, so a later start journals nothing more.
+        insert_action(Some(&[0x03])).await?;
+        run(&storage, &storage, &plan, &CancellationToken::new()).await?;
+        assert_eq!(storage.latest(ID).await?, latest, "not run again");
 
         Ok(())
     }

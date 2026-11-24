@@ -60,6 +60,8 @@ pub struct Pinned {
     pub roots_pinned_on_write: usize,
     /// Roots pinned, or left unpinned, by walking the ledger DB.
     pub roots_walked: usize,
+    /// Whether it was cancelled before pinning every root; see [LedgerState::pin].
+    pub cancelled: bool,
 }
 
 impl LedgerState {
@@ -67,21 +69,26 @@ impl LedgerState {
     /// skips it and gc no longer marks from those roots. Call once they are flushed, i.e. after
     /// [Self::persist]. Returns the nodes pinned and the roots left unpinned.
     pub fn pin_roots() -> Pinned {
-        Self::pin_queued()
+        Self::pin_queued(&|| false)
     }
 
     /// Pin the given already persisted roots, and everything they reach. Reads the ledger DB only,
     /// loading nothing into the arena. Returns the nodes pinned and the roots left unpinned.
+    ///
+    /// Pins in batches, each committed with all it reaches, and no further batch once `cancelled`
+    /// returns true, so pinning the same roots again later resumes after the batches committed.
     pub fn pin(
         roots: impl IntoIterator<Item = ArenaHash<<v1_1::LedgerDb as DB>::Hasher>>,
+        cancelled: impl Fn() -> bool,
     ) -> Pinned {
         roots.into_iter().for_each(|mut root| root.pin());
-        Self::pin_queued()
+        Self::pin_queued(&cancelled)
     }
 
-    /// Pin the roots queued and not pinned as their nodes were flushed.
-    fn pin_queued() -> Pinned {
-        pinning::pin_queued()
+    /// Pin the roots queued and not pinned as their nodes were flushed, no further batch of them
+    /// once `cancelled` returns true.
+    fn pin_queued(cancelled: &dyn Fn() -> bool) -> Pinned {
+        pinning::pin_queued(cancelled)
     }
 }
 
@@ -261,7 +268,7 @@ mod tests {
             Some(false),
             "contract zswap state stored unpinned"
         );
-        LedgerState::pin([contract_root.clone()]);
+        LedgerState::pin([contract_root.clone()], || false);
         assert_eq!(pinned(&contract_root), Some(true), "contract state pinned");
         assert_eq!(
             pinned(&ledger_state_root),
@@ -270,11 +277,11 @@ mod tests {
         );
 
         // Pinning again finds it pinned.
-        LedgerState::pin([contract_root.clone()]);
+        LedgerState::pin([contract_root.clone()], || false);
         assert_eq!(pinned(&contract_root), Some(true));
 
         // A contract zswap state pins by its key the same way.
-        let pinned_zswap = LedgerState::pin([zswap_root.clone()]);
+        let pinned_zswap = LedgerState::pin([zswap_root.clone()], || false);
         assert!(pinned_zswap.failed_roots.is_empty());
         assert_eq!(
             pinned(&zswap_root),
@@ -353,7 +360,7 @@ mod tests {
                 Some(false),
                 "{ledger_version}: contract zswap state stored unpinned"
             );
-            let pinned_zswap = LedgerState::pin([zswap_root.clone()]);
+            let pinned_zswap = LedgerState::pin([zswap_root.clone()], || false);
             assert!(
                 pinned_zswap.failed_roots.is_empty(),
                 "{ledger_version}: walked to the end"

@@ -32,7 +32,7 @@ const APPEND: &str = indoc! {"
     VALUES ($1, $2, $3, $4, $5)
 "};
 const LATEST: &str = indoc! {"
-    SELECT version, state
+    SELECT seq, version, state
     FROM journal
     WHERE id = $1
     ORDER BY seq DESC
@@ -41,13 +41,14 @@ const LATEST: &str = indoc! {"
 
 impl Journal for Pool {
     async fn latest(&self, id: &str) -> Result<Option<Entry<Value>>, BoxError> {
-        let row = sqlx::query_as::<_, (i64, Json<Value>)>(LATEST)
+        let row = sqlx::query_as::<_, (i64, i64, Json<Value>)>(LATEST)
             .bind(id)
             .fetch_optional(&**self)
             .await?;
 
-        row.map(|(version, Json(state))| {
+        row.map(|(seq, version, Json(state))| {
             Ok(Entry {
+                seq: u64::try_from(seq)?,
                 version: u32::try_from(version)?,
                 state,
             })
@@ -58,14 +59,15 @@ impl Journal for Pool {
     async fn append(
         &self,
         id: &str,
-        entry: Entry<Value>,
+        version: u32,
+        state: Value,
         started_at: SystemTime,
         ended_at: SystemTime,
     ) -> Result<(), BoxError> {
         sqlx::query(APPEND)
             .bind(id)
-            .bind(i64::from(entry.version))
-            .bind(Json(entry.state))
+            .bind(i64::from(version))
+            .bind(Json(state))
             .bind(unix_millis(started_at))
             .bind(unix_millis(ended_at))
             .execute(&**self)
@@ -83,30 +85,27 @@ async fn assert_latest_entry_per_task(pool: &Pool) -> Result<(), BoxError> {
     assert_eq!(pool.latest("test/a").await?, None);
 
     let now = SystemTime::now();
-    let entry = |version, state| Entry { version, state };
-    pool.append("test/a", entry(1, json!({ "cursor": 1 })), now, now)
+    pool.append("test/a", 1, json!({ "cursor": 1 }), now, now)
         .await?;
-    pool.append("test/b", entry(1, json!(null)), now, now)
-        .await?;
-    pool.append("test/a", entry(2, json!({ "cursor": 2 })), now, now)
+    pool.append("test/b", 1, json!(null), now, now).await?;
+    pool.append("test/a", 2, json!({ "cursor": 2 }), now, now)
         .await?;
 
+    // The latest of each task, with sequence numbers in the order of appends.
     assert_eq!(
         pool.latest("test/a").await?,
-        Some(entry(2, json!({ "cursor": 2 })))
+        Some(Entry::new(3, 2, json!({ "cursor": 2 })))
     );
-    assert_eq!(pool.latest("test/b").await?, Some(entry(1, json!(null))));
+    assert_eq!(
+        pool.latest("test/b").await?,
+        Some(Entry::new(2, 1, json!(null)))
+    );
 
     // Times are stored as given, in Unix milliseconds.
     let (started_at, ended_at) = (1_000, 2_500);
     let at = |millis| SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(millis);
-    pool.append(
-        "test/c",
-        entry(1, json!(null)),
-        at(started_at),
-        at(ended_at),
-    )
-    .await?;
+    pool.append("test/c", 1, json!(null), at(started_at), at(ended_at))
+        .await?;
     let times = sqlx::query_as::<_, (i64, i64)>(
         "SELECT started_at, ended_at FROM journal WHERE id = 'test/c'",
     )
