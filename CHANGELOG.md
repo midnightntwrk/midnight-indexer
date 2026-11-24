@@ -4,7 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [4.4.200-rc.1] - 2026-11-12
+## [4.4.200-rc.1] - 2026-11-24
+
+### 🚀 Features
+
+- *(chain-indexer)* Validate ledger state against the node's StateKey (#1724)
+- *(indexer-common)* Use jemalloc as the global allocator on Linux with allocator metrics and opt-in heap profiling (#1745)
+- *(chain-indexer)* Record indexer build in a startup journal (#1796)
 
 ### 🐛 Bug Fixes
 
@@ -14,11 +20,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - *(indexer-api)* Avoid runtime starvation during arena loads (#1687)
 - *(indexer-api)* Accept deflate-only WebSocket offers (#1751)
 - *(indexer-api)* Speak the websocket protocol selected (#1775)
+- *(chain-indexer)* Use indexed per-pair updates for spent unshielded UTXOs in standalone (#1439)
+- *(deps)* Address RUSTSEC-2026-0592 in url (#1825)
+- *(docker)* Refresh Debian base images for security fixes (#1830)
 
 ### ⚡ Performance
 
 - *(indexer-common)* Batch ledger DB writes per storage engine (#1740)
 - *(indexer-common)* Index contract zswap entries instead of scan (#1741)
+- *(chain-indexer)* Stop reading every gc root (#1802)
+- *(chain-indexer)* Skip the Postgres connection test per query (#1798)
+- *(indexer-common)* Keep contract state history out of gc (#1799)
+- *(chain-indexer)* Keep latest system parameters in memory (#1797)
+- Pin contract state history in resumable batches (#1824)
+- *(chain-indexer)* Check contract state keys once per database (#1820)
+
+### ⚙️ Miscellaneous Tasks
+
+- *(qa)* Ignore picomatch advisory in bun audit
+- *(qa)* Port moth e2e backend to ledger 9 (#1769)
+- Run postgres on 17.12 for the 2026-11-12 security release (#1795)
 
 ## [4.4.101] - 2026-11-05
 
