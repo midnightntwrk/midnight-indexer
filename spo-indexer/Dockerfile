@@ -42,10 +42,9 @@ RUN : "${MIDNIGHT_INDEXER_GIT_SHA:?build arg required}" && \
     mkdir -p /runtime/opt/spo-indexer && \
     mv /build/spo-indexer/config.yaml /runtime/opt/spo-indexer
 
-FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2 AS runtime
-# The base image predates the trixie-security zlib1g fix for CVE-2026-85091 and CVE-2026-76844.
+FROM debian:trixie-slim@sha256:8aa5a7bf5a1955bddbe7d74fcdd0b91ab30e74362a8b73af672b0481b35b44a0 AS runtime
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates=20250419+deb13u1 zlib1g=1:1.3.dfsg+really1.3.1-1+deb13u1 && \
+    apt-get install -y --no-install-recommends ca-certificates=20250419+deb13u1 && \
     rm -rf /var/lib/apt/lists/*
 RUN useradd -u 10001 -d /nonexistent -s /usr/sbin/nologin -M -c "" appuser && \
     passwd -l appuser && \
