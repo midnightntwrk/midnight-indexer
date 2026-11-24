@@ -36,6 +36,7 @@ trait-variant   = { workspace = true }
 reqwest         = { workspace = true, features = [ "json", "rustls" ] }
 
 [dev-dependencies]
+indexer-common         = { path = "../indexer-common", features = [ "testing" ] }
 tempfile               = { workspace = true }
 testcontainers         = { workspace = true }
 testcontainers-modules = { workspace = true, features = [ "postgres" ] }

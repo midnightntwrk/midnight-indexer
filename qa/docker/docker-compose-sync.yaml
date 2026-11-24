@@ -177,7 +177,7 @@ services:
   postgres:
     profiles:
       - cloud
-    image: "postgres:17.1-alpine"
+    image: "postgres:17.12-alpine"
     restart: "always"
     ports:
       - "${SYNC_POSTGRES_PORT:-5433}:5432"

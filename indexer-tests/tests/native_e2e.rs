@@ -12,6 +12,8 @@
 // limitations under the License.
 
 use anyhow::Context;
+#[cfg(feature = "cloud")]
+use indexer_common::testing::POSTGRES_IMAGE_TAG;
 use nix::{
     sys::signal::{self, Signal},
     unistd::Pid,
@@ -250,7 +252,7 @@ async fn start_postgres() -> anyhow::Result<(ContainerAsync<Postgres>, u16)> {
         .with_db_name("indexer")
         .with_user("indexer")
         .with_password(env!("APP__INFRA__STORAGE__PASSWORD"))
-        .with_tag("17.1-alpine")
+        .with_tag(POSTGRES_IMAGE_TAG)
         .start()
         .await
         .context("start Postgres container")?;

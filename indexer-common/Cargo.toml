@@ -72,7 +72,7 @@ serde                        = { workspace = true, features = [ "derive" ] }
 serde_json                   = { workspace = true }
 serde_with                   = { workspace = true, optional = true }
 sha2                         = { workspace = true }
-sqlx                         = { workspace = true, features = [ "runtime-tokio", "uuid" ] }
+sqlx                         = { workspace = true, features = [ "json", "runtime-tokio", "uuid" ] }
 tempfile                     = { workspace = true, optional = true }
 testcontainers               = { workspace = true, optional = true }
 testcontainers-modules       = { workspace = true, optional = true, features = [ "postgres" ] }
@@ -101,7 +101,7 @@ tempfile               = { workspace = true }
 testcontainers         = { workspace = true }
 testcontainers-modules = { workspace = true, features = [ "postgres" ] }
 thiserror              = { workspace = true }
-tokio                  = { workspace = true, features = [ "macros", "rt-multi-thread" ] }
+tokio                  = { workspace = true, features = [ "macros", "rt-multi-thread", "sync" ] }
 
 [features]
 cloud      = [ "async-nats", "serde_with", "sqlx/postgres", "sqlx/tls-rustls" ]

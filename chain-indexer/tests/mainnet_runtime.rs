@@ -28,6 +28,8 @@ use chain_indexer::{
 };
 use fs_extra::dir::{CopyOptions, copy};
 use futures::TryStreamExt;
+#[cfg(feature = "cloud")]
+use indexer_common::testing::POSTGRES_IMAGE_TAG;
 use std::{fs, path::Path, pin::pin, time::Duration};
 use testcontainers::{
     GenericImage, ImageExt,
@@ -199,7 +201,7 @@ async fn init_ledger_db()
         .with_db_name("indexer")
         .with_user("indexer")
         .with_password("postgres")
-        .with_tag("17.1-alpine")
+        .with_tag(POSTGRES_IMAGE_TAG)
         .start()
         .await
         .context("start Postgres container")?;
@@ -218,6 +220,7 @@ async fn init_ledger_db()
         max_connections: 10,
         idle_timeout: Duration::from_secs(60),
         max_lifetime: Duration::from_secs(5 * 60),
+        test_before_acquire: true,
     };
     let pool = PostgresPool::new(config)
         .await
