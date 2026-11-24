@@ -38,13 +38,29 @@ pub use tokio_util::sync::CancellationToken;
 pub type BoxFuture<'a, Item = ()> =
     Pin<Box<dyn Future<Output = Result<Item, BoxError>> + Send + 'a>>;
 
-/// What a task's run leaves in the journal: the task version it reached and the state it returned.
+/// What a task's run left in the journal: where in the journal, the task version the run reached
+/// and the state it returned.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Entry<State> {
+    /// Orders the journal, increasing with each entry appended, so it tells apart the entries of
+    /// two runs that are otherwise equal.
+    pub seq: u64,
     /// The task version the run reached.
     pub version: u32,
     /// The state the run returned.
     pub state: State,
+}
+
+#[cfg(any(test, feature = "testing"))]
+impl<State> Entry<State> {
+    /// The entry at `seq` of a run that reached `version` and returned `state`.
+    pub fn new(seq: u64, version: u32, state: State) -> Self {
+        Self {
+            seq,
+            version,
+            state,
+        }
+    }
 }
 
 /// A startup task. `Context` is whatever the tasks of an application need, e.g. its storage.
@@ -114,11 +130,13 @@ pub trait Journal: Send + Sync {
         id: &str,
     ) -> impl Future<Output = Result<Option<Entry<Value>>, BoxError>> + Send;
 
-    /// Append the entry of a run of the task with `id` that started and ended at the given times.
+    /// Append the entry of a run of the task with `id`, at the version it reached, with the state
+    /// it returned, that started and ended at the given times.
     fn append(
         &self,
         id: &str,
-        entry: Entry<Value>,
+        version: u32,
+        state: Value,
         started_at: SystemTime,
         ended_at: SystemTime,
     ) -> impl Future<Output = Result<(), BoxError>> + Send;
@@ -225,13 +243,19 @@ async fn run_task<Context: Sync, J: Journal>(
             false => None,
         };
         let started_at = SystemTime::now();
-        let entry = task.execute(context, previous, cancel).await?;
-        Ok::<_, BoxError>(entry.map(|entry| (entry, started_at)))
+        let state = task.execute(context, previous, cancel).await?;
+        Ok::<_, BoxError>(state.map(|state| (state, started_at)))
     };
 
     match executed.await {
-        Ok(Some((entry, started_at))) if task.journal() => journal
-            .append(task.id(), entry, started_at, SystemTime::now())
+        Ok(Some((state, started_at))) if task.journal() => journal
+            .append(
+                task.id(),
+                task.version(),
+                state,
+                started_at,
+                SystemTime::now(),
+            )
             .await
             .map_err(|source| failed(source).into()),
         Ok(_) => Ok(()),
@@ -269,24 +293,31 @@ pub trait DynTask<Context>: Send + Sync {
     /// [Task::ID].
     fn id(&self) -> &'static str;
 
+    /// [Task::VERSION].
+    fn version(&self) -> u32;
+
     /// [Task::FATAL].
     fn fatal(&self) -> bool;
 
     /// [Task::JOURNAL].
     fn journal(&self) -> bool;
 
-    /// `None` if it was not pending, otherwise the entry to journal.
+    /// `None` if it was not pending, otherwise the state to journal.
     fn execute<'a>(
         &'a self,
         context: &'a Context,
         previous: Option<Entry<Value>>,
         cancel: &'a CancellationToken,
-    ) -> BoxFuture<'a, Option<Entry<Value>>>;
+    ) -> BoxFuture<'a, Option<Value>>;
 }
 
 impl<Context: Sync, T: Task<Context>> DynTask<Context> for T {
     fn id(&self) -> &'static str {
         T::ID
+    }
+
+    fn version(&self) -> u32 {
+        T::VERSION
     }
 
     fn fatal(&self) -> bool {
@@ -302,15 +333,23 @@ impl<Context: Sync, T: Task<Context>> DynTask<Context> for T {
         context: &'a Context,
         previous: Option<Entry<Value>>,
         cancel: &'a CancellationToken,
-    ) -> BoxFuture<'a, Option<Entry<Value>>> {
+    ) -> BoxFuture<'a, Option<Value>> {
         Box::pin(async move {
             // An entry whose state no longer reads counts as none: the task runs again, which it
             // must be safe to do, rather than failing every start. One a newer version journaled,
             // as after a rollback, means a newer build did the work: the task is skipped.
             let previous = match previous {
                 None => None,
-                Some(Entry { version, state }) => match T::read_state(version, state) {
-                    Ok(state) => Some(Entry { version, state }),
+                Some(Entry {
+                    seq,
+                    version,
+                    state,
+                }) => match T::read_state(version, state) {
+                    Ok(state) => Some(Entry {
+                        seq,
+                        version,
+                        state,
+                    }),
                     Err(error) if version > T::VERSION => {
                         warn!(
                             task = T::ID,
@@ -338,10 +377,7 @@ impl<Context: Sync, T: Task<Context>> DynTask<Context> for T {
             }
 
             let state = self.run(context, previous.as_ref(), cancel).await?;
-            Ok(Some(Entry {
-                version: T::VERSION,
-                state: serde_json::to_value(state)?,
-            }))
+            Ok(Some(serde_json::to_value(state)?))
         })
     }
 }
@@ -392,11 +428,21 @@ mod tests {
         async fn append(
             &self,
             id: &str,
-            entry: Entry<Value>,
+            version: u32,
+            state: Value,
             _started_at: SystemTime,
             _ended_at: SystemTime,
         ) -> Result<(), BoxError> {
-            self.0.lock().unwrap().push((id.to_owned(), entry));
+            let mut entries = self.0.lock().unwrap();
+            let seq = entries.len() as u64 + 1;
+            entries.push((
+                id.to_owned(),
+                Entry {
+                    seq,
+                    version,
+                    state,
+                },
+            ));
             Ok(())
         }
     }
@@ -672,10 +718,7 @@ mod tests {
         );
         assert_eq!(
             journal.latest("test/counting").await?,
-            Some(Entry {
-                version: 2,
-                state: Value::from(2)
-            }),
+            Some(Entry::new(2, 2, Value::from(2))),
             "the newer run saw the older one's state"
         );
         assert_eq!(journal.ids().len(), 2, "one entry per completed run");
@@ -694,12 +737,14 @@ mod tests {
     #[tokio::test]
     async fn unreadable_state_runs_as_if_never_run() -> Result<(), BoxError> {
         let (context, journal) = (Context::default(), MemoryJournal::default());
-        let entry = Entry {
-            version: 1,
-            state: Value::from("not a count"),
-        };
         journal
-            .append("test/counting", entry, SystemTime::now(), SystemTime::now())
+            .append(
+                "test/counting",
+                1,
+                Value::from("not a count"),
+                SystemTime::now(),
+                SystemTime::now(),
+            )
             .await?;
 
         run(
@@ -712,10 +757,7 @@ mod tests {
         assert_eq!(context.runs.load(Relaxed), 1);
         assert_eq!(
             journal.latest("test/counting").await?,
-            Some(Entry {
-                version: 1,
-                state: Value::from(1)
-            })
+            Some(Entry::new(2, 1, Value::from(1)))
         );
 
         Ok(())
@@ -726,12 +768,14 @@ mod tests {
     #[tokio::test]
     async fn unreadable_state_of_a_newer_version_skips() -> Result<(), BoxError> {
         let (context, journal) = (Context::default(), MemoryJournal::default());
-        let entry = Entry {
-            version: 2,
-            state: Value::from("not a count"),
-        };
         journal
-            .append("test/counting", entry, SystemTime::now(), SystemTime::now())
+            .append(
+                "test/counting",
+                2,
+                Value::from("not a count"),
+                SystemTime::now(),
+                SystemTime::now(),
+            )
             .await?;
 
         run(
@@ -782,14 +826,11 @@ mod tests {
     #[tokio::test]
     async fn a_newer_version_migrates_older_state() -> Result<(), BoxError> {
         let (context, journal) = (Context::default(), MemoryJournal::default());
-        let entry = Entry {
-            version: 1,
-            state: Value::from(5),
-        };
         journal
             .append(
                 "test/migrating",
-                entry,
+                1,
+                Value::from(5),
                 SystemTime::now(),
                 SystemTime::now(),
             )
@@ -805,10 +846,7 @@ mod tests {
         assert_eq!(context.runs.load(Relaxed), 1);
         assert_eq!(
             journal.latest("test/migrating").await?,
-            Some(Entry {
-                version: 2,
-                state: serde_json::json!([5, 6])
-            })
+            Some(Entry::new(2, 2, serde_json::json!([5, 6])))
         );
 
         Ok(())
@@ -829,7 +867,8 @@ mod tests {
             async fn append(
                 &self,
                 _id: &str,
-                _entry: Entry<Value>,
+                _version: u32,
+                _state: Value,
                 _started_at: SystemTime,
                 _ended_at: SystemTime,
             ) -> Result<(), BoxError> {
@@ -877,7 +916,8 @@ mod tests {
         async fn append(
             &self,
             _id: &str,
-            _entry: Entry<Value>,
+            _version: u32,
+            _state: Value,
             _started_at: SystemTime,
             _ended_at: SystemTime,
         ) -> Result<(), BoxError> {
