@@ -346,11 +346,14 @@ impl Journal for Storage {
     async fn append(
         &self,
         id: &str,
-        entry: Entry<Value>,
+        version: u32,
+        state: Value,
         started_at: SystemTime,
         ended_at: SystemTime,
     ) -> Result<(), BoxError> {
-        self.pool.append(id, entry, started_at, ended_at).await
+        self.pool
+            .append(id, version, state, started_at, ended_at)
+            .await
     }
 }
 
