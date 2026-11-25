@@ -75,13 +75,15 @@ suite's [runtime expectations](../qa/tests/tests/sync/README.md#runtime-expectat
 ### Overriding Midnight Node images in CI
 
 Set the `NODE_IMAGE` GitHub Actions repository variable to the image repository without a tag.
-The default is `ghcr.io/midnightntwrk/midnight-node`. Undeployed QA appends `-toolkit` to the
-repository name for the corresponding toolkit image. The workflows derive the tags separately
-from `NODE_VERSIONS` or the workflow's tag inputs.
+The default is `ghcr.io/midnightntwrk/midnight-node`. QA uses the same image name with
+`-toolkit` appended. For deployed QA, use `node_toolkit_tag` to override `latest-main`.
 
-For private images, set the variable on the private repository that runs CI. Grant that
-repository read access to both packages under **Manage Actions access** in GHCR so its workflow
-token can pull the images.
+For private images, grant the private repository that runs CI read access to both packages
+under **Manage Actions access** in GHCR. Grant access only where contributors who can run
+workflows are trusted with the images.
+
+Native CI pulls the latest tag from `NODE_VERSIONS` using `NODE_IMAGE`. In private repositories,
+PR and merge queue runs authenticate to GHCR when you set a GHCR override.
 
 ## The QA TypeScript suite (`qa/tests/`)
 
