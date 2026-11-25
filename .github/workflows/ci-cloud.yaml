@@ -115,7 +115,7 @@ jobs:
   test:
     # The job that runs reports as test so branch protection checks its result.
     name: ${{ (github.event.repository.private && startsWith(vars.NODE_IMAGE, 'ghcr.io/')) && 'test-without-package-access' || 'test' }}
-    runs-on: ubuntu-latest-8-core-x64
+    runs-on: ${{ vars.TEST_RUNNER || 'ubuntu-latest-8-core-x64' }}
     needs: [changes]
     if: >-
       ${{ !cancelled() && needs.changes.outputs.non_qa != 'false' &&
@@ -178,7 +178,7 @@ jobs:
   test-with-permissions:
     # The job that runs reports as test so branch protection checks its result.
     name: ${{ (github.event.repository.private && startsWith(vars.NODE_IMAGE, 'ghcr.io/')) && 'test' || 'test-with-permissions' }}
-    runs-on: ubuntu-latest-8-core-x64
+    runs-on: ${{ vars.TEST_RUNNER || 'ubuntu-latest-8-core-x64' }}
     needs: [changes]
     if: >-
       ${{ !cancelled() && needs.changes.outputs.non_qa != 'false' &&

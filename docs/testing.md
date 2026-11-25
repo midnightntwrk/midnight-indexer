@@ -72,7 +72,9 @@ suite's [runtime expectations](../qa/tests/tests/sync/README.md#runtime-expectat
 `indexer-tests/src/main.rs` (the `e2e` bin) can point the same suite at a **deployed** indexer
 (`--host/--port/--network-id`), but no workflow wires it up - it is a manual tool.
 
-### Overriding Midnight Node images in CI
+### CI overrides
+
+#### Node image
 
 Set the `NODE_IMAGE` GitHub Actions repository variable to the image repository without a tag.
 The default is `ghcr.io/midnightntwrk/midnight-node`. QA uses the same image name with
@@ -84,6 +86,16 @@ workflows are trusted with the images.
 
 Native CI pulls the latest tag from `NODE_VERSIONS` using `NODE_IMAGE`. In private repositories,
 PR and merge queue runs authenticate to GHCR when you set a GHCR override.
+
+#### Runner overrides
+
+Set these GitHub Actions repository variables to runner labels available to the repository.
+
+| Variable | Jobs |
+| --- | --- |
+| `IMAGE_BUILD_RUNNER_AMD64` | amd64 image builds |
+| `IMAGE_BUILD_RUNNER_ARM64` | arm64 image builds |
+| `TEST_RUNNER` | Cloud and standalone native tests |
 
 ## The QA TypeScript suite (`qa/tests/`)
 

@@ -133,11 +133,15 @@ jobs:
         # the unsuffixed tag into a real multi-arch manifest referencing both arches.
         platform:
           - arch: amd64
-            runner: ${{ needs.resolve-registry.outputs.registry != '' && 'ubuntu-latest' || 'ubuntu-latest-16-core-x64' }}
+            runner: >-
+              ${{ vars.IMAGE_BUILD_RUNNER_AMD64 ||
+                  (needs.resolve-registry.outputs.registry != '' && 'ubuntu-latest' || 'ubuntu-latest-16-core-x64') }}
             suffix: "-amd64"
             cache_scope: ""
           - arch: arm64
-            runner: ${{ needs.resolve-registry.outputs.registry != '' && 'ubuntu-24.04-arm' || 'ubuntu-latest-8-core-arm64' }}
+            runner: >-
+              ${{ vars.IMAGE_BUILD_RUNNER_ARM64 ||
+                  (needs.resolve-registry.outputs.registry != '' && 'ubuntu-24.04-arm' || 'ubuntu-latest-8-core-arm64') }}
             suffix: "-arm64"
             cache_scope: "-arm64"
     steps:
