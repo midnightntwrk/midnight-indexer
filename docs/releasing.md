@@ -47,12 +47,17 @@ Review the prepended section before committing.
 3. **Images publish automatically.** A `v*` tag triggers
    `.github/workflows/build-indexer-images.yaml`, which builds every component
    (`chain-indexer`, `wallet-indexer`, `indexer-api`, `spo-indexer`,
-   `indexer-standalone`) with the `release` profile and pushes semver-tagged
-   images to `ghcr.io/midnight-ntwrk/<component>` (always) and
-   `docker.io/midnightntwrk/<component>` (tag builds only). The same workflow also runs on
+   `indexer-standalone`) with the `release` profile and publishes SemVer-tagged images.
+   The canonical public repository publishes to `ghcr.io/midnight-ntwrk/<component>` (always)
+   and `docker.io/midnightntwrk/<component>` (tag builds only). The same workflow also runs on
    **main pushes** and **manual dispatch**, tagging those images `<cargo-version>-<short-sha>`
    with the `dev` profile (GHCR only) - a pre-merge or feature image is identifiable by its
    `-<sha>` suffix.
+
+   Forks build on standard GitHub-hosted runners and publish images and build caches to
+   `ghcr.io/<owner>/<repository>/<component>` using their own workflow token.
+   Compose validation and undeployed QA pull the indexer images from the same
+   namespace.
 
 ## Scheduling & sign-off
 
