@@ -41,7 +41,7 @@ export enum CardanoNetworkType {
  * Selectable indexer deployment instance.
  *
  * Each deployed environment runs two indexer instances behind the public
- * `indexer.<env>.midnight.network` URL (blue/green). A new indexer version is
+ * `indexer.<env>.<domain>` URL (blue/green). A new indexer version is
  * rolled out to the secondary instance first, so QA can target it explicitly
  * before it is promoted to primary.
  */
@@ -116,13 +116,21 @@ const hostEntries: HostEntry[] = [
   { env: EnvironmentName.QANET, domain: 'qanet.midnight.network' },
   { env: EnvironmentName.DEVNET, domain: 'devnet.midnight.network' },
   { env: EnvironmentName.PREVIEW, domain: 'preview.midnight.network' },
-  { env: EnvironmentName.PREPROD, domain: 'preprod.midnight.network' },
+  {
+    env: EnvironmentName.PREPROD,
+    indexerHost: 'indexer.preprod.shielded.tools',
+    nodeHost: 'rpc.preprod.midnight.network',
+  },
   {
     env: EnvironmentName.STAGENET,
     indexerHost: 'indexer.stagenet.shielded.tools',
     nodeHost: 'rpc.stagenet.shielded.tools',
   },
-  { env: EnvironmentName.MAINNET, domain: 'mainnet.midnight.network' },
+  {
+    env: EnvironmentName.MAINNET,
+    indexerHost: 'indexer.mainnet.shielded.tools',
+    nodeHost: 'rpc.mainnet.midnight.network',
+  },
 ];
 
 const hostConfigByEnvName: Record<EnvironmentName, HostConfig> = hostEntries.reduce(
