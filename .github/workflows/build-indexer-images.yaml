@@ -168,10 +168,10 @@ jobs:
 
       - &login-ghcr
         name: Login to GHCR
-        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        uses: &ghcr-login-action docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
-          username: ${{ needs.resolve-registry.outputs.registry != '' && github.actor || 'MidnightCI' }}
+          username: &ghcr-username ${{ needs.resolve-registry.outputs.registry != '' && github.actor || 'MidnightCI' }}
           password: ${{ needs.resolve-registry.outputs.registry != '' && github.token || secrets.MIDNIGHTCI_PACKAGES_WRITE }}
 
       - name: Setup Docker Metadata
@@ -387,7 +387,12 @@ jobs:
           docker compose --profile "$PROFILE" config --quiet
           echo "Docker Compose syntax validation completed successfully"
 
-      - *login-ghcr
+      - name: Login to GHCR
+        uses: *ghcr-login-action
+        with:
+          registry: ghcr.io
+          username: *ghcr-username
+          password: ${{ needs.resolve-registry.outputs.registry != '' && github.token || secrets.MIDNIGHTCI_PACKAGES_READ }}
 
       - name: Derive image tags
         id: tags
