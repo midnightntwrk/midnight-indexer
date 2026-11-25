@@ -35,7 +35,7 @@ inputs:
     required: false
     default: ""
   packages_read_token:
-    description: Token with read access to the GHCR packages and the npm registry
+    description: Token with read access to the GHCR images
     required: true
   app_infra_secret:
     description: APP__INFRA__SECRET for the local stack (undeployed only)
@@ -69,7 +69,7 @@ runs:
       uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
       with:
         registry: ghcr.io
-        username: MidnightCI
+        username: ${{ inputs.packages_read_token == github.token && github.actor || 'MidnightCI' }}
         password: ${{ inputs.packages_read_token }}
 
     # Pulling up front keeps registry/auth/tag failures out of the startup step
@@ -130,9 +130,6 @@ runs:
     - name: Install dependencies
       shell: bash
       working-directory: qa/tests
-      env:
-        GITHUB_TOKEN: ${{ inputs.packages_read_token }}
-        NODE_AUTH_TOKEN: ${{ inputs.packages_read_token }}
       run: bun install --frozen-lockfile
 
     # The test process reads NODE_TAG / NODE_TOOLKIT_TAG too (environment/model.ts,
@@ -146,8 +143,6 @@ runs:
       working-directory: qa/tests
       env:
         TARGET_ENV: ${{ inputs.target_env }}
-        GITHUB_TOKEN: ${{ inputs.packages_read_token }}
-        NODE_AUTH_TOKEN: ${{ inputs.packages_read_token }}
         LOG_LEVEL: DEBUG
         NODE_TAG: ${{ inputs.target_env == 'undeployed' && inputs.node_tag || '' }}
         NODE_TOOLKIT_TAG: ${{ inputs.target_env == 'undeployed' && (inputs.node_toolkit_tag || inputs.node_tag) || '' }}
@@ -158,8 +153,6 @@ runs:
       working-directory: qa/tests
       env:
         TARGET_ENV: ${{ inputs.target_env }}
-        GITHUB_TOKEN: ${{ inputs.packages_read_token }}
-        NODE_AUTH_TOKEN: ${{ inputs.packages_read_token }}
         LOG_LEVEL: DEBUG
         NODE_TAG: ${{ inputs.target_env == 'undeployed' && inputs.node_tag || '' }}
         NODE_TOOLKIT_TAG: ${{ inputs.target_env == 'undeployed' && (inputs.node_toolkit_tag || inputs.node_tag) || '' }}
