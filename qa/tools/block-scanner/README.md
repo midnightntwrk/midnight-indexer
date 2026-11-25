@@ -28,21 +28,20 @@ bun install
 # Run the scanner (defaults to undeployed environment)
 bun run src/scanner.ts
 
-# Run with specific environment
-TARGET_ENV=devnet bun run src/scanner.ts
-
 # Run to generate test data for the indexer tests
 bun run src/scanner.ts <path/to/test/data/folder>
 
 # Start scanning from a specific block height (must be less than latest)
-START_BLOCK_HEIGHT=1000 TARGET_ENV=devnet bun run src/scanner.ts
+START_BLOCK_HEIGHT=1000 bun run src/scanner.ts
+
+# Scan an environment that has no built-in host
+TARGET_ENV=<env> INDEXER_HOST=<indexer host> bun run src/scanner.ts
 ```
 
 ### Available Environments (these might change in future)
 
 - `undeployed` - Local development (ws://localhost:8088/api/v4/graphql/ws)
-- `devnet` - Development network
-- `qanet` - QA network
+- Any other name - set `INDEXER_HOST` to the indexer's host; `TARGET_ENV` still names the output folder
 
 ### Scripts
 

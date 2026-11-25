@@ -1,51 +1,14 @@
 name: Indexer QA Integration Tests Base workflow
 
-# Note this is the base workflow used by the other
-# qa-integration-tests-<environment>.yml workflows
+# Note this is the base workflow used by
+# qa-integration-tests-undeployed.yml
 
 permissions:
   contents: read
 
 on:
-  workflow_dispatch:
-    inputs:
-      target_env:
-        type: choice
-        description: Midnight target environment (devnet/qanet/preview/preprod)
-        required: true
-        default: qanet
-        options:
-          - devnet
-          - qanet
-          - preview
-          - preprod
-      ref:
-        type: string
-        description: Git ref
-        required: false
-        default: main
-      node_tag:
-        type: string
-        required: true
-        description: Node ta
-        default: latest
-      indexer_tag:
-        type: string
-        required: true
-        description: Indexer tag
-        default: latest
-      node_toolkit_tag:
-        type: string
-        required: false
-        description: Node toolkit tag (leave empty for the startup script default)
-        default: ""
   workflow_call:
     inputs:
-      target_env:
-        type: string
-        description: Midnight target environment (devnet/qanet/preview/preprod)
-        required: true
-        default: qanet
       ref:
         type: string
         description: Git ref
@@ -104,7 +67,6 @@ jobs:
 
       - uses: ./.github/actions/qa-integration-tests
         with:
-          target_env: ${{ inputs.target_env }}
           node_tag: ${{ inputs.node_tag }}
           indexer_tag: ${{ inputs.indexer_tag }}
           node_toolkit_tag: ${{ inputs.node_toolkit_tag }}

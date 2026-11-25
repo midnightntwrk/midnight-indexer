@@ -1,30 +1,27 @@
 name: QA integration tests
 description: >-
-  Run the QA smoke and integration suites against a target environment, standing
-  a local docker-compose stack up first when the target is `undeployed`.
+  Stand a local docker-compose stack up and run the QA smoke and integration
+  suites against it (`TARGET_ENV=undeployed`).
 
   build-indexer-images runs this composite in the job that derives the tags.
   Callers that want their own workflow run wrap it in
   qa-integration-tests-base-workflow.yml.
 
 inputs:
-  target_env:
-    description: Midnight target environment (undeployed/devnet/qanet/preview/preprod)
-    required: true
   node_image:
-    description: Node image repository (undeployed only)
+    description: Node image repository
     required: false
     default: ghcr.io/midnightntwrk/midnight-node
   node_tag:
-    description: Node image tag (undeployed only)
+    description: Node image tag
     required: false
     default: latest
   indexer_tag:
-    description: Indexer image tag (undeployed only)
+    description: Indexer image tag
     required: false
     default: latest
   node_toolkit_tag:
-    description: Node toolkit image tag (undeployed only; empty uses the startup script default)
+    description: Node toolkit image tag (empty uses the startup script default)
     required: false
     default: ""
   image_registry:
@@ -38,15 +35,15 @@ inputs:
     description: Token with read access to the GHCR packages and the npm registry
     required: true
   app_infra_secret:
-    description: APP__INFRA__SECRET for the local stack (undeployed only)
+    description: APP__INFRA__SECRET for the local stack
     required: false
     default: ""
   storage_password:
-    description: APP__INFRA__STORAGE__PASSWORD for the local stack (undeployed only)
+    description: APP__INFRA__STORAGE__PASSWORD for the local stack
     required: false
     default: ""
   pub_sub_password:
-    description: APP__INFRA__PUB_SUB__PASSWORD for the local stack (undeployed only)
+    description: APP__INFRA__PUB_SUB__PASSWORD for the local stack
     required: false
     default: ""
 
@@ -77,7 +74,6 @@ runs:
     # separate download time from environment startup time. Images already
     # present make this a cheap manifest check.
     - name: Pull images
-      if: inputs.target_env == 'undeployed'
       shell: bash
       env:
         NODE_IMAGE: ${{ inputs.node_image }}
@@ -99,7 +95,6 @@ runs:
         docker pull "ghcr.io/midnightntwrk/midnight-node-toolkit:${NODE_TOOLKIT_TAG:-$NODE_TAG}"
 
     - name: Startup local environment
-      if: inputs.target_env == 'undeployed'
       shell: bash
       env:
         NODE_IMAGE: ${{ inputs.node_image }}
@@ -139,30 +134,29 @@ runs:
     # toolkit-wrapper.ts). Unset, they fall back to the second NODE_VERSIONS line
     # and `latest-main` - not the node the stack above runs, and the toolkit/node
     # skew behind the IncompatibleCodegen failure in tests/e2e/README.md. The
-    # toolkit pairing mirrors startup-localenv-with-data.sh. Deployed targets get
-    # "", which the test process reads as unset.
+    # toolkit pairing mirrors startup-localenv-with-data.sh.
     - name: Run smoke tests
       shell: bash
       working-directory: qa/tests
       env:
-        TARGET_ENV: ${{ inputs.target_env }}
+        TARGET_ENV: undeployed
         GITHUB_TOKEN: ${{ inputs.packages_read_token }}
         NODE_AUTH_TOKEN: ${{ inputs.packages_read_token }}
         LOG_LEVEL: DEBUG
-        NODE_TAG: ${{ inputs.target_env == 'undeployed' && inputs.node_tag || '' }}
-        NODE_TOOLKIT_TAG: ${{ inputs.target_env == 'undeployed' && (inputs.node_toolkit_tag || inputs.node_tag) || '' }}
+        NODE_TAG: ${{ inputs.node_tag }}
+        NODE_TOOLKIT_TAG: ${{ inputs.node_toolkit_tag || inputs.node_tag }}
       run: bun run test smoke
 
     - name: Run integration tests
       shell: bash
       working-directory: qa/tests
       env:
-        TARGET_ENV: ${{ inputs.target_env }}
+        TARGET_ENV: undeployed
         GITHUB_TOKEN: ${{ inputs.packages_read_token }}
         NODE_AUTH_TOKEN: ${{ inputs.packages_read_token }}
         LOG_LEVEL: DEBUG
-        NODE_TAG: ${{ inputs.target_env == 'undeployed' && inputs.node_tag || '' }}
-        NODE_TOOLKIT_TAG: ${{ inputs.target_env == 'undeployed' && (inputs.node_toolkit_tag || inputs.node_tag) || '' }}
+        NODE_TAG: ${{ inputs.node_tag }}
+        NODE_TOOLKIT_TAG: ${{ inputs.node_toolkit_tag || inputs.node_tag }}
       run: bun run test integration
 
     - name: Generate API coverage report (non-blocking)
@@ -170,7 +164,7 @@ runs:
       shell: bash
       working-directory: qa/tests
       env:
-        TARGET_ENV: ${{ inputs.target_env }}
+        TARGET_ENV: undeployed
       # `|| true` rather than `continue-on-error:`, which composite steps do not
       # take. Same effect: a coverage-tooling failure never reds the suite.
       run: bun run coverage:generate --target-env="$TARGET_ENV" --indexer-api-version=v4 || true
@@ -179,7 +173,7 @@ runs:
       if: always()
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
-        name: junit-integration-test-reports-${{ inputs.target_env }}
+        name: junit-integration-test-reports-undeployed
         path: ./qa/tests/reports/custom-junit-report.xml
         if-no-files-found: warn
 
@@ -187,13 +181,13 @@ runs:
       if: always()
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
-        name: qa-integration-tests-${{ inputs.target_env }}-logs
+        name: qa-integration-tests-undeployed-logs
         path: ./qa/tests/logs
 
     - name: Upload API coverage report
       if: always()
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
-        name: qa-api-coverage-${{ inputs.target_env }}
+        name: qa-api-coverage-undeployed
         path: ./qa/tests/coverage/output/**
         if-no-files-found: warn

@@ -15,6 +15,7 @@
 
 import fs from 'fs';
 import log from '@utils/logging/logger';
+import { resolveHosts } from './hosts';
 
 export enum EnvironmentName {
   MAINNET = 'mainnet',
@@ -40,8 +41,8 @@ export enum CardanoNetworkType {
 /**
  * Selectable indexer deployment instance.
  *
- * Each deployed environment runs two indexer instances behind the public
- * `indexer.<env>.midnight.network` URL (blue/green). A new indexer version is
+ * Each deployed environment runs two indexer instances behind its
+ * `indexer.<domain>` URL (blue/green). A new indexer version is
  * rolled out to the secondary instance first, so QA can target it explicitly
  * before it is promoted to primary.
  */
@@ -56,7 +57,9 @@ export enum IndexerInstance {
  * - When `rawInstance` is unset/empty, the host is returned unchanged so the
  *   public URL keeps pointing at whichever instance is currently primary.
  * - `blue`/`green` (case-insensitive) rewrite the leading `indexer` label to
- *   `indexer-blue`/`indexer-green` (e.g. `indexer-green.qanet.midnight.network`).
+ *   `indexer-blue`/`indexer-green` (e.g. `indexer-green.preview.midnight.network`).
+ * - A host that does not start with `indexer.` cannot be rewritten and fails
+ *   fast, so an `INDEXER_HOST` override never silently targets the primary.
  * - Any other value fails fast, mirroring the `TARGET_ENV` validation style.
  * - The undeployed/localhost environment has no blue/green split, so the
  *   override is ignored there (with a warning) rather than corrupting the host.
@@ -88,60 +91,15 @@ export function resolveIndexerHost(
     );
   }
 
+  if (!baseHost.startsWith('indexer.')) {
+    throw new Error(
+      `INDEXER_INSTANCE="${rawInstance}" cannot be applied to host "${baseHost}": it only rewrites ` +
+        `a leading "indexer." label. Put the instance's own host in INDEXER_HOST and unset INDEXER_INSTANCE.`,
+    );
+  }
+
   return baseHost.replace(/^indexer\./, `indexer-${normalized}.`);
 }
-
-type HostConfig = {
-  indexerHost: string;
-  nodeHost: string;
-};
-
-type HostEntry =
-  | {
-      env: EnvironmentName;
-      indexerHost: string;
-      nodeHost: string;
-    }
-  | {
-      env: EnvironmentName;
-      domain: string;
-    };
-
-const hostEntries: HostEntry[] = [
-  {
-    env: EnvironmentName.UNDEPLOYED,
-    indexerHost: 'localhost:8088',
-    nodeHost: 'localhost:9944',
-  },
-  { env: EnvironmentName.QANET, domain: 'qanet.midnight.network' },
-  { env: EnvironmentName.DEVNET, domain: 'devnet.midnight.network' },
-  { env: EnvironmentName.PREVIEW, domain: 'preview.midnight.network' },
-  { env: EnvironmentName.PREPROD, domain: 'preprod.midnight.network' },
-  {
-    env: EnvironmentName.STAGENET,
-    indexerHost: 'indexer.stagenet.shielded.tools',
-    nodeHost: 'rpc.stagenet.shielded.tools',
-  },
-  { env: EnvironmentName.MAINNET, domain: 'mainnet.midnight.network' },
-];
-
-const hostConfigByEnvName: Record<EnvironmentName, HostConfig> = hostEntries.reduce(
-  (config, entry) => {
-    if ('domain' in entry) {
-      config[entry.env] = {
-        indexerHost: `indexer.${entry.domain}`,
-        nodeHost: `rpc.${entry.domain}`,
-      };
-    } else {
-      config[entry.env] = {
-        indexerHost: entry.indexerHost,
-        nodeHost: entry.nodeHost,
-      };
-    }
-    return config;
-  },
-  {} as Record<EnvironmentName, HostConfig>,
-);
 
 /**
  * Resolves the supported node version for the current environment.
@@ -184,6 +142,7 @@ export class Environment {
   private readonly wsProtocol: string;
   private readonly httpProtocol: string;
   private readonly indexerHost: string;
+  private readonly primaryIndexerHost: string;
   private readonly networkId: string;
   private readonly nodeHost: string;
   private readonly nodeTag: string;
@@ -215,12 +174,17 @@ export class Environment {
     // These should be now safe to assign as we already
     // checked envName
     this.networkId = this.envName;
+    const hosts = resolveHosts(this.envName, {
+      indexerHost: process.env.INDEXER_HOST,
+      nodeHost: process.env.NODE_HOST,
+    });
+    this.primaryIndexerHost = hosts.indexerHost;
     this.indexerHost = resolveIndexerHost(
-      hostConfigByEnvName[this.envName].indexerHost,
+      hosts.indexerHost,
       process.env.INDEXER_INSTANCE,
       this.isUndeployed,
     );
-    this.nodeHost = hostConfigByEnvName[this.envName].nodeHost;
+    this.nodeHost = hosts.nodeHost;
     log.debug(`Using indexer host: ${this.indexerHost}`);
 
     // What we are actually doing here is the following:
@@ -412,7 +376,7 @@ export class Environment {
     throw new Error(
       `INDEXER_INSTANCE="${instance}" (${this.indexerHost}) returned HTTP ${status} on /ready — ` +
         `no ingress for this colour, so it is almost certainly the PRIMARY (served at the bare ` +
-        `${hostConfigByEnvName[this.envName].indexerHost}). Target the other colour, or unset ` +
+        `${this.primaryIndexerHost}). Target the other colour, or unset ` +
         `INDEXER_INSTANCE to use the primary.`,
     );
   }
