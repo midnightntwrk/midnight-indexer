@@ -224,9 +224,12 @@ jobs:
             MIDNIGHT_INDEXER_GIT_SHA=${{ env.GIT_SHA }}
           platforms: linux/${{ matrix.platform.arch }}
           tags: local/${{ matrix.image.name }}:check
+          # Upstream builds reuse layers from the legacy cache during registry migration.
           cache-from: &cache-from |
             type=registry,ref=${{ env.REGISTRY }}/${{ matrix.image.name }}:buildcache${{ matrix.platform.cache_scope }}
             type=registry,ref=${{ env.REGISTRY }}/${{ matrix.image.name }}:buildcache-${{ env.PROFILE }}${{ matrix.platform.cache_scope }}
+            ${{ needs.resolve-registry.outputs.registry == '' && format('type=registry,ref=ghcr.io/midnight-ntwrk/{0}:buildcache{1}', matrix.image.name, matrix.platform.cache_scope) || '' }}
+            ${{ needs.resolve-registry.outputs.registry == '' && format('type=registry,ref=ghcr.io/midnight-ntwrk/{0}:buildcache-{1}{2}', matrix.image.name, env.PROFILE, matrix.platform.cache_scope) || '' }}
 
       - name: Check the image reports its commit
         env:
