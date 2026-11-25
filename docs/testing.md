@@ -48,7 +48,7 @@ suite's [runtime expectations](../qa/tests/tests/sync/README.md#runtime-expectat
 `indexer-tests/tests/native_e2e.rs` (run by `just test`, on every PR via `ci-cloud.yaml` /
 `ci-standalone.yaml`):
 
-- Starts a **real `midnightntwrk/midnight-node` container** (version = last line of
+- Starts a **real Midnight Node container** (version = last line of
   `NODE_VERSIONS`, currently `3.0.0-c3a556864675`) whose chain DB is **pre-seeded from fixed data in
   `.node/<version>/`** (bind-mounted, `CFG_PRESET=dev`) so it replays a known, deterministic
   chain, plus postgres + nats via testcontainers, and runs the **actual** chain-indexer /
@@ -71,6 +71,17 @@ suite's [runtime expectations](../qa/tests/tests/sync/README.md#runtime-expectat
 
 `indexer-tests/src/main.rs` (the `e2e` bin) can point the same suite at a **deployed** indexer
 (`--host/--port/--network-id`), but no workflow wires it up - it is a manual tool.
+
+### Overriding Midnight Node images in CI
+
+Set the `NODE_IMAGE` GitHub Actions repository variable to the image repository without a tag.
+The default is `ghcr.io/midnightntwrk/midnight-node`. Undeployed QA appends `-toolkit` to the
+repository name for the corresponding toolkit image. The workflows derive the tags separately
+from `NODE_VERSIONS` or the workflow's tag inputs.
+
+For private images, set the variable on the private repository that runs CI. Grant that
+repository read access to both packages under **Manage Actions access** in GHCR so its workflow
+token can pull the images.
 
 ## The QA TypeScript suite (`qa/tests/`)
 

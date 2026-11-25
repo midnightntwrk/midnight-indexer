@@ -34,7 +34,7 @@ env:
   CARGO_AUDITABLE_VERSION: 0.7.7
   # Builds the cargo chef dependency layer. Pinned: bump deliberately; the justfile reads this too.
   CARGO_CHEF_VERSION: 0.1.78
-  NODE_IMAGE: ghcr.io/midnightntwrk/midnight-node
+  NODE_IMAGE: ${{ vars.NODE_IMAGE || 'ghcr.io/midnightntwrk/midnight-node' }}
   # The upstream build cache and QA images use this namespace.
   REGISTRY: ghcr.io/midnightntwrk
   # Only this repository publishes to the shared registries.
@@ -171,7 +171,7 @@ jobs:
         uses: &ghcr-login-action docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
-          username: &ghcr-username ${{ needs.resolve-registry.outputs.registry != '' && github.actor || 'MidnightCI' }}
+          username: ${{ needs.resolve-registry.outputs.registry != '' && github.actor || 'MidnightCI' }}
           password: ${{ needs.resolve-registry.outputs.registry != '' && github.token || secrets.MIDNIGHTCI_PACKAGES_WRITE }}
 
       - name: Setup Docker Metadata
@@ -394,8 +394,8 @@ jobs:
         uses: *ghcr-login-action
         with:
           registry: ghcr.io
-          username: *ghcr-username
-          password: ${{ needs.resolve-registry.outputs.registry != '' && github.token || secrets.MIDNIGHTCI_PACKAGES_READ }}
+          username: ${{ (needs.resolve-registry.outputs.registry != '' || startsWith(vars.NODE_IMAGE, 'ghcr.io/')) && github.actor || 'MidnightCI' }}
+          password: ${{ (needs.resolve-registry.outputs.registry != '' || startsWith(vars.NODE_IMAGE, 'ghcr.io/')) && github.token || secrets.MIDNIGHTCI_PACKAGES_READ }}
 
       - name: Derive image tags
         id: tags
@@ -499,11 +499,12 @@ jobs:
           target_env: undeployed
           # Per-arch tag: see the `needs:` note above.
           indexer_tag: ${{ steps.tags.outputs.indexer_tag }}-amd64
+          node_image: ${{ env.NODE_IMAGE }}
           node_tag: ${{ steps.tags.outputs.node_tag }}
           node_toolkit_tag: ${{ steps.tags.outputs.node_toolkit_tag }}
           # The per-commit <version>-<sha8> images are published to GHCR.
           image_registry: ${{ env.REGISTRY }}
-          packages_read_token: ${{ needs.resolve-registry.outputs.registry != '' && github.token || secrets.MIDNIGHTCI_PACKAGES_READ }}
+          packages_read_token: ${{ (needs.resolve-registry.outputs.registry != '' || startsWith(vars.NODE_IMAGE, 'ghcr.io/')) && github.token || secrets.MIDNIGHTCI_PACKAGES_READ }}
           app_infra_secret: ${{ secrets.APP__INFRA__SECRET }}
           storage_password: ${{ secrets.APP__INFRA__STORAGE__PASSWORD }}
           pub_sub_password: ${{ secrets.APP__INFRA__PUB_SUB__PASSWORD }}

@@ -89,14 +89,8 @@ runs:
         docker compose --profile cloud pull
         # Used by qa/scripts/startup-localenv-with-data.sh for volume setup.
         docker pull "$(. ./qa/scripts/_lib.sh && printf '%s' "$ALPINE_IMAGE")"
-        # Used by the toolkit wrapper for test data generation; the registry is
-        # hardcoded there (qa/tests/utils/toolkit/toolkit-wrapper.ts) and this
-        # pull must match it. The tag default mirrors
-        # startup-localenv-with-data.sh, which pairs the toolkit with the node.
-        # Docker Hub's midnightntwrk/midnight-node-toolkit cannot be used here:
-        # it only carries the toolkit's own release tags and latest-main, not the
-        # node-paired tags this action passes.
-        docker pull "ghcr.io/midnightntwrk/midnight-node-toolkit:${NODE_TOOLKIT_TAG:-$NODE_TAG}"
+        # GHCR carries node-paired toolkit tags, which keep the toolkit metadata in sync with the node.
+        docker pull "${NODE_IMAGE}-toolkit:${NODE_TOOLKIT_TAG:-$NODE_TAG}"
 
     - name: Startup local environment
       if: inputs.target_env == 'undeployed'
@@ -144,6 +138,7 @@ runs:
       env:
         TARGET_ENV: ${{ inputs.target_env }}
         LOG_LEVEL: DEBUG
+        NODE_IMAGE: ${{ inputs.target_env == 'undeployed' && inputs.node_image || '' }}
         NODE_TAG: ${{ inputs.target_env == 'undeployed' && inputs.node_tag || '' }}
         NODE_TOOLKIT_TAG: ${{ inputs.target_env == 'undeployed' && (inputs.node_toolkit_tag || inputs.node_tag) || '' }}
       run: bun run test smoke
@@ -154,6 +149,7 @@ runs:
       env:
         TARGET_ENV: ${{ inputs.target_env }}
         LOG_LEVEL: DEBUG
+        NODE_IMAGE: ${{ inputs.target_env == 'undeployed' && inputs.node_image || '' }}
         NODE_TAG: ${{ inputs.target_env == 'undeployed' && inputs.node_tag || '' }}
         NODE_TOOLKIT_TAG: ${{ inputs.target_env == 'undeployed' && (inputs.node_toolkit_tag || inputs.node_tag) || '' }}
       run: bun run test integration
