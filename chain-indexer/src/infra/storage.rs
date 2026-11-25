@@ -1915,7 +1915,7 @@ mod contract_state_translation_tests {
         .bind(hash(height))
         .bind(height as i64)
         .bind(hash(height.wrapping_sub(1)))
-        .fetch_one(&**pool)
+        .fetch_one(pool.writer())
         .await
         .expect("insert block")
     }
@@ -1928,7 +1928,7 @@ mod contract_state_translation_tests {
         "})
         .bind(block_id)
         .bind(hash(1_000 + seed))
-        .fetch_one(&**pool)
+        .fetch_one(pool.writer())
         .await
         .expect("insert transaction")
     }
@@ -1954,7 +1954,7 @@ mod contract_state_translation_tests {
         .bind(transaction_id)
         .bind(address)
         .bind(state_key)
-        .fetch_one(&**pool)
+        .fetch_one(pool.writer())
         .await
         .expect("insert contract action")
     }

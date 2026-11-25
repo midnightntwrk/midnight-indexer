@@ -102,9 +102,8 @@ async fn process_next_epoch(
     info!(epoch_no = epoch.epoch_no; "processing epoch");
 
     // Fetch everything from the network before opening a transaction. Holding
-    // the SQLite writer across HTTP calls starves concurrent writers (e.g. the
-    // chain-indexer or the stake-refresh task) beyond `busy_timeout` and trips
-    // `database is locked` errors.
+    // the SQLite writer across HTTP calls can exhaust the checkout timeout for
+    // concurrent writers (e.g. the chain-indexer or the stake-refresh task).
     let prefetch_started = Instant::now();
     let committee = client.get_committee(epoch.epoch_no).await?;
     let raw_spos = client.get_spo_registrations(epoch.epoch_no).await?;
