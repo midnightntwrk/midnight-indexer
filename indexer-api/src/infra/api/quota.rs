@@ -18,14 +18,17 @@
 //! - Per WebSocket connection, a concurrent count of active subscriptions across all 9 GraphQL
 //!   subscription types. Enforced via a per-connection `AtomicUsize` injected at
 //!   `on_connection_init` and decremented by [`SubscriptionGuard`] on drop.
-//! - Per session id, a creation rate via a token bucket. Only `shielded_transactions` takes a
-//!   `session_id`, so this layer applies there. Rejected attempts do not consume a token.
+//! - Per session, a creation rate via a token bucket. Only `shielded_transactions` takes a
+//!   `session_id`, so this layer applies there. Buckets are keyed by the ID of the wallet the
+//!   session resolves to, which stays the same when the wallet reconnects with a new session.
+//!   Rejected attempts do not consume a token. Buckets that have refilled completely behave the
+//!   same as missing ones, so they are pruned at most once per minute, keeping the map bounded by
+//!   the wallets recently subscribed.
 //!
 //! Cap hits return [`QuotaError`] which API resolvers convert to `ApiError::client`. The
 //! WebSocket connection itself remains open.
 
 use dashmap::DashMap;
-use indexer_common::domain::SessionId;
 use metrics::{Counter, Gauge, counter, gauge};
 use parking_lot::Mutex;
 use serde::Deserialize;
@@ -35,12 +38,16 @@ use std::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     },
-    time::Instant,
+    time::{Duration, Instant},
 };
 use thiserror::Error;
+use uuid::Uuid;
 
 const REJECTION_KIND_PER_CONNECTION: &str = "per_connection";
 const REJECTION_KIND_PER_SESSION_RATE: &str = "per_session_rate";
+
+/// Minimum time between two prunes of the per-session buckets.
+const PRUNE_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Per-WebSocket-connection counter for active subscriptions. Attached to the connection's
 /// async-graphql `Data` from the `on_connection_init` callback so every subscription resolver on
@@ -62,7 +69,9 @@ pub struct QuotaConfig {
 /// State shared across the entire `indexer-api` instance, held in the async-graphql Schema data.
 pub struct SubscriptionQuotas {
     config: QuotaConfig,
-    per_session_buckets: DashMap<SessionId, Arc<Mutex<TokenBucket>>>,
+    /// Keyed by wallet ID, so the map, which outlives requests, holds no session IDs.
+    per_session_buckets: DashMap<Uuid, Arc<Mutex<TokenBucket>>>,
+    last_prune: Mutex<Instant>,
     metrics: QuotaMetrics,
 }
 
@@ -71,18 +80,19 @@ impl SubscriptionQuotas {
         Self {
             config,
             per_session_buckets: DashMap::new(),
+            last_prune: Mutex::new(Instant::now()),
             metrics: QuotaMetrics::default(),
         }
     }
 
     /// Try to register a new active subscription. The per-connection counter must be obtained from
     /// the per-WebSocket-connection async-graphql `Data` populated by the `on_connection_init`
-    /// callback. If `session` is provided, also consume a token from that session id's rate
-    /// bucket.
+    /// callback. If `wallet_id` is provided, also consume a token from the rate bucket of that
+    /// wallet's session.
     pub fn try_acquire(
         &self,
         per_connection_counter: &Arc<AtomicUsize>,
-        session: Option<SessionId>,
+        wallet_id: Option<Uuid>,
     ) -> Result<SubscriptionGuard, QuotaError> {
         let max_concurrent = self.config.max_concurrent_per_connection.get();
         if per_connection_counter
@@ -95,10 +105,12 @@ impl SubscriptionQuotas {
             return Err(QuotaError::PerConnection(max_concurrent));
         }
 
-        if let Some(session) = session {
+        if let Some(wallet_id) = wallet_id {
+            self.prune_idle_if_due(Instant::now());
+
             let bucket = self
                 .per_session_buckets
-                .entry(session)
+                .entry(wallet_id)
                 .or_insert_with(|| Arc::new(Mutex::new(TokenBucket::new(&self.config))))
                 .clone();
             let allowed = bucket.lock().try_take();
@@ -116,6 +128,30 @@ impl SubscriptionQuotas {
             per_connection_counter: per_connection_counter.clone(),
             active_gauge: self.metrics.active.clone(),
         })
+    }
+
+    /// Prune idle buckets if at least `PRUNE_INTERVAL` has passed since the last prune. If
+    /// another caller is currently checking, skip: it will prune if due.
+    fn prune_idle_if_due(&self, now: Instant) {
+        let due = self.last_prune.try_lock().is_some_and(|mut last_prune| {
+            let due = now.saturating_duration_since(*last_prune) >= PRUNE_INTERVAL;
+            if due {
+                *last_prune = now;
+            }
+            due
+        });
+
+        if due {
+            self.prune_idle_at(now);
+        }
+    }
+
+    /// Drop per-session buckets that are full again at `now`; a full bucket behaves the same as a
+    /// missing one. Buckets are only cloned out of the map while its shard lock is held, which
+    /// `retain` holds too, so a strong count of 1 means no caller is about to use the bucket.
+    fn prune_idle_at(&self, now: Instant) {
+        self.per_session_buckets
+            .retain(|_, bucket| Arc::strong_count(bucket) > 1 || !bucket.lock().is_full_at(now));
     }
 }
 
@@ -180,6 +216,11 @@ impl TokenBucket {
             false
         }
     }
+
+    fn is_full_at(&self, now: Instant) -> bool {
+        let elapsed = now.duration_since(self.last_refill).as_secs_f64();
+        self.tokens + elapsed * self.refill_per_sec >= self.capacity
+    }
 }
 
 struct QuotaMetrics {
@@ -216,8 +257,8 @@ mod tests {
         }
     }
 
-    fn session(byte: u8) -> SessionId {
-        [byte; 32].into()
+    fn wallet(byte: u8) -> Uuid {
+        Uuid::from_bytes([byte; 16])
     }
 
     #[test]
@@ -245,13 +286,13 @@ mod tests {
     fn per_session_rate_blocks_after_capacity() {
         let quotas = SubscriptionQuotas::new(config(1000, 5));
         let counter = Arc::new(AtomicUsize::new(0));
-        let s = session(1);
+        let w = wallet(1);
 
         let mut guards = Vec::new();
         for _ in 0..5 {
-            guards.push(quotas.try_acquire(&counter, Some(s)).unwrap());
+            guards.push(quotas.try_acquire(&counter, Some(w)).unwrap());
         }
-        let err = quotas.try_acquire(&counter, Some(s)).unwrap_err();
+        let err = quotas.try_acquire(&counter, Some(w)).unwrap_err();
         assert!(matches!(err, QuotaError::PerSessionRate(5)));
     }
 
@@ -259,12 +300,12 @@ mod tests {
     fn rejected_session_rate_does_not_consume_per_connection_slot() {
         let quotas = SubscriptionQuotas::new(config(10, 1));
         let counter = Arc::new(AtomicUsize::new(0));
-        let s = session(2);
+        let w = wallet(2);
 
-        let _g = quotas.try_acquire(&counter, Some(s)).unwrap();
+        let _g = quotas.try_acquire(&counter, Some(w)).unwrap();
         assert_eq!(counter.load(Ordering::Acquire), 1);
 
-        let err = quotas.try_acquire(&counter, Some(s)).unwrap_err();
+        let err = quotas.try_acquire(&counter, Some(w)).unwrap_err();
         assert!(matches!(err, QuotaError::PerSessionRate(1)));
         assert_eq!(
             counter.load(Ordering::Acquire),
@@ -277,13 +318,13 @@ mod tests {
     fn rejected_per_connection_does_not_consume_session_token() {
         let quotas = SubscriptionQuotas::new(config(1, 60));
         let counter = Arc::new(AtomicUsize::new(0));
-        let s = session(3);
+        let w = wallet(3);
 
-        let _g = quotas.try_acquire(&counter, Some(s)).unwrap();
-        let err = quotas.try_acquire(&counter, Some(s)).unwrap_err();
+        let _g = quotas.try_acquire(&counter, Some(w)).unwrap();
+        let err = quotas.try_acquire(&counter, Some(w)).unwrap_err();
         assert!(matches!(err, QuotaError::PerConnection(1)));
 
-        let bucket = quotas.per_session_buckets.get(&s).unwrap().clone();
+        let bucket = quotas.per_session_buckets.get(&w).unwrap().clone();
         let tokens = bucket.lock().tokens;
         assert!(
             tokens > 58.0,
@@ -296,12 +337,94 @@ mod tests {
         let quotas = SubscriptionQuotas::new(config(1000, 1));
         let counter = Arc::new(AtomicUsize::new(0));
 
-        quotas.try_acquire(&counter, Some(session(10))).unwrap();
-        quotas.try_acquire(&counter, Some(session(11))).unwrap();
-        quotas.try_acquire(&counter, Some(session(12))).unwrap();
+        quotas.try_acquire(&counter, Some(wallet(10))).unwrap();
+        quotas.try_acquire(&counter, Some(wallet(11))).unwrap();
+        quotas.try_acquire(&counter, Some(wallet(12))).unwrap();
 
-        let err = quotas.try_acquire(&counter, Some(session(10))).unwrap_err();
+        let err = quotas.try_acquire(&counter, Some(wallet(10))).unwrap_err();
         assert!(matches!(err, QuotaError::PerSessionRate(1)));
+    }
+
+    #[test]
+    fn idle_full_buckets_are_pruned() {
+        let quotas = SubscriptionQuotas::new(config(1000, 1));
+        let counter = Arc::new(AtomicUsize::new(0));
+
+        let guards = (0..100)
+            .map(|n| quotas.try_acquire(&counter, Some(wallet(n))).unwrap())
+            .collect::<Vec<_>>();
+        drop(guards);
+        assert_eq!(quotas.per_session_buckets.len(), 100);
+
+        // After a full refill period every bucket is full again, i.e. indistinguishable from a
+        // missing one.
+        quotas.prune_idle_at(Instant::now() + Duration::from_secs(120));
+        assert!(
+            quotas.per_session_buckets.is_empty(),
+            "{} idle buckets were not pruned",
+            quotas.per_session_buckets.len()
+        );
+    }
+
+    #[test]
+    fn prune_runs_at_most_once_per_interval() {
+        // A bucket of capacity 60 refills one token per second, so it is full again one second
+        // after a take; whether it is pruned then depends only on the prune interval.
+        let quotas = SubscriptionQuotas::new(config(1000, 60));
+        let counter = Arc::new(AtomicUsize::new(0));
+        drop(quotas.try_acquire(&counter, Some(wallet(1))).unwrap());
+        let start = *quotas.last_prune.lock();
+
+        let not_due = start + PRUNE_INTERVAL - Duration::from_secs(1);
+        quotas.prune_idle_if_due(not_due);
+        assert_eq!(quotas.per_session_buckets.len(), 1);
+        assert_eq!(*quotas.last_prune.lock(), start);
+
+        let due = start + PRUNE_INTERVAL + Duration::from_secs(1);
+        quotas.prune_idle_if_due(due);
+        assert!(quotas.per_session_buckets.is_empty());
+        assert_eq!(*quotas.last_prune.lock(), due);
+    }
+
+    #[test]
+    fn prune_skips_while_another_caller_checks() {
+        let quotas = SubscriptionQuotas::new(config(1000, 60));
+        let counter = Arc::new(AtomicUsize::new(0));
+        drop(quotas.try_acquire(&counter, Some(wallet(1))).unwrap());
+
+        let last_prune = quotas.last_prune.lock();
+        let due = *last_prune + PRUNE_INTERVAL + Duration::from_secs(1);
+        quotas.prune_idle_if_due(due);
+        assert_eq!(quotas.per_session_buckets.len(), 1);
+        drop(last_prune);
+    }
+
+    #[test]
+    fn prune_keeps_drained_and_referenced_buckets() {
+        // A bucket of capacity 1 takes 60 seconds to refill, so it is reliably not full right
+        // after a take.
+        let quotas = SubscriptionQuotas::new(config(1000, 1));
+        let counter = Arc::new(AtomicUsize::new(0));
+        drop(quotas.try_acquire(&counter, Some(wallet(1))).unwrap());
+
+        // Right after a take, the bucket is a token short of full.
+        quotas.prune_idle_at(Instant::now());
+        assert_eq!(quotas.per_session_buckets.len(), 1);
+
+        // Once refilled, the bucket is kept while a caller holds it and pruned afterwards.
+        let held = quotas
+            .per_session_buckets
+            .iter()
+            .next()
+            .map(|entry| entry.value().clone())
+            .unwrap();
+        let refilled = Instant::now() + Duration::from_secs(120);
+        quotas.prune_idle_at(refilled);
+        assert_eq!(quotas.per_session_buckets.len(), 1);
+
+        drop(held);
+        quotas.prune_idle_at(refilled);
+        assert!(quotas.per_session_buckets.is_empty());
     }
 
     #[test]

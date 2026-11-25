@@ -25,6 +25,34 @@ query ZswapMerkleTreeCollapsedUpdate($START_INDEX: Int!, $END_INDEX: Int!) {
   }
 }`;
 
+/**
+ * The latest block's protocol version and nothing else. For callers that only
+ * need to know which ledger train the chain runs: the full query fetches every
+ * transaction body in the block.
+ */
+export const GET_LATEST_BLOCK_PROTOCOL_VERSION = `
+query GetLatestBlockProtocolVersion{
+  block{
+    height
+    protocolVersion
+  }
+}`;
+
+/**
+ * The latest block's DUST Merkle roots and nothing else. For polling loops:
+ * the full query fetches every transaction body in the block, and the client
+ * logs the whole response.
+ */
+export const GET_LATEST_BLOCK_DUST_ROOTS = `
+query GetLatestBlockDustRoots{
+  block{
+    height
+    timestamp
+    dustCommitmentMerkleTreeRoot
+    dustGenerationMerkleTreeRoot
+  }
+}`;
+
 export const GET_LATEST_BLOCK = `
 query GetLatestBlock{
   block{
@@ -74,6 +102,28 @@ query ExecutionInputs($ADDRESS: HexEncoded!) {
   }
   contract(address: $ADDRESS) {
     state
+  }
+}`;
+
+// Governance parameters (D-parameter, Terms and Conditions) in force at a block,
+// used to cross-check the dParameterHistory / termsAndConditionsHistory queries
+// (#1003). Latest block when OFFSET is omitted.
+export const GET_BLOCK_SYSTEM_PARAMETERS = `
+query BlockSystemParameters($OFFSET: BlockOffset) {
+  block(offset: $OFFSET) {
+    hash
+    height
+    timestamp
+    systemParameters {
+      dParameter {
+        numPermissionedCandidates
+        numRegisteredCandidates
+      }
+      termsAndConditions {
+        hash
+        url
+      }
+    }
   }
 }`;
 

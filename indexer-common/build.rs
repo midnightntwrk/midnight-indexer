@@ -21,6 +21,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=MIDNIGHT_INDEXER_GIT_SHA");
     println!("cargo:rerun-if-env-changed=MIDNIGHT_INDEXER_BUILD_DATE");
     println!("cargo:rerun-if-changed=build.rs");
+    rerun_if_head_moves();
 
     if let Some(sha) = pick("MIDNIGHT_INDEXER_GIT_SHA", git_sha) {
         println!("cargo:rustc-env=MIDNIGHT_INDEXER_GIT_SHA={sha}");
@@ -38,6 +39,36 @@ fn pick(env_var: &str, compute: fn() -> Option<String>) -> Option<String> {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .or_else(compute)
+}
+
+/// Rerun when `HEAD` moves, on a checkout, which changes `HEAD`, or a commit, which changes the
+/// branch it names, as a loose or a packed ref, so a build does not report the previous commit.
+/// The reflog of `HEAD` changes on both, also when the branch's loose ref did not exist yet.
+/// Without a git repository, as in a Docker build, there is nothing to watch.
+fn rerun_if_head_moves() {
+    let Some(git_dir) = run("git", &["rev-parse", "--absolute-git-dir"]) else {
+        return;
+    };
+    // A worktree keeps its own `HEAD`, and its refs in the common directory.
+    let common_dir = run(
+        "git",
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )
+    .unwrap_or_else(|| git_dir.clone());
+
+    let mut watched = vec![
+        format!("{git_dir}/HEAD"),
+        format!("{git_dir}/logs/HEAD"),
+        format!("{common_dir}/packed-refs"),
+    ];
+    if let Some(branch) = run("git", &["symbolic-ref", "-q", "HEAD"]) {
+        watched.push(format!("{common_dir}/{branch}"));
+    }
+    // A path that does not exist would rerun the script on every build.
+    watched
+        .into_iter()
+        .filter(|path| std::path::Path::new(path).exists())
+        .for_each(|path| println!("cargo:rerun-if-changed={path}"));
 }
 
 fn git_sha() -> Option<String> {

@@ -1,0 +1,3 @@
+# Grype reads this file from the repository root when build-indexer-images scans each image.
+# Each accepted finding needs a reason and the condition for removing it.
+ignore: []

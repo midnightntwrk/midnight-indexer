@@ -102,8 +102,8 @@ pub enum Error {
         "refusing to migrate: this database stores contract states as blobs, which \
          009_contract_state_keys.sql drops without converting them; the blobs cannot be \
          recreated. Sync a new indexer from genesis and cut over, or - for a single instance - \
-         wipe both the indexer database and the ledger DB and re-index from genesis. See \
-         docs/re-indexing.md"
+         wipe both the indexer database and the ledger DB and reindex from genesis. See \
+         docs/reindexing.md"
     )]
     UnconvertibleContractStates,
 }
@@ -114,6 +114,7 @@ mod tests {
         migrations::postgres::run,
         pool::{self, postgres::PostgresPool},
     };
+    use crate::testing::POSTGRES_IMAGE_TAG;
     use anyhow::Context;
     use sqlx::{Row, postgres::PgSslMode};
     use std::{collections::HashSet, error::Error as StdError, time::Duration};
@@ -126,7 +127,7 @@ mod tests {
             .with_db_name("indexer")
             .with_user("indexer")
             .with_password(env!("APP__INFRA__STORAGE__PASSWORD"))
-            .with_tag("17.1-alpine")
+            .with_tag(POSTGRES_IMAGE_TAG)
             .start()
             .await
             .context("start Postgres container")?;
@@ -145,6 +146,7 @@ mod tests {
             max_connections: 10,
             idle_timeout: Duration::from_secs(60),
             max_lifetime: Duration::from_secs(5 * 60),
+            test_before_acquire: true,
         };
         let pool = PostgresPool::new(config).await?;
 

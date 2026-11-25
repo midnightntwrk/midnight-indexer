@@ -41,6 +41,16 @@ where
 
     async fn save_spo(&self, spo: &SPO, tx: &mut SqlxTransaction) -> Result<(), sqlx::Error>;
 
+    /// Remove other identities sharing any key with `spo` that were never valid and never
+    /// produced blocks, so a verified registration replaces one squatted by an unsigned one.
+    /// This also removes a genuine pool's earlier identity, with its INVALID history, if the pool
+    /// rotated keys while its stake was still unknown. Returns the removed identities.
+    async fn remove_unverified_spos(
+        &self,
+        spo: &SPO,
+        tx: &mut SqlxTransaction,
+    ) -> Result<Vec<String>, sqlx::Error>;
+
     async fn save_membership(
         &self,
         memberships: &[ValidatorMembership],

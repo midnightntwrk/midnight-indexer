@@ -28,6 +28,8 @@ use chain_indexer::{
 };
 use fs_extra::dir::{CopyOptions, copy};
 use futures::TryStreamExt;
+#[cfg(feature = "cloud")]
+use indexer_common::testing::POSTGRES_IMAGE_TAG;
 use std::{fs, path::Path, pin::pin, time::Duration};
 use testcontainers::{
     GenericImage, ImageExt,
@@ -35,6 +37,8 @@ use testcontainers::{
     runners::AsyncRunner,
 };
 use walkdir::WalkDir;
+
+const NODE_IMAGE: &str = "ghcr.io/midnightntwrk/midnight-node";
 
 /// The node version running the same runtime (identical metadata) as mainnet after the
 /// upgrade at block 1_774_492.
@@ -73,7 +77,7 @@ async fn test_finalized_blocks_node_1_0() -> anyhow::Result<()> {
     }
 
     let node_path = temp_dir.path().join(NODE_VERSION).display().to_string();
-    let node_container = GenericImage::new("midnightntwrk/midnight-node", NODE_VERSION)
+    let node_container = GenericImage::new(NODE_IMAGE, NODE_VERSION)
         .with_wait_for(WaitFor::message_on_stderr("9944"))
         .with_mount(Mount::bind_mount(node_path, "/node"))
         .with_env_var("SHOW_CONFIG", "false")
@@ -155,7 +159,7 @@ async fn test_mainnet_runtime_upgrade_boundary() -> anyhow::Result<()> {
     let contract_action = block
         .transactions
         .iter()
-        .filter_map(|transaction| match transaction {
+        .filter_map(|(_, transaction, _)| match transaction {
             Transaction::Regular(transaction) => Some(&transaction.contract_actions),
             Transaction::System(_) => None,
         })
@@ -197,7 +201,7 @@ async fn init_ledger_db()
         .with_db_name("indexer")
         .with_user("indexer")
         .with_password("postgres")
-        .with_tag("17.1-alpine")
+        .with_tag(POSTGRES_IMAGE_TAG)
         .start()
         .await
         .context("start Postgres container")?;
@@ -216,6 +220,7 @@ async fn init_ledger_db()
         max_connections: 10,
         idle_timeout: Duration::from_secs(60),
         max_lifetime: Duration::from_secs(5 * 60),
+        test_before_acquire: true,
     };
     let pool = PostgresPool::new(config)
         .await

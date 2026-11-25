@@ -553,10 +553,10 @@ async fn measure_root_row_growth() -> anyhow::Result<()> {
     let actions =
         consecutive_actions(&indexer, &address, env_usize("SPIKE_DELTA_ACTIONS", 25)).await?;
 
-    let roots_before = LedgerState::persisted_root_hashes().len();
+    let roots_before = ledger_db::root_count().context("ledger DB initialized")?;
     let keys = contract_state_keys(&actions)?;
     flush();
-    let roots_after = LedgerState::persisted_root_hashes().len();
+    let roots_after = ledger_db::root_count().context("ledger DB initialized")?;
 
     let mut per_state = HashMap::<Vec<u8>, usize>::new();
     for (_, key) in &keys {

@@ -53,7 +53,8 @@ impl Cli {
 
         while let Some(block) = blocks.try_next().await.context("get next block")? {
             println!("## BLOCK: height={}, hash={}", block.height, block.hash);
-            for transaction in block.transactions {
+            for (phase, transaction, outcome) in block.transactions {
+                println!("\t# {phase:?}: {outcome:?}");
                 match transaction {
                     node::Transaction::Regular(transaction) => {
                         println!(

@@ -11,19 +11,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use indexer_common::domain::{ProtocolVersion, SerializedLedgerStateKey};
+use indexer_common::{
+    domain::{
+        ProtocolVersion, SerializedContractStateKey, SerializedLedgerStateKey,
+        SerializedZswapStateKey,
+    },
+    startup::Journal,
+};
 use std::num::NonZeroUsize;
 
 use crate::domain::{
-    Block, BlockRef, DParameter, DustRegistrationEvent, SystemParametersChange, TermsAndConditions,
-    Transaction,
+    Block, BlockRef, ContractStateTranslation, DParameter, DustRegistrationEvent,
+    LatestContractAction, SystemParametersChange, TermsAndConditions, Transaction,
 };
 
 /// Storage abstraction.
 #[trait_variant::make(Send)]
 pub trait Storage
 where
-    Self: Clone + Send + Sync + 'static,
+    Self: Clone + Send + Sync + Journal + 'static,
 {
     /// Save the given block with parameters and return the max regular transaction ID.
     async fn save_block(
@@ -33,7 +39,13 @@ where
         dust_registration_events: &[DustRegistrationEvent],
         ledger_state_key: &SerializedLedgerStateKey,
         system_parameters_change: Option<&SystemParametersChange>,
+        contract_state_translations: &[(u64, ContractStateTranslation)],
     ) -> Result<Option<u64>, sqlx::Error>;
+
+    /// The latest contract action of every contract.
+    async fn get_latest_contract_actions(
+        &self,
+    ) -> Result<Vec<(u64, LatestContractAction)>, sqlx::Error>;
 
     /// Get the block ref, ledger state key and protocol version of the highest stored block.
     async fn get_highest_block(
@@ -62,7 +74,7 @@ where
     /// Whether any stored contract action predates contract states being referenced by
     /// ledger-arena key, i.e. has neither key set. Such rows were written by a version that stored
     /// the states as blobs; those blobs are gone and cannot be recreated, so the database must be
-    /// re-indexed rather than resumed.
+    /// reindexed rather than resumed.
     async fn contract_actions_without_state_keys_exist(&self) -> Result<bool, sqlx::Error>;
 
     /// Get the latest D-Parameter.
@@ -72,4 +84,16 @@ where
     async fn get_latest_terms_and_conditions(
         &self,
     ) -> Result<Option<TermsAndConditions>, sqlx::Error>;
+
+    /// The keys of every contract state and contract zswap state stored, translations included,
+    /// each once.
+    async fn get_contract_state_keys(
+        &self,
+    ) -> Result<
+        (
+            Vec<SerializedContractStateKey>,
+            Vec<SerializedZswapStateKey>,
+        ),
+        sqlx::Error,
+    >;
 }

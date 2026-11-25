@@ -21,7 +21,8 @@ pub trait ShieldedNullifiersStorage
 where
     Self: Clone + Send + Sync + 'static,
 {
-    /// Get transactions containing zswap nullifiers matching a prefix.
+    /// Get transactions containing zswap nullifiers matching one of the given prefixes. Empty
+    /// prefixes match nothing.
     async fn get_shielded_nullifier_transactions(
         &self,
         nullifier_prefixes: &[Vec<u8>],

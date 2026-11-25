@@ -12,7 +12,7 @@ if [ -d "target/data/postgres" ] || [ -d "target/data/nats" ]; then
     echo "Cleaning postgres and nats data directories..."
     docker run --rm \
         -v "$(pwd):/project" \
-        alpine sh -c "rm -rf /project/target"
+        "$ALPINE_IMAGE" sh -c "rm -rf /project/target"
     echo "Data directories cleaned"
 fi
 

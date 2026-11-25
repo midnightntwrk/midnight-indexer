@@ -11,6 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(all(target_os = "linux", feature = "standalone"))]
+#[global_allocator]
+static ALLOC: indexer_common::Jemalloc = indexer_common::Jemalloc;
+
 #[cfg(feature = "standalone")]
 mod config;
 
@@ -65,17 +69,18 @@ fn run() -> anyhow::Result<()> {
         infra::{ledger_db, migrations, pool, pub_sub},
         telemetry,
     };
-    use log::info;
+    use log::{info, warn};
     use spo_indexer::{
         application as spo_app,
         infra::{spo_client::SPOClient, storage as spo_storage},
     };
-    use std::{num::NonZeroUsize, panic};
+    use std::{num::NonZeroUsize, panic, time::Duration};
     use tokio::{
         runtime::Builder,
         select,
         signal::unix::{SignalKind, signal},
         task,
+        time::timeout,
     };
     use wallet_indexer::{application as wallet_app, infra::storage as wallet_storage};
 
@@ -174,6 +179,7 @@ fn run() -> anyhow::Result<()> {
 
     runtime.block_on(async {
         telemetry::init_tracing(tracing_config);
+        let metrics = metrics_config.enabled;
         telemetry::init_metrics(metrics_config);
 
         let pool = pool::sqlite::SqlitePool::new(storage_config)
@@ -203,13 +209,23 @@ fn run() -> anyhow::Result<()> {
             let storage = chain_storage::Storage::new(pool.clone());
             let publisher = pub_sub.publisher();
             let application_config = application_config.clone();
+            // Before connecting, which can take a while, so a SIGTERM meanwhile ends it.
+            let mut sigterm =
+                signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
             task::spawn(async move {
-                let node = SubxtNode::new(node_config)
-                    .await
-                    .context("create SubxtNode")?;
-                let sigterm =
-                    signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
-                chain_app::run(application_config.into(), node, storage, publisher, sigterm).await
+                let node = select! {
+                    node = SubxtNode::new(node_config) => node.context("create SubxtNode")?,
+                    _ = sigterm.recv() => return Ok(()),
+                };
+                chain_app::run(
+                    application_config.into(),
+                    metrics,
+                    node,
+                    storage,
+                    publisher,
+                    sigterm,
+                )
+                .await
             })
         };
 
@@ -254,8 +270,27 @@ fn run() -> anyhow::Result<()> {
             )
         });
 
+        // On SIGTERM, every component stops, but the chain-indexer may first finish what it is doing.
+        let mut sigterm =
+            signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
+        let mut chain_indexer = chain_indexer;
         select! {
-            result = chain_indexer => handle_exit("chain-indexer", result),
+            biased;
+
+            _ = sigterm.recv() => {
+                // How long to wait for the chain-indexer to finish what it is doing; whoever sent
+                // SIGTERM may kill the process sooner.
+                const TIMEOUT: Duration = Duration::from_secs(60);
+
+                match timeout(TIMEOUT, &mut chain_indexer).await {
+                    Ok(result) => handle_exit("chain-indexer", result),
+                    Err(_) => warn!(
+                        timeout:? = TIMEOUT;
+                        "chain-indexer did not stop in time after SIGTERM"
+                    ),
+                }
+            }
+            result = &mut chain_indexer => handle_exit("chain-indexer", result),
             result = spo_indexer => handle_exit("spo-indexer", result),
             result = wallet_indexer => handle_exit("wallet-indexer", result),
             result = indexer_api => handle_exit("indexer-api", result),

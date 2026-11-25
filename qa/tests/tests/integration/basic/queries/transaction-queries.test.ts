@@ -15,6 +15,7 @@
 
 import log from '@utils/logging/logger';
 import '@utils/logging/test-logging-hooks';
+import { expectedPreFundWalletCount } from '@utils/genesis';
 import dataProvider from '@utils/testdata-provider';
 import { GraphQLError } from 'graphql/error/GraphQLError';
 import { IndexerHttpClient } from '@utils/indexer/http-client';
@@ -303,14 +304,15 @@ describe.skipIf(env.isMainnetEnv())(`genesis transactions`, () => {
     });
 
     /**
-     * Genesis regular transactions contain utxos related to 4 pre-fund wallets
+     * Genesis regular transactions contain utxos related to the pre-fund wallets of the chain
      *
      * @given the genesis transactions are collected
      * @when we inspect their utxos
-     * @then some of the regular transactions should contain utxos related to 4 pre-fund wallets
+     * @then the regular transactions should contain utxos related to the expected number of
+     * pre-fund wallets
      */
-    test('should return utxos related to 4 pre-fund wallets', async () => {
-      const expectedPreFundWallets = 4;
+    test('should return utxos related to the expected number of pre-fund wallets', async () => {
+      const expectedPreFundWallets = await expectedPreFundWalletCount();
 
       // Loop through all the utxos in the genesis transaction and gather all
       // the pre-fund wallet addresses

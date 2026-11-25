@@ -1,6 +1,20 @@
+FROM rust:1.98.1-trixie@sha256:a8a5f0a1e5fe7dfe1d352591e4a1c7dd2c08fd70475cae872cf3458ba0df0546 AS toolchain
 ARG RUST_VERSION
-FROM lukemathwalker/cargo-chef:0.1.77-rust-$RUST_VERSION-trixie AS chef
+# cargo chef cook runs before rust-toolchain.toml is copied in, so the image's Rust must match it.
+RUN test "$(rustc --version | cut -d ' ' -f 2)" = "${RUST_VERSION:?build arg required}" || \
+    { echo "image has $(rustc --version), rust-toolchain.toml wants ${RUST_VERSION}" >&2; exit 1; }
+
+FROM toolchain AS chef
+ARG CARGO_CHEF_VERSION
+RUN cargo install cargo-chef --locked --version "${CARGO_CHEF_VERSION:?build arg required}" && \
+    rm -rf "$CARGO_HOME/registry"
 WORKDIR /build
+
+# Built from toolchain, not chef, so bumping either tool leaves the other's layer cached.
+FROM toolchain AS auditable
+ARG CARGO_AUDITABLE_VERSION
+RUN cargo install cargo-auditable --locked --version "${CARGO_AUDITABLE_VERSION:?build arg required}" && \
+    rm -rf "$CARGO_HOME/registry"
 
 FROM chef AS planner
 COPY . .
@@ -10,24 +24,36 @@ FROM chef AS builder
 SHELL ["/bin/bash", "-c"]
 ARG PROFILE=release
 COPY --from=planner /build/recipe.json recipe.json
-RUN cargo chef cook --profile $PROFILE --recipe-path recipe.json
+# Same package and features as the build below, so cargo reuses every dependency compiled here.
+RUN cargo chef cook -p chain-indexer --locked --features cloud --profile $PROFILE --recipe-path recipe.json
+# The git commit, for `--version` and the startup journal, as .git is not in the build context.
+# Declared after cargo chef cook, so a new commit leaves the cached dependencies alone.
+ARG MIDNIGHT_INDEXER_GIT_SHA
+COPY --from=auditable /usr/local/cargo/bin/cargo-auditable /usr/local/cargo/bin/
 COPY . .
-RUN cargo build -p chain-indexer --locked --features cloud --profile $PROFILE && \
+RUN : "${MIDNIGHT_INDEXER_GIT_SHA:?build arg required}" && \
+    cargo auditable build -p chain-indexer --locked --features cloud --profile $PROFILE && \
+    if ! readelf -S "./target/${PROFILE/dev/debug}/chain-indexer" | grep -q '\.dep-v0'; then \
+        echo "chain-indexer binary lacks the .dep-v0 section embedded by cargo auditable" >&2; exit 1; \
+    fi && \
     mkdir -p /runtime/usr/local/bin && \
     mv "./target/${PROFILE/dev/debug}/chain-indexer" /runtime/usr/local/bin && \
     mv /build/chain-indexer/bin/entrypoint.sh /runtime/usr/local/bin && \
     mkdir -p /runtime/opt/chain-indexer && \
     mv /build/chain-indexer/config.yaml /runtime/opt/chain-indexer
 
-FROM debian:trixie-slim@sha256:f6e2cfac5cf956ea044b4bd75e6397b4372ad88fe00908045e9a0d21712ae3ba AS runtime
+FROM debian:trixie-slim@sha256:8aa5a7bf5a1955bddbe7d74fcdd0b91ab30e74362a8b73af672b0481b35b44a0 AS runtime
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates=20250419 && \
+    apt-get install -y --no-install-recommends ca-certificates=20250419+deb13u1 && \
     rm -rf /var/lib/apt/lists/*
 RUN useradd -u 10001 -d /nonexistent -s /usr/sbin/nologin -M -c "" appuser && \
     passwd -l appuser && \
     mkdir /var/run/chain-indexer && \
     chown appuser:appuser /var/run/chain-indexer
-COPY --from=builder --chown=appuser:appuser /runtime /
-USER appuser
+# Root-owned, so the service can run and read these but not replace them; it only writes
+# to the directories created for it above.
+COPY --from=builder /runtime /
+# appuser, by UID: Kubernetes runAsNonRoot can only verify a numeric user.
+USER 10001
 WORKDIR /opt/chain-indexer
 ENTRYPOINT ["entrypoint.sh"]

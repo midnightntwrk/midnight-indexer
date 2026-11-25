@@ -1,0 +1,56 @@
+name: Sync target release from milestone
+
+on:
+  issues:
+    types: [demilestoned, milestoned, opened]
+  milestone:
+    types: [edited]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  sync:
+    if: |
+      (github.event_name == 'issues' && !github.event.issue.pull_request &&
+        (github.event.action != 'opened' || github.event.issue.milestone)) ||
+      (github.event_name == 'milestone' && github.event.changes.title != null)
+    # The event filter runs before the sync job joins its concurrency group.
+    concurrency:
+      group: sync-target-release-${{ github.event_name }}-${{ github.event.issue.number || github.event.milestone.number }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Sync Target release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          MILESTONE_NUMBER: ${{ github.event.milestone.number }}
+        run: |
+          # An issue event supplies the number of the issue to sync.
+          issue_numbers="$ISSUE_NUMBER"
+          # Renaming a milestone can change Target release for all issues assigned to the milestone.
+          if [[ "$GITHUB_EVENT_NAME" == milestone ]]; then
+            issue_numbers=$(gh api --paginate \
+              "repos/$GITHUB_REPOSITORY/issues?milestone=$MILESTONE_NUMBER&state=all&per_page=100" \
+              --jq '.[] | select(.pull_request == null) | .number')
+          fi
+
+          # The workflow attempts every issue before failing the run.
+          sync_status=0
+          while IFS= read -r issue_number; do
+            [[ -n "$issue_number" ]] || continue
+            # Sync target release for issue
+            if ! bash .github/scripts/sync-target-release.sh "$issue_number"; then
+              printf 'Target release sync failed for issue #%s.\n' "$issue_number" >&2
+              sync_status=1
+            fi
+          done <<< "$issue_numbers"
+          exit "$sync_status"

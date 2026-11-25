@@ -13,6 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import { CONTRACT_ACTION_STATE_AT_BODY } from './contract-queries';
+
 export const TRANSACTION_RESULT_BODY_FRAGMENT = `     status
       segments {
         id
@@ -96,5 +98,31 @@ export const TRANSACTION_BODY_FRAGMENT = `   ${REGULAR_TRANSACTION_FRAGMENT}
 export const GET_TRANSACTION_BY_OFFSET = `query GetTransactionByOffset($OFFSET: TransactionOffset!){
   transactions(offset: $OFFSET){
     ${TRANSACTION_BODY_FRAGMENT}
+  }
+}`;
+
+export const GET_TRANSACTION_CONTRACT_ACTIONS_STATE_AT = `query GetTransactionContractActionsStateAt($OFFSET: TransactionOffset!) {
+  transactions(offset: $OFFSET) {
+    hash
+    contractActions {
+      ${CONTRACT_ACTION_STATE_AT_BODY}
+    }
+  }
+}`;
+
+// TRANSACTION_BODY_FRAGMENT asks contract actions only for their shared fields, so a Deploy
+// cannot be told apart from a Call or an Update. This variant asks for the concrete type and
+// nothing else, which also keeps it usable against older indexer deployments.
+export const GET_TRANSACTION_CONTRACT_ACTIONS_BY_OFFSET = `query GetTransactionByOffset($OFFSET: TransactionOffset!) {
+  transactions(offset: $OFFSET) {
+    hash
+    block {
+      hash
+      height
+    }
+    contractActions {
+      __typename
+      address
+    }
   }
 }`;

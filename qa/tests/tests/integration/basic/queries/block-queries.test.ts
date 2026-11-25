@@ -24,6 +24,7 @@ import type {
   RegularTransaction,
   Transaction,
 } from '@utils/indexer/indexer-types';
+import { expectedPreFundWalletCount } from '@utils/genesis';
 import dataProvider from '@utils/testdata-provider';
 import { TestContext } from 'vitest';
 import { env } from 'environment/model';
@@ -688,19 +689,19 @@ describe.skipIf(env.isMainnetEnv())(`genesis block`, () => {
     });
 
     /**
-     * Genesis block contains utxos related to exactly 4 pre-fund wallets
+     * Genesis block contains utxos related to exactly the pre-fund wallets of the chain
      *
      * @given the genesis block is queried
      * @when we inspect the utxos in its transaction
-     * @then there should be utxos related to exactly 4 pre-fund wallets
+     * @then there should be utxos related to exactly the expected number of pre-fund wallets
      */
-    test('should contain utxos related to exactly 4 pre-fund wallets', async (ctx: TestContext) => {
+    test('should contain utxos related to exactly the expected number of pre-fund wallets', async (ctx: TestContext) => {
       ctx.task!.meta.custom = {
         labels: ['Query', 'Block', 'ByHeight', 'Genesis', 'PreFundWallets', 'UnshieldedTokens'],
         testKey: 'PM-17690',
       };
 
-      const expectedPreFundWallets = 4;
+      const expectedPreFundWallets = await expectedPreFundWalletCount();
       const genesisTransactions = await extractGenesisTransactions(genesisBlock);
 
       // Loop through all the utxos in the transactions that have them and gather all

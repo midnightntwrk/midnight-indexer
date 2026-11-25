@@ -13,6 +13,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import { CONTRACT_ACTION_STATE_AT_BODY } from './contract-queries';
+
 export const SHIELDED_TRANSACTION_SUBSCRIPTION_BY_SESSION_ID = `subscription WalletSyncEventSubscription ($SESSION_ID: String){
     shieldedTransactions (sessionId: $SESSION_ID) {
         ... on RelevantTransaction {
@@ -335,6 +337,26 @@ export const CONTRACT_ACTIONS_SUBSCRIPTION_FROM_LATEST_BLOCK = `subscription Con
 export const CONTRACT_ACTIONS_SUBSCRIPTION_FROM_BLOCK_BY_OFFSET = `subscription ContractActionsSubscriptionFromBlockByOffset($ADDRESS: HexEncoded!, $OFFSET: BlockOffset) {
     contractActions(address: $ADDRESS, offset: $OFFSET) {
         ${CONTRACT_ACTION_SUBSCRIPTION_FRAGMENT}
+    }
+}`;
+
+// Only the fields the no-offset test checks: address, transaction and block height.
+export const CONTRACT_ACTIONS_WITH_HEIGHT_FROM_LATEST_BLOCK = `subscription ContractActionsWithHeightFromLatestBlock($ADDRESS: HexEncoded!) {
+    contractActions(address: $ADDRESS) {
+        __typename
+        address
+        transaction {
+            hash
+            block {
+                height
+            }
+        }
+    }
+}`;
+
+export const CONTRACT_ACTIONS_STATE_AT_SUBSCRIPTION = `subscription ContractActionsStateAt($ADDRESS: HexEncoded!, $OFFSET: BlockOffset) {
+    contractActions(address: $ADDRESS, offset: $OFFSET) {
+        ${CONTRACT_ACTION_STATE_AT_BODY}
     }
 }`;
 

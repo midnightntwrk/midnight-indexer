@@ -14,15 +14,20 @@
 mod contract_state;
 mod contract_zswap_state;
 mod ledger_state;
+mod pinning;
 mod secret_key;
+mod state_key;
 mod state_translation_v8_to_v9;
 mod transaction;
+mod zswap_state;
 
 pub use contract_state::*;
 pub use contract_zswap_state::*;
 pub use ledger_state::*;
+pub use pinning::*;
 pub use secret_key::*;
 pub use transaction::*;
+pub use zswap_state::*;
 
 use crate::{
     domain::{
@@ -69,6 +74,9 @@ type IntentV9<D> =
 pub enum Error {
     #[error("cannot load ledger state for key {}", const_hex::encode(.0))]
     LoadLedgerState(SerializedLedgerStateKey, #[source] io::Error),
+
+    #[error("cannot reload a ledger state mid-block, with non-zero block fullness")]
+    ReloadLedgerState,
 
     #[error("cannot load contract state for key {0}")]
     LoadContractState(SerializedContractStateKey, #[source] io::Error),

@@ -11,6 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(target_os = "linux")]
+#[global_allocator]
+static ALLOC: indexer_common::Jemalloc = indexer_common::Jemalloc;
+
 #[cfg(feature = "cloud")]
 fn main() {
     use indexer_common::telemetry;
@@ -90,6 +94,7 @@ fn run() -> anyhow::Result<()> {
         let sigterm = signal(SignalKind::terminate()).expect("SIGTERM handler can be registered");
 
         telemetry::init_tracing(tracing_config);
+        let metrics = metrics_config.enabled;
         telemetry::init_metrics(metrics_config);
 
         let node = SubxtNode::new(node_config)
@@ -113,7 +118,15 @@ fn run() -> anyhow::Result<()> {
             .await
             .context("create NatsPublisher")?;
 
-        application::run(application_config, node, storage, publisher, sigterm).await
+        application::run(
+            application_config,
+            metrics,
+            node,
+            storage,
+            publisher,
+            sigterm,
+        )
+        .await
     });
 
     // The implicit runtime drop hangs indefinitely when spawned tasks are inside

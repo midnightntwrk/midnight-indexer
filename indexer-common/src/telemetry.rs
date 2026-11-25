@@ -27,6 +27,10 @@
 //!
 //! ## Metrics
 //! - Metrics are exposed via Prometheus at the configured endpoint.
+//! - On Linux the allocator's own statistics are published as well, see [allocator_metrics].
+
+#[cfg(target_os = "linux")]
+pub mod allocator_metrics;
 
 use fastrace::{
     collector::{ConsoleReporter, Reporter},
@@ -35,10 +39,12 @@ use fastrace::{
 use fastrace_opentelemetry::OpenTelemetryReporter;
 use fastrace_tracing::FastraceCompatLayer;
 use logforth::{
+    Diagnostic, Filter,
     append::{FastraceEvent, Stdout},
     diagnostic::FastraceDiagnostic,
-    filter::rustlog::RustLogFilterBuilder,
+    filter::{FilterResult, RustLogFilter, rustlog::RustLogFilterBuilder},
     layout::JsonLayout,
+    record::{FilterCriteria, Level},
 };
 use metrics_exporter_prometheus::PrometheusBuilder;
 use opentelemetry::InstrumentationScope;
@@ -94,8 +100,10 @@ pub struct MetricsConfig {
 
 /// Initialize logging with [Logforth](https://github.com/fast/logforth).
 ///
-/// Log levels are filterd based on the `RUST_LOG` environment variable and log records are
-/// formatted as JSON.
+/// Log levels are filtered based on the `RUST_LOG` environment variable and log records are
+/// formatted as JSON. Regardless of `RUST_LOG`, the `tungstenite` and `tokio_tungstenite` targets
+/// never log below INFO, because their DEBUG and TRACE records contain WebSocket payloads, which
+/// carry session IDs and viewing keys.
 ///
 /// If logging happens in the context of a span, log records are added to the current span as events
 /// and the trace ID of the current span is added to the log records, thus correlating logs and
@@ -108,12 +116,46 @@ pub fn init_logging() {
     logforth::starter_log::builder()
         .dispatch(|dispatch| {
             dispatch
-                .filter(RustLogFilterBuilder::from_default_env().build())
+                .filter(log_filter(std::env::var("RUST_LOG").ok().as_deref()))
                 .diagnostic(FastraceDiagnostic::default())
                 .append(Stdout::default().with_layout(JsonLayout::default()))
                 .append(FastraceEvent::default())
         })
         .apply();
+}
+
+/// Log targets whose DEBUG and TRACE records contain WebSocket payloads.
+const PAYLOAD_LOG_TARGETS: [&str; 2] = ["tungstenite", "tokio_tungstenite"];
+
+/// Build the log filter from the given `RUST_LOG` specification, capping the
+/// [PAYLOAD_LOG_TARGETS] at INFO.
+fn log_filter(spec: Option<&str>) -> LogFilter {
+    LogFilter(RustLogFilterBuilder::from_spec(spec.unwrap_or_default()).build())
+}
+
+/// A `RUST_LOG` filter which cannot enable the [PAYLOAD_LOG_TARGETS] below INFO.
+///
+/// This is a separate check rather than an extra directive, because in a `RUST_LOG` filter the
+/// longest matching target wins, so e.g. `tungstenite::protocol=trace` would override a forced
+/// `tungstenite=info`.
+#[derive(Debug)]
+struct LogFilter(RustLogFilter);
+
+impl Filter for LogFilter {
+    fn enabled(&self, criteria: &FilterCriteria, diags: &[Box<dyn Diagnostic>]) -> FilterResult {
+        let payload_target = PAYLOAD_LOG_TARGETS.iter().any(|target| {
+            criteria
+                .target()
+                .strip_prefix(target)
+                .is_some_and(|rest| rest.is_empty() || rest.starts_with("::"))
+        });
+
+        if payload_target && criteria.level() < Level::Info {
+            FilterResult::Reject
+        } else {
+            self.0.enabled(criteria, diags)
+        }
+    }
 }
 
 /// Initialize tracing with [fastrace](https://github.com/fast/fastrace).
@@ -163,11 +205,12 @@ pub fn init_tracing(config: TracingConfig) {
 
 /// Initialize metrics.
 ///
-/// Installs a Prometheus exporter.
+/// Installs a Prometheus exporter and, on Linux, starts publishing the allocator's statistics.
+/// Must be called within a Tokio runtime.
 ///
 /// # Panics
 ///
-/// Panics if the Prometheus exporter can be installed.
+/// Panics if the Prometheus exporter cannot be installed.
 pub fn init_metrics(config: MetricsConfig) {
     let MetricsConfig {
         enabled,
@@ -180,6 +223,16 @@ pub fn init_metrics(config: MetricsConfig) {
             .with_http_listener((address, port))
             .install()
             .expect("Prometheus exporter can be installed");
+
+        #[cfg(target_os = "linux")]
+        match allocator_metrics::AllocatorMetrics::new() {
+            Ok(metrics) => {
+                tokio::spawn(metrics.run(allocator_metrics::DEFAULT_INTERVAL));
+            }
+            Err(error) => {
+                log::error!(error:%; "cannot read allocator statistics, not publishing them")
+            }
+        }
     }
 }
 
@@ -204,4 +257,136 @@ fn package_name() -> String {
 
 fn package_version() -> String {
     format!("v{}", env!("CARGO_PKG_VERSION"))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::telemetry::log_filter;
+    use logforth::{
+        Filter,
+        filter::FilterResult,
+        record::{FilterCriteria, Level},
+    };
+
+    fn enabled(spec: Option<&str>, level: Level, target: &str) -> bool {
+        let criteria = FilterCriteria::builder()
+            .level(level)
+            .target(target)
+            .build();
+        !matches!(
+            log_filter(spec).enabled(&criteria, &[]),
+            FilterResult::Reject
+        )
+    }
+
+    #[test]
+    fn test_log_filter_websocket_payloads_never_logged() {
+        let specs = [
+            Some("trace"),
+            Some("info,tungstenite=trace,tokio_tungstenite=trace"),
+            Some("info,tungstenite::protocol=trace,tokio_tungstenite::compat=debug"),
+        ];
+
+        for spec in specs {
+            for target in [
+                "tungstenite::protocol",
+                "tokio_tungstenite",
+                "tokio_tungstenite::compat",
+            ] {
+                assert!(
+                    !enabled(spec, Level::Debug, target),
+                    "{spec:?} enables DEBUG for {target}"
+                );
+                assert!(
+                    !enabled(spec, Level::Trace, target),
+                    "{spec:?} enables TRACE for {target}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_log_filter_other_targets_unchanged() {
+        assert!(enabled(None, Level::Error, "chain_indexer"));
+        assert!(!enabled(None, Level::Warn, "chain_indexer"));
+        assert!(!enabled(None, Level::Info, "tungstenite::protocol"));
+
+        assert!(enabled(Some("debug"), Level::Debug, "indexer_api"));
+        assert!(!enabled(Some("debug"), Level::Trace, "indexer_api"));
+
+        assert!(enabled(
+            Some("info,indexer_api=trace"),
+            Level::Trace,
+            "indexer_api::infra"
+        ));
+        assert!(!enabled(
+            Some("indexer_api=trace"),
+            Level::Error,
+            "chain_indexer"
+        ));
+
+        assert!(!enabled(Some("warn"), Level::Info, "tungstenite::protocol"));
+        assert!(enabled(Some("warn"), Level::Warn, "tungstenite::protocol"));
+        assert!(enabled(Some("trace"), Level::Info, "tungstenite::protocol"));
+
+        // Only the payload targets themselves and their submodules are capped, not other crates
+        // whose names merely start the same.
+        assert!(enabled(Some("debug"), Level::Debug, "tungstenite_ext"));
+        assert!(enabled(
+            Some("debug"),
+            Level::Debug,
+            "tokio_tungstenite_ext::compat"
+        ));
+    }
+
+    // `init_metrics` installs the global recorder, which can be done once per process, so this is
+    // the only test calling it.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn test_init_metrics_publishes_allocator_stats() {
+        use crate::telemetry::{MetricsConfig, allocator_metrics::STATS, init_metrics};
+        use std::{
+            net::{Ipv4Addr, TcpListener},
+            time::Duration,
+        };
+        use tokio::time::{sleep, timeout};
+
+        let port = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .and_then(|listener| listener.local_addr())
+            .expect("free port can be found")
+            .port();
+
+        init_metrics(MetricsConfig {
+            enabled: true,
+            address: Ipv4Addr::LOCALHOST.into(),
+            port,
+        });
+
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .expect("HTTP client can be built");
+        let url = format!("http://{}:{port}/metrics", Ipv4Addr::LOCALHOST);
+        // Complete once the scrape has every series and the refresh task has set `allocated`.
+        let complete = |body: &str| {
+            let series = |stat: &str| format!("indexer_memory_allocator_bytes{{stat=\"{stat}\"}} ");
+            STATS.iter().all(|stat| body.contains(&series(stat)))
+                && !body.contains(&format!("{}0\n", series("allocated")))
+        };
+        let scrape = async {
+            loop {
+                if let Ok(response) = client.get(&url).send().await
+                    && let Ok(body) = response.text().await
+                    && complete(&body)
+                {
+                    break;
+                }
+                sleep(Duration::from_millis(50)).await;
+            }
+        };
+
+        timeout(Duration::from_secs(10), scrape)
+            .await
+            .expect("allocator stats are served by the Prometheus endpoint");
+    }
 }

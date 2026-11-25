@@ -55,7 +55,7 @@ struct UnshieldedUtxoRow {
 /// This is the same failure `dust_epoch` already fixes for `dust_generation_info`
 /// (migration `008_dust_generation_epoch`), handled the same way and for the same
 /// reason -- at read time, so the answer is right for data indexed by an older
-/// build and stays right across a re-index.
+/// build and stays right across a reindex.
 fn scope_to_dust_epoch(rows: Vec<UnshieldedUtxoRow>) -> Result<Vec<UnshieldedUtxo>, sqlx::Error> {
     rows.into_iter()
         .map(

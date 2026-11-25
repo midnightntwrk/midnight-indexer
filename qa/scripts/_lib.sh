@@ -1,8 +1,13 @@
 #!/bin/bash
 
-# Shared helpers for the undeployed-stack startup scripts.
-# Source from `startup-localenv-*.sh`:
+# Shared helpers for the QA scripts that start an undeployed stack.
+# Source with:
 #   . "$(dirname "$0")/_lib.sh"
+
+# Image for the throwaway containers that create and clear bind-mounted
+# directories, pinned by digest.
+# shellcheck disable=SC2034 # read by the scripts that source this file
+ALPINE_IMAGE="alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf"
 
 # Default node tag for a run that did not set NODE_TAG: the stable entry of the
 # repo's NODE_VERSIONS file. This mirrors readSupportedNodeVersion() in

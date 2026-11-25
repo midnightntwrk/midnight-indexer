@@ -5,8 +5,8 @@
 # `migrate_state_v8_to_v9` host fn is present from genesis), attaches the cloud
 # indexer stack, submits v8 transactions, drives the governance runtime upgrade to
 # the 2.1.0 WASM (spec_version -> 2_001_000, migration fires at apply+1), then
-# submits v9 transactions. The indexer must cross the boundary without a ledger/
-# zswap root mismatch and keep indexing.
+# submits v9 transactions. The indexer must cross the boundary without a ledger
+# state root mismatch and keep indexing.
 #
 # This is the generative, from-genesis rehearsal described in
 # docs/hardfork-devnet-rehearsal-8to9.md. It validates the live transaction path
@@ -19,8 +19,8 @@
 #
 # Usage:
 #   IMAGE_REGISTRY=midnightntwrk INDEXER_TAG=<sha> \
-#   FROM_NODE_TAG=1.0.0 TO_NODE_TAG=<2.1.0-local-tag> \
-#   FROM_TOOLKIT_TAG=1.0.0 TO_TOOLKIT_TAG=<2.1.0-local-tag> \
+#   FROM_NODE_TAG=1.0.400 TO_NODE_TAG=<2.1.0-local-tag> \
+#   FROM_TOOLKIT_TAG=1.0.400 TO_TOOLKIT_TAG=<2.1.0-local-tag> \
 #   RUNTIME_WASM=/path/to/midnight_node_runtime.compact.compressed.wasm \
 #     bash qa/scripts/test-hardfork-8to9.sh
 #
@@ -38,7 +38,7 @@
 set -euo pipefail
 
 # --- Configuration ---
-FROM_NODE_TAG="${FROM_NODE_TAG:-1.0.0}"          # ledger-8 node (chain-spec source)
+FROM_NODE_TAG="${FROM_NODE_TAG:-1.0.400}"        # ledger-8 node (chain-spec source)
 TO_NODE_TAG="${TO_NODE_TAG:-2.1.0}"              # ledger-9 migration node (binary + WASM)
 INDEXER_TAG="${INDEXER_TAG:?INDEXER_TAG is required (e.g. dev)}"
 FROM_TOOLKIT_TAG="${FROM_TOOLKIT_TAG:-$FROM_NODE_TAG}"  # toolkit for v8 sends
@@ -345,8 +345,9 @@ sleep 6
 # --- Step 8: assert the crossing ---
 echo ""
 echo ">>> Step 8: Asserting the indexer crossed the boundary..."
-# A failed crossing bails in chain-indexer with one of these (application.rs):
-#   "translate ledger state" | "ledger state root mismatch ..." | "zswap state root mismatch ..."
+# A failed crossing bails in chain-indexer with one of these (application.rs); older images may
+# also report "zswap state root mismatch ...":
+#   "translate ledger state" | "ledger state root mismatch ..."
 if compose --profile cloud logs chain-indexer 2>&1 \
      | grep -Eiq "ledger state root mismatch|zswap state root mismatch|translate ledger state"; then
   echo "ERROR: chain-indexer reported a boundary failure. Offending log lines:" >&2

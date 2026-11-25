@@ -20,11 +20,26 @@ body = """
 {% else %}\
     ## [unreleased]
 {% endif %}\
+{% set_global reindex = [] %}\
+{% for commit in commits %}\
+    {% for footer in commit.footers %}\
+        {% if footer.token == "REINDEX" %}\
+            {% set_global reindex = reindex | concat(with=footer.value) %}\
+        {% endif %}\
+    {% endfor %}\
+{% endfor %}\
+{% if reindex | length > 0 %}
+    ### 🚨 Reindex required
+    {% for value in reindex %}
+        - {{ value | upper_first }}\
+    {% endfor %}
+{% endif %}\
 {% for group, commits in commits | group_by(attribute="group") %}
     ### {{ group | striptags | trim | upper_first }}
     {% for commit in commits %}
         - {% if commit.scope %}*({{ commit.scope }})* {% endif %}\
             {% if commit.breaking %}[**breaking**] {% endif %}\
+            {% for footer in commit.footers %}{% if footer.token == "REINDEX" %}[**reindex**] {% endif %}{% endfor %}\
             {{ commit.message | upper_first }}\
     {% endfor %}
 {% endfor %}\n
