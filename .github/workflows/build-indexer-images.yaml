@@ -35,10 +35,6 @@ env:
   # Builds the cargo chef dependency layer. Pinned: bump deliberately; the justfile reads this too.
   CARGO_CHEF_VERSION: 0.1.78
   NODE_IMAGE: ${{ vars.NODE_IMAGE || 'ghcr.io/midnightntwrk/midnight-node' }}
-  USE_NODE_IMAGE_TOKEN: >-
-    ${{ github.event.repository.private &&
-        startsWith(vars.NODE_IMAGE, 'ghcr.io/') && vars.NODE_IMAGE_USERNAME != '' &&
-        secrets[vars.NODE_IMAGE_TOKEN] != '' }}
   # The upstream build cache and QA images use this namespace.
   REGISTRY: ghcr.io/midnightntwrk
   # Only this repository publishes to the shared registries.
@@ -115,7 +111,7 @@ jobs:
       contents: read
       packages: write
     env:
-      FETCH: ${{ github.event.repository.private && vars.FETCH_TOKEN != '' }}
+      FETCH: ${{ github.event.repository.private && (secrets.FETCH_TOKEN != '' || secrets.NODE_GIT_TOKEN != '') }}
       PROFILE: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || inputs.profile || 'dev' }}
     strategy:
       fail-fast: false
@@ -225,8 +221,7 @@ jobs:
           # `local/` below is only a tag name. Works because each job builds a single platform.
           load: true
           secrets: &fetch-token >-
-            ${{ env.FETCH == 'true' &&
-                format('git_token={0}', secrets[vars.FETCH_TOKEN]) || '' }}
+            ${{ env.FETCH == 'true' && format('git_token={0}', secrets.FETCH_TOKEN || secrets.NODE_GIT_TOKEN) || '' }}
           # Anchored here and reused by the push step below, so both builds match and share a cache.
           build-args: &build-args |
             FETCH=${{ env.FETCH }}
@@ -382,6 +377,11 @@ jobs:
       packages: read
     env:
       IMAGE_REGISTRY: ${{ needs.resolve-registry.outputs.registry || (github.ref_type == 'tag' && 'docker.io/midnightntwrk' || 'ghcr.io/midnightntwrk') }}
+      USE_NODE_IMAGE_TOKEN: &use-node-image-token >-
+        ${{ github.event.repository.private && startsWith(vars.NODE_IMAGE, 'ghcr.io/') &&
+            vars.NODE_IMAGE_USERNAME != '' &&
+            ((vars.NODE_IMAGE_TOKEN == 'MIDNIGHTCI_PACKAGES_READ' && secrets.MIDNIGHTCI_PACKAGES_READ != '') ||
+             (vars.NODE_IMAGE_TOKEN != 'MIDNIGHTCI_PACKAGES_READ' && secrets.NODE_IMAGE_TOKEN != '')) }}
     strategy:
       matrix:
         profile: [cloud, standalone]
@@ -431,7 +431,9 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ vars.NODE_IMAGE_USERNAME }}
-          password: ${{ secrets[vars.NODE_IMAGE_TOKEN] }}
+          password: >-
+            ${{ (vars.NODE_IMAGE_TOKEN == 'MIDNIGHTCI_PACKAGES_READ' && secrets.MIDNIGHTCI_PACKAGES_READ) ||
+                secrets.NODE_IMAGE_TOKEN }}
 
       - name: Pre-pull the node image
         if: env.USE_NODE_IMAGE_TOKEN == 'true'
@@ -508,6 +510,8 @@ jobs:
     permissions:
       contents: read
       packages: read
+    env:
+      USE_NODE_IMAGE_TOKEN: *use-node-image-token
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -534,7 +538,10 @@ jobs:
           # The per-commit <version>-<sha8> images are published to GHCR.
           image_registry: ${{ env.REGISTRY }}
           packages_read_token: ${{ (needs.resolve-registry.outputs.registry != '' || startsWith(vars.NODE_IMAGE, 'ghcr.io/')) && github.token || secrets.MIDNIGHTCI_PACKAGES_READ }}
-          node_image_token: ${{ env.USE_NODE_IMAGE_TOKEN == 'true' && secrets[vars.NODE_IMAGE_TOKEN] || '' }}
+          node_image_token: >-
+            ${{ env.USE_NODE_IMAGE_TOKEN == 'true' &&
+                ((vars.NODE_IMAGE_TOKEN == 'MIDNIGHTCI_PACKAGES_READ' && secrets.MIDNIGHTCI_PACKAGES_READ) ||
+                 secrets.NODE_IMAGE_TOKEN) || '' }}
           node_image_username: ${{ vars.NODE_IMAGE_USERNAME }}
           app_infra_secret: ${{ secrets.APP__INFRA__SECRET }}
           storage_password: ${{ secrets.APP__INFRA__STORAGE__PASSWORD }}

@@ -9,7 +9,7 @@ name: rust-security-scan
 # - cargo-deny can scan public dependencies without secrets
 # - SARIF uploads to GitHub Security (no secrets needed)
 #
-# A private dependency fetch needs the secret named by FETCH_TOKEN.
+# Private Git dependencies require an Actions secret with repository read access.
 
 permissions:
   actions: read # required for SARIF upload in a private repo
@@ -63,9 +63,9 @@ jobs:
           persist-credentials: false
 
       - name: Fetch Cargo dependencies
-        if: github.event.repository.private && vars.FETCH_TOKEN != ''
+        if: github.event.repository.private
         env:
-          FETCH_TOKEN: ${{ secrets[vars.FETCH_TOKEN] }}
+          FETCH_TOKEN: ${{ secrets.FETCH_TOKEN || secrets.NODE_GIT_TOKEN }}
         run: |
           if [[ -n "$FETCH_TOKEN" ]]; then
             bash ./fetch_cargo_dependencies.sh

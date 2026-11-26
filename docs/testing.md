@@ -80,11 +80,10 @@ Set the `NODE_IMAGE` GitHub Actions repository variable to the image repository 
 The default is `ghcr.io/midnightntwrk/midnight-node`. QA uses the same image name with
 `-toolkit` appended. For deployed QA, use `node_toolkit_tag` to override `latest-main`.
 
-To use a separate node credential for native CI and the image build's undeployed QA,
-set the `NODE_IMAGE_TOKEN` Actions repository variable to the secret name and
-`NODE_IMAGE_USERNAME` to the account that owns the token. The token needs read access to
-the node and toolkit images. Grant the private CI repository read access under **Manage
-Actions access** in GHCR when pulls use the workflow token.
+For a private GHCR override, add the token as the `NODE_IMAGE_TOKEN` GitHub Actions repository
+secret and set the `NODE_IMAGE_USERNAME` repository variable to the account that owns it.
+The token needs read access to the node and toolkit images. If you use the workflow token,
+grant the CI repository read access under **Manage Actions access** in GHCR.
 
 #### Runner overrides
 
@@ -98,10 +97,10 @@ Set these GitHub Actions repository variables to runner labels available to the 
 
 #### Private Cargo dependencies
 
-In the private repository, set the `FETCH_TOKEN` GitHub Actions repository variable to the name
-of the secret that stores the token. The token needs read access to the private GitHub
-repositories pinned in `Cargo.lock`. CI uses it for `cargo fetch --locked`, including inside
-image builds.
+Private CI uses the `NODE_GIT_TOKEN` GitHub Actions secret by default for
+`cargo fetch --locked`, including inside image builds. To override the credential, set the
+`FETCH_TOKEN` Actions secret. The token needs read access to the private GitHub repositories
+pinned in `Cargo.lock`.
 
 ## The QA TypeScript suite (`qa/tests/`)
 

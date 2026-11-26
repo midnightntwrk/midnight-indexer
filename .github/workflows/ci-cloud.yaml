@@ -110,9 +110,9 @@ jobs:
 
       - &fetch
         name: Fetch Cargo dependencies
-        if: github.event.repository.private && vars.FETCH_TOKEN != ''
+        if: github.event.repository.private
         env:
-          FETCH_TOKEN: ${{ secrets[vars.FETCH_TOKEN] }}
+          FETCH_TOKEN: ${{ secrets.FETCH_TOKEN || secrets.NODE_GIT_TOKEN }}
         run: |
           if [[ -n "$FETCH_TOKEN" ]]; then
             bash ./fetch_cargo_dependencies.sh
@@ -141,10 +141,14 @@ jobs:
       - name: Login to GHCR
         if: github.job == 'test-with-package-access'
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        env:
+          NODE_IMAGE_TOKEN: >-
+            ${{ (vars.NODE_IMAGE_TOKEN == 'MIDNIGHTCI_PACKAGES_READ' && secrets.MIDNIGHTCI_PACKAGES_READ) ||
+                (vars.NODE_IMAGE_TOKEN != 'MIDNIGHTCI_PACKAGES_READ' && secrets.NODE_IMAGE_TOKEN) || '' }}
         with:
           registry: ghcr.io
-          username: ${{ secrets[vars.NODE_IMAGE_TOKEN] != '' && vars.NODE_IMAGE_USERNAME || github.actor }}
-          password: ${{ (vars.NODE_IMAGE_USERNAME && secrets[vars.NODE_IMAGE_TOKEN]) || github.token }}
+          username: ${{ env.NODE_IMAGE_TOKEN != '' && vars.NODE_IMAGE_USERNAME || github.actor }}
+          password: ${{ (vars.NODE_IMAGE_USERNAME && env.NODE_IMAGE_TOKEN) || github.token }}
 
       - name: Pre-pull Docker images
         run: |
