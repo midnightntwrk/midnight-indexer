@@ -146,7 +146,7 @@ jobs:
       - *checkout
 
       - name: Login to GHCR
-        if: github.job == 'test-with-permissions'
+        if: github.job == 'test-with-package-access'
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
@@ -195,7 +195,7 @@ jobs:
           just feature=standalone test
 
   # Package access is limited to private repositories because PR code can disclose pulled images.
-  test-with-permissions:
+  test-with-package-access:
     runs-on: ${{ vars.TEST_RUNNER || 'ubuntu-latest-8-core-x64' }}
     needs: [changes]
     if: >-
@@ -210,7 +210,7 @@ jobs:
 
   # Branch protection requires one test check, regardless of which job has package access.
   test:
-    needs: [changes, test-without-package-access, test-with-permissions]
+    needs: [changes, test-without-package-access, test-with-package-access]
     if: ${{ always() && needs.changes.outputs.non_qa != 'false' }}
     runs-on: ubuntu-latest
     permissions: {}
@@ -218,7 +218,7 @@ jobs:
       - name: Check test result
         env:
           WITHOUT_PACKAGE_ACCESS: ${{ needs.test-without-package-access.result }}
-          WITH_PACKAGE_ACCESS: ${{ needs.test-with-permissions.result }}
+          WITH_PACKAGE_ACCESS: ${{ needs.test-with-package-access.result }}
         run: |
           printf 'Without package access: %s\nWith package access: %s\n' "$WITHOUT_PACKAGE_ACCESS" "$WITH_PACKAGE_ACCESS"
           [[ "$WITHOUT_PACKAGE_ACCESS/$WITH_PACKAGE_ACCESS" == success/skipped ||
