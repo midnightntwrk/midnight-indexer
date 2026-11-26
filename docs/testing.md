@@ -80,12 +80,11 @@ Set the `NODE_IMAGE` GitHub Actions repository variable to the image repository 
 The default is `ghcr.io/midnightntwrk/midnight-node`. QA uses the same image name with
 `-toolkit` appended. For deployed QA, use `node_toolkit_tag` to override `latest-main`.
 
-For private images, grant the private repository that runs CI read access to both packages
-under **Manage Actions access** in GHCR. Grant access only where contributors who can run
-workflows are trusted with the images.
-
-Native CI pulls the latest tag from `NODE_VERSIONS` using `NODE_IMAGE`. In private repositories,
-PR and merge queue runs authenticate to GHCR when you set a GHCR override.
+To use a separate node credential for native CI and the image build's undeployed QA,
+set the `NODE_IMAGE_TOKEN` Actions repository variable to the secret name and
+`NODE_IMAGE_USERNAME` to the account that owns the token. The token needs read access to
+the node and toolkit images. Grant the private CI repository read access under **Manage
+Actions access** in GHCR when pulls use the workflow token.
 
 #### Runner overrides
 

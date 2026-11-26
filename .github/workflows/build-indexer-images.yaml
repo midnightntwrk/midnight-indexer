@@ -35,6 +35,10 @@ env:
   # Builds the cargo chef dependency layer. Pinned: bump deliberately; the justfile reads this too.
   CARGO_CHEF_VERSION: 0.1.78
   NODE_IMAGE: ${{ vars.NODE_IMAGE || 'ghcr.io/midnightntwrk/midnight-node' }}
+  USE_NODE_IMAGE_TOKEN: >-
+    ${{ github.event.repository.private &&
+        startsWith(vars.NODE_IMAGE, 'ghcr.io/') && vars.NODE_IMAGE_USERNAME != '' &&
+        secrets[vars.NODE_IMAGE_TOKEN] != '' }}
   # The upstream build cache and QA images use this namespace.
   REGISTRY: ghcr.io/midnightntwrk
   # Only this repository publishes to the shared registries.
@@ -401,13 +405,6 @@ jobs:
           docker compose --profile "$PROFILE" config --quiet
           echo "Docker Compose syntax validation completed successfully"
 
-      - name: Login to GHCR
-        uses: *ghcr-login-action
-        with:
-          registry: ghcr.io
-          username: ${{ (needs.resolve-registry.outputs.registry != '' || startsWith(vars.NODE_IMAGE, 'ghcr.io/')) && github.actor || 'MidnightCI' }}
-          password: ${{ (needs.resolve-registry.outputs.registry != '' || startsWith(vars.NODE_IMAGE, 'ghcr.io/')) && github.token || secrets.MIDNIGHTCI_PACKAGES_READ }}
-
       - name: Derive image tags
         id: tags
         uses: ./.github/actions/derive-image-tags
@@ -428,11 +425,32 @@ jobs:
             echo "NODE_TAG=$NODE_TAG"
           } >> "$GITHUB_ENV"
 
+      - name: Login to GHCR for the node image
+        if: env.USE_NODE_IMAGE_TOKEN == 'true'
+        uses: *ghcr-login-action
+        with:
+          registry: ghcr.io
+          username: ${{ vars.NODE_IMAGE_USERNAME }}
+          password: ${{ secrets[vars.NODE_IMAGE_TOKEN] }}
+
+      - name: Pre-pull the node image
+        if: env.USE_NODE_IMAGE_TOKEN == 'true'
+        run: docker pull "$NODE_IMAGE:$NODE_TAG"
+
+      - name: Login to GHCR for indexer images
+        uses: *ghcr-login-action
+        with:
+          registry: ghcr.io
+          username: ${{ (needs.resolve-registry.outputs.registry != '' || startsWith(vars.NODE_IMAGE, 'ghcr.io/')) && github.actor || 'MidnightCI' }}
+          password: ${{ (needs.resolve-registry.outputs.registry != '' || startsWith(vars.NODE_IMAGE, 'ghcr.io/')) && github.token || secrets.MIDNIGHTCI_PACKAGES_READ }}
+
       - name: Init Env Vars
         uses: ./.github/actions/init-env
 
       - name: Docker Compose Up
         env:
+          # Compose reuses the node image after the GHCR login switches to indexer credentials.
+          NODE_PULL_POLICY: ${{ env.USE_NODE_IMAGE_TOKEN == 'true' && 'never' || 'missing' }}
           PROFILE: ${{ matrix.profile }}
         run: |
           echo "Compose up with:"
@@ -516,6 +534,8 @@ jobs:
           # The per-commit <version>-<sha8> images are published to GHCR.
           image_registry: ${{ env.REGISTRY }}
           packages_read_token: ${{ (needs.resolve-registry.outputs.registry != '' || startsWith(vars.NODE_IMAGE, 'ghcr.io/')) && github.token || secrets.MIDNIGHTCI_PACKAGES_READ }}
+          node_image_token: ${{ env.USE_NODE_IMAGE_TOKEN == 'true' && secrets[vars.NODE_IMAGE_TOKEN] || '' }}
+          node_image_username: ${{ vars.NODE_IMAGE_USERNAME }}
           app_infra_secret: ${{ secrets.APP__INFRA__SECRET }}
           storage_password: ${{ secrets.APP__INFRA__STORAGE__PASSWORD }}
           pub_sub_password: ${{ secrets.APP__INFRA__PUB_SUB__PASSWORD }}

@@ -145,8 +145,8 @@ jobs:
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
+          username: ${{ secrets[vars.NODE_IMAGE_TOKEN] != '' && vars.NODE_IMAGE_USERNAME || github.actor }}
+          password: ${{ (vars.NODE_IMAGE_USERNAME && secrets[vars.NODE_IMAGE_TOKEN]) || github.token }}
 
       - name: Pre-pull Docker images
         run: |
