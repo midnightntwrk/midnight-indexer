@@ -54,8 +54,10 @@ Review the prepended section before committing.
    with the `dev` profile (GHCR only) - a pre-merge or feature image is identifiable by its
    `-<sha>` suffix.
 
-   Forks build on standard GitHub-hosted runners and publish images and build caches to
-   `ghcr.io/<owner>/<repository>/<component>` using their own workflow token.
+   Forks use standard GitHub-hosted runners by default and can
+   [override the build runners](./testing.md#runner-overrides).
+   They publish images and build caches to `ghcr.io/<owner>/<repository>/<component>`
+   using their own workflow token.
    Compose validation and undeployed QA pull the indexer images from the same
    namespace.
 
