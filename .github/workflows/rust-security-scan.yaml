@@ -6,10 +6,10 @@ name: rust-security-scan
 # fork PR code access to secrets.
 #
 # Fork PR behavior:
-# - cargo-deny runs successfully (no secrets needed)
+# - cargo-deny can scan public dependencies without secrets
 # - SARIF uploads to GitHub Security (no secrets needed)
 #
-# This is acceptable because fork PRs still get security scanning via cargo-deny.
+# Private Git dependencies require an Actions secret with repository read access.
 
 permissions:
   actions: read # required for SARIF upload in a private repo
@@ -59,6 +59,17 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch Cargo dependencies
+        if: github.event.repository.private
+        env:
+          FETCH_TOKEN: ${{ secrets.FETCH_TOKEN || secrets.NODE_GIT_TOKEN }}
+        run: |
+          if [[ -n "$FETCH_TOKEN" ]]; then
+            bash ./fetch_cargo_dependencies.sh
+          fi
 
       - name: Install cargo-deny
         uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3

@@ -19,11 +19,21 @@ RUN cargo install cargo-auditable --locked --version "${CARGO_AUDITABLE_VERSION:
 FROM chef AS planner
 COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
+ARG FETCH=false
+# The planner uses a token to fetch private Cargo dependencies when FETCH is enabled.
+RUN --mount=type=secret,id=git_token,env=FETCH_TOKEN \
+    mkdir -p "$CARGO_HOME/git" "$CARGO_HOME/registry" && \
+    if [ "$FETCH" = true ]; then bash ./fetch_cargo_dependencies.sh; fi
 
 FROM chef AS builder
 SHELL ["/bin/bash", "-c"]
 ARG PROFILE=release
 COPY --from=planner /build/recipe.json recipe.json
+COPY --from=planner /usr/local/cargo/git /usr/local/cargo/git
+COPY --from=planner /usr/local/cargo/registry /usr/local/cargo/registry
+ARG FETCH=false
+# Offline builds fail if the planner missed a dependency.
+ENV CARGO_NET_OFFLINE=$FETCH
 # Same package and features as the build below, so cargo reuses every dependency compiled here.
 RUN cargo chef cook -p spo-indexer --locked --features cloud --profile $PROFILE --recipe-path recipe.json
 # The git commit, for `--version` and the startup journal, as .git is not in the build context.

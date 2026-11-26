@@ -48,7 +48,7 @@ suite's [runtime expectations](../qa/tests/tests/sync/README.md#runtime-expectat
 `indexer-tests/tests/native_e2e.rs` (run by `just test`, on every PR via `ci-cloud.yaml` /
 `ci-standalone.yaml`):
 
-- Starts a **real `midnightntwrk/midnight-node` container** (version = last line of
+- Starts a **real Midnight Node container** (version = last line of
   `NODE_VERSIONS`, currently `3.0.0-c3a556864675`) whose chain DB is **pre-seeded from fixed data in
   `.node/<version>/`** (bind-mounted, `CFG_PRESET=dev`) so it replays a known, deterministic
   chain, plus postgres + nats via testcontainers, and runs the **actual** chain-indexer /
@@ -71,6 +71,36 @@ suite's [runtime expectations](../qa/tests/tests/sync/README.md#runtime-expectat
 
 `indexer-tests/src/main.rs` (the `e2e` bin) can point the same suite at a **deployed** indexer
 (`--host/--port/--network-id`), but no workflow wires it up - it is a manual tool.
+
+### CI overrides
+
+#### Node image
+
+Set the `NODE_IMAGE` GitHub Actions repository variable to the image repository without a tag.
+The default is `ghcr.io/midnightntwrk/midnight-node`. QA uses the same image name with
+`-toolkit` appended. For deployed QA, use `node_toolkit_tag` to override `latest-main`.
+
+For a private GHCR override, add the token as the `NODE_IMAGE_TOKEN` GitHub Actions repository
+secret and set the `NODE_IMAGE_USERNAME` repository variable to the account that owns it.
+The token needs read access to the node and toolkit images. If you use the workflow token,
+grant the CI repository read access under **Manage Actions access** in GHCR.
+
+#### Runner overrides
+
+Set these GitHub Actions repository variables to runner labels available to the repository.
+
+| Variable | Jobs |
+| --- | --- |
+| `IMAGE_BUILD_RUNNER_AMD64` | amd64 image builds |
+| `IMAGE_BUILD_RUNNER_ARM64` | arm64 image builds |
+| `TEST_RUNNER` | Cloud and standalone native tests |
+
+#### Private Cargo dependencies
+
+Private CI uses the `NODE_GIT_TOKEN` GitHub Actions secret by default for
+`cargo fetch --locked`, including inside image builds. To override the credential, set the
+`FETCH_TOKEN` Actions secret. The token needs read access to the private GitHub repositories
+pinned in `Cargo.lock`.
 
 ## The QA TypeScript suite (`qa/tests/`)
 

@@ -84,7 +84,7 @@ echo " NODE_TAG: $NODE_TAG"
 echo " INDEXER_TAG: $INDEXER_TAG"
 echo " NODE_TOOLKIT_TAG: $NODE_TOOLKIT_TAG"
 
-docker compose --profile cloud up -d
+docker compose --profile cloud up -d "$@"
 
 wait_for_indexer_ready
 
