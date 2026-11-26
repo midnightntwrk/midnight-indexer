@@ -126,9 +126,7 @@ jobs:
           rustup override set ${{needs.changes.outputs.toolchain}}
           just feature=cloud lint
 
-  test:
-    # The job that runs reports as test so branch protection checks its result.
-    name: ${{ (github.event.repository.private && startsWith(vars.NODE_IMAGE, 'ghcr.io/')) && 'test-without-package-access' || 'test' }}
+  test-without-package-access:
     runs-on: ${{ vars.TEST_RUNNER || 'ubuntu-latest-8-core-x64' }}
     needs: [changes]
     if: >-
@@ -191,8 +189,6 @@ jobs:
 
   # Package access is limited to private repositories because PR code can disclose pulled images.
   test-with-permissions:
-    # The job that runs reports as test so branch protection checks its result.
-    name: ${{ (github.event.repository.private && startsWith(vars.NODE_IMAGE, 'ghcr.io/')) && 'test' || 'test-with-permissions' }}
     runs-on: ${{ vars.TEST_RUNNER || 'ubuntu-latest-8-core-x64' }}
     needs: [changes]
     if: >-
@@ -204,6 +200,22 @@ jobs:
       packages: read
     env: *test-env
     steps: *test-steps
+
+  # Branch protection requires one test check, regardless of which job has package access.
+  test:
+    needs: [changes, test-without-package-access, test-with-permissions]
+    if: ${{ always() && needs.changes.outputs.non_qa != 'false' }}
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Check test result
+        env:
+          WITHOUT_PACKAGE_ACCESS: ${{ needs.test-without-package-access.result }}
+          WITH_PACKAGE_ACCESS: ${{ needs.test-with-permissions.result }}
+        run: |
+          printf 'Without package access: %s\nWith package access: %s\n' "$WITHOUT_PACKAGE_ACCESS" "$WITH_PACKAGE_ACCESS"
+          [[ "$WITHOUT_PACKAGE_ACCESS/$WITH_PACKAGE_ACCESS" == success/skipped ||
+             "$WITHOUT_PACKAGE_ACCESS/$WITH_PACKAGE_ACCESS" == skipped/success ]]
 
   doc:
     runs-on: ubuntu-latest
