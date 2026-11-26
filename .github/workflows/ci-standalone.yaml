@@ -82,8 +82,12 @@ jobs:
     needs: [changes]
     if: ${{!cancelled() && needs.changes.outputs.non_qa != 'false'}}
     steps:
-      - name: Checkout repository
+      - &checkout
+        name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Checkout's GitHub token would take precedence over the fetch credential.
+          persist-credentials: false
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
@@ -103,6 +107,16 @@ jobs:
           key: standalone
           # PR caches are visible only to their own PR, so only main saves.
           save-if: ${{github.ref == 'refs/heads/main'}}
+
+      - &fetch
+        name: Fetch Cargo dependencies
+        if: github.event.repository.private && vars.FETCH_TOKEN != ''
+        env:
+          FETCH_TOKEN: ${{ secrets[vars.FETCH_TOKEN] }}
+        run: |
+          if [[ -n "$FETCH_TOKEN" ]]; then
+            bash ./fetch_cargo_dependencies.sh
+          fi
 
       - name: Init Env Vars
         uses: ./.github/actions/init-env
@@ -131,8 +145,7 @@ jobs:
     env: &test-env
       NODE_IMAGE: ${{ vars.NODE_IMAGE || 'ghcr.io/midnightntwrk/midnight-node' }}
     steps: &test-steps
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - *checkout
 
       - name: Login to GHCR
         if: github.job == 'test-with-permissions'
@@ -176,6 +189,8 @@ jobs:
       - name: Init Env Vars
         uses: ./.github/actions/init-env
 
+      - *fetch
+
       - name: just test
         run: |
           rustup override set ${{needs.changes.outputs.toolchain}}
@@ -202,8 +217,7 @@ jobs:
     needs: [changes]
     if: ${{!cancelled() && needs.changes.outputs.non_qa != 'false'}}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - *checkout
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
@@ -223,6 +237,8 @@ jobs:
           key: standalone
           # PR caches are visible only to their own PR, so only main saves.
           save-if: ${{github.ref == 'refs/heads/main'}}
+
+      - *fetch
 
       - name: just doc
         run: |

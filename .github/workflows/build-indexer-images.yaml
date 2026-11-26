@@ -111,6 +111,7 @@ jobs:
       contents: read
       packages: write
     env:
+      FETCH: ${{ github.event.repository.private && vars.FETCH_TOKEN != '' }}
       PROFILE: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || inputs.profile || 'dev' }}
     strategy:
       fail-fast: false
@@ -219,8 +220,12 @@ jobs:
           # leaving it in the BuildKit container, so syft can read it as docker:<tag>. Not pushed:
           # `local/` below is only a tag name. Works because each job builds a single platform.
           load: true
+          secrets: &fetch-token >-
+            ${{ env.FETCH == 'true' &&
+                format('git_token={0}', secrets[vars.FETCH_TOKEN]) || '' }}
           # Anchored here and reused by the push step below, so both builds match and share a cache.
           build-args: &build-args |
+            FETCH=${{ env.FETCH }}
             PROFILE=${{ env.PROFILE }}
             RUST_VERSION=${{ env.TOOLCHAIN }}
             CARGO_AUDITABLE_VERSION=${{ env.CARGO_AUDITABLE_VERSION }}
@@ -287,14 +292,16 @@ jobs:
           context: .
           file: ./${{ matrix.image.name }}/Dockerfile
           push: true
+          secrets: *fetch-token
           build-args: *build-args
           platforms: linux/${{ matrix.platform.arch }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: *cache-from
+          # Keep layers containing private Cargo sources out of the runtime image package.
           cache-to: |
-            type=registry,ref=${{ env.REGISTRY }}/${{ matrix.image.name }}:buildcache${{ matrix.platform.cache_scope }},mode=max
-            type=registry,ref=${{ env.REGISTRY }}/${{ matrix.image.name }}:buildcache-${{ env.PROFILE }}${{ matrix.platform.cache_scope }},mode=max
+            ${{ env.FETCH != 'true' && format('type=registry,ref={0}/{1}:buildcache{2},mode=max', env.REGISTRY, matrix.image.name, matrix.platform.cache_scope) || '' }}
+            ${{ env.FETCH != 'true' && format('type=registry,ref={0}/{1}:buildcache-{2}{3},mode=max', env.REGISTRY, matrix.image.name, env.PROFILE, matrix.platform.cache_scope) || '' }}
           # Attaches an SPDX SBOM to the published image, next to its provenance. BuildKit runs this
           # syft-based scanner image on the final stage; pinned by digest and bumped by hand.
           attests: |

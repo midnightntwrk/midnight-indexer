@@ -97,6 +97,13 @@ Set these GitHub Actions repository variables to runner labels available to the 
 | `IMAGE_BUILD_RUNNER_ARM64` | arm64 image builds |
 | `TEST_RUNNER` | Cloud and standalone native tests |
 
+#### Private Cargo dependencies
+
+In the private repository, set the `FETCH_TOKEN` GitHub Actions repository variable to the name
+of the secret that stores the token. The token needs read access to the private GitHub
+repositories pinned in `Cargo.lock`. CI uses it for `cargo fetch --locked`, including inside
+image builds.
+
 ## The QA TypeScript suite (`qa/tests/`)
 
 - **smoke** - `/ready`, schema introspection, schema-change / deprecation detection.
