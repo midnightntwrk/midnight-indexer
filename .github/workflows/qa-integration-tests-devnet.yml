@@ -9,6 +9,12 @@ permissions:
 
 on:
   workflow_dispatch:
+    inputs:
+      node_toolkit_tag:
+        type: string
+        description: Node toolkit tag compatible with the deployed node (defaults to latest-main)
+        required: false
+        default: ""
 
 jobs:
   test:
@@ -17,6 +23,7 @@ jobs:
     with:
       target_env: devnet
       ref: main
+      node_toolkit_tag: ${{ inputs.node_toolkit_tag }}
     secrets:
       MIDNIGHTCI_PACKAGES_READ: ${{ secrets.MIDNIGHTCI_PACKAGES_READ }}
       APP__INFRA__SECRET: ${{ secrets.APP__INFRA__SECRET }}

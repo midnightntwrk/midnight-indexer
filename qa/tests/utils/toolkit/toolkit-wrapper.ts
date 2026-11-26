@@ -468,9 +468,8 @@ class ToolkitWrapper {
     log.debug(`Toolkit ledger cache   : ${ledgerCacheDir}`);
     log.debug(`Toolkit ZK cache       : ${zkCacheDir}`);
 
-    this.container = new GenericContainer(
-      `ghcr.io/midnightntwrk/midnight-node-toolkit:${this.config.nodeToolkitTag}`,
-    )
+    const nodeImage = process.env.NODE_IMAGE || 'ghcr.io/midnightntwrk/midnight-node';
+    this.container = new GenericContainer(`${nodeImage}-toolkit:${this.config.nodeToolkitTag}`)
       .withName(this.config.containerName)
       .withNetworkMode('host')
       .withEntrypoint([])
