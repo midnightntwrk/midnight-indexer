@@ -35,14 +35,14 @@ on:
       node_toolkit_tag:
         type: string
         required: false
-        description: Node toolkit tag (leave empty for the startup script default)
+        description: Node toolkit tag (defaults to latest-main on deployed targets)
         default: ""
   workflow_call:
     inputs:
       target_env:
         type: string
         description: Midnight target environment (undeployed/preview/preprod)
-        required: true
+        required: false
         default: preview
       ref:
         type: string
@@ -60,7 +60,7 @@ on:
         default: latest
       node_toolkit_tag:
         type: string
-        description: Node toolkit tag (leave empty for the startup script default)
+        description: Node toolkit tag (defaults to the local node tag or latest-main on deployed targets)
         required: false
         default: ""
       image_registry:
@@ -74,7 +74,7 @@ on:
         default: ""
     secrets:
       MIDNIGHTCI_PACKAGES_READ:
-        required: true
+        required: false
       APP__INFRA__SECRET:
         required: false
       APP__INFRA__STORAGE__PASSWORD:
@@ -92,6 +92,7 @@ jobs:
   basic-integration-tests:
     name: Execute basic integration tests
     permissions:
+      contents: read
       packages: read
     runs-on: ubuntu-latest
     steps:
@@ -113,11 +114,12 @@ jobs:
       - uses: ./.github/actions/qa-integration-tests
         with:
           target_env: ${{ inputs.target_env }}
+          node_image: ${{ vars.NODE_IMAGE || 'ghcr.io/midnightntwrk/midnight-node' }}
           node_tag: ${{ inputs.node_tag }}
           indexer_tag: ${{ inputs.indexer_tag }}
           node_toolkit_tag: ${{ inputs.node_toolkit_tag }}
           image_registry: ${{ inputs.image_registry }}
-          packages_read_token: ${{ secrets.MIDNIGHTCI_PACKAGES_READ }}
+          packages_read_token: ${{ startsWith(vars.NODE_IMAGE, 'ghcr.io/') && github.token || secrets.MIDNIGHTCI_PACKAGES_READ }}
           app_infra_secret: ${{ secrets.APP__INFRA__SECRET }}
           storage_password: ${{ secrets.APP__INFRA__STORAGE__PASSWORD }}
           pub_sub_password: ${{ secrets.APP__INFRA__PUB_SUB__PASSWORD }}

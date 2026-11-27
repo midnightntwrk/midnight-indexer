@@ -15,6 +15,9 @@
 //! with [sequential] and [parallel]. Each task decides whether it needs to run from its last
 //! journaled entry and, if it likes, from live state. Every run that completes is appended to the
 //! [Journal], so the journal is also a log of what was done to the database, in order.
+//!
+//! A long task, such as a backfill, can be cancelled partway, see [Task::run]: it journals
+//! what it did as not [completed](Task::completed), and the next start runs it again from there.
 
 use crate::error::BoxError;
 use futures::future::try_join_all;
@@ -28,18 +31,36 @@ use std::{
     pin::Pin,
     time::{SystemTime, UNIX_EPOCH},
 };
+/// Cancels running startup tasks, e.g. on SIGTERM; see [run] and [Task::run].
+pub use tokio_util::sync::CancellationToken;
 
 /// The future of a task step or of a plan: an `Item`, or the error that stopped it.
 pub type BoxFuture<'a, Item = ()> =
     Pin<Box<dyn Future<Output = Result<Item, BoxError>> + Send + 'a>>;
 
-/// What a task's run leaves in the journal: the task version it reached and the state it returned.
+/// What a task's run left in the journal: where in the journal, the task version the run reached
+/// and the state it returned.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Entry<State> {
+    /// Orders the journal, increasing with each entry appended, so it tells apart the entries of
+    /// two runs that are otherwise equal.
+    pub seq: u64,
     /// The task version the run reached.
     pub version: u32,
     /// The state the run returned.
     pub state: State,
+}
+
+#[cfg(any(test, feature = "testing"))]
+impl<State> Entry<State> {
+    /// The entry at `seq` of a run that reached `version` and returned `state`.
+    pub fn new(seq: u64, version: u32, state: State) -> Self {
+        Self {
+            seq,
+            version,
+            state,
+        }
+    }
 }
 
 /// A startup task. `Context` is whatever the tasks of an application need, e.g. its storage.
@@ -66,28 +87,38 @@ pub trait Task<Context>: Send + Sync {
 
     /// The state journaled by `version` of this task, as this version reads it. By default it is
     /// deserialized as it is; override to migrate the shapes older versions wrote.
-    fn read_state(version: u32, state: Value) -> Result<Self::State, BoxError> {
-        let _ = version;
+    fn read_state(_version: u32, state: Value) -> Result<Self::State, BoxError> {
         Ok(serde_json::from_value(state)?)
     }
 
+    /// Whether a journaled state is of a run that completed the task's work. By default every run
+    /// completes; a task that can be cancelled partway, see [Task::run], says whether a run did.
+    fn completed(_state: &Self::State) -> bool {
+        true
+    }
+
     /// Whether the task needs to run, given its last journaled entry, `None` if it never ran.
-    /// By default, if it never ran or ran at an older version. Override to check live state, as a
-    /// repair would, or to run on every start, as a hook would.
+    /// By default, if it never ran, ran at an older version or did not [complete](Self::completed).
+    /// Override to check live state, as a repair would, or to run on every start, as a hook would.
     fn is_pending<'a>(
         &'a self,
         _context: &'a Context,
         previous: Option<&'a Entry<Self::State>>,
     ) -> BoxFuture<'a, bool> {
-        let pending = previous.is_none_or(|previous| previous.version < Self::VERSION);
+        let pending = previous.is_none_or(|previous| {
+            previous.version < Self::VERSION || !Self::completed(&previous.state)
+        });
         Box::pin(async move { Ok(pending) })
     }
 
-    /// Run the task and return the state to journal.
+    /// Run the task and return the state to journal. A task that can be cancelled partway checks
+    /// `cancel` where it is safe to end early, and once cancelled, returns what it did so far as not
+    /// [completed](Self::completed), so the next start resumes it.
     fn run<'a>(
         &'a self,
         context: &'a Context,
         previous: Option<&'a Entry<Self::State>>,
+        cancel: &'a CancellationToken,
     ) -> BoxFuture<'a, Self::State>;
 }
 
@@ -99,11 +130,13 @@ pub trait Journal: Send + Sync {
         id: &str,
     ) -> impl Future<Output = Result<Option<Entry<Value>>, BoxError>> + Send;
 
-    /// Append the entry of a run of the task with `id` that started and ended at the given times.
+    /// Append the entry of a run of the task with `id`, at the version it reached, with the state
+    /// it returned, that started and ended at the given times.
     fn append(
         &self,
         id: &str,
-        entry: Entry<Value>,
+        version: u32,
+        state: Value,
         started_at: SystemTime,
         ended_at: SystemTime,
     ) -> impl Future<Output = Result<(), BoxError>> + Send;
@@ -158,7 +191,8 @@ pub fn parallel<Context>(plans: impl IntoIterator<Item = Plan<Context>>) -> Plan
     Plan::Parallel(plans.into_iter().collect())
 }
 
-/// Run the plan. Takes no lock: if several instances can start at once, take one first.
+/// Run the plan. Takes no lock: if several instances can start at once, take one first. Once
+/// `cancel` is cancelled, no further task starts; check it afterwards to tell whether all ran.
 ///
 /// # Errors
 ///
@@ -167,20 +201,22 @@ pub fn run<'a, Context: Sync, J: Journal>(
     context: &'a Context,
     journal: &'a J,
     plan: &'a Plan<Context>,
+    cancel: &'a CancellationToken,
 ) -> BoxFuture<'a> {
     Box::pin(async move {
         plan.validate()?;
 
         match plan {
-            Plan::Task(task) => run_task(context, journal, task.as_ref()).await,
+            Plan::Task(_) if cancel.is_cancelled() => Ok(()),
+            Plan::Task(task) => run_task(context, journal, task.as_ref(), cancel).await,
             Plan::Sequential(plans) => {
                 for plan in plans {
-                    run(context, journal, plan).await?;
+                    run(context, journal, plan, cancel).await?;
                 }
                 Ok(())
             }
             Plan::Parallel(plans) => {
-                try_join_all(plans.iter().map(|plan| run(context, journal, plan)))
+                try_join_all(plans.iter().map(|plan| run(context, journal, plan, cancel)))
                     .await
                     .map(drop)
             }
@@ -192,6 +228,7 @@ async fn run_task<Context: Sync, J: Journal>(
     context: &Context,
     journal: &J,
     task: &dyn DynTask<Context>,
+    cancel: &CancellationToken,
 ) -> Result<(), BoxError> {
     let failed = |source| TaskError {
         task: task.id(),
@@ -206,13 +243,19 @@ async fn run_task<Context: Sync, J: Journal>(
             false => None,
         };
         let started_at = SystemTime::now();
-        let entry = task.execute(context, previous).await?;
-        Ok::<_, BoxError>(entry.map(|entry| (entry, started_at)))
+        let state = task.execute(context, previous, cancel).await?;
+        Ok::<_, BoxError>(state.map(|state| (state, started_at)))
     };
 
     match executed.await {
-        Ok(Some((entry, started_at))) if task.journal() => journal
-            .append(task.id(), entry, started_at, SystemTime::now())
+        Ok(Some((state, started_at))) if task.journal() => journal
+            .append(
+                task.id(),
+                task.version(),
+                state,
+                started_at,
+                SystemTime::now(),
+            )
             .await
             .map_err(|source| failed(source).into()),
         Ok(_) => Ok(()),
@@ -250,23 +293,31 @@ pub trait DynTask<Context>: Send + Sync {
     /// [Task::ID].
     fn id(&self) -> &'static str;
 
+    /// [Task::VERSION].
+    fn version(&self) -> u32;
+
     /// [Task::FATAL].
     fn fatal(&self) -> bool;
 
     /// [Task::JOURNAL].
     fn journal(&self) -> bool;
 
-    /// `None` if it was not pending, otherwise the entry to journal.
+    /// `None` if it was not pending, otherwise the state to journal.
     fn execute<'a>(
         &'a self,
         context: &'a Context,
         previous: Option<Entry<Value>>,
-    ) -> BoxFuture<'a, Option<Entry<Value>>>;
+        cancel: &'a CancellationToken,
+    ) -> BoxFuture<'a, Option<Value>>;
 }
 
 impl<Context: Sync, T: Task<Context>> DynTask<Context> for T {
     fn id(&self) -> &'static str {
         T::ID
+    }
+
+    fn version(&self) -> u32 {
+        T::VERSION
     }
 
     fn fatal(&self) -> bool {
@@ -281,15 +332,24 @@ impl<Context: Sync, T: Task<Context>> DynTask<Context> for T {
         &'a self,
         context: &'a Context,
         previous: Option<Entry<Value>>,
-    ) -> BoxFuture<'a, Option<Entry<Value>>> {
+        cancel: &'a CancellationToken,
+    ) -> BoxFuture<'a, Option<Value>> {
         Box::pin(async move {
             // An entry whose state no longer reads counts as none: the task runs again, which it
             // must be safe to do, rather than failing every start. One a newer version journaled,
             // as after a rollback, means a newer build did the work: the task is skipped.
             let previous = match previous {
                 None => None,
-                Some(Entry { version, state }) => match T::read_state(version, state) {
-                    Ok(state) => Some(Entry { version, state }),
+                Some(Entry {
+                    seq,
+                    version,
+                    state,
+                }) => match T::read_state(version, state) {
+                    Ok(state) => Some(Entry {
+                        seq,
+                        version,
+                        state,
+                    }),
                     Err(error) if version > T::VERSION => {
                         warn!(
                             task = T::ID,
@@ -311,22 +371,23 @@ impl<Context: Sync, T: Task<Context>> DynTask<Context> for T {
                 },
             };
 
-            if !self.is_pending(context, previous.as_ref()).await? {
+            // Cancelled meanwhile, e.g. while reading the journal, it does not start.
+            if !self.is_pending(context, previous.as_ref()).await? || cancel.is_cancelled() {
                 return Ok(None);
             }
 
-            let state = self.run(context, previous.as_ref()).await?;
-            Ok(Some(Entry {
-                version: T::VERSION,
-                state: serde_json::to_value(state)?,
-            }))
+            let state = self.run(context, previous.as_ref(), cancel).await?;
+            Ok(Some(serde_json::to_value(state)?))
         })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{BoxFuture, Entry, Journal, Task, parallel, run, sequential, task, unix_millis};
+    use super::{
+        BoxFuture, CancellationToken, Entry, Journal, Task, parallel, run, sequential, task,
+        unix_millis,
+    };
     use crate::error::BoxError;
     use serde_json::Value;
     use std::{
@@ -367,11 +428,21 @@ mod tests {
         async fn append(
             &self,
             id: &str,
-            entry: Entry<Value>,
+            version: u32,
+            state: Value,
             _started_at: SystemTime,
             _ended_at: SystemTime,
         ) -> Result<(), BoxError> {
-            self.0.lock().unwrap().push((id.to_owned(), entry));
+            let mut entries = self.0.lock().unwrap();
+            let seq = entries.len() as u64 + 1;
+            entries.push((
+                id.to_owned(),
+                Entry {
+                    seq,
+                    version,
+                    state,
+                },
+            ));
             Ok(())
         }
     }
@@ -397,6 +468,7 @@ mod tests {
             &'a self,
             context: &'a Context,
             previous: Option<&'a Entry<u32>>,
+            _cancel: &'a CancellationToken,
         ) -> BoxFuture<'a, u32> {
             Box::pin(async move {
                 if self.fail {
@@ -428,6 +500,7 @@ mod tests {
             &'a self,
             context: &'a Context,
             _previous: Option<&'a Entry<()>>,
+            _cancel: &'a CancellationToken,
         ) -> BoxFuture<'a, ()> {
             Box::pin(async move {
                 context.runs.fetch_add(1, Relaxed);
@@ -447,6 +520,7 @@ mod tests {
                     &'a self,
                     _context: &'a Context,
                     _previous: Option<&'a Entry<()>>,
+                    _cancel: &'a CancellationToken,
                 ) -> BoxFuture<'a, ()> {
                     Box::pin(async { Ok(()) })
                 }
@@ -457,18 +531,186 @@ mod tests {
     named!(Second, "test/second");
     named!(Third, "test/third");
 
+    /// Takes `STEPS` steps over its runs, recording how many are done, and is cancelled once
+    /// `cancel_at` are, as on SIGTERM: it then ends before the next step, not completed.
+    struct Resumable {
+        cancel_at: u32,
+    }
+
+    #[derive(serde::Serialize, serde::Deserialize)]
+    struct Steps {
+        done: u32,
+        completed: bool,
+    }
+
+    const STEPS: u32 = 5;
+
+    impl Task<Context> for Resumable {
+        const ID: &'static str = "test/resumable";
+        type State = Steps;
+
+        fn completed(state: &Steps) -> bool {
+            state.completed
+        }
+
+        fn run<'a>(
+            &'a self,
+            context: &'a Context,
+            previous: Option<&'a Entry<Steps>>,
+            cancel: &'a CancellationToken,
+        ) -> BoxFuture<'a, Steps> {
+            Box::pin(async move {
+                let mut done = previous.map_or(0, |previous| previous.state.done);
+                while done < STEPS {
+                    if cancel.is_cancelled() {
+                        return Ok(Steps {
+                            done,
+                            completed: false,
+                        });
+                    }
+                    context.runs.fetch_add(1, Relaxed);
+                    done += 1;
+                    if done == self.cancel_at {
+                        cancel.cancel();
+                    }
+                }
+                Ok(Steps {
+                    done,
+                    completed: true,
+                })
+            })
+        }
+    }
+
+    // A cancelled task journals what it did as not completed, and the next start runs it again
+    // from there until it completes; then it no longer runs.
+    #[tokio::test]
+    async fn a_cancelled_task_resumes_until_completed() -> Result<(), BoxError> {
+        let (context, journal) = (Context::default(), MemoryJournal::default());
+        let latest = async || -> Result<(u32, bool), BoxError> {
+            let entry = journal.latest("test/resumable").await?.expect("journaled");
+            let steps = serde_json::from_value::<Steps>(entry.state)?;
+            Ok((steps.done, steps.completed))
+        };
+
+        let cancel = CancellationToken::new();
+        run(
+            &context,
+            &journal,
+            &task(Resumable { cancel_at: 2 }),
+            &cancel,
+        )
+        .await?;
+        assert!(cancel.is_cancelled());
+        assert_eq!(latest().await?, (2, false), "cancelled after two steps");
+
+        run(
+            &context,
+            &journal,
+            &task(Resumable { cancel_at: 0 }),
+            &CancellationToken::new(),
+        )
+        .await?;
+        assert_eq!(latest().await?, (STEPS, true), "resumed and completed");
+        assert_eq!(context.runs.load(Relaxed), STEPS, "no step taken twice");
+
+        run(
+            &context,
+            &journal,
+            &task(Resumable { cancel_at: 0 }),
+            &CancellationToken::new(),
+        )
+        .await?;
+        assert_eq!(journal.ids().len(), 2, "not run once completed");
+
+        Ok(())
+    }
+
+    /// Cancels its token while checking whether it is pending, as a SIGTERM arriving meanwhile.
+    struct CancelledWhilePending(CancellationToken);
+
+    impl Task<Context> for CancelledWhilePending {
+        const ID: &'static str = "test/cancelled_while_pending";
+        type State = ();
+
+        fn is_pending<'a>(
+            &'a self,
+            _context: &'a Context,
+            _previous: Option<&'a Entry<()>>,
+        ) -> BoxFuture<'a, bool> {
+            self.0.cancel();
+            Box::pin(async { Ok(true) })
+        }
+
+        fn run<'a>(
+            &'a self,
+            context: &'a Context,
+            _previous: Option<&'a Entry<()>>,
+            _cancel: &'a CancellationToken,
+        ) -> BoxFuture<'a, ()> {
+            Box::pin(async move {
+                context.runs.fetch_add(1, Relaxed);
+                Ok(())
+            })
+        }
+    }
+
+    // A task cancelled while its entry is read or checked does not start.
+    #[tokio::test]
+    async fn a_task_cancelled_while_pending_does_not_start() -> Result<(), BoxError> {
+        let (context, journal) = (Context::default(), MemoryJournal::default());
+
+        let cancel = CancellationToken::new();
+        run(
+            &context,
+            &journal,
+            &task(CancelledWhilePending(cancel.clone())),
+            &cancel,
+        )
+        .await?;
+        assert_eq!(context.runs.load(Relaxed), 0, "not started");
+        assert!(journal.ids().is_empty(), "nothing journaled");
+
+        Ok(())
+    }
+
+    // Once cancelled, a run of a plan starts no further task; the next start runs them.
+    #[tokio::test]
+    async fn a_cancelled_run_starts_no_further_task() -> Result<(), BoxError> {
+        let (context, journal) = (Context::default(), MemoryJournal::default());
+
+        let plan = sequential([task(Resumable { cancel_at: 1 }), task(First)]);
+        run(&context, &journal, &plan, &CancellationToken::new()).await?;
+        assert_eq!(
+            journal.ids(),
+            vec!["test/resumable"],
+            "the first task cancelled the run"
+        );
+
+        let cancel = CancellationToken::new();
+        cancel.cancel();
+        run(&context, &journal, &task(Second), &cancel).await?;
+        assert_eq!(
+            journal.ids(),
+            vec!["test/resumable"],
+            "nothing started once cancelled"
+        );
+
+        Ok(())
+    }
+
     #[tokio::test]
     async fn runs_once_per_version() -> Result<(), BoxError> {
         let (context, journal) = (Context::default(), MemoryJournal::default());
 
         let v1 = task(Counting::<1, true> { fail: false });
-        run(&context, &journal, &v1).await?;
-        run(&context, &journal, &v1).await?;
+        run(&context, &journal, &v1, &CancellationToken::new()).await?;
+        run(&context, &journal, &v1, &CancellationToken::new()).await?;
         assert_eq!(context.runs.load(Relaxed), 1, "skipped at the same version");
 
         let v2 = task(Counting::<2, true> { fail: false });
-        run(&context, &journal, &v2).await?;
-        run(&context, &journal, &v2).await?;
+        run(&context, &journal, &v2, &CancellationToken::new()).await?;
+        run(&context, &journal, &v2, &CancellationToken::new()).await?;
         assert_eq!(
             context.runs.load(Relaxed),
             2,
@@ -476,15 +718,12 @@ mod tests {
         );
         assert_eq!(
             journal.latest("test/counting").await?,
-            Some(Entry {
-                version: 2,
-                state: Value::from(2)
-            }),
+            Some(Entry::new(2, 2, Value::from(2))),
             "the newer run saw the older one's state"
         );
         assert_eq!(journal.ids().len(), 2, "one entry per completed run");
 
-        run(&context, &journal, &v1).await?;
+        run(&context, &journal, &v1, &CancellationToken::new()).await?;
         assert_eq!(
             context.runs.load(Relaxed),
             2,
@@ -498,27 +737,27 @@ mod tests {
     #[tokio::test]
     async fn unreadable_state_runs_as_if_never_run() -> Result<(), BoxError> {
         let (context, journal) = (Context::default(), MemoryJournal::default());
-        let entry = Entry {
-            version: 1,
-            state: Value::from("not a count"),
-        };
         journal
-            .append("test/counting", entry, SystemTime::now(), SystemTime::now())
+            .append(
+                "test/counting",
+                1,
+                Value::from("not a count"),
+                SystemTime::now(),
+                SystemTime::now(),
+            )
             .await?;
 
         run(
             &context,
             &journal,
             &task(Counting::<1, true> { fail: false }),
+            &CancellationToken::new(),
         )
         .await?;
         assert_eq!(context.runs.load(Relaxed), 1);
         assert_eq!(
             journal.latest("test/counting").await?,
-            Some(Entry {
-                version: 1,
-                state: Value::from(1)
-            })
+            Some(Entry::new(2, 1, Value::from(1)))
         );
 
         Ok(())
@@ -529,18 +768,21 @@ mod tests {
     #[tokio::test]
     async fn unreadable_state_of_a_newer_version_skips() -> Result<(), BoxError> {
         let (context, journal) = (Context::default(), MemoryJournal::default());
-        let entry = Entry {
-            version: 2,
-            state: Value::from("not a count"),
-        };
         journal
-            .append("test/counting", entry, SystemTime::now(), SystemTime::now())
+            .append(
+                "test/counting",
+                2,
+                Value::from("not a count"),
+                SystemTime::now(),
+                SystemTime::now(),
+            )
             .await?;
 
         run(
             &context,
             &journal,
             &task(Counting::<1, true> { fail: false }),
+            &CancellationToken::new(),
         )
         .await?;
         assert_eq!(context.runs.load(Relaxed), 0);
@@ -569,6 +811,7 @@ mod tests {
             &'a self,
             context: &'a Context,
             previous: Option<&'a Entry<Vec<u32>>>,
+            _cancel: &'a CancellationToken,
         ) -> BoxFuture<'a, Vec<u32>> {
             Box::pin(async move {
                 context.runs.fetch_add(1, Relaxed);
@@ -583,27 +826,27 @@ mod tests {
     #[tokio::test]
     async fn a_newer_version_migrates_older_state() -> Result<(), BoxError> {
         let (context, journal) = (Context::default(), MemoryJournal::default());
-        let entry = Entry {
-            version: 1,
-            state: Value::from(5),
-        };
         journal
             .append(
                 "test/migrating",
-                entry,
+                1,
+                Value::from(5),
                 SystemTime::now(),
                 SystemTime::now(),
             )
             .await?;
 
-        run(&context, &journal, &task(Migrating)).await?;
+        run(
+            &context,
+            &journal,
+            &task(Migrating),
+            &CancellationToken::new(),
+        )
+        .await?;
         assert_eq!(context.runs.load(Relaxed), 1);
         assert_eq!(
             journal.latest("test/migrating").await?,
-            Some(Entry {
-                version: 2,
-                state: serde_json::json!([5, 6])
-            })
+            Some(Entry::new(2, 2, serde_json::json!([5, 6])))
         );
 
         Ok(())
@@ -624,7 +867,8 @@ mod tests {
             async fn append(
                 &self,
                 _id: &str,
-                _entry: Entry<Value>,
+                _version: u32,
+                _state: Value,
                 _started_at: SystemTime,
                 _ended_at: SystemTime,
             ) -> Result<(), BoxError> {
@@ -635,16 +879,27 @@ mod tests {
         let context = Context::default();
         let counting = task(Counting::<1, false> { fail: false });
 
-        let error = run(&context, &FailingJournal, &counting)
-            .await
-            .expect_err("a failed append fails startup");
+        let error = run(
+            &context,
+            &FailingJournal,
+            &counting,
+            &CancellationToken::new(),
+        )
+        .await
+        .expect_err("a failed append fails startup");
         assert_eq!(error.to_string(), "startup task test/counting failed");
         assert_eq!(
             error.source().map(ToString::to_string).as_deref(),
             Some("append failed")
         );
 
-        run(&context, &MemoryJournal::default(), &counting).await?;
+        run(
+            &context,
+            &MemoryJournal::default(),
+            &counting,
+            &CancellationToken::new(),
+        )
+        .await?;
         assert_eq!(context.runs.load(Relaxed), 2, "ran again");
 
         Ok(())
@@ -661,7 +916,8 @@ mod tests {
         async fn append(
             &self,
             _id: &str,
-            _entry: Entry<Value>,
+            _version: u32,
+            _state: Value,
             _started_at: SystemTime,
             _ended_at: SystemTime,
         ) -> Result<(), BoxError> {
@@ -675,9 +931,14 @@ mod tests {
         let context = Context::default();
 
         let fatal = task(Counting::<1, true> { fail: false });
-        let error = run(&context, &UnreadableJournal, &fatal)
-            .await
-            .expect_err("a failed read fails a fatal task");
+        let error = run(
+            &context,
+            &UnreadableJournal,
+            &fatal,
+            &CancellationToken::new(),
+        )
+        .await
+        .expect_err("a failed read fails a fatal task");
         assert_eq!(error.to_string(), "startup task test/counting failed");
         assert_eq!(
             error.source().map(ToString::to_string).as_deref(),
@@ -685,7 +946,13 @@ mod tests {
         );
 
         let not_fatal = task(Counting::<1, false> { fail: false });
-        run(&context, &UnreadableJournal, &not_fatal).await?;
+        run(
+            &context,
+            &UnreadableJournal,
+            &not_fatal,
+            &CancellationToken::new(),
+        )
+        .await?;
         assert_eq!(context.runs.load(Relaxed), 0, "skipped");
 
         Ok(())
@@ -707,7 +974,7 @@ mod tests {
             ]),
         ];
         for plan in &plans {
-            let error = run(&context, &journal, plan)
+            let error = run(&context, &journal, plan, &CancellationToken::new())
                 .await
                 .expect_err("a duplicate ID fails the plan");
             assert_eq!(
@@ -725,7 +992,13 @@ mod tests {
     async fn a_hook_runs_without_reading_the_journal() -> Result<(), BoxError> {
         let context = Context::default();
 
-        run(&context, &UnreadableJournal, &task(Hook)).await?;
+        run(
+            &context,
+            &UnreadableJournal,
+            &task(Hook),
+            &CancellationToken::new(),
+        )
+        .await?;
         assert_eq!(context.runs.load(Relaxed), 1);
 
         Ok(())
@@ -761,6 +1034,7 @@ mod tests {
             &'a self,
             context: &'a Concurrent,
             _previous: Option<&'a Entry<()>>,
+            _cancel: &'a CancellationToken,
         ) -> BoxFuture<'a, ()> {
             Box::pin(async move {
                 context.barrier.wait().await;
@@ -782,6 +1056,7 @@ mod tests {
             &'a self,
             _context: &'a Concurrent,
             _previous: Option<&'a Entry<()>>,
+            _cancel: &'a CancellationToken,
         ) -> BoxFuture<'a, ()> {
             Box::pin(async { Err("failed".into()) })
         }
@@ -798,6 +1073,7 @@ mod tests {
             &'a self,
             _context: &'a Concurrent,
             _previous: Option<&'a Entry<()>>,
+            _cancel: &'a CancellationToken,
         ) -> BoxFuture<'a, ()> {
             Box::pin(std::future::pending())
         }
@@ -816,7 +1092,7 @@ mod tests {
         let (context, journal) = (Concurrent::new(2), MemoryJournal::default());
 
         let plan = parallel([task(Waiting::<0>), task(Waiting::<1>)]);
-        within(run(&context, &journal, &plan)).await?;
+        within(run(&context, &journal, &plan, &CancellationToken::new())).await?;
         assert_eq!(context.finished.load(Relaxed), 2);
         assert_eq!(journal.ids().len(), 2);
 
@@ -829,7 +1105,7 @@ mod tests {
         let (context, journal) = (Concurrent::new(1), MemoryJournal::default());
 
         let plan = parallel([task(Failing::<true>), task(Never)]);
-        let result = within(run(&context, &journal, &plan)).await;
+        let result = within(run(&context, &journal, &plan, &CancellationToken::new())).await;
         assert!(result.is_err());
         assert!(journal.ids().is_empty());
     }
@@ -840,7 +1116,7 @@ mod tests {
         let (context, journal) = (Concurrent::new(1), MemoryJournal::default());
 
         let plan = parallel([task(Failing::<false>), task(Waiting::<0>)]);
-        within(run(&context, &journal, &plan)).await?;
+        within(run(&context, &journal, &plan, &CancellationToken::new())).await?;
         assert_eq!(context.finished.load(Relaxed), 1);
         assert_eq!(journal.ids(), ["test/waiting/0"]);
 
@@ -867,10 +1143,14 @@ mod tests {
         let (context, journal) = (Context::default(), MemoryJournal::default());
 
         let fatal = task(Counting::<1, true> { fail: true });
-        assert!(run(&context, &journal, &fatal).await.is_err());
+        assert!(
+            run(&context, &journal, &fatal, &CancellationToken::new())
+                .await
+                .is_err()
+        );
 
         let not_fatal = task(Counting::<1, false> { fail: true });
-        run(&context, &journal, &not_fatal).await?;
+        run(&context, &journal, &not_fatal, &CancellationToken::new()).await?;
         assert!(journal.ids().is_empty());
 
         // The failed task runs on the next start.
@@ -878,6 +1158,7 @@ mod tests {
             &context,
             &journal,
             &task(Counting::<1, true> { fail: false }),
+            &CancellationToken::new(),
         )
         .await?;
         assert_eq!(context.runs.load(Relaxed), 1);
@@ -890,8 +1171,8 @@ mod tests {
         let (context, journal) = (Context::default(), MemoryJournal::default());
 
         let hook = task(Hook);
-        run(&context, &journal, &hook).await?;
-        run(&context, &journal, &hook).await?;
+        run(&context, &journal, &hook, &CancellationToken::new()).await?;
+        run(&context, &journal, &hook, &CancellationToken::new()).await?;
         assert_eq!(context.runs.load(Relaxed), 2);
         assert!(journal.ids().is_empty());
 
@@ -907,13 +1188,17 @@ mod tests {
             parallel([task(Second), task(Hook)]),
             task(Third),
         ]);
-        run(&context, &journal, &plan).await?;
+        run(&context, &journal, &plan, &CancellationToken::new()).await?;
         assert_eq!(journal.ids(), ["test/first", "test/second", "test/third"]);
 
         // A fatal failure stops what follows it.
         let journal = MemoryJournal::default();
         let plan = sequential([task(Counting::<1, true> { fail: true }), task(First)]);
-        assert!(run(&context, &journal, &plan).await.is_err());
+        assert!(
+            run(&context, &journal, &plan, &CancellationToken::new())
+                .await
+                .is_err()
+        );
         assert!(journal.ids().is_empty());
 
         Ok(())

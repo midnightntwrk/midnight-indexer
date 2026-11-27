@@ -23,7 +23,7 @@ use indexer_common::domain::{
     ApplyRegularTransactionOutcome, ApplySystemTransactionOutcome, BlockHash, LedgerVersion,
     NetworkId, ProtocolVersion, SerializedContractAddress, SerializedLedgerStateKey,
     TransactionHash, TransactionResult,
-    ledger::{self, ContractZswapIndices, LedgerParameters, RootCountRepair},
+    ledger::{self, ArenaHash, ContractZswapIndices, LedgerParameters, Pinned, RootCountRepair},
 };
 use log::{debug, warn};
 use std::{
@@ -196,6 +196,19 @@ impl LedgerState {
     /// number of arena nodes culled.
     pub fn gc(bound: std::time::Duration) -> usize {
         indexer_common::domain::ledger::LedgerState::gc(bound)
+    }
+
+    /// See [`indexer_common::domain::ledger::LedgerState::pin_roots`].
+    pub(crate) fn pin_roots() -> Pinned {
+        indexer_common::domain::ledger::LedgerState::pin_roots()
+    }
+
+    /// See [`indexer_common::domain::ledger::LedgerState::pin`].
+    pub(crate) fn pin(
+        roots: impl IntoIterator<Item = ArenaHash>,
+        cancelled: impl Fn() -> bool,
+    ) -> Pinned {
+        indexer_common::domain::ledger::LedgerState::pin(roots, cancelled)
     }
 
     /// Apply the given node transactions to this ledger state and return domain transactions.

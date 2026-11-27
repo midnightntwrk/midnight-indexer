@@ -63,13 +63,13 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
         with:
           components: rustfmt
           toolchain: ${{needs.changes.outputs.toolchain}}
 
       - name: Install just
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: just
 
@@ -82,27 +82,41 @@ jobs:
     needs: [changes]
     if: ${{!cancelled() && needs.changes.outputs.non_qa != 'false'}}
     steps:
-      - name: Checkout repository
+      - &checkout
+        name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Checkout's GitHub token would take precedence over the fetch credential.
+          persist-credentials: false
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
         with:
           toolchain: ${{needs.changes.outputs.toolchain}}
           components: clippy
 
       - name: Install just
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: just
 
       - name: Setup Rust cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           # The default key is the job id, which ci-standalone shares.
           key: cloud
           # PR caches are visible only to their own PR, so only main saves.
           save-if: ${{github.ref == 'refs/heads/main'}}
+
+      - &fetch
+        name: Fetch Cargo dependencies
+        if: github.event.repository.private
+        env:
+          FETCH_TOKEN: ${{ secrets.FETCH_TOKEN || secrets.NODE_GIT_TOKEN }}
+        run: |
+          if [[ -n "$FETCH_TOKEN" ]]; then
+            bash ./fetch_cargo_dependencies.sh
+          fi
 
       - name: Init Env Vars
         uses: ./.github/actions/init-env
@@ -112,18 +126,29 @@ jobs:
           rustup override set ${{needs.changes.outputs.toolchain}}
           just feature=cloud lint
 
-  test:
-    runs-on: ubuntu-latest-8-core-x64
+  test-without-package-access:
+    runs-on: ${{ vars.TEST_RUNNER || 'ubuntu-latest-8-core-x64' }}
     needs: [changes]
-    if: ${{!cancelled() && needs.changes.outputs.non_qa != 'false'}}
+    if: >-
+      ${{ !cancelled() && needs.changes.outputs.non_qa != 'false' &&
+          !(github.event.repository.private && startsWith(vars.NODE_IMAGE, 'ghcr.io/')) }}
     timeout-minutes: 15
-    permissions:
-      contents: read
-    env:
-      NODE_IMAGE: ghcr.io/midnightntwrk/midnight-node
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    env: &test-env
+      NODE_IMAGE: ${{ vars.NODE_IMAGE || 'ghcr.io/midnightntwrk/midnight-node' }}
+    steps: &test-steps
+      - *checkout
+
+      - name: Login to GHCR
+        if: github.job == 'test-with-package-access'
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        env:
+          NODE_IMAGE_TOKEN: >-
+            ${{ (vars.NODE_IMAGE_TOKEN == 'MIDNIGHTCI_PACKAGES_READ' && secrets.MIDNIGHTCI_PACKAGES_READ) ||
+                (vars.NODE_IMAGE_TOKEN != 'MIDNIGHTCI_PACKAGES_READ' && secrets.NODE_IMAGE_TOKEN) || '' }}
+        with:
+          registry: ghcr.io
+          username: ${{ env.NODE_IMAGE_TOKEN != '' && vars.NODE_IMAGE_USERNAME || github.actor }}
+          password: ${{ (vars.NODE_IMAGE_USERNAME && env.NODE_IMAGE_TOKEN) || github.token }}
 
       - name: Pre-pull Docker images
         run: |
@@ -134,22 +159,22 @@ jobs:
           docker pull "$NODE_IMAGE:$NODE_VERSION"
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
         with:
           toolchain: ${{needs.changes.outputs.toolchain}}
 
       - name: Install nextest
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: nextest
 
       - name: Install just
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: just
 
       - name: Setup Rust cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           # The default key is the job id, which ci-standalone shares.
           key: cloud
@@ -159,37 +184,70 @@ jobs:
       - name: Init Env Vars
         uses: ./.github/actions/init-env
 
+      - *fetch
+
       - name: just test
         run: |
           rustup override set ${{needs.changes.outputs.toolchain}}
           just feature=cloud test
+
+  # Package access is limited to private repositories because PR code can disclose pulled images.
+  test-with-package-access:
+    runs-on: ${{ vars.TEST_RUNNER || 'ubuntu-latest-8-core-x64' }}
+    needs: [changes]
+    if: >-
+      ${{ !cancelled() && needs.changes.outputs.non_qa != 'false' &&
+          github.event.repository.private && startsWith(vars.NODE_IMAGE, 'ghcr.io/') }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    env: *test-env
+    steps: *test-steps
+
+  # Branch protection requires one test check, regardless of which job has package access.
+  test:
+    needs: [changes, test-without-package-access, test-with-package-access]
+    if: ${{ always() && needs.changes.outputs.non_qa != 'false' }}
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Check test result
+        env:
+          WITHOUT_PACKAGE_ACCESS: ${{ needs.test-without-package-access.result }}
+          WITH_PACKAGE_ACCESS: ${{ needs.test-with-package-access.result }}
+        run: |
+          printf 'Without package access: %s\nWith package access: %s\n' "$WITHOUT_PACKAGE_ACCESS" "$WITH_PACKAGE_ACCESS"
+          [[ "$WITHOUT_PACKAGE_ACCESS/$WITH_PACKAGE_ACCESS" == success/skipped ||
+             "$WITHOUT_PACKAGE_ACCESS/$WITH_PACKAGE_ACCESS" == skipped/success ]]
 
   doc:
     runs-on: ubuntu-latest
     needs: [changes]
     if: ${{!cancelled() && needs.changes.outputs.non_qa != 'false'}}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - *checkout
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master
+        uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master
         with:
           components: rust-docs
           toolchain: ${{needs.changes.outputs.toolchain}}
 
       - name: Install just
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: just
 
       - name: Setup Rust cache
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           # The default key is the job id, which ci-standalone shares.
           key: cloud
           # PR caches are visible only to their own PR, so only main saves.
           save-if: ${{github.ref == 'refs/heads/main'}}
+
+      - *fetch
 
       - name: just doc
         run: |

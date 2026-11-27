@@ -34,9 +34,29 @@ env:
   CARGO_AUDITABLE_VERSION: 0.7.7
   # Builds the cargo chef dependency layer. Pinned: bump deliberately; the justfile reads this too.
   CARGO_CHEF_VERSION: 0.1.78
-  NODE_IMAGE: ghcr.io/midnightntwrk/midnight-node
+  NODE_IMAGE: ${{ vars.NODE_IMAGE || 'ghcr.io/midnightntwrk/midnight-node' }}
+  # The upstream build cache and QA images use this namespace.
+  REGISTRY: ghcr.io/midnightntwrk
+  # Only this repository publishes to the shared registries.
+  REPOSITORY: midnightntwrk/midnight-indexer
 
 jobs:
+  # The repository running the workflow determines the image registry.
+  resolve-registry:
+    name: Resolve registry override
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      registry: ${{ steps.namespace.outputs.registry }}
+    steps:
+      - name: Set repository registry
+        id: namespace
+        run: |
+          repository="${GITHUB_REPOSITORY,,}"
+          if [[ "$repository" != "$REPOSITORY" ]]; then
+            echo "registry=ghcr.io/$repository" >> "$GITHUB_OUTPUT"
+          fi
+
   # cargo-chef and cargo-auditable run inside every image build, but their locked dependencies are
   # outside the workspace Cargo.lock that rust-security-scan checks. Check the exact pinned
   # versions here. No job waits on this one, so an advisory fails the run without holding back
@@ -56,7 +76,7 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Install cargo-deny
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           # Same pin as rust-security-scan; see the note there before bumping.
           tool: cargo-deny@0.20.2
@@ -85,10 +105,13 @@ jobs:
 
   build-and-push:
     name: Build and push (${{ matrix.image.name }}, ${{ matrix.platform.arch }})
+    needs: resolve-registry
     runs-on: ${{ matrix.platform.runner }}
     permissions:
+      contents: read
       packages: write
     env:
+      FETCH: ${{ github.event.repository.private && (secrets.FETCH_TOKEN != '' || secrets.NODE_GIT_TOKEN != '') }}
       PROFILE: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || inputs.profile || 'dev' }}
     strategy:
       fail-fast: false
@@ -105,17 +128,21 @@ jobs:
           - name: spo-indexer
             description: Midnight SPO Indexer
         # Each (image, arch) is an independent parallel job publishing an arch-suffixed tag, built
-        # natively on a runner of that arch (the same runner labels midnight-node uses). amd64 keeps
-        # the existing (warm) buildcache ref. Neither blocks the other, and each -amd64/-arm64 tag is
+        # natively on a runner of that arch. The amd64 build cache uses an unsuffixed tag.
+        # Neither build blocks the other, and each -amd64/-arm64 tag is
         # available as soon as that arch finishes. The downstream merge-manifests job then assembles
         # the unsuffixed tag into a real multi-arch manifest referencing both arches.
         platform:
           - arch: amd64
-            runner: ubuntu-latest-16-core-x64
+            runner: >-
+              ${{ vars.IMAGE_BUILD_RUNNER_AMD64 ||
+                  (needs.resolve-registry.outputs.registry != '' && 'ubuntu-latest' || 'ubuntu-latest-16-core-x64') }}
             suffix: "-amd64"
             cache_scope: ""
           - arch: arm64
-            runner: ubuntu-latest-8-core-arm64
+            runner: >-
+              ${{ vars.IMAGE_BUILD_RUNNER_ARM64 ||
+                  (needs.resolve-registry.outputs.registry != '' && 'ubuntu-24.04-arm' || 'ubuntu-latest-8-core-arm64') }}
             suffix: "-arm64"
             cache_scope: "-arm64"
     steps:
@@ -136,32 +163,36 @@ jobs:
           # The commit as local builds report it, for `--version` and the startup journal.
           echo "GIT_SHA=${GITHUB_SHA::8}" | tee -a "$GITHUB_ENV"
 
-      - name: Login to DockerHub
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+      - &login-docker-hub
+        name: Login to Docker Hub
+        if: needs.resolve-registry.outputs.registry == ''
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           username: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_USER }}
           password: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_TOKEN }}
 
-      - name: Login to GHCR
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+      - &login-ghcr
+        name: Login to GHCR
+        uses: &ghcr-login-action docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
-          username: MidnightCI
-          password: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+          username: ${{ needs.resolve-registry.outputs.registry != '' && github.actor || 'MidnightCI' }}
+          password: ${{ needs.resolve-registry.outputs.registry != '' && github.token || secrets.MIDNIGHTCI_PACKAGES_WRITE }}
 
       - name: Setup Docker Metadata
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         env:
           DOCKER_METADATA_SHORT_SHA_LENGTH: 8
+          REGISTRY: &resolved-registry ${{ needs.resolve-registry.outputs.registry || env.REGISTRY }}
         with:
           # midnight-ntwrk is the legacy GitHub org, dual-published to the current
           # midnightntwrk org until it is sunset. Tag builds also push to Docker
           # Hub, which is the registry docker-compose.yaml defaults to.
-          images: |
-            ghcr.io/midnight-ntwrk/${{ matrix.image.name }}
-            ghcr.io/midnightntwrk/${{ matrix.image.name }}
-            ${{ github.ref_type == 'tag' && format('midnightntwrk/{0}', matrix.image.name) || '' }}
+          images: &published-images |
+            ${{ env.REGISTRY }}/${{ matrix.image.name }}
+            ${{ needs.resolve-registry.outputs.registry == '' && format('ghcr.io/midnight-ntwrk/{0}', matrix.image.name) || '' }}
+            ${{ needs.resolve-registry.outputs.registry == '' && github.ref_type == 'tag' && format('midnightntwrk/{0}', matrix.image.name) || '' }}
           # onlatest arch-suffixes the `latest` tag release tags get, which merge-manifests expects.
           flavor: |
             suffix=${{ matrix.platform.suffix }},onlatest=true
@@ -169,7 +200,7 @@ jobs:
             type=semver,pattern={{version}}
             ${{ github.ref_type != 'tag' && format('type=sha,prefix={0}-,format=short', env.VERSION) || '' }}
           labels: |
-            org.opencontainers.image.source=https://github.com/midnightntwrk/midnight-indexer/
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.title=${{ matrix.image.name }}
             org.opencontainers.image.description=${{ matrix.image.description }}
 
@@ -180,6 +211,8 @@ jobs:
       # push below then rebuilds from this builder's cache, so the image is only built once.
       - name: Build Docker Image for checks
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        env:
+          REGISTRY: *resolved-registry
         with:
           context: .
           file: ./${{ matrix.image.name }}/Dockerfile
@@ -187,8 +220,11 @@ jobs:
           # leaving it in the BuildKit container, so syft can read it as docker:<tag>. Not pushed:
           # `local/` below is only a tag name. Works because each job builds a single platform.
           load: true
+          secrets: &fetch-token >-
+            ${{ env.FETCH == 'true' && format('git_token={0}', secrets.FETCH_TOKEN || secrets.NODE_GIT_TOKEN) || '' }}
           # Anchored here and reused by the push step below, so both builds match and share a cache.
           build-args: &build-args |
+            FETCH=${{ env.FETCH }}
             PROFILE=${{ env.PROFILE }}
             RUST_VERSION=${{ env.TOOLCHAIN }}
             CARGO_AUDITABLE_VERSION=${{ env.CARGO_AUDITABLE_VERSION }}
@@ -196,9 +232,12 @@ jobs:
             MIDNIGHT_INDEXER_GIT_SHA=${{ env.GIT_SHA }}
           platforms: linux/${{ matrix.platform.arch }}
           tags: local/${{ matrix.image.name }}:check
+          # Upstream builds reuse layers from the legacy cache during registry migration.
           cache-from: &cache-from |
-            type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.image.name }}:buildcache${{ matrix.platform.cache_scope }}
-            type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.image.name }}:buildcache-${{ env.PROFILE }}${{ matrix.platform.cache_scope }}
+            type=registry,ref=${{ env.REGISTRY }}/${{ matrix.image.name }}:buildcache${{ matrix.platform.cache_scope }}
+            type=registry,ref=${{ env.REGISTRY }}/${{ matrix.image.name }}:buildcache-${{ env.PROFILE }}${{ matrix.platform.cache_scope }}
+            ${{ needs.resolve-registry.outputs.registry == '' && format('type=registry,ref=ghcr.io/midnight-ntwrk/{0}:buildcache{1}', matrix.image.name, matrix.platform.cache_scope) || '' }}
+            ${{ needs.resolve-registry.outputs.registry == '' && format('type=registry,ref=ghcr.io/midnight-ntwrk/{0}:buildcache-{1}{2}', matrix.image.name, env.PROFILE, matrix.platform.cache_scope) || '' }}
 
       - name: Check the image reports its commit
         env:
@@ -246,18 +285,22 @@ jobs:
 
       - name: Build and push Docker Image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        env:
+          REGISTRY: *resolved-registry
         with:
           context: .
           file: ./${{ matrix.image.name }}/Dockerfile
           push: true
+          secrets: *fetch-token
           build-args: *build-args
           platforms: linux/${{ matrix.platform.arch }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: *cache-from
+          # Keep layers containing private Cargo sources out of the runtime image package.
           cache-to: |
-            type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.image.name }}:buildcache${{ matrix.platform.cache_scope }},mode=max
-            type=registry,ref=ghcr.io/midnight-ntwrk/${{ matrix.image.name }}:buildcache-${{ env.PROFILE }}${{ matrix.platform.cache_scope }},mode=max
+            ${{ env.FETCH != 'true' && format('type=registry,ref={0}/{1}:buildcache{2},mode=max', env.REGISTRY, matrix.image.name, matrix.platform.cache_scope) || '' }}
+            ${{ env.FETCH != 'true' && format('type=registry,ref={0}/{1}:buildcache-{2}{3},mode=max', env.REGISTRY, matrix.image.name, env.PROFILE, matrix.platform.cache_scope) || '' }}
           # Attaches an SPDX SBOM to the published image, next to its provenance. BuildKit runs this
           # syft-based scanner image on the final stage; pinned by digest and bumped by hand.
           attests: |
@@ -265,9 +308,10 @@ jobs:
 
   merge-manifests:
     name: Merge multi-arch manifest (${{ matrix.image.name }})
-    needs: build-and-push
+    needs: [build-and-push, resolve-registry]
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       packages: write
     strategy:
       fail-fast: false
@@ -290,18 +334,9 @@ jobs:
           version=$(grep '^version.*=' Cargo.toml | sed -E 's/version.*=.*"(.*)"/\1/')
           echo "VERSION=$version" | tee -a "$GITHUB_ENV"
 
-      - name: Login to DockerHub
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          username: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_USER }}
-          password: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_TOKEN }}
+      - *login-docker-hub
 
-      - name: Login to GHCR
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: ghcr.io
-          username: MidnightCI
-          password: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+      - *login-ghcr
 
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -314,12 +349,9 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         env:
           DOCKER_METADATA_SHORT_SHA_LENGTH: 8
+          REGISTRY: *resolved-registry
         with:
-          # Keep in sync with the images list in build-and-push.
-          images: |
-            ghcr.io/midnight-ntwrk/${{ matrix.image.name }}
-            ghcr.io/midnightntwrk/${{ matrix.image.name }}
-            ${{ github.ref_type == 'tag' && format('midnightntwrk/{0}', matrix.image.name) || '' }}
+          images: *published-images
           tags: |
             type=semver,pattern={{version}}
             ${{ github.ref_type != 'tag' && format('type=sha,prefix={0}-,format=short', env.VERSION) || '' }}
@@ -337,9 +369,19 @@ jobs:
 
   docker-compose-validation:
     name: Docker Compose Validation
-    needs: merge-manifests
+    needs: [merge-manifests, resolve-registry]
     runs-on: ubuntu-latest
     continue-on-error: true
+    permissions:
+      contents: read
+      packages: read
+    env:
+      IMAGE_REGISTRY: ${{ needs.resolve-registry.outputs.registry || (github.ref_type == 'tag' && 'docker.io/midnightntwrk' || 'ghcr.io/midnightntwrk') }}
+      USE_NODE_IMAGE_TOKEN: &use-node-image-token >-
+        ${{ github.event.repository.private && startsWith(vars.NODE_IMAGE, 'ghcr.io/') &&
+            vars.NODE_IMAGE_USERNAME != '' &&
+            ((vars.NODE_IMAGE_TOKEN == 'MIDNIGHTCI_PACKAGES_READ' && secrets.MIDNIGHTCI_PACKAGES_READ != '') ||
+             (vars.NODE_IMAGE_TOKEN != 'MIDNIGHTCI_PACKAGES_READ' && secrets.NODE_IMAGE_TOKEN != '')) }}
     strategy:
       matrix:
         profile: [cloud, standalone]
@@ -363,13 +405,6 @@ jobs:
           docker compose --profile "$PROFILE" config --quiet
           echo "Docker Compose syntax validation completed successfully"
 
-      - name: Login to GHCR
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
-        with:
-          registry: ghcr.io
-          username: MidnightCI
-          password: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
-
       - name: Derive image tags
         id: tags
         uses: ./.github/actions/derive-image-tags
@@ -390,26 +425,41 @@ jobs:
             echo "NODE_TAG=$NODE_TAG"
           } >> "$GITHUB_ENV"
 
-      - name: Set image registry
-        env:
-          REF_TYPE: ${{ github.ref_type }}
-        run: |
-          if [ "$REF_TYPE" != "tag" ]; then
-            echo "IMAGE_REGISTRY=ghcr.io/midnight-ntwrk" >> "$GITHUB_ENV"
-          fi
+      - name: Login to GHCR for the node image
+        if: env.USE_NODE_IMAGE_TOKEN == 'true'
+        uses: *ghcr-login-action
+        with:
+          registry: ghcr.io
+          username: ${{ vars.NODE_IMAGE_USERNAME }}
+          password: >-
+            ${{ (vars.NODE_IMAGE_TOKEN == 'MIDNIGHTCI_PACKAGES_READ' && secrets.MIDNIGHTCI_PACKAGES_READ) ||
+                secrets.NODE_IMAGE_TOKEN }}
+
+      - name: Pre-pull the node image
+        if: env.USE_NODE_IMAGE_TOKEN == 'true'
+        run: docker pull "$NODE_IMAGE:$NODE_TAG"
+
+      - name: Login to GHCR for indexer images
+        uses: *ghcr-login-action
+        with:
+          registry: ghcr.io
+          username: ${{ (needs.resolve-registry.outputs.registry != '' || startsWith(vars.NODE_IMAGE, 'ghcr.io/')) && github.actor || 'MidnightCI' }}
+          password: ${{ (needs.resolve-registry.outputs.registry != '' || startsWith(vars.NODE_IMAGE, 'ghcr.io/')) && github.token || secrets.MIDNIGHTCI_PACKAGES_READ }}
 
       - name: Init Env Vars
         uses: ./.github/actions/init-env
 
       - name: Docker Compose Up
         env:
+          # Compose reuses the node image after the GHCR login switches to indexer credentials.
+          NODE_PULL_POLICY: ${{ env.USE_NODE_IMAGE_TOKEN == 'true' && 'never' || 'missing' }}
           PROFILE: ${{ matrix.profile }}
         run: |
           echo "Compose up with:"
           echo "- Indexer tag: $INDEXER_TAG"
           echo "- Node image : $NODE_IMAGE"
           echo "- Node tag   : $NODE_TAG"
-          echo "- Registry   : ${IMAGE_REGISTRY:-midnightntwrk}"
+          echo "- Registry   : $IMAGE_REGISTRY"
           docker compose --profile "$PROFILE" up -d
 
       - name: Show running containers
@@ -448,7 +498,7 @@ jobs:
     #
     # `needs` cannot name one leg of a matrix, so this job also waits for the
     # arm64 builds.
-    needs: build-and-push
+    needs: [build-and-push, resolve-registry]
     # Tag builds have their own release verification flow.
     if: github.ref_type != 'tag'
     runs-on: ubuntu-latest
@@ -460,6 +510,8 @@ jobs:
     permissions:
       contents: read
       packages: read
+    env:
+      USE_NODE_IMAGE_TOKEN: *use-node-image-token
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -474,17 +526,23 @@ jobs:
 
       - name: Run QA suites against the freshly built images
         uses: ./.github/actions/qa-integration-tests
+        env:
+          REGISTRY: *resolved-registry
         with:
           target_env: undeployed
           # Per-arch tag: see the `needs:` note above.
           indexer_tag: ${{ steps.tags.outputs.indexer_tag }}-amd64
+          node_image: ${{ env.NODE_IMAGE }}
           node_tag: ${{ steps.tags.outputs.node_tag }}
           node_toolkit_tag: ${{ steps.tags.outputs.node_toolkit_tag }}
-          # Docker Hub only receives release-tag builds, so the per-commit
-          # <version>-<sha8> images this job tests exist on GHCR alone. This job
-          # never runs for a tag ref, so the registry is unconditional here.
-          image_registry: ghcr.io/midnightntwrk
-          packages_read_token: ${{ secrets.MIDNIGHTCI_PACKAGES_READ }}
+          # The per-commit <version>-<sha8> images are published to GHCR.
+          image_registry: ${{ env.REGISTRY }}
+          packages_read_token: ${{ (needs.resolve-registry.outputs.registry != '' || startsWith(vars.NODE_IMAGE, 'ghcr.io/')) && github.token || secrets.MIDNIGHTCI_PACKAGES_READ }}
+          node_image_token: >-
+            ${{ env.USE_NODE_IMAGE_TOKEN == 'true' &&
+                ((vars.NODE_IMAGE_TOKEN == 'MIDNIGHTCI_PACKAGES_READ' && secrets.MIDNIGHTCI_PACKAGES_READ) ||
+                 secrets.NODE_IMAGE_TOKEN) || '' }}
+          node_image_username: ${{ vars.NODE_IMAGE_USERNAME }}
           app_infra_secret: ${{ secrets.APP__INFRA__SECRET }}
           storage_password: ${{ secrets.APP__INFRA__STORAGE__PASSWORD }}
           pub_sub_password: ${{ secrets.APP__INFRA__PUB_SUB__PASSWORD }}

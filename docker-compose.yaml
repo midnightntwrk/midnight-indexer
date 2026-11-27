@@ -236,6 +236,7 @@ services:
   node:
     profiles: [cloud, standalone]
     image: "${NODE_IMAGE:-midnightntwrk/midnight-node}:${NODE_TAG:-latest}"
+    pull_policy: "${NODE_PULL_POLICY:-missing}"
     restart: "always"
     ports:
       - "9944:9944"

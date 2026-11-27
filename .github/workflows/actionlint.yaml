@@ -7,14 +7,16 @@ on:
   pull_request:
     paths:
       - ".github/actions/**"
-      - ".github/workflows/*.yml"
+      - ".github/scripts/**"
       - ".github/workflows/*.yaml"
+      - ".github/workflows/*.yml"
   push:
     branches: [main]
     paths:
       - ".github/actions/**"
-      - ".github/workflows/*.yml"
+      - ".github/scripts/**"
       - ".github/workflows/*.yaml"
+      - ".github/workflows/*.yml"
 
 jobs:
   actionlint:
@@ -29,3 +31,6 @@ jobs:
         with:
           matcher: true # Enable GitHub annotations for errors
           fail-on-error: true # Fail CI when errors are found
+
+      - name: Test Target release sync
+        run: bash .github/scripts/test-sync-target-release.sh

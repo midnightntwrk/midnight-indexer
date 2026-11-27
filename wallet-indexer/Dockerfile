@@ -19,11 +19,21 @@ RUN cargo install cargo-auditable --locked --version "${CARGO_AUDITABLE_VERSION:
 FROM chef AS planner
 COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
+ARG FETCH=false
+# The planner uses a token to fetch private Cargo dependencies when FETCH is enabled.
+RUN --mount=type=secret,id=git_token,env=FETCH_TOKEN \
+    mkdir -p "$CARGO_HOME/git" "$CARGO_HOME/registry" && \
+    if [ "$FETCH" = true ]; then bash ./fetch_cargo_dependencies.sh; fi
 
 FROM chef AS builder
 SHELL ["/bin/bash", "-c"]
 ARG PROFILE=release
 COPY --from=planner /build/recipe.json recipe.json
+COPY --from=planner /usr/local/cargo/git /usr/local/cargo/git
+COPY --from=planner /usr/local/cargo/registry /usr/local/cargo/registry
+ARG FETCH=false
+# Offline builds fail if the planner missed a dependency.
+ENV CARGO_NET_OFFLINE=$FETCH
 # Same package and features as the build below, so cargo reuses every dependency compiled here.
 RUN cargo chef cook -p wallet-indexer --locked --features cloud --profile $PROFILE --recipe-path recipe.json
 # The git commit, for `--version` and the startup journal, as .git is not in the build context.
@@ -42,11 +52,7 @@ RUN : "${MIDNIGHT_INDEXER_GIT_SHA:?build arg required}" && \
     mkdir -p /runtime/opt/wallet-indexer && \
     mv /build/wallet-indexer/config.yaml /runtime/opt/wallet-indexer
 
-FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2 AS runtime
-# The base image predates the trixie-security zlib1g fix for CVE-2026-85091 and CVE-2026-76844.
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends zlib1g=1:1.3.dfsg+really1.3.1-1+deb13u1 && \
-    rm -rf /var/lib/apt/lists/*
+FROM debian:trixie-slim@sha256:8aa5a7bf5a1955bddbe7d74fcdd0b91ab30e74362a8b73af672b0481b35b44a0 AS runtime
 RUN useradd -u 10001 -d /nonexistent -s /usr/sbin/nologin -M -c "" appuser && \
     passwd -l appuser && \
     mkdir /var/run/wallet-indexer && \

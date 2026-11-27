@@ -22,8 +22,8 @@ use indexer_common::{
     domain::{
         BlockHash, ByteVec, ContractAttributes, ContractBalance, LedgerEvent,
         LedgerEventAttributes, LedgerEventGrouping, ProtocolVersion, SerializedContractAddress,
-        SerializedContractStateKey, SerializedLedgerStateKey, TermsAndConditionsHash,
-        UnshieldedUtxo, bridge::BridgeEvent,
+        SerializedContractStateKey, SerializedLedgerStateKey, SerializedZswapStateKey,
+        TermsAndConditionsHash, UnshieldedUtxo, bridge::BridgeEvent,
     },
     error::BoxError,
     infra::sqlx::U128BeBytes,
@@ -302,6 +302,39 @@ impl domain::storage::Storage for Storage {
             })
             .transpose()
     }
+
+    async fn get_contract_state_keys(
+        &self,
+    ) -> Result<
+        (
+            Vec<SerializedContractStateKey>,
+            Vec<SerializedZswapStateKey>,
+        ),
+        sqlx::Error,
+    > {
+        let state_keys = indoc! {"
+            SELECT state_key FROM contract_actions WHERE state_key IS NOT NULL
+            UNION
+            SELECT state_key FROM contract_action_translations
+        "};
+        let zswap_state_keys = indoc! {"
+            SELECT DISTINCT zswap_state_key
+            FROM contract_actions
+            WHERE zswap_state_key IS NOT NULL
+        "};
+        let (state_keys, zswap_state_keys) = tokio::try_join!(
+            sqlx::query_as::<_, (Vec<u8>,)>(state_keys).fetch_all(&*self.pool),
+            sqlx::query_as::<_, (Vec<u8>,)>(zswap_state_keys).fetch_all(&*self.pool),
+        )?;
+
+        Ok((
+            state_keys.into_iter().map(|(key,)| key.into()).collect(),
+            zswap_state_keys
+                .into_iter()
+                .map(|(key,)| key.into())
+                .collect(),
+        ))
+    }
 }
 
 /// The journal of startup tasks, in the indexer database.
@@ -313,11 +346,14 @@ impl Journal for Storage {
     async fn append(
         &self,
         id: &str,
-        entry: Entry<Value>,
+        version: u32,
+        state: Value,
         started_at: SystemTime,
         ended_at: SystemTime,
     ) -> Result<(), BoxError> {
-        self.pool.append(id, entry, started_at, ended_at).await
+        self.pool
+            .append(id, version, state, started_at, ended_at)
+            .await
     }
 }
 
@@ -1851,26 +1887,9 @@ mod contract_event_correlation_tests {
 
 #[cfg(all(test, feature = "standalone"))]
 mod contract_state_translation_tests {
-    use super::*;
+    use super::{testing::storage, *};
     use crate::domain::storage::Storage as _;
-    use indexer_common::infra::{
-        migrations,
-        pool::sqlite::{self, SqlitePool},
-    };
-
-    /// A migrated SQLite database and a `Storage` over it.
-    async fn storage() -> (tempfile::TempDir, SqlitePool, Storage) {
-        let dir = tempfile::tempdir().expect("create tempdir");
-        let url = dir.path().join("indexer.sqlite").display().to_string();
-        let pool = SqlitePool::new(sqlite::Config::with_url(url))
-            .await
-            .expect("create pool");
-        migrations::sqlite::run(&pool)
-            .await
-            .expect("run migrations");
-        let storage = Storage::new(pool.clone());
-        (dir, pool, storage)
-    }
+    use indexer_common::infra::pool::sqlite::SqlitePool;
 
     fn hash(seed: u32) -> Vec<u8> {
         let mut hash = [0; 32];
@@ -1992,6 +2011,56 @@ mod contract_state_translation_tests {
         );
     }
 
+    /// The roots the pinning backfill pins: every contract state key once, from the actions and
+    /// their translations, and every contract zswap state key once.
+    #[tokio::test]
+    async fn contract_state_keys_are_every_stored_key_once() {
+        let (_dir, pool, storage) = storage().await;
+        let block = insert_block(&pool, 1).await;
+        let tx_id = insert_transaction(&pool, block, 1).await;
+        let a = insert_contract_action(&pool, tx_id, &[1; 32], Some(&[0xa1])).await;
+        let b = insert_contract_action(&pool, tx_id, &[1; 32], Some(&[0xa1])).await;
+        let c = insert_contract_action(&pool, tx_id, &[2; 32], None).await;
+        for (action, zswap_state_key) in [(a, [0xc1]), (b, [0xc1]), (c, [0xc2])] {
+            sqlx::query("UPDATE contract_actions SET zswap_state_key = $1 WHERE id = $2")
+                .bind(zswap_state_key.as_slice())
+                .bind(action)
+                .execute(&*pool)
+                .await
+                .expect("set zswap state key");
+        }
+        let fork_block = insert_block(&pool, 2).await;
+        let translations = [
+            (a as u64, ContractStateTranslation(vec![0xa9].into())),
+            (b as u64, ContractStateTranslation(vec![0xa1].into())),
+        ];
+        let mut tx = storage.pool.begin().await.expect("begin");
+        save_contract_state_translations(&translations, fork_block, 2, &mut tx)
+            .await
+            .expect("save translations");
+        tx.commit().await.expect("commit");
+
+        let (state_keys, zswap_state_keys) = storage
+            .get_contract_state_keys()
+            .await
+            .expect("get contract state keys");
+        let sorted = |keys: Vec<Vec<u8>>| {
+            let mut keys = keys;
+            keys.sort();
+            keys
+        };
+        assert_eq!(
+            sorted(state_keys.into_iter().map(|key| key.0.0).collect()),
+            [vec![0xa1], vec![0xa9]],
+            "action and translation keys, each once"
+        );
+        assert_eq!(
+            sorted(zswap_state_keys.into_iter().map(|key| key.0.0).collect()),
+            [vec![0xc1], vec![0xc2]],
+            "zswap state keys, each once"
+        );
+    }
+
     /// Translations are inserted in chunks; a failed insert leaves no rows.
     #[tokio::test]
     async fn translations_are_inserted_in_chunks_and_a_shortfall_rolls_back() {
@@ -2037,5 +2106,50 @@ mod contract_state_translation_tests {
         save_contract_state_translations(&[], fork_block, 2, &mut tx)
             .await
             .expect("no translations");
+    }
+}
+
+#[cfg(all(test, feature = "standalone"))]
+mod system_parameters_tests {
+    use super::testing::storage;
+    use crate::domain::storage::Storage as _;
+
+    /// An empty database has no system parameters.
+    #[tokio::test]
+    async fn latest_system_parameters_are_none_when_empty() {
+        let (_dir, _pool, storage) = storage().await;
+
+        let (d_parameter, terms_and_conditions) = tokio::join!(
+            storage.get_latest_d_parameter(),
+            storage.get_latest_terms_and_conditions(),
+        );
+        assert_eq!(d_parameter.expect("get latest D-parameter"), None);
+        assert_eq!(
+            terms_and_conditions.expect("get latest terms and conditions"),
+            None
+        );
+    }
+}
+
+#[cfg(all(test, feature = "standalone"))]
+pub(crate) mod testing {
+    use super::Storage;
+    use indexer_common::infra::{
+        migrations,
+        pool::sqlite::{self, SqlitePool},
+    };
+
+    /// A migrated SQLite database and a `Storage` over it.
+    pub(crate) async fn storage() -> (tempfile::TempDir, SqlitePool, Storage) {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let url = dir.path().join("indexer.sqlite").display().to_string();
+        let pool = SqlitePool::new(sqlite::Config::with_url(url))
+            .await
+            .expect("create pool");
+        migrations::sqlite::run(&pool)
+            .await
+            .expect("run migrations");
+        let storage = Storage::new(pool.clone());
+        (dir, pool, storage)
     }
 }
