@@ -92,6 +92,9 @@ infra:
       # Each arena load blocks a worker thread and, in cloud deployments, draws on the same
       # connection pool as ordinary queries.
       max_concurrent_loads: 6
+    # Maximum age of the sealed session tokens returned by `connect`. Bounds the token
+    # lifetime, because `disconnect` cannot revoke tokens held by other instances.
+    session_token_ttl: "7days"
 
 telemetry:
   tracing:
