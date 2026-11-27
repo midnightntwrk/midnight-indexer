@@ -440,11 +440,10 @@ impl TransactionStorage for Storage {
             FROM transactions
             INNER JOIN blocks ON blocks.id = transactions.block_id
             INNER JOIN regular_transactions ON regular_transactions.id = transactions.id
-            WHERE EXISTS (
-                SELECT 1
+            WHERE transactions.id IN (
+                SELECT transaction_id
                 FROM transaction_identifiers
-                WHERE transaction_identifiers.transaction_id = transactions.id
-                AND transaction_identifiers.identifier = $1
+                WHERE identifier = $1
             )
             ORDER BY transactions.id
         "};
