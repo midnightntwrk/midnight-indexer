@@ -90,6 +90,7 @@ By default it connects to a local Midnight Node at `ws://localhost:9944` and exp
 | APP__INFRA__API__PORT | Port of the GraphQL API | `8088` |
 | APP__INFRA__SECRET | Hex-encoded 32-byte secret to encrypt stored sensitive data | - |
 | APP__INFRA__SPO_NODE__BLOCKFROST_ID | Blockfrost API key (required, must be non-empty; needed by spo-indexer which is included in the standalone binary). Use any non-empty placeholder if you are not exercising SPO features. | - |
+| APP__INFRA__SPO_NODE__BLOCKFROST_BASE_URL | Base URL of a Blockfrost-compatible API, including the version path, e.g. `http://localhost:3000/api/v0` | hosted Blockfrost URL for the network named by the API key prefix |
 
 For the full set of configuration options see [config.yaml](indexer-standalone/config.yaml).
 
@@ -157,8 +158,11 @@ For the full set of configuration options see [config.yaml](wallet-indexer/confi
 | APP__INFRA__STORAGE__USER | PostgreSQL database user | `indexer` |
 | APP__INFRA__NODE__URL | WebSocket Endpoint of Midnight Node | `ws://localhost:9944` |
 | APP__INFRA__NODE__BLOCKFROST_ID | Blockfrost API key for Cardano stake queries | - |
+| APP__INFRA__NODE__BLOCKFROST_BASE_URL | Base URL of a Blockfrost-compatible API, including the version path, e.g. `http://localhost:3000/api/v0` | hosted Blockfrost URL for the network named by the API key prefix |
 
 The Blockfrost API key is required for stake distribution queries against Cardano. Without it, spo-indexer will still index committee membership, epoch data, and D-parameter changes, but stake-related data (pool metadata, stake distribution) will not be available.
+
+Any Blockfrost-compatible API can be used instead of hosted Blockfrost by setting the base URL. spo-indexer calls `GET /pools/{pool_id}` and `GET /pools/{pool_id}/metadata` with hex pool IDs. A self-hosted API usually ignores the API key, but it must still be non-empty.
 
 For the full set of configuration options see [config.yaml](spo-indexer/config.yaml).
 
