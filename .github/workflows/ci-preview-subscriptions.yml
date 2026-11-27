@@ -1,0 +1,22 @@
+name: Preview subscription workflow validation
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/qa-preview-subscriptions.yml
+      - .github/workflows/ci-preview-subscriptions.yml
+      - .github/workflows/qa-test-block-subscriptions-preview.yml
+      - .github/workflows/qa-test-ledger-events-preview.yml
+
+permissions:
+  contents: read
+
+jobs:
+  preview-subscriptions:
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [block-subscriptions, ledger-events]
+    uses: ./.github/workflows/qa-preview-subscriptions.yml
+    with:
+      suite: ${{ matrix.suite }}
