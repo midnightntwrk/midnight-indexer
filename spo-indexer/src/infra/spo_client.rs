@@ -96,7 +96,7 @@ impl Default for HttpPoolConfig {
     }
 }
 
-/// A [Node] implementation based on subxt.
+/// Client for node RPCs and Blockfrost stake pool data.
 #[derive(Clone)]
 pub struct SPOClient {
     pub epoch_duration: u32,
@@ -183,12 +183,12 @@ impl SPOClient {
             .online_client
             .at_block(block_number)
             .await
-            .map_err(|error| SPOClientError::UnexpectedResponse(error.to_string()))?;
+            .map_err(|error| SPOClientError::Subtx(error.into()))?;
         let extrinsics = at_block
             .extrinsics()
             .fetch()
             .await
-            .map_err(|error| SPOClientError::UnexpectedResponse(error.to_string()))?;
+            .map_err(|error| SPOClientError::Subtx(error.into()))?;
 
         for extrinsic in extrinsics.iter() {
             let extrinsic =
