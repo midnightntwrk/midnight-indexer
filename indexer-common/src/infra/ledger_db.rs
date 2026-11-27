@@ -13,6 +13,9 @@
 
 #[cfg_attr(docsrs, doc(cfg(any(feature = "cloud", feature = "standalone"))))]
 #[cfg(any(feature = "cloud", feature = "standalone"))]
+pub mod object_parts;
+#[cfg_attr(docsrs, doc(cfg(any(feature = "cloud", feature = "standalone"))))]
+#[cfg(any(feature = "cloud", feature = "standalone"))]
 pub mod v1_1;
 
 use serde::Deserialize;

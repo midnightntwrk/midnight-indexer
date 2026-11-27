@@ -13,7 +13,10 @@
 
 pub(crate) mod pinning;
 
-use crate::error::StdErrorExt;
+use crate::{
+    error::StdErrorExt,
+    infra::ledger_db::object_parts::{self, Parts},
+};
 use derive_more::Debug;
 use futures::TryStreamExt;
 use indoc::indoc;
@@ -43,15 +46,22 @@ const BATCH_BYTES: usize = 64 * 1024 * 1024;
 // Keys per SQLite `DELETE … IN (…)`, one bind each.
 #[cfg(feature = "standalone")]
 const BATCH_DELETE_SIZE: usize = SQLITE_MAX_BINDS;
-// Rows per SQLite `INSERT … VALUES`, two binds each.
+// Rows per SQLite `INSERT … VALUES`, four binds each.
 #[cfg(feature = "standalone")]
-const BATCH_INSERT_SIZE: usize = SQLITE_MAX_BINDS / 2;
+const BATCH_INSERT_SIZE: usize = SQLITE_MAX_BINDS / 4;
 // Rows per Postgres statement taking its rows as array parameters.
 #[cfg(feature = "cloud")]
 const BATCH_ROWS: usize = 10_000;
 // SQLite's maximum number of binds per statement.
 #[cfg(feature = "standalone")]
 const SQLITE_MAX_BINDS: usize = 32_766;
+
+// A row read for a node's children: key, pinned, `child_keys` and, only without them, object.
+type ChildrenRow = (Vec<u8>, bool, Option<Vec<u8>>, Option<Vec<u8>>);
+// A stored node: `object`, `child_keys` and `child_values`; see [node_object].
+type NodeRow = (Vec<u8>, Option<Vec<u8>>, Option<Vec<u8>>);
+// A stored node with its key in front.
+type NodeKeyRow = (Vec<u8>, Vec<u8>, Option<Vec<u8>>, Option<Vec<u8>>);
 
 #[cfg(feature = "cloud")]
 type SqlxTransaction = sqlx::Transaction<'static, sqlx::Postgres>;
@@ -107,19 +117,17 @@ impl DB for LedgerDb {
         block_in_place(|| {
             Handle::current().block_on(async {
                 let query = indoc! {"
-                    SELECT object
+                    SELECT object, child_keys, child_values
                     FROM ledger_db_nodes
                     WHERE key = $1
                 "};
 
-                sqlx::query_as::<_, (Vec<u8>,)>(query)
+                sqlx::query_as::<_, NodeRow>(query)
                     .bind(key.0.as_slice())
                     .fetch_optional(&*self.pool)
                     .await
                     .unwrap_or_panic("cannot get node")
-                    .map(|(object,)| {
-                        OnDiskObject::<Self::Hasher>::deserialize(&mut object.as_slice(), 0)
-                    })
+                    .map(node_object)
                     .transpose()
                     .unwrap_or_panic("cannot deserialize node as OnDiskObject")
             })
@@ -135,26 +143,32 @@ impl DB for LedgerDb {
                     .await
                     .unwrap_or_panic("begin transaction for insert node");
 
-                let mut ser_object = Vec::with_capacity(object.serialized_size());
-                Serializable::serialize(&object, &mut ser_object)
-                    .unwrap_or_panic("cannot serialize object");
+                let parts = node_parts(&object);
 
                 let query = indoc! {"
                     INSERT INTO ledger_db_nodes (
                         key,
-                        object
+                        object,
+                        child_keys,
+                        child_values
                     )
                     VALUES (
                         $1,
-                        $2
+                        $2,
+                        $3,
+                        $4
                     )
                     ON CONFLICT (key) DO UPDATE
-                    SET object = EXCLUDED.object
+                    SET object = EXCLUDED.object,
+                        child_keys = EXCLUDED.child_keys,
+                        child_values = EXCLUDED.child_values
                 "};
 
                 sqlx::query(query)
                     .bind(key.0.as_slice())
-                    .bind(ser_object.as_slice())
+                    .bind(parts.data)
+                    .bind(parts.child_keys)
+                    .bind(parts.child_values)
                     .execute(&mut *tx)
                     .await
                     .unwrap_or_panic("cannot insert node");
@@ -255,24 +269,22 @@ impl DB for LedgerDb {
                 #[cfg(feature = "cloud")]
                 {
                     let query = indoc! {"
-                        SELECT key, object
+                        SELECT key, object, child_keys, child_values
                         FROM ledger_db_nodes
                         WHERE key = ANY($1::bytea[])
                     "};
 
-                    let mut nodes = sqlx::query_as::<_, (Vec<u8>, Vec<u8>)>(query)
+                    let mut nodes = sqlx::query_as::<_, NodeKeyRow>(query)
                         .bind(keys.iter().map(|key| key.0.as_slice()).collect::<Vec<_>>())
                         .fetch(&*self.pool)
-                        .and_then(|(key, object)| {
+                        .and_then(|(key, object, child_keys, child_values)| {
                             let key_and_object =
                                 ArenaHash::<Self::Hasher>::deserialize(&mut key.as_slice(), 0)
                                     .map_err(|error| sqlx::Error::Decode(error.into()))
                                     .and_then(|key| {
-                                        let object = OnDiskObject::<Self::Hasher>::deserialize(
-                                            &mut object.as_slice(),
-                                            0,
-                                        )
-                                        .map_err(|error| sqlx::Error::Decode(error.into()));
+                                        let object =
+                                            node_object((object, child_keys, child_values))
+                                                .map_err(|error| sqlx::Error::Decode(error.into()));
                                         object.map(|object| (key, object))
                                     });
                             ready(key_and_object)
@@ -294,7 +306,7 @@ impl DB for LedgerDb {
                     use sqlx::QueryBuilder;
 
                     let query = indoc! {"
-                        SELECT key, object
+                        SELECT key, object, child_keys, child_values
                         FROM ledger_db_nodes
                         WHERE key IN (
                     "};
@@ -307,18 +319,16 @@ impl DB for LedgerDb {
                     query.push(")");
 
                     let mut nodes = query
-                        .build_query_as::<(Vec<u8>, Vec<u8>)>()
+                        .build_query_as::<NodeKeyRow>()
                         .fetch(&*self.pool)
-                        .and_then(|(key, object)| {
+                        .and_then(|(key, object, child_keys, child_values)| {
                             let key_and_object =
                                 ArenaHash::<Self::Hasher>::deserialize(&mut key.as_slice(), 0)
                                     .map_err(|error| sqlx::Error::Decode(error.into()))
                                     .and_then(|key| {
-                                        let object = OnDiskObject::<Self::Hasher>::deserialize(
-                                            &mut object.as_slice(),
-                                            0,
-                                        )
-                                        .map_err(|error| sqlx::Error::Decode(error.into()));
+                                        let object =
+                                            node_object((object, child_keys, child_values))
+                                                .map_err(|error| sqlx::Error::Decode(error.into()));
                                         object.map(|object| (key, object))
                                     });
                             ready(key_and_object)
@@ -356,6 +366,72 @@ impl DB for LedgerDb {
                     .await
                     .unwrap_or_panic("cannot get root count")
                     .map_or(0, |(count,)| count as u32)
+            })
+        })
+    }
+
+    /// The root counts of `keys` in one query, or one per chunk of binds on SQLite, rather than one
+    /// per key. Every key is in the result, with 0 for a key that is not a root.
+    fn batch_get_root_counts<I>(&self, keys: I) -> HashMap<ArenaHash<Self::Hasher>, u32>
+    where
+        I: Iterator<Item = ArenaHash<Self::Hasher>>,
+    {
+        let keys = keys.collect::<Vec<_>>();
+        if keys.is_empty() {
+            return HashMap::new();
+        }
+
+        block_in_place(|| {
+            Handle::current().block_on(async {
+                #[cfg(feature = "standalone")]
+                let rows = {
+                    let mut rows = vec![];
+                    for chunk in keys.chunks(BATCH_DELETE_SIZE) {
+                        let mut query = QueryBuilder::new(indoc! {"
+                            SELECT key, count
+                            FROM ledger_db_roots
+                            WHERE key IN (
+                        "});
+                        let mut bindings = query.separated(", ");
+                        for key in chunk {
+                            bindings.push_bind(key.0.as_slice());
+                        }
+                        query.push(")");
+                        rows.extend(
+                            query
+                                .build_query_as::<(Vec<u8>, i64)>()
+                                .fetch_all(&*self.pool)
+                                .await
+                                .unwrap_or_panic("cannot batch get root counts"),
+                        );
+                    }
+                    rows
+                };
+
+                #[cfg(feature = "cloud")]
+                let rows = {
+                    let query = indoc! {"
+                        SELECT key, count
+                        FROM ledger_db_roots
+                        WHERE key = ANY($1::bytea[])
+                    "};
+
+                    sqlx::query_as::<_, (Vec<u8>, i64)>(query)
+                        .bind(keys.iter().map(|key| key.0.as_slice()).collect::<Vec<_>>())
+                        .fetch_all(&*self.pool)
+                        .await
+                        .unwrap_or_panic("cannot batch get root counts")
+                };
+
+                let counts = rows.into_iter().collect::<HashMap<_, _>>();
+                keys.into_iter()
+                    .map(|key| {
+                        let count = counts
+                            .get(key.0.as_slice())
+                            .map_or(0, |count| *count as u32);
+                        (key, count)
+                    })
+                    .collect()
             })
         })
     }
@@ -425,10 +501,6 @@ impl DB for LedgerDb {
     /// reachable nodes, `gc()` scans the DB in batches, culls every scanned
     /// node not in the mark set, and uses the returned resume handle to pick
     /// up where a time-bounded pass left off. Not called by indexer code.
-    ///
-    /// Scans only the unpinned rows, which are all gc may cull: pinned rows are reachable from
-    /// roots that are never unpersisted. That leaves them out of every scan, which is only right
-    /// while gc's sweep is the sole caller; see the storage-core pin in the workspace manifest.
     fn scan(
         &self,
         resume_from: Option<Self::ScanResumeHandle>,
@@ -439,29 +511,29 @@ impl DB for LedgerDb {
     ) {
         block_in_place(|| {
             Handle::current().block_on(async {
-                let mut query =
-                    QueryBuilder::new("SELECT key, object FROM ledger_db_nodes WHERE NOT pinned");
+                let mut query = QueryBuilder::new(
+                    "SELECT key, object, child_keys, child_values FROM ledger_db_nodes",
+                );
                 if let Some(handle) = resume_from.as_ref() {
-                    query.push(" AND key > ");
+                    query.push(" WHERE key > ");
                     query.push_bind(handle.0.as_slice());
                 }
                 query.push(" ORDER BY key LIMIT ");
                 query.push_bind(batch_size as i64);
 
                 let raw = query
-                    .build_query_as::<(Vec<u8>, Vec<u8>)>()
+                    .build_query_as::<NodeKeyRow>()
                     .fetch_all(&*self.pool)
                     .await
                     .unwrap_or_panic("cannot scan ledger_db_nodes");
 
                 let batch = raw
                     .into_iter()
-                    .map(|(key, object)| {
+                    .map(|(key, object, child_keys, child_values)| {
                         let key = ArenaHash::<Self::Hasher>::deserialize(&mut key.as_slice(), 0)
                             .unwrap_or_panic("cannot deserialize key as ArenaHash");
-                        let object =
-                            OnDiskObject::<Self::Hasher>::deserialize(&mut object.as_slice(), 0)
-                                .unwrap_or_panic("cannot deserialize node as OnDiskObject");
+                        let object = node_object((object, child_keys, child_values))
+                            .unwrap_or_panic("cannot deserialize node as OnDiskObject");
                         (key, object)
                     })
                     .collect::<Vec<_>>();
@@ -469,6 +541,139 @@ impl DB for LedgerDb {
                 let next_handle = batch.last().map(|(k, _)| k.clone());
 
                 (batch, next_handle)
+            })
+        })
+    }
+
+    /// The keys of the next `batch_size` unpinned nodes after `resume_from`, in key order, from
+    /// the partial index alone, without reading any object. Pinned nodes are reachable from roots
+    /// that are never unpersisted, and storage-core lets a scan leave out such nodes.
+    fn scan_keys(
+        &self,
+        resume_from: Option<Self::ScanResumeHandle>,
+        batch_size: usize,
+    ) -> (Vec<ArenaHash<Self::Hasher>>, Option<Self::ScanResumeHandle>) {
+        block_in_place(|| {
+            Handle::current().block_on(async {
+                let mut query =
+                    QueryBuilder::new("SELECT key FROM ledger_db_nodes WHERE NOT pinned");
+                if let Some(handle) = resume_from.as_ref() {
+                    query.push(" AND key > ");
+                    query.push_bind(handle.0.as_slice());
+                }
+                query.push(" ORDER BY key LIMIT ");
+                query.push_bind(batch_size as i64);
+
+                let keys = query
+                    .build_query_as::<(Vec<u8>,)>()
+                    .fetch_all(&*self.pool)
+                    .await
+                    .unwrap_or_panic("cannot scan ledger_db_nodes keys")
+                    .into_iter()
+                    .map(|(key,)| {
+                        ArenaHash::<Self::Hasher>::deserialize(&mut key.as_slice(), 0)
+                            .unwrap_or_panic("cannot deserialize key as ArenaHash")
+                    })
+                    .collect::<Vec<_>>();
+                let next_handle = keys.last().cloned();
+
+                (keys, next_handle)
+            })
+        })
+    }
+
+    /// The children of each stored key among `keys`; see `LedgerDb::children_rows`. Keys that are
+    /// not stored are left out.
+    ///
+    /// Pinned nodes report none: they are left out of [DB::scan_keys], as are all their
+    /// descendants, so gc's mark need not reach below them.
+    fn batch_get_children<I>(
+        &self,
+        keys: I,
+    ) -> Vec<(ArenaHash<Self::Hasher>, Vec<ArenaHash<Self::Hasher>>)>
+    where
+        I: Iterator<Item = ArenaHash<Self::Hasher>>,
+    {
+        self.children_rows(&keys.collect::<Vec<_>>())
+            .into_iter()
+            .map(|(key, _, children)| (key, children))
+            .collect()
+    }
+}
+
+impl LedgerDb {
+    /// `(key, pinned, children)` of the stored ones among `keys`: an unpinned node's by-reference
+    /// children, from `child_keys`, or from its object for a row written before that column
+    /// existed, and none for a pinned node.
+    fn children_rows(
+        &self,
+        keys: &[ArenaHash<DefaultHasher>],
+    ) -> Vec<(
+        ArenaHash<DefaultHasher>,
+        bool,
+        Vec<ArenaHash<DefaultHasher>>,
+    )> {
+        if keys.is_empty() {
+            return vec![];
+        }
+
+        block_in_place(|| {
+            Handle::current().block_on(async {
+                #[cfg(feature = "standalone")]
+                let rows = {
+                    let mut rows = vec![];
+                    for chunk in keys.chunks(BATCH_DELETE_SIZE) {
+                        let mut query = QueryBuilder::new(indoc! {"
+                            SELECT
+                                key,
+                                pinned,
+                                CASE WHEN NOT pinned THEN child_keys END,
+                                CASE WHEN NOT pinned AND child_keys IS NULL THEN object END
+                            FROM ledger_db_nodes
+                            WHERE key IN (
+                        "});
+                        let mut bindings = query.separated(", ");
+                        for key in chunk {
+                            bindings.push_bind(key.0.as_slice());
+                        }
+                        query.push(")");
+                        rows.extend(
+                            query
+                                .build_query_as::<ChildrenRow>()
+                                .fetch_all(&*self.pool)
+                                .await
+                                .unwrap_or_panic("cannot batch get node children"),
+                        );
+                    }
+                    rows
+                };
+
+                #[cfg(feature = "cloud")]
+                let rows = {
+                    let query = indoc! {"
+                        SELECT
+                            key,
+                            pinned,
+                            CASE WHEN NOT pinned THEN child_keys END,
+                            CASE WHEN NOT pinned AND child_keys IS NULL THEN object END
+                        FROM ledger_db_nodes
+                        WHERE key = ANY($1::bytea[])
+                    "};
+
+                    sqlx::query_as::<_, ChildrenRow>(query)
+                        .bind(keys.iter().map(|key| key.0.as_slice()).collect::<Vec<_>>())
+                        .fetch_all(&*self.pool)
+                        .await
+                        .unwrap_or_panic("cannot batch get node children")
+                };
+
+                rows.into_iter()
+                    .map(|(key, pinned, children, object)| {
+                        let key = ArenaHash::<DefaultHasher>::deserialize(&mut key.as_slice(), 0)
+                            .unwrap_or_panic("cannot deserialize key as ArenaHash");
+                        (key, pinned, row_children(children, object))
+                    })
+                    .collect()
             })
         })
     }
@@ -504,33 +709,40 @@ async fn flush_inserts<Hasher: WellBehavedHasher>(
     pinned: &HashSet<ArenaHash<Hasher>>,
 ) {
     for chunk in inserts.chunks(BATCH_INSERT_SIZE) {
-        QueryBuilder::new("INSERT INTO ledger_db_nodes (key, object, pinned) ")
-            .push_values(chunk, |mut q, (key, object)| {
-                let ser_object = serialize_object(object);
-                q.push_bind(key.0.as_slice())
-                    .push_bind(ser_object)
-                    .push(if pinned.contains(key) {
-                        "TRUE"
-                    } else {
-                        "FALSE"
-                    });
-            })
-            .push(indoc! {"
-                 ON CONFLICT (key) DO UPDATE
-                SET object = EXCLUDED.object, pinned = ledger_db_nodes.pinned OR EXCLUDED.pinned
-            "})
-            .build()
-            .execute(&mut **tx)
-            .await
-            .unwrap_or_panic("cannot batch insert nodes");
+        QueryBuilder::new(
+            "INSERT INTO ledger_db_nodes (key, object, child_keys, child_values, pinned) ",
+        )
+        .push_values(chunk, |mut q, (key, object)| {
+            let parts = node_parts(object);
+            q.push_bind(key.0.as_slice())
+                .push_bind(parts.data)
+                .push_bind(parts.child_keys)
+                .push_bind(parts.child_values)
+                .push(if pinned.contains(key) {
+                    "TRUE"
+                } else {
+                    "FALSE"
+                });
+        })
+        .push(indoc! {"
+             ON CONFLICT (key) DO UPDATE
+            SET object = EXCLUDED.object,
+                child_keys = EXCLUDED.child_keys,
+                child_values = EXCLUDED.child_values,
+                pinned = ledger_db_nodes.pinned OR EXCLUDED.pinned
+        "})
+        .build()
+        .execute(&mut **tx)
+        .await
+        .unwrap_or_panic("cannot batch insert nodes");
     }
 
     inserts.clear();
 }
 
-// Postgres takes the keys, the nodes and their pinned flags as three array parameters, so every
-// statement has the same SQL whatever its number of nodes. Nodes in `pinned` are inserted pinned,
-// and a stored node stays pinned.
+// Postgres takes the keys, the nodes' parts and their pinned flags as five array parameters, so
+// every statement has the same SQL whatever its number of nodes. Nodes in `pinned` are inserted
+// pinned, and a stored node stays pinned.
 #[cfg(feature = "cloud")]
 async fn flush_inserts<Hasher: WellBehavedHasher>(
     tx: &mut SqlxTransaction,
@@ -538,10 +750,13 @@ async fn flush_inserts<Hasher: WellBehavedHasher>(
     pinned: &HashSet<ArenaHash<Hasher>>,
 ) {
     let query = indoc! {"
-        INSERT INTO ledger_db_nodes (key, object, pinned)
-        SELECT * FROM UNNEST($1::bytea[], $2::bytea[], $3::boolean[])
+        INSERT INTO ledger_db_nodes (key, object, child_keys, child_values, pinned)
+        SELECT * FROM UNNEST($1::bytea[], $2::bytea[], $3::bytea[], $4::bytea[], $5::boolean[])
         ON CONFLICT (key) DO UPDATE
-        SET object = EXCLUDED.object, pinned = ledger_db_nodes.pinned OR EXCLUDED.pinned
+        SET object = EXCLUDED.object,
+            child_keys = EXCLUDED.child_keys,
+            child_values = EXCLUDED.child_values,
+            pinned = ledger_db_nodes.pinned OR EXCLUDED.pinned
     "};
 
     for chunk in insert_chunks(inserts, |(_, object)| object.serialized_size()) {
@@ -549,20 +764,26 @@ async fn flush_inserts<Hasher: WellBehavedHasher>(
         // content-addressed and, with storage-core's `layout-v2`, carry no reference count, so rows
         // sharing a key are identical.
         let mut unique = HashSet::with_capacity(chunk.len());
-        let (keys, (objects, pinned)) = chunk
+        let (keys, (objects, (child_keys, (child_values, pinned)))) = chunk
             .iter()
             .filter(|(key, _)| unique.insert(key.0.as_slice()))
             .map(|(key, object)| {
+                let parts = node_parts(object);
                 (
                     key.0.as_slice(),
-                    (serialize_object(object), pinned.contains(key)),
+                    (
+                        parts.data,
+                        (parts.child_keys, (parts.child_values, pinned.contains(key))),
+                    ),
                 )
             })
-            .unzip::<_, _, Vec<_>, (Vec<_>, Vec<_>)>();
+            .unzip::<_, _, Vec<_>, (Vec<_>, (Vec<_>, (Vec<_>, Vec<_>)))>();
 
         sqlx::query(query)
             .bind(keys)
             .bind(objects)
+            .bind(child_keys)
+            .bind(child_values)
             .bind(pinned)
             .execute(&mut **tx)
             .await
@@ -597,6 +818,60 @@ fn insert_chunks<Node>(nodes: &[Node], size: impl Fn(&Node) -> usize) -> Vec<&[N
     }
 
     chunks
+}
+
+/// The parts `object` is stored as.
+fn node_parts<Hasher: WellBehavedHasher>(object: &OnDiskObject<Hasher>) -> Parts {
+    object_parts::split(&serialize_object(object)).unwrap_or_panic("cannot split object into parts")
+}
+
+/// The node stored as `object`, `child_keys` and `child_values`: the parts joined, or `object`
+/// alone for a row written before the parts existed, which has the other two NULL.
+fn node_object<Hasher: WellBehavedHasher>(
+    (object, child_keys, child_values): NodeRow,
+) -> std::io::Result<OnDiskObject<Hasher>> {
+    let object = match (child_keys, child_values) {
+        (Some(child_keys), Some(child_values)) => object_parts::join(&Parts {
+            data: object,
+            child_keys,
+            child_values,
+        })?,
+        _ => object,
+    };
+    OnDiskObject::deserialize(&mut object.as_slice(), 0)
+}
+
+/// The by-reference children of a row: from its `child_keys`, or from its object for a row written
+/// before that column existed.
+///
+/// Panics on a `child_keys` value that is not whole hashes: gc's mark follows these lists, so a
+/// short one would let gc delete nodes still in use.
+fn row_children(
+    children: Option<Vec<u8>>,
+    object: Option<Vec<u8>>,
+) -> Vec<ArenaHash<DefaultHasher>> {
+    match (children, object) {
+        (Some(children), _) => {
+            let (hashes, rest) = children.as_chunks::<32>();
+            assert!(
+                rest.is_empty(),
+                "ledger_db_nodes.child_keys is {} bytes, not whole 32-byte hashes",
+                children.len()
+            );
+            hashes.iter().map(|hash| arena_hash(*hash)).collect()
+        }
+
+        (None, Some(object)) => {
+            OnDiskObject::<DefaultHasher>::deserialize(&mut object.as_slice(), 0)
+                .unwrap_or_panic("cannot deserialize node as OnDiskObject")
+                .children
+                .iter()
+                .flat_map(|child| child.refs().into_iter().cloned())
+                .collect()
+        }
+
+        (None, None) => vec![],
+    }
 }
 
 fn serialize_object<Hasher: WellBehavedHasher>(object: &OnDiskObject<Hasher>) -> Vec<u8> {
@@ -774,7 +1049,6 @@ where
     }
 }
 
-#[cfg(test)]
 pub(crate) fn arena_hash(bytes: [u8; 32]) -> ArenaHash<DefaultHasher> {
     ArenaHash::deserialize(&mut bytes.as_slice(), 0).expect("32 bytes are an ArenaHash")
 }
@@ -801,6 +1075,123 @@ fn persist_nodes(
     let (nodes, _) = db.scan(None, 2 * count);
     assert_eq!(nodes.len(), count);
     nodes
+}
+
+// `scan_keys` pages through the same keys as `scan`, in the same order, resuming where it left off.
+// Shared by both suites, like `assert_get_root_count_reads_stored_count`.
+#[cfg(test)]
+fn assert_scan_keys_pages_like_scan(storage: &Storage<LedgerDb>, db: &mut LedgerDb) {
+    let nodes = persist_nodes(storage, db, 10);
+    let scanned = nodes.into_iter().map(|(key, _)| key).collect::<Vec<_>>();
+
+    let pages = std::iter::successors(Some(db.scan_keys(None, 3)), |(_, handle)| {
+        handle.clone().map(|handle| db.scan_keys(Some(handle), 3))
+    })
+    .take_while(|(keys, _)| !keys.is_empty())
+    .collect::<Vec<_>>();
+
+    assert!(pages.iter().all(|(keys, _)| keys.len() <= 3));
+    let keys = pages
+        .into_iter()
+        .flat_map(|(keys, _)| keys)
+        .collect::<Vec<_>>();
+    assert_eq!(keys, scanned);
+}
+
+// `batch_get_children` reports each stored node's children as its object does, reached through
+// inlined children too, falls back to the object for a row stored whole, as written before the
+// parts existed, which still loads, and leaves out keys that are not stored. Shared by both suites,
+// like `assert_get_root_count_reads_stored_count`.
+#[cfg(test)]
+fn assert_batch_get_children_matches_objects(storage: &Storage<LedgerDb>, db: &mut LedgerDb) {
+    use midnight_storage_core_v1::arena::ArenaKey;
+
+    // A leaf is stored as its own node, while an `Option` holding one is small enough to be
+    // inlined: the first root reaches its leaf only through an inlined node, the second directly.
+    let leaf = |value| storage.alloc([value; SMALL_OBJECT_LIMIT / 4]);
+    let mut through_inlined = storage.alloc(Some(storage.alloc(Some(leaf(1)))));
+    let mut direct = storage.alloc(Some(leaf(2)));
+    through_inlined.persist();
+    direct.persist();
+    storage.with_backend(|backend| backend.flush_all_changes_to_db());
+
+    let (stored, _) = db.scan(None, 100);
+    assert!(
+        stored.iter().any(|(_, object)| object
+            .children
+            .iter()
+            .any(|child| matches!(child, ArenaKey::Direct(_)))),
+        "some children are inlined"
+    );
+    let expected = stored
+        .iter()
+        .map(|(key, object)| {
+            let children = object
+                .children
+                .iter()
+                .flat_map(|child| child.refs().into_iter().cloned())
+                .collect::<Vec<_>>();
+            (key.clone(), children)
+        })
+        .collect::<HashMap<_, _>>();
+
+    let (legacy, legacy_object) = stored
+        .iter()
+        .find(|(key, _)| !expected[key].is_empty())
+        .expect("a node with children");
+    let whole = serialize_object(legacy_object);
+    block_in_place(|| {
+        Handle::current().block_on(
+            sqlx::query(indoc! {"
+                UPDATE ledger_db_nodes
+                SET object = $1, child_keys = NULL, child_values = NULL
+                WHERE key = $2
+            "})
+            .bind(whole.as_slice())
+            .bind(legacy.0.as_slice())
+            .execute(&*db.pool),
+        )
+    })
+    .expect("store the node whole");
+    let loaded = db.get_node(legacy).expect("the whole node loads");
+    assert_eq!(serialize_object(&loaded), whole);
+
+    let absent = arena_hash([0xff; 32]);
+    let reported = db
+        .batch_get_children(expected.keys().cloned().chain([absent]))
+        .into_iter()
+        .collect::<HashMap<_, _>>();
+    assert_eq!(reported, expected);
+}
+
+// `batch_get_root_counts` reads the stored count of every key, in chunks on SQLite, and 0 for keys
+// that are not roots, as `get_root_count` does. Shared by both suites, like
+// `assert_get_root_count_reads_stored_count`.
+#[cfg(test)]
+fn assert_batch_get_root_counts_reads_every_key(db: &mut LedgerDb) {
+    // Enough keys to span several SQLite statements; every third one is not a root.
+    #[cfg(feature = "standalone")]
+    const KEYS: usize = 2 * SQLITE_MAX_BINDS + 1;
+    #[cfg(feature = "cloud")]
+    const KEYS: usize = 1_000;
+
+    let key = |i: usize| {
+        let mut bytes = [0; 32];
+        bytes[..8].copy_from_slice(&(i as u64).to_le_bytes());
+        arena_hash(bytes)
+    };
+    let count = |i: usize| {
+        if i.is_multiple_of(3) {
+            0
+        } else {
+            (i % 7 + 1) as u32
+        }
+    };
+    db.batch_update((0..KEYS).map(|i| (key(i), SetRootCount(count(i)))));
+
+    let counts = db.batch_get_root_counts((0..KEYS).map(key));
+    assert_eq!(counts.len(), KEYS);
+    assert!((0..KEYS).all(|i| counts.get(&key(i)) == Some(&count(i))));
 }
 
 // `batch_update` inserts in chunks, storing every node as given, and accepts a key inserted twice
@@ -985,12 +1376,21 @@ fn assert_get_root_count_reads_stored_count(db: &mut LedgerDb) {
     assert_eq!(db.get_root_count(&other_key), 1);
 }
 
+#[cfg(test)]
+#[test]
+#[should_panic(expected = "not whole 32-byte hashes")]
+fn row_children_rejects_partial_hashes() {
+    row_children(Some(vec![0; 33]), None);
+}
+
 #[cfg(all(test, feature = "standalone"))]
 pub(crate) mod sqlite_tests {
     use super::{
-        SQLITE_MAX_BINDS, assert_batch_update_deletes_in_chunks_and_keeps_update_order,
+        SQLITE_MAX_BINDS, assert_batch_get_children_matches_objects,
+        assert_batch_get_root_counts_reads_every_key,
+        assert_batch_update_deletes_in_chunks_and_keeps_update_order,
         assert_batch_update_inserts_in_chunks, assert_batch_update_sets_root_counts,
-        assert_get_root_count_reads_stored_count,
+        assert_get_root_count_reads_stored_count, assert_scan_keys_pages_like_scan,
     };
     use crate::infra::{
         ledger_db::v1_1::LedgerDb,
@@ -1058,6 +1458,35 @@ pub(crate) mod sqlite_tests {
         let storage = Storage::new(16, LedgerDb::new(pool.clone()));
         let mut db = LedgerDb::new(pool);
         assert_batch_update_deletes_in_chunks_and_keeps_update_order(&storage, &mut db);
+        Ok(())
+    }
+
+    // See `assert_batch_get_children_matches_objects`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn batch_get_children_matches_objects() -> Result<(), Box<dyn StdError>> {
+        let pool = setup_pool().await?;
+        let storage = Storage::new(16, LedgerDb::new(pool.clone()));
+        let mut db = LedgerDb::new(pool);
+        assert_batch_get_children_matches_objects(&storage, &mut db);
+        Ok(())
+    }
+
+    // See `assert_batch_get_root_counts_reads_every_key`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn batch_get_root_counts_reads_every_key() -> Result<(), Box<dyn StdError>> {
+        let pool = setup_pool().await?;
+        let mut db = LedgerDb::new(pool);
+        assert_batch_get_root_counts_reads_every_key(&mut db);
+        Ok(())
+    }
+
+    // See `assert_scan_keys_pages_like_scan`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn scan_keys_pages_like_scan() -> Result<(), Box<dyn StdError>> {
+        let pool = setup_pool().await?;
+        let storage = Storage::new(16, LedgerDb::new(pool.clone()));
+        let mut db = LedgerDb::new(pool);
+        assert_scan_keys_pages_like_scan(&storage, &mut db);
         Ok(())
     }
 
@@ -1219,9 +1648,11 @@ pub(crate) mod sqlite_tests {
 #[cfg(all(test, feature = "cloud"))]
 mod postgres_tests {
     use super::{
-        BATCH_BYTES, BATCH_ROWS, assert_batch_update_deletes_in_chunks_and_keeps_update_order,
+        BATCH_BYTES, BATCH_ROWS, assert_batch_get_children_matches_objects,
+        assert_batch_get_root_counts_reads_every_key,
+        assert_batch_update_deletes_in_chunks_and_keeps_update_order,
         assert_batch_update_inserts_in_chunks, assert_batch_update_sets_root_counts,
-        assert_get_root_count_reads_stored_count, insert_chunks,
+        assert_get_root_count_reads_stored_count, assert_scan_keys_pages_like_scan, insert_chunks,
     };
     use crate::infra::{
         ledger_db::v1_1::LedgerDb,
@@ -1352,6 +1783,35 @@ mod postgres_tests {
         let storage = Storage::new(16, LedgerDb::new(pool.clone()));
         let mut db = LedgerDb::new(pool);
         assert_batch_update_deletes_in_chunks_and_keeps_update_order(&storage, &mut db);
+        Ok(())
+    }
+
+    // See `assert_batch_get_children_matches_objects`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn batch_get_children_matches_objects() -> Result<(), Box<dyn StdError>> {
+        let (_container, pool) = setup_pool().await?;
+        let storage = Storage::new(16, LedgerDb::new(pool.clone()));
+        let mut db = LedgerDb::new(pool);
+        assert_batch_get_children_matches_objects(&storage, &mut db);
+        Ok(())
+    }
+
+    // See `assert_batch_get_root_counts_reads_every_key`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn batch_get_root_counts_reads_every_key() -> Result<(), Box<dyn StdError>> {
+        let (_container, pool) = setup_pool().await?;
+        let mut db = LedgerDb::new(pool);
+        assert_batch_get_root_counts_reads_every_key(&mut db);
+        Ok(())
+    }
+
+    // See `assert_scan_keys_pages_like_scan`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn scan_keys_pages_like_scan() -> Result<(), Box<dyn StdError>> {
+        let (_container, pool) = setup_pool().await?;
+        let storage = Storage::new(16, LedgerDb::new(pool.clone()));
+        let mut db = LedgerDb::new(pool);
+        assert_scan_keys_pages_like_scan(&storage, &mut db);
         Ok(())
     }
 
