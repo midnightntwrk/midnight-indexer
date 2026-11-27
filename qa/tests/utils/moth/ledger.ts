@@ -78,7 +78,7 @@ export const loadLedger = (): Promise<LedgerVersion> => {
 /**
  * Whether moth can build contract transactions on this chain. Its contract
  * path (`utils/moth/moth-contracts.ts`) runs on midnight-js 5, whose current
- * era is ledger 9, against artifacts compiled with compactc 0.36.0. A ledger-8
+ * era is ledger 9, against artifacts compiled with compactc 0.36.1. A ledger-8
  * chain is that train's retained era and needs the ledger-8 compact-runtime
  * resolvable next to the artifacts, which the harness does not carry, so
  * contract deploys, calls and updates go through the toolkit there (its 1.x

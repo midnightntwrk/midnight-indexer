@@ -481,7 +481,7 @@ TARGET_ENV=preprod INDEXER_API_VERSION=v3 bun run test:integration
 | `TX_BACKEND`          | No                                | `toolkit`              | What builds e2e transactions: `toolkit` (container) or `moth` (in-process moth-wallet). See [Transaction backend](#transaction-backend-toolkit-or-moth). |
 | `TX_BACKEND_MOTH_WALLET` | No                                | `qa-<seed fingerprint>` | Name of moth's on-disk wallet cache under `~/.moth/sync/<network>/`, to keep a dedicated light wallet warm. |
 | `FUNDING_SEED_<ENV>_LIGHT` | No                                | `FUNDING_SEED_<ENV>`   | Under `TX_BACKEND=moth`, a funded wallet with little history for transfers; its restore cost tracks the wallet's state, not the chain. |
-| `PROOF_SERVER_TAG`    | No                                | by ledger: `8.1.0` / `9.0.0` | `midnightntwrk/proof-server` image tag for the on-demand proof server (moth backend only). |
+| `PROOF_SERVER_TAG`    | No                                | by ledger: `8.1.0` / `9.0.2` | `midnightntwrk/proof-server` image tag for the on-demand proof server (moth backend only). |
 | `PROOF_SERVER_URL`    | No                                | (started on demand)    | A proof server you run yourself; nothing is started when set (moth backend only). |
 | `MOTH_REGISTER_DUST`  | No                                | unset                  | Under `TX_BACKEND=moth`, `1` lets the harness register a spending wallet's NIGHT for DUST generation when it holds NIGHT but no DUST (after a hard fork); otherwise it fails with that diagnosis. |
 | `MN_SYNC_TIMEOUT_MS`  | No                                | `21600000` (6 h)       | Bound on a moth wallet sync that makes no progress. Lower it on CI; a warm wallet syncs in seconds. |
