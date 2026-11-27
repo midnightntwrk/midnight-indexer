@@ -37,6 +37,11 @@ import { SHIELDED_TX_PROGRESS_SUBSCRIPTION_BY_SESSION_ID } from '@utils/indexer/
 import { isProgressProtocolVersionSupported } from '@utils/indexer/schema-feature-probe';
 import type { ShieldedTransactionsProgress } from '@utils/indexer/indexer-types';
 import dataProvider from '@utils/testdata-provider';
+import {
+  awaitFirstProgress,
+  collectRelevantTransactions,
+  type StreamedRelevantTransaction,
+} from 'tests/shared/shielded-transactions-utils';
 
 // This is longer because it might take some time when
 // a new verion of the toolkit image is available and
@@ -516,5 +521,140 @@ describe('shielded transaction subscriptions', () => {
         );
       });
     }, 45_000);
+  });
+
+  describe.skipIf(!env.isUndeployedEnv())('a subscription starting at a given zswap index', () => {
+    // The `index` argument selects relevant transactions by `zswapStartIndex >= index`.
+    // midnight-indexer#1681 moved paging within that selection from the zswap index to
+    // the transaction ID and kept this filter as it was; these tests pin the filter on
+    // the funding wallet's real history. They are not regression tests for #1681: the
+    // funding wallet has no relevant transaction without commitments, so they pass on
+    // the pre-fix server too. The seeded regression tests are in
+    // tests/e2e/shielded-transaction-paging.test.ts.
+    //
+    // Undeployed only: the funding wallet's history there is short, so every stream
+    // settles within MAX_MS and the full sequences are compared. On a hosted
+    // environment with a long funding wallet history the streams would be cut off
+    // instead. Every test has an explicit timeout above its collections, as the
+    // suite's default of 60 s is below two of them.
+    const IDLE_MS = 3_000;
+    const MAX_MS = 40_000;
+    const ONE_COLLECTION_TIMEOUT = MAX_MS + 20_000;
+    const TWO_COLLECTIONS_TIMEOUT = 2 * MAX_MS + 20_000;
+
+    function expectAscendingAndUnique(transactions: StreamedRelevantTransaction[]): void {
+      const ids = transactions.map((t) => t.id);
+      expect(ids, 'ascending transaction IDs').toEqual([...ids].sort((a, b) => a - b));
+      expect(new Set(ids).size, 'no transaction streamed twice').toBe(ids.length);
+      expect(new Set(transactions.map((t) => t.hash)).size).toBe(ids.length);
+    }
+
+    async function collectFrom(sessionId: string, index: number) {
+      const result = await collectRelevantTransactions(indexerWsClient, sessionId, {
+        index,
+        idleMs: IDLE_MS,
+        maxMs: MAX_MS,
+      });
+      log.debug(
+        `index ${index}: ${result.transactions.length} relevant transactions, settled=${result.settled}`,
+      );
+      return result;
+    }
+
+    /**
+     * @given a wallet session for the funding seed, which has relevant transactions
+     * @when a shielded transactions subscription is opened from index 0
+     * @then relevant transactions are streamed in ascending transaction ID order, each once
+     * @and every one has a zswap start index not above its end index
+     */
+    test(
+      'should stream each relevant transaction once in ascending transaction ID order, given index 0',
+      async (ctx: TestContext) => {
+        ctx.task!.meta.custom = { labels: ['Subscription', 'ShieldedTransaction', 'Index'] };
+
+        const viewingKey = await toolkit.showViewingKey(dataProvider.getFundingSeed());
+        const sessionId = await indexerWsClient.openWalletSession(viewingKey);
+
+        const { transactions } = await collectFrom(sessionId, 0);
+
+        expect(transactions.length).toBeGreaterThanOrEqual(1);
+        expectAscendingAndUnique(transactions);
+        transactions.forEach((t) => {
+          expect(t.zswapStartIndex).toBeLessThanOrEqual(t.zswapEndIndex);
+        });
+
+        await indexerWsClient.closeWalletSession(sessionId);
+      },
+      ONE_COLLECTION_TIMEOUT,
+    );
+
+    /**
+     * @given the relevant transactions streamed from index 0
+     * @when a second subscription is opened from the zswap start index K of the last one streamed
+     * @then only relevant transactions with a zswap start index of at least K are streamed
+     * @and they are the tail of the sequence streamed from 0, in the same order
+     */
+    test(
+      'should stream only the relevant transactions whose zswap start index is at least the given index',
+      async (ctx: TestContext) => {
+        ctx.task!.meta.custom = { labels: ['Subscription', 'ShieldedTransaction', 'Index'] };
+
+        const viewingKey = await toolkit.showViewingKey(dataProvider.getFundingSeed());
+        const sessionId = await indexerWsClient.openWalletSession(viewingKey);
+
+        const fromZero = await collectFrom(sessionId, 0);
+        expect(fromZero.transactions.length).toBeGreaterThanOrEqual(1);
+        const index = fromZero.transactions.at(-1)!.zswapStartIndex;
+
+        const fromIndex = await collectFrom(sessionId, index);
+
+        expectAscendingAndUnique(fromIndex.transactions);
+        fromIndex.transactions.forEach((t) => {
+          expect(
+            t.zswapStartIndex,
+            `transaction ${t.id} below index ${index}`,
+          ).toBeGreaterThanOrEqual(index);
+        });
+
+        // Both streams must have settled, so the whole tail is compared.
+        expect(fromZero.settled, 'the stream from 0 did not settle').toBe(true);
+        expect(fromIndex.settled, `the stream from ${index} did not settle`).toBe(true);
+        const expectedTail = fromZero.transactions.filter((t) => t.zswapStartIndex >= index);
+        expect(expectedTail.length).toBeGreaterThanOrEqual(1);
+        expect(fromIndex.transactions.map((t) => t.id)).toEqual(expectedTail.map((t) => t.id));
+
+        await indexerWsClient.closeWalletSession(sessionId);
+      },
+      TWO_COLLECTIONS_TIMEOUT,
+    );
+
+    /**
+     * @given the chain's next free zswap index H from the first progress event
+     * @when a shielded transactions subscription is opened from index H
+     * @then no relevant transaction with a zswap start index below H is streamed; as every
+     *       committed transaction starts below H, usually none is streamed at all
+     */
+    test(
+      'should stream no relevant transaction starting below the next free zswap index',
+      async (ctx: TestContext) => {
+        ctx.task!.meta.custom = { labels: ['Subscription', 'ShieldedTransaction', 'Index'] };
+
+        const viewingKey = await toolkit.showViewingKey(dataProvider.getFundingSeed());
+        const sessionId = await indexerWsClient.openWalletSession(viewingKey);
+
+        const { highestZswapEndIndex } = await awaitFirstProgress(indexerWsClient, sessionId);
+        expect(highestZswapEndIndex).toBeGreaterThan(0);
+
+        const { transactions, settled } = await collectFrom(sessionId, highestZswapEndIndex);
+
+        expect(settled).toBe(true);
+        transactions.forEach((t) => {
+          expect(t.zswapStartIndex).toBeGreaterThanOrEqual(highestZswapEndIndex);
+        });
+
+        await indexerWsClient.closeWalletSession(sessionId);
+      },
+      ONE_COLLECTION_TIMEOUT,
+    );
   });
 });
