@@ -42,6 +42,7 @@ Its candidates are point-in-time, so the suite probes the funding wallet at run 
 - **Contract Deployment**: Deploys smart contracts and validates deployment events in the indexer
 - **Contract Calls**: Invokes deployed contract methods and verifies the indexer captures these interactions
 - **Contract Updates**: Tests contract upgrade scenarios and validates update events
+- **Contract State History After GC**: Re-reads the contract states the run left on the chain as of their old blocks, by block height and by block hash, once at least two chain-indexer gc passes have run past them, and checks them against the node. `setup/run-last-sequencer.ts` runs this file after every other file, so the rest of the run provides the gc passes; run alone, it deploys and calls a counter itself and waits about 7 minutes.
 - **Guaranteed/Fallible Segment Split**: Submits a custom compiled Compact contract call that applies its guaranteed transcript while its own fallible segment fails, and verifies the indexer still reports that call — and, conversely, that a call where no execution phase applied is not reported. See `contracts/segment-split/README.md` for how the fixture forces that split.
 
 ## Cache Warmup

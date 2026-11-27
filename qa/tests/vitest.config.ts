@@ -15,6 +15,7 @@
 
 import { defineConfig } from 'vitest/config';
 import CustomJUnitReporter from './utils/reporters/custom-junit/custom-junit-reporter';
+import RunLastSequencer from './setup/run-last-sequencer';
 
 // Optional cap on Vitest's worker pool. When `VITEST_MAX_WORKERS` is set,
 // the value is enforced (positive integer, or "<n>%" percentage); when
@@ -71,6 +72,9 @@ export default defineConfig({
     // Note: slowTestThreshold per-project doesn't work in Vitest 3.2.4
     // Setting a single threshold for all projects
     slowTestThreshold: 3000,
+    // Default file order, except for the files that need the rest of the run's chain history
+    // (see setup/run-last-sequencer.ts).
+    sequence: { sequencer: RunLastSequencer },
     // Projects reference individual config files
     projects: [
       './vitest.config.smoke.ts',
